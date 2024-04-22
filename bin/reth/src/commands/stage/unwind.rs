@@ -15,6 +15,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_exex::ExExManagerHandle;
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{
     args::{get_secret_key, NetworkArgs},
@@ -211,6 +212,7 @@ impl Command {
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    ExExManagerHandle::empty(),
                 ))
                 .set(AccountHashingStage::default())
                 .set(StorageHashingStage::default())

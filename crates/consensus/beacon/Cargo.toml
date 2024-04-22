@@ -15,7 +15,7 @@ workspace = true
 reth-beacon-consensus-core.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-stages.workspace = true
+reth-stages-api.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
@@ -54,7 +54,8 @@ reth-rpc-types-compat.workspace = true
 reth-tracing.workspace = true
 reth-revm.workspace = true
 reth-downloaders.workspace = true
-reth-node-ethereum.workspace = true
+reth-evm-ethereum.workspace = true
+reth-ethereum-engine-primitives.workspace = true
 reth-config.workspace = true
 
 assert_matches.workspace = true
@@ -65,5 +66,5 @@ optimism = [
     "reth-interfaces/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
-    "reth-beacon-consensus-core/optimism"
+    "reth-beacon-consensus-core/optimism",
 ]

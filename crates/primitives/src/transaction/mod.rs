@@ -997,8 +997,9 @@ impl TransactionSignedNoHash {
             }
 
             // pre bedrock system transactions were sent from the zero address as legacy
-            // transactions with an empty signature Note: this is very hacky and only
-            // relevant for op-mainnet pre bedrock
+            // transactions with an empty signature
+            //
+            // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
             if self.is_legacy() && self.signature == Signature::optimism_deposit_tx_signature() {
                 return Some(Address::ZERO)
             }
@@ -1104,7 +1105,7 @@ impl Compact for TransactionSignedNoHash {
         to_compact_ztd_unaware(self, buf)
     }
 
-    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
         from_compact_zstd_unaware(buf, _len)
     }
 }
@@ -1205,7 +1206,13 @@ impl TransactionSigned {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [Signature::recover_signer].
+    ///
+    /// Note:
+    ///
+    /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
+    /// [Self::recover_signer_unchecked] if you want to recover the signer without ensuring that the
+    /// signature has a low `s` value.
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1221,7 +1228,7 @@ impl TransactionSigned {
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [Signature::recover_signer_unchecked].
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1816,6 +1823,25 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
+impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
+    type Error = ConversionError;
+
+    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
+
+        TransactionSigned::from_transaction_and_signature(
+            tx.try_into()?,
+            Signature {
+                r: signature.r,
+                s: signature.s,
+                odd_y_parity: signature.y_parity.ok_or(ConversionError::MissingYParity)?.0,
+            },
+        )
+        .try_into_ecrecovered()
+        .map_err(|_| ConversionError::InvalidSignature)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -2164,6 +2190,19 @@ mod tests {
         assert_eq!(encoded.as_ref(), data.as_slice());
     }
 
+    // <https://github.com/paradigmxyz/reth/issues/7750>
+    // <https://etherscan.io/tx/0x2084b8144eea4031c2fa7dfe343498c5e665ca85ed17825f2925f0b5b01c36ac>
+    #[test]
+    fn recover_pre_eip2() {
+        let data = hex!("f8ea0c850ba43b7400832dc6c0942935aa0a2d2fbb791622c29eb1c117b65b7a908580b884590528a9000000000000000000000001878ace42092b7f1ae1f28d16c1272b1aa80ca4670000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000d02ab486cedc0000000000000000000000000000000000000000000000000000557fe293cabc08cf1ca05bfaf3fda0a56b49cc78b22125feb5ae6a99d2b4781f00507d8b02c173771c85a0b5da0dbe6c5bc53740d0071fc83eb17ba0f709e49e9ae7df60dee625ef51afc5");
+        let tx = TransactionSigned::decode_enveloped(&mut data.as_slice()).unwrap();
+        let sender = tx.recover_signer();
+        assert!(sender.is_none());
+        let sender = tx.recover_signer_unchecked().unwrap();
+
+        assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));
+    }
+
     #[test]
     fn min_length_encoded_legacy_transaction() {
         let transaction = TxLegacy::default();
@@ -2175,7 +2214,14 @@ mod tests {
         );
 
         let encoded = &alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("c98080808080801b8080"), encoded[..]);
+        assert_eq!(
+            if cfg!(feature = "optimism") {
+                hex!("c9808080808080808080")
+            } else {
+                hex!("c98080808080801b8080")
+            },
+            &encoded[..]
+        );
         assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
