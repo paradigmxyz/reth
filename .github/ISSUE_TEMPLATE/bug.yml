@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report! Please provide as much detail as possible.
-        
+
         If you believe you have found a vulnerability, please provide details [here](mailto:georgios@paradigm.xyz) instead.
   - type: textarea
     id: what-happened
@@ -14,7 +14,7 @@ body:
       label: Describe the bug
       description: |
         A clear and concise description of what the bug is.
-        
+
         If the bug is in a crate you are using (i.e. you are not running the standard `reth` binary) please mention that as well.
     validations:
       required: true
@@ -25,7 +25,7 @@ body:
       description: Please provide any steps you think might be relevant to reproduce the bug.
       placeholder: |
         Steps to reproduce:
-        
+
         1. Start '...'
         2. Then '...'
         3. Check '...'
@@ -74,6 +74,13 @@ body:
     attributes:
       label: What database version are you on?
       description: This can be obtained with `reth db version`
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Which chain / network are you on?
+      description: This is the argument you pass to `reth --chain`. If you are using `--dev`, type in 'dev' here. If you are not running with `--chain` or `--dev` then it is mainnet.
     validations:
       required: true
   - type: dropdown
