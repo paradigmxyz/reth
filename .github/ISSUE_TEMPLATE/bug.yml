@@ -41,9 +41,9 @@ body:
 
         **Please also provide debug logs.** By default, these can be found in:
 
-        - `~/.cache/reth/logs` on Linux
-        - `~/Library/Caches/reth/logs` on macOS
-        - `%localAppData%/reth/logs` on Windows
+        1. `~/.cache/reth/logs` on Linux
+        1. `~/Library/Caches/reth/logs` on macOS
+        1. `%localAppData%/reth/logs` on Windows
       render: text
     validations:
       required: false
