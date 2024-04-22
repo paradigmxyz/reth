@@ -6,7 +6,7 @@ use crate::{
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
 use reth_db::database::Database;
-use reth_evm::execute::ExecutorProvider;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -93,7 +93,7 @@ impl<DB, E> BlockchainTree<DB, E> {
 impl<DB, E> BlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    E: ExecutorProvider,
+    E: BlockExecutorProvider,
 {
     /// Builds the blockchain tree for the node.
     ///

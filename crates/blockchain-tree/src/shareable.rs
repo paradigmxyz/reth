@@ -3,7 +3,7 @@
 use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
-use reth_evm::execute::ExecutorProvider;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_interfaces::{
     blockchain_tree::{
         error::{CanonicalError, InsertBlockError},
@@ -43,7 +43,7 @@ impl<DB, E> ShareableBlockchainTree<DB, E> {
 impl<DB, E> BlockchainTreeEngine for ShareableBlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    E: ExecutorProvider,
+    E: BlockExecutorProvider,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         let mut tree = self.tree.write();
@@ -103,7 +103,7 @@ where
 impl<DB, E> BlockchainTreeViewer for ShareableBlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    E: ExecutorProvider,
+    E: BlockExecutorProvider,
 {
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
         trace!(target: "blockchain_tree", "Returning all blocks in blockchain tree");
@@ -185,7 +185,7 @@ where
 impl<DB, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    E: ExecutorProvider,
+    E: BlockExecutorProvider,
 {
     fn find_pending_state_provider(
         &self,

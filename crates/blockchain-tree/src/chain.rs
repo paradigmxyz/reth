@@ -6,7 +6,7 @@
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
 use reth_db::database::Database;
-use reth_evm::execute::{EthBlockOutput, Executor, ExecutorProvider};
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, InsertBlockErrorKind},
@@ -21,8 +21,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    BundleStateDataProvider, BundleStateWithReceipts, Chain, ExecutorFactory, ProviderError,
-    StateRootProvider,
+    BundleStateDataProvider, BundleStateWithReceipts, Chain, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
@@ -80,7 +79,7 @@ impl AppendableChain {
     ) -> Result<Self, InsertBlockErrorKind>
     where
         DB: Database + Clone,
-        E: ExecutorProvider,
+        E: BlockExecutorProvider,
     {
         let state = BundleStateWithReceipts::default();
         let empty = BTreeMap::new();
@@ -118,7 +117,7 @@ impl AppendableChain {
     ) -> Result<Self, InsertBlockErrorKind>
     where
         DB: Database + Clone,
-        E: ExecutorProvider,
+        E: BlockExecutorProvider,
     {
         let parent_number = block.number - 1;
         let parent = self.blocks().get(&parent_number).ok_or(
@@ -180,7 +179,7 @@ impl AppendableChain {
     where
         BSDP: BundleStateDataProvider,
         DB: Database + Clone,
-        E: ExecutorProvider,
+        E: BlockExecutorProvider,
     {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
@@ -212,7 +211,7 @@ impl AppendableChain {
         let block = block.unseal();
         // executor.execute_and_verify_receipt(&block, U256::MAX)?;
         let state = executor.execute((&block, U256::MAX).into()).map_err(Into::into)?;
-        let EthBlockOutput { state, receipts, .. } = state;
+        let BlockExecutionOutput { state, receipts, .. } = state;
         let bundle_state = BundleStateWithReceipts::new(
             state,
             Receipts::from_block_receipt(receipts),
@@ -281,7 +280,7 @@ impl AppendableChain {
     ) -> Result<(), InsertBlockErrorKind>
     where
         DB: Database + Clone,
-        E: ExecutorProvider,
+        E: BlockExecutorProvider,
     {
         let parent_block = self.chain.tip();
 
