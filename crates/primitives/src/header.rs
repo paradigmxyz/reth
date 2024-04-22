@@ -700,7 +700,8 @@ impl SealedHeader {
         let parent_gas_limit =
             if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
                 parent.gas_limit *
-                    chain_spec.base_fee_params(self.timestamp).elasticity_multiplier as u64
+                    chain_spec.base_fee_params_at_timestamp(self.timestamp).elasticity_multiplier
+                        as u64
             } else {
                 parent.gas_limit
             };
@@ -801,16 +802,18 @@ impl SealedHeader {
         if chain_spec.fork(Hardfork::London).active_at_block(self.number) {
             let base_fee = self.base_fee_per_gas.ok_or(HeaderValidationError::BaseFeeMissing)?;
 
-            let expected_base_fee =
-                if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-                    constants::EIP1559_INITIAL_BASE_FEE
-                } else {
-                    // This BaseFeeMissing will not happen as previous blocks are checked to have
-                    // them.
-                    parent
-                        .next_block_base_fee(chain_spec.base_fee_params(self.timestamp))
-                        .ok_or(HeaderValidationError::BaseFeeMissing)?
-                };
+            let expected_base_fee = if chain_spec
+                .fork(Hardfork::London)
+                .transitions_at_block(self.number)
+            {
+                constants::EIP1559_INITIAL_BASE_FEE
+            } else {
+                // This BaseFeeMissing will not happen as previous blocks are checked to have
+                // them.
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp))
+                    .ok_or(HeaderValidationError::BaseFeeMissing)?
+            };
             if expected_base_fee != base_fee {
                 return Err(HeaderValidationError::BaseFeeDiff(GotExpected {
                     expected: expected_base_fee,
