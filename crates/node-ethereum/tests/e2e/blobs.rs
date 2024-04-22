@@ -52,9 +52,6 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let (blob_payload, blob_attr) = node.new_payload(eth_payload_attributes).await?;
     // clean the pool
     node.inner.pool.remove_transactions(vec![blob_tx_hash]);
-    // submit the blob payload
-    let blob_block_hash =
-        node.engine_api.submit_payload(blob_payload, blob_attr, versioned_hashes.clone()).await?;
 
     // inject normal tx
     let raw_tx = wallet.transfer_tx(None).await;
@@ -62,14 +59,18 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     // build payload with normal tx
     let (payload, attributes) = node.new_payload(eth_payload_attributes).await?;
 
+    // submit the blob payload
+    let blob_block_hash =
+        node.engine_api.submit_payload(blob_payload, blob_attr, versioned_hashes.clone()).await?;
+
     // submit the payload
     let block_hash = node.engine_api.submit_payload(payload, attributes, vec![]).await?;
 
-    // send fcu with blob hash
-    node.engine_api.update_forkchoice(blob_block_hash).await?;
-
     // send fcu with normal hash
     node.engine_api.update_forkchoice(block_hash).await?;
+
+    // send fcu with blob hash
+    node.engine_api.update_forkchoice(blob_block_hash).await?;
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
