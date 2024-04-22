@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockWithSenders, Receipt, U256};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Receipts, U256};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
@@ -32,22 +32,15 @@ pub trait BatchExecutor<DB> {
     type Error;
 
     /// Executes the next block in the batch and update the state internally.
-    fn execute_one(
-        &mut self,
-        input: Self::Input<'_>,
-    ) -> Result<BatchBlockExecutionOutput, Self::Error>;
+    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 
     /// Finishes the batch and return the final state.
     fn finalize(self) -> Self::Output;
-}
 
-/// The output of an executed block in a batch.
-#[derive(Debug, Clone, Copy)]
-pub struct BatchBlockExecutionOutput {
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
-    pub size_hint: Option<usize>,
+    fn size_hint(&self) -> Option<usize>;
 }
 
 /// The output of an ethereum block.
@@ -63,6 +56,21 @@ pub struct BlockExecutionOutput<T> {
     pub receipts: Vec<T>,
     /// The total gas used by the block.
     pub gas_used: u64,
+}
+
+/// The output of a batch of ethereum blocks.
+#[derive(Debug)]
+pub struct BatchBlockExecutionOutput {
+    /// Bundle state with reverts.
+    pub bundle: BundleState,
+    /// The collection of receipts.
+    /// Outer vector stores receipts for each block sequentially.
+    /// The inner vector stores receipts ordered by transaction number.
+    ///
+    /// If receipt is None it means it is pruned.
+    pub receipts: Receipts,
+    /// First block of bundle state.
+    pub first_block: BlockNumber,
 }
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
@@ -88,7 +96,7 @@ impl<'a, Block> From<(&'a Block, U256)> for BlockExecutionInput<'a, Block> {
 }
 
 /// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider: Send + Sync + Clone {
+pub trait BlockExecutorProvider: Send + Sync + Clone + 'static {
     /// An executor that can execute a single block given a database.
     type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
         DB,
@@ -102,7 +110,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone {
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         // TODO: change to bundle state with receipts
-        Output = BlockExecutionOutput<Receipt>,
+        Output = BatchBlockExecutionOutput,
         Error: Into<BlockExecutionError>,
     >;
     /// Creates a new executor for single block execution.
@@ -159,18 +167,19 @@ mod tests {
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = BlockExecutionOutput<Receipt>;
+        type Output = BatchBlockExecutionOutput;
         type Error = BlockExecutionError;
 
-        fn execute_one(
-            &mut self,
-            _input: Self::Input<'_>,
-        ) -> Result<BatchBlockExecutionOutput, Self::Error> {
-            Ok(BatchBlockExecutionOutput { size_hint: None })
+        fn execute_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
+            Ok(())
         }
 
         fn finalize(self) -> Self::Output {
             todo!()
+        }
+
+        fn size_hint(&self) -> Option<usize> {
+            None
         }
     }
 

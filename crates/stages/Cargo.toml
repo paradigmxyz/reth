@@ -24,6 +24,7 @@ reth-etl.workspace = true
 reth-config.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-evm.workspace = true
+reth-revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

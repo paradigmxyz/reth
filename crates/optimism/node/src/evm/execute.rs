@@ -482,10 +482,7 @@ where
     type Output = BundleStateWithReceipts;
     type Error = BlockExecutionError;
 
-    fn execute_one(
-        &mut self,
-        input: Self::Input<'_>,
-    ) -> Result<BatchBlockExecutionOutput, Self::Error> {
+    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, _gas_used) = self.executor.execute_and_verify(block, total_difficulty)?;
 
@@ -496,7 +493,7 @@ where
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
 
-        Ok(BatchBlockExecutionOutput { size_hint: Some(self.executor.state.bundle_size_hint()) })
+        Ok(())
     }
 
     fn finalize(mut self) -> Self::Output {
@@ -508,6 +505,10 @@ where
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
         )
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.executor.state.bundle_state.size_hint())
     }
 }
 

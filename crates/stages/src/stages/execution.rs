@@ -3,6 +3,7 @@ use num_traits::Zero;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
+use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
 use reth_exex::ExExManagerHandle;
 use reth_primitives::{
     stage::{
@@ -12,10 +13,11 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, CanonStateNotification, Chain, DatabaseProviderRW, ExecutorFactory,
+    BlockReader, BundleStateWithReceipts, CanonStateNotification, Chain, DatabaseProviderRW,
     HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader,
     TransactionVariant,
 };
+use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
     UnwindInput, UnwindOutput,
@@ -28,8 +30,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::*;
-use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
-use reth_revm::database::StateProviderDatabase;
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -148,7 +148,8 @@ impl<E> ExecutionStage<E> {
 }
 
 impl<E> ExecutionStage<E>
-    where E: BlockExecutorProvider
+where
+    E: BlockExecutorProvider,
 {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
@@ -220,9 +221,7 @@ impl<E> ExecutionStage<E>
             // Execute the block
             let execute_start = Instant::now();
 
-            let out = executor.execute_one(
-                (&block, td).into()
-            ).map_err(|error| StageError::Block {
+            executor.execute_one((&block, td).into()).map_err(|error| StageError::Block {
                 block: Box::new(block.header.clone().seal_slow()),
                 error: BlockErrorKind::Execution(error.into()),
             })?;
@@ -248,7 +247,7 @@ impl<E> ExecutionStage<E>
             }
 
             // Check if we should commit now
-            let bundle_size_hint = out.size_hint.unwrap_or_default() as u64;
+            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
                 bundle_size_hint,
@@ -259,7 +258,8 @@ impl<E> ExecutionStage<E>
             }
         }
         let time = Instant::now();
-        let state = executor.finalize();
+        let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+        let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
         // Check if we should send a [`CanonStateNotification`] to execution extensions.
@@ -397,7 +397,11 @@ fn calculate_gas_used_from_headers(
     Ok(gas_total)
 }
 
-impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
+impl<E, DB> Stage<DB> for ExecutionStage<E>
+where
+    DB: Database,
+    E: BlockExecutorProvider,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Execution
@@ -619,10 +623,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::test_utils::TestStageDB;
+    use std::collections::BTreeMap;
+
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
+
     use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_interfaces::executor::BlockValidationError;
@@ -633,7 +638,10 @@ mod tests {
     };
     use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
     use reth_revm::EvmProcessorFactory;
-    use std::collections::BTreeMap;
+
+    use crate::test_utils::TestStageDB;
+
+    use super::*;
 
     fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
         let executor_factory = EvmProcessorFactory::new(
