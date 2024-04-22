@@ -188,7 +188,7 @@ pub struct Config {
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
-    /// belongs, e.g. (b"opstack", ChainId) or (b"eth", ForkId).
+    /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", ForkId)`.
     pub(super) fork: (&'static [u8], ForkId),
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
