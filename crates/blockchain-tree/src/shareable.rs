@@ -3,6 +3,7 @@
 use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
+use reth_evm::execute::ExecutorProvider;
 use reth_interfaces::{
     blockchain_tree::{
         error::{CanonicalError, InsertBlockError},
@@ -24,7 +25,6 @@ use std::{
     sync::Arc,
 };
 use tracing::trace;
-use reth_evm::execute::ExecutorProvider;
 
 /// Shareable blockchain tree that is behind a RwLock
 #[derive(Clone, Debug)]
@@ -185,7 +185,7 @@ where
 impl<DB, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    E: ExecutorFactory,
+    E: ExecutorProvider,
 {
     fn find_pending_state_provider(
         &self,

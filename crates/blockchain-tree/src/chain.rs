@@ -6,6 +6,7 @@
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
 use reth_db::database::Database;
+use reth_evm::execute::{Executor, ExecutorProvider};
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, InsertBlockErrorKind},
@@ -22,6 +23,7 @@ use reth_provider::{
     BundleStateDataProvider, BundleStateWithReceipts, Chain, ExecutorFactory, ProviderError,
     StateRootProvider,
 };
+use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
@@ -29,7 +31,6 @@ use std::{
     ops::{Deref, DerefMut},
     time::Instant,
 };
-use reth_evm::execute::ExecutorProvider;
 
 /// A chain in the blockchain tree that has functionality to execute blocks and append them to
 /// itself.
@@ -67,18 +68,18 @@ impl AppendableChain {
     ///
     /// if [BlockValidationKind::Exhaustive] is specified, the method will verify the state root of
     /// the block.
-    pub fn new_canonical_fork<DB, EF>(
+    pub fn new_canonical_fork<DB, E>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
-        externals: &TreeExternals<DB, EF>,
+        externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
         DB: Database + Clone,
-        EF: ExecutorFactory,
+        E: ExecutorProvider,
     {
         let state = BundleStateWithReceipts::default();
         let empty = BTreeMap::new();
@@ -204,49 +205,50 @@ impl AppendableChain {
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
-        let
-
-        let mut executor = externals.executor_factory.with_state(&provider);
+        let db = StateProviderDatabase::new(&provider);
+        let executor = externals.executor_factory.executor(db);
         let block_hash = block.hash();
         let block = block.unseal();
-        executor.execute_and_verify_receipt(&block, U256::MAX)?;
-        let bundle_state = executor.take_output_state();
+        // executor.execute_and_verify_receipt(&block, U256::MAX)?;
+        let bundle_state = executor.execute((&block, U256::MAX).into()).map_err(Into::into)?;
 
-        // check state root if the block extends the canonical chain __and__ if state root
-        // validation was requested.
-        if block_validation_kind.is_exhaustive() {
-            // calculate and check state root
-            let start = Instant::now();
-            let (state_root, trie_updates) = if block_attachment.is_canonical() {
-                let mut state = provider.bundle_state_data_provider.state().clone();
-                state.extend(bundle_state.clone());
-                let hashed_state = state.hash_state_slow();
-                ParallelStateRoot::new(consistent_view, hashed_state)
-                    .incremental_root_with_updates()
-                    .map(|(root, updates)| (root, Some(updates)))
-                    .map_err(ProviderError::from)?
-            } else {
-                (provider.state_root(bundle_state.state())?, None)
-            };
-            if block.state_root != state_root {
-                return Err(ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block.state_root }.into(),
-                )
-                .into())
-            }
+        todo!()
 
-            tracing::debug!(
-                target: "blockchain_tree::chain",
-                number = block.number,
-                hash = %block_hash,
-                elapsed = ?start.elapsed(),
-                "Validated state root"
-            );
-
-            Ok((bundle_state, trie_updates))
-        } else {
-            Ok((bundle_state, None))
-        }
+        // // check state root if the block extends the canonical chain __and__ if state root
+        // // validation was requested.
+        // if block_validation_kind.is_exhaustive() {
+        //     // calculate and check state root
+        //     let start = Instant::now();
+        //     let (state_root, trie_updates) = if block_attachment.is_canonical() {
+        //         let mut state = provider.bundle_state_data_provider.state().clone();
+        //         state.extend(bundle_state.clone());
+        //         let hashed_state = state.hash_state_slow();
+        //         ParallelStateRoot::new(consistent_view, hashed_state)
+        //             .incremental_root_with_updates()
+        //             .map(|(root, updates)| (root, Some(updates)))
+        //             .map_err(ProviderError::from)?
+        //     } else {
+        //         (provider.state_root(bundle_state.state())?, None)
+        //     };
+        //     if block.state_root != state_root {
+        //         return Err(ConsensusError::BodyStateRootDiff(
+        //             GotExpected { got: state_root, expected: block.state_root }.into(),
+        //         )
+        //         .into())
+        //     }
+        //
+        //     tracing::debug!(
+        //         target: "blockchain_tree::chain",
+        //         number = block.number,
+        //         hash = %block_hash,
+        //         elapsed = ?start.elapsed(),
+        //         "Validated state root"
+        //     );
+        //
+        //     Ok((bundle_state, trie_updates))
+        // } else {
+        //     Ok((bundle_state, None))
+        // }
     }
 
     /// Validate and execute the given block, and append it to this chain.

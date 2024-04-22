@@ -6,6 +6,7 @@ use crate::{
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
 use reth_db::database::Database;
+use reth_evm::execute::ExecutorProvider;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -32,7 +33,6 @@ use std::{
     sync::Arc,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
-use reth_evm::execute::ExecutorProvider;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A Tree of chains.
