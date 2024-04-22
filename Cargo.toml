@@ -349,6 +349,8 @@ futures-util = "0.3.25"
 hyper = "0.14.25"
 tower = "0.4"
 tower-http = "0.4"
+http = "0.2.8"
+http-body = "0.4.5"
 
 # p2p
 discv5 = { git = "https://github.com/sigp/discv5", rev = "04ac004" }
