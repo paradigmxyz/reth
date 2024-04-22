@@ -164,7 +164,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
                     #[cfg(feature = "optimism")]
                     // below bedrock, transaction nonces can be replayed
-                    if provider.chain_spec().is_bedrock_active_at_block(end_block) {
+                    if !provider.chain_spec().is_bedrock_active_at_block(end_block) {
                         if matches!(res, Err(DatabaseError::Write(e)) if e.table_name == <tables::RawTable<tables::TransactionHashNumbers> as Table>::NAME && e.info.code == mdbx::Error::KeyExist.to_err_code())
                         {
                             continue
