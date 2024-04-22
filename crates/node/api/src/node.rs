@@ -2,7 +2,7 @@
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
 use reth_db::database::Database;
-use reth_evm::execute::ExecutorProvider;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
@@ -23,7 +23,7 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Evm: ConfigureEvm;
     /// Provides instances of executors to execute blocks, for individual blocks and batches of
     /// blocks (historical sync).
-    type Executor: ExecutorProvider;
+    type Executor: BlockExecutorProvider;
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> Self::Evm;

@@ -3,8 +3,8 @@
 use crate::OptimismEvmConfig;
 use reth_evm::{
     execute::{
-        BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
-        ExecutorProvider,
+        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
+        BlockExecutorProvider, Executor,
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
@@ -87,7 +87,7 @@ where
     }
 }
 
-impl<EvmConfig> ExecutorProvider for OpExecutorProvider<EvmConfig>
+impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
@@ -424,8 +424,8 @@ where
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError>,
 {
-    type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-    type Output = EthBlockOutput<Receipt>;
+    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
     /// Executes the block and commits the state changes.
@@ -436,13 +436,13 @@ where
     ///
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let EthBlockExecutionInput { block, total_difficulty } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, gas_used) = self.execute_and_verify(block, total_difficulty)?;
 
         // prepare the state for extraction
         self.state.merge_transitions(BundleRetention::PlainState);
 
-        Ok(EthBlockOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
     }
 }
 
@@ -478,12 +478,15 @@ where
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError>,
 {
-    type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BundleStateWithReceipts;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
-        let EthBlockExecutionInput { block, total_difficulty } = input;
+    fn execute_one(
+        &mut self,
+        input: Self::Input<'_>,
+    ) -> Result<BatchBlockExecutionOutput, Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, _gas_used) = self.executor.execute_and_verify(block, total_difficulty)?;
 
         // prepare the state according to the prune mode
@@ -493,7 +496,7 @@ where
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
 
-        Ok(BatchBlockOutput { size_hint: Some(self.executor.state.bundle_size_hint()) })
+        Ok(BatchBlockExecutionOutput { size_hint: Some(self.executor.state.bundle_size_hint()) })
     }
 
     fn finalize(mut self) -> Self::Output {

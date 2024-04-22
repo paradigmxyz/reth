@@ -21,8 +21,8 @@ pub trait Executor<DB> {
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
 }
 
-/// An executor that can execute multiple blocks in a row and keep track of the state over the
-/// entire batch.
+/// A general purpose executor that can execute multiple inputs in sequence and keep track of the
+/// state over the entire batch.
 pub trait BatchExecutor<DB> {
     /// The input type for the executor.
     type Input<'a>;
@@ -32,7 +32,10 @@ pub trait BatchExecutor<DB> {
     type Error;
 
     /// Executes the next block in the batch and update the state internally.
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error>;
+    fn execute_one(
+        &mut self,
+        input: Self::Input<'_>,
+    ) -> Result<BatchBlockExecutionOutput, Self::Error>;
 
     /// Finishes the batch and return the final state.
     fn finalize(self) -> Self::Output;
@@ -40,8 +43,10 @@ pub trait BatchExecutor<DB> {
 
 /// The output of an executed block in a batch.
 #[derive(Debug, Clone, Copy)]
-pub struct BatchBlockOutput {
-    /// The size hint of the batch's tracked state.
+pub struct BatchBlockExecutionOutput {
+    /// The size hint of the batch's tracked state size.
+    ///
+    /// This is used to optimize DB commits depending on the size of the state.
     pub size_hint: Option<usize>,
 }
 
@@ -51,7 +56,7 @@ pub struct BatchBlockOutput {
 ///
 /// TODO(mattsse): combine with BundleStateWithReceipts
 #[derive(Debug)]
-pub struct EthBlockOutput<T> {
+pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
@@ -62,42 +67,42 @@ pub struct EthBlockOutput<T> {
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
 #[derive(Debug)]
-pub struct EthBlockExecutionInput<'a, Block> {
+pub struct BlockExecutionInput<'a, Block> {
     /// The block to execute.
     pub block: &'a Block,
     /// The total difficulty of the block.
     pub total_difficulty: U256,
 }
 
-impl<'a, Block> EthBlockExecutionInput<'a, Block> {
+impl<'a, Block> BlockExecutionInput<'a, Block> {
     /// Creates a new input.
     pub fn new(block: &'a Block, total_difficulty: U256) -> Self {
         Self { block, total_difficulty }
     }
 }
 
-impl<'a, Block> From<(&'a Block, U256)> for EthBlockExecutionInput<'a, Block> {
+impl<'a, Block> From<(&'a Block, U256)> for BlockExecutionInput<'a, Block> {
     fn from((block, total_difficulty): (&'a Block, U256)) -> Self {
         Self::new(block, total_difficulty)
     }
 }
 
-/// A type that can create a new executor.
-pub trait ExecutorProvider: Send + Sync + Clone {
+/// A type that can create a new executor for block execution.
+pub trait BlockExecutorProvider: Send + Sync + Clone {
     /// An executor that can execute a single block given a database.
     type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
         DB,
-        Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>,
-        Output = EthBlockOutput<Receipt>,
+        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
+        Output = BlockExecutionOutput<Receipt>,
         Error: Into<BlockExecutionError>,
     >;
     /// An executor that can execute a batch of blocks given a database.
 
     type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
         DB,
-        Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>,
+        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         // TODO: change to bundle state with receipts
-        Output = EthBlockOutput<Receipt>,
+        Output = BlockExecutionOutput<Receipt>,
         Error: Into<BlockExecutionError>,
     >;
     /// Creates a new executor for single block execution.
@@ -121,7 +126,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
 
-    impl ExecutorProvider for TestExecutorProvider {
+    impl BlockExecutorProvider for TestExecutorProvider {
         type Executor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
         type BatchExecutor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
 
@@ -143,8 +148,8 @@ mod tests {
     struct TestExecutor<DB>(PhantomData<DB>);
 
     impl<DB> Executor<DB> for TestExecutor<DB> {
-        type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-        type Output = EthBlockOutput<Receipt>;
+        type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+        type Output = BlockExecutionOutput<Receipt>;
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
@@ -153,15 +158,15 @@ mod tests {
     }
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
-        type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-        type Output = EthBlockOutput<Receipt>;
+        type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+        type Output = BlockExecutionOutput<Receipt>;
         type Error = BlockExecutionError;
 
         fn execute_one(
             &mut self,
             _input: Self::Input<'_>,
-        ) -> Result<BatchBlockOutput, Self::Error> {
-            Ok(BatchBlockOutput { size_hint: None })
+        ) -> Result<BatchBlockExecutionOutput, Self::Error> {
+            Ok(BatchBlockExecutionOutput { size_hint: None })
         }
 
         fn finalize(self) -> Self::Output {
@@ -177,6 +182,6 @@ mod tests {
         let block =
             Block { header: Default::default(), body: vec![], ommers: vec![], withdrawals: None };
         let block = BlockWithSenders::new(block, Default::default()).unwrap();
-        let _ = executor.execute(EthBlockExecutionInput::new(&block, U256::ZERO));
+        let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
     }
 }
