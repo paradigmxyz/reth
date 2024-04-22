@@ -354,6 +354,11 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             |_| true,
         )
     }
+
+    /// Returns a reference to the [`ChainSpec`].
+    pub fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
 }
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {

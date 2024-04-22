@@ -141,14 +141,6 @@ impl StageError {
                 StageError::Fatal(_)
         )
     }
-
-    /// Returns `true` if error is caused by attempt to insert transaction into db, that already
-    /// exists.
-    pub fn is_dup_tx(&self) -> bool {
-        matches!(self, StageError::Database(DbError::Write(e))
-            if e.table_name == "TransactionHashNumbers" && e.info.code == -30799
-        )
-    }
 }
 
 impl From<std::io::Error> for StageError {

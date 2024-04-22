@@ -153,17 +153,28 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                         );
                     }
 
-                    if append_only {
+                    let res = if append_only {
                         txhash_cursor.append(
                             RawKey::<TxHash>::from_vec(hash),
                             RawValue::<TxNumber>::from_vec(number),
-                        )?;
+                        )
                     } else {
                         txhash_cursor.insert(
                             RawKey::<TxHash>::from_vec(hash),
                             RawValue::<TxNumber>::from_vec(number),
-                        )?;
+                        )
+                    };
+
+                    #[cfg(feature = "optimism")]
+                    if matches!(res, Err(StageError::Database(DbError::Write(e))) = res if e.table_name == "TransactionHashNumbers" && e.info.code == -30799)
+                    {
+                        // below bedrock, transaction nonces can be replayed
+                        if provider.chain_spec().is_bedrock_active_at_block(end_block) {
+                            continue
+                        }
                     }
+
+                    res?
                 }
                 break
             }
