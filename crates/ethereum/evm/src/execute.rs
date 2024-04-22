@@ -13,8 +13,8 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt, Receipts,
-    Withdrawals, U256,
+    BlockNumber, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt,
+    Receipts, Withdrawals, U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
@@ -39,7 +39,6 @@ pub struct EthExecutorProvider<EvmConfig> {
     chain_spec: Arc<ChainSpec>,
     evm_config: EvmConfig,
     inspector: Option<InspectorStack>,
-    prune_modes: PruneModes,
 }
 
 impl EthExecutorProvider<EthEvmConfig> {
@@ -52,18 +51,12 @@ impl EthExecutorProvider<EthEvmConfig> {
 impl<EvmConfig> EthExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { chain_spec, evm_config, inspector: None, prune_modes: PruneModes::none() }
+        Self { chain_spec, evm_config, inspector: None }
     }
 
     /// Configures an optional inspector stack for debugging.
     pub fn with_inspector(mut self, inspector: InspectorStack) -> Self {
         self.inspector = Some(inspector);
-        self
-    }
-
-    /// Configures the prune modes for the executor.
-    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
-        self.prune_modes = prune_modes;
         self
     }
 }
@@ -102,14 +95,14 @@ where
         self.eth_executor(db)
     }
 
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError>,
     {
         let executor = self.eth_executor(db);
         EthBatchExecutor {
             executor,
-            batch_record: BlockBatchRecord::new(self.prune_modes.clone()),
+            batch_record: BlockBatchRecord::new(prune_modes),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -461,6 +454,10 @@ where
         )
     }
 
+    fn set_tip(&mut self, tip: BlockNumber) {
+        self.batch_record.set_tip(tip);
+    }
+
     fn size_hint(&self) -> Option<usize> {
         Some(self.executor.state.bundle_state.size_hint())
     }
@@ -502,12 +499,7 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> EthExecutorProvider<EthEvmConfig> {
-        EthExecutorProvider {
-            chain_spec,
-            evm_config: Default::default(),
-            inspector: None,
-            prune_modes: Default::default(),
-        }
+        EthExecutorProvider { chain_spec, evm_config: Default::default(), inspector: None }
     }
 
     #[test]
@@ -702,7 +694,8 @@ mod tests {
 
         let provider = executor_provider(chain_spec);
 
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -782,7 +775,8 @@ mod tests {
         let provider = executor_provider(chain_spec);
 
         // execute header
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor

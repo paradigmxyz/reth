@@ -1,6 +1,7 @@
 //! Optimism block executor.
 
 use crate::OptimismEvmConfig;
+use alloy_primitives::BlockNumber;
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -40,7 +41,6 @@ pub struct OpExecutorProvider<EvmConfig> {
     chain_spec: Arc<ChainSpec>,
     evm_config: EvmConfig,
     inspector: Option<InspectorStack>,
-    prune_modes: PruneModes,
 }
 
 impl OpExecutorProvider<OptimismEvmConfig> {
@@ -53,18 +53,12 @@ impl OpExecutorProvider<OptimismEvmConfig> {
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { chain_spec, evm_config, inspector: None, prune_modes: PruneModes::none() }
+        Self { chain_spec, evm_config, inspector: None }
     }
 
     /// Configures an optional inspector stack for debugging.
     pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
         self.inspector = inspector;
-        self
-    }
-
-    /// Configures the prune modes for the executor.
-    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
-        self.prune_modes = prune_modes;
         self
     }
 }
@@ -102,14 +96,14 @@ where
         self.op_executor(db)
     }
 
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError>,
     {
         let executor = self.op_executor(db);
         OpBatchExecutor {
             executor,
-            batch_record: BlockBatchRecord::new(self.prune_modes.clone()),
+            batch_record: BlockBatchRecord::new(prune_modes),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -507,6 +501,10 @@ where
         )
     }
 
+    fn set_tip(&mut self, tip: BlockNumber) {
+        self.batch_record.set_tip(tip);
+    }
+
     fn size_hint(&self) -> Option<usize> {
         Some(self.executor.state.bundle_state.size_hint())
     }
@@ -580,12 +578,7 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider {
-            chain_spec,
-            evm_config: Default::default(),
-            inspector: None,
-            prune_modes: Default::default(),
-        }
+        OpExecutorProvider { chain_spec, evm_config: Default::default(), inspector: None }
     }
 
     #[test]
@@ -632,7 +625,8 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         executor.state_mut().load_cache_account(L1_BLOCK_CONTRACT).unwrap();
 
@@ -712,7 +706,8 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         executor.state_mut().load_cache_account(L1_BLOCK_CONTRACT).unwrap();
 

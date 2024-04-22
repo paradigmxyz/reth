@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Receipts, U256};
+use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, U256};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
@@ -36,6 +36,11 @@ pub trait BatchExecutor<DB> {
 
     /// Finishes the batch and return the final state.
     fn finalize(self) -> Self::Output;
+
+    /// Set the expected tip of the batch.
+    ///
+    /// This can be used to optimize state pruning during execution.
+    fn set_tip(&mut self, tip: BlockNumber);
 
     /// The size hint of the batch's tracked state size.
     ///
@@ -105,7 +110,6 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + 'static {
         Error: Into<BlockExecutionError>,
     >;
     /// An executor that can execute a batch of blocks given a database.
-
     type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
@@ -113,13 +117,17 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + 'static {
         Output = BatchBlockExecutionOutput,
         Error: Into<BlockExecutionError>,
     >;
+
     /// Creates a new executor for single block execution.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error = ProviderError>;
 
-    /// Creates a new batch executor
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
+    /// Creates a new batch executor with the given database and pruning modes.
+    ///
+    /// The pruning modes are used to determine which parts of the state should be kept during
+    /// execution.
+    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError>;
 }
@@ -145,7 +153,7 @@ mod tests {
             TestExecutor(PhantomData)
         }
 
-        fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
+        fn batch_executor<DB>(&self, _db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
         where
             DB: Database<Error = ProviderError>,
         {
@@ -175,6 +183,10 @@ mod tests {
         }
 
         fn finalize(self) -> Self::Output {
+            todo!()
+        }
+
+        fn set_tip(&mut self, _tip: BlockNumber) {
             todo!()
         }
 

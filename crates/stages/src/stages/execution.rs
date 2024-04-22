@@ -179,10 +179,8 @@ where
             provider.tx_ref(),
             provider.static_file_provider().clone(),
         ));
-        let mut executor = self.executor_factory.batch_executor(db);
-
-        // executor.set_prune_modes(prune_modes);
-        // executor.set_tip(max_block);
+        let mut executor = self.executor_factory.batch_executor(db, prune_modes);
+        executor.set_tip(max_block);
 
         // Progress tracking
         let mut stage_progress = start_block;
