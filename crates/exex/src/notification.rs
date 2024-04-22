@@ -5,16 +5,16 @@ use reth_provider::{CanonStateNotification, Chain};
 /// Notifications sent to an ExEx.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExExNotification {
-    /// Chain got committed without a reorg, and only new chain is returned.
+    /// Chain got committed without a reorg, and only the new chain is returned.
     ChainCommitted {
-        /// The newly committed chain.
+        /// The new chain after commit.
         new: Arc<Chain>,
     },
-    /// Chain got reorged and both old, and new chain are returned.
+    /// Chain got reorged, and both the old and the new chains are returned.
     ChainReorged {
-        /// The old chain before reorganization.
+        /// The old chain before reorg.
         old: Arc<Chain>,
-        /// The new chain after reorganization.
+        /// The new chain after reorg.
         new: Arc<Chain>,
     },
     /// Chain got reverted, and only the old chain is returned.
