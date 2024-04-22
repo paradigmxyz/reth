@@ -33,7 +33,6 @@ reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 
 # ethereum
@@ -98,7 +97,6 @@ optimism = [
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-auto-seal-consensus/optimism",
     "reth-consensus-common/optimism",
     "reth-beacon-consensus/optimism",
 ]
