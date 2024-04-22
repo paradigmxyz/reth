@@ -54,6 +54,13 @@ pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
+impl IpcServer {
+    /// Returns the configured [Endpoint]
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
+}
+
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
 where
     RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
@@ -68,11 +75,6 @@ where
     <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<String>>::Future:
     Send + Unpin,
 {
-    /// Returns the configured [Endpoint]
-    pub fn endpoint(&self) -> &Endpoint {
-        &self.endpoint
-    }
-
     /// Start responding to connections requests.
     ///
     /// This will run on the tokio runtime until the server is stopped or the ServerHandle is
