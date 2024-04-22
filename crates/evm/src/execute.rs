@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockWithSenders, Receipts, U256};
+use reth_primitives::{BlockWithSenders, Receipt, U256};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
@@ -88,7 +88,7 @@ pub trait ExecutorProvider: Send + Sync + Clone {
     type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
         DB,
         Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>,
-        Output = EthBlockOutput<Receipts>,
+        Output = EthBlockOutput<Receipt>,
         Error: Into<BlockExecutionError>,
     >;
     /// An executor that can execute a batch of blocks given a database.
@@ -97,7 +97,7 @@ pub trait ExecutorProvider: Send + Sync + Clone {
         DB,
         Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>,
         // TODO: change to bundle state with receipts
-        Output = EthBlockOutput<Receipts>,
+        Output = EthBlockOutput<Receipt>,
         Error: Into<BlockExecutionError>,
     >;
     /// Creates a new executor for single block execution.
@@ -144,7 +144,7 @@ mod tests {
 
     impl<DB> Executor<DB> for TestExecutor<DB> {
         type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-        type Output = EthBlockOutput<Receipts>;
+        type Output = EthBlockOutput<Receipt>;
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
@@ -154,7 +154,7 @@ mod tests {
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
         type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-        type Output = EthBlockOutput<Receipts>;
+        type Output = EthBlockOutput<Receipt>;
         type Error = BlockExecutionError;
 
         fn execute_one(

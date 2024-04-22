@@ -6,7 +6,7 @@
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
 use reth_db::database::Database;
-use reth_evm::execute::{Executor, ExecutorProvider};
+use reth_evm::execute::{EthBlockOutput, Executor, ExecutorProvider};
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, InsertBlockErrorKind},
@@ -16,7 +16,8 @@ use reth_interfaces::{
     RethResult,
 };
 use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
+    BlockHash, BlockNumber, ForkBlock, GotExpected, Receipts, SealedBlockWithSenders, SealedHeader,
+    U256,
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
@@ -210,45 +211,49 @@ impl AppendableChain {
         let block_hash = block.hash();
         let block = block.unseal();
         // executor.execute_and_verify_receipt(&block, U256::MAX)?;
-        let bundle_state = executor.execute((&block, U256::MAX).into()).map_err(Into::into)?;
+        let state = executor.execute((&block, U256::MAX).into()).map_err(Into::into)?;
+        let EthBlockOutput { state, receipts, .. } = state;
+        let bundle_state = BundleStateWithReceipts::new(
+            state,
+            Receipts::from_block_receipt(receipts),
+            block.number,
+        );
 
-        todo!()
+        // check state root if the block extends the canonical chain __and__ if state root
+        // validation was requested.
+        if block_validation_kind.is_exhaustive() {
+            // calculate and check state root
+            let start = Instant::now();
+            let (state_root, trie_updates) = if block_attachment.is_canonical() {
+                let mut state = provider.bundle_state_data_provider.state().clone();
+                state.extend(bundle_state.clone());
+                let hashed_state = state.hash_state_slow();
+                ParallelStateRoot::new(consistent_view, hashed_state)
+                    .incremental_root_with_updates()
+                    .map(|(root, updates)| (root, Some(updates)))
+                    .map_err(ProviderError::from)?
+            } else {
+                (provider.state_root(bundle_state.state())?, None)
+            };
+            if block.state_root != state_root {
+                return Err(ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: state_root, expected: block.state_root }.into(),
+                )
+                .into())
+            }
 
-        // // check state root if the block extends the canonical chain __and__ if state root
-        // // validation was requested.
-        // if block_validation_kind.is_exhaustive() {
-        //     // calculate and check state root
-        //     let start = Instant::now();
-        //     let (state_root, trie_updates) = if block_attachment.is_canonical() {
-        //         let mut state = provider.bundle_state_data_provider.state().clone();
-        //         state.extend(bundle_state.clone());
-        //         let hashed_state = state.hash_state_slow();
-        //         ParallelStateRoot::new(consistent_view, hashed_state)
-        //             .incremental_root_with_updates()
-        //             .map(|(root, updates)| (root, Some(updates)))
-        //             .map_err(ProviderError::from)?
-        //     } else {
-        //         (provider.state_root(bundle_state.state())?, None)
-        //     };
-        //     if block.state_root != state_root {
-        //         return Err(ConsensusError::BodyStateRootDiff(
-        //             GotExpected { got: state_root, expected: block.state_root }.into(),
-        //         )
-        //         .into())
-        //     }
-        //
-        //     tracing::debug!(
-        //         target: "blockchain_tree::chain",
-        //         number = block.number,
-        //         hash = %block_hash,
-        //         elapsed = ?start.elapsed(),
-        //         "Validated state root"
-        //     );
-        //
-        //     Ok((bundle_state, trie_updates))
-        // } else {
-        //     Ok((bundle_state, None))
-        // }
+            tracing::debug!(
+                target: "blockchain_tree::chain",
+                number = block.number,
+                hash = %block_hash,
+                elapsed = ?start.elapsed(),
+                "Validated state root"
+            );
+
+            Ok((bundle_state, trie_updates))
+        } else {
+            Ok((bundle_state, None))
+        }
     }
 
     /// Validate and execute the given block, and append it to this chain.

@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
-    ExecutorFactory, ProviderError,
+    ProviderError,
 };
 use std::{
     collections::{BTreeMap, HashSet},

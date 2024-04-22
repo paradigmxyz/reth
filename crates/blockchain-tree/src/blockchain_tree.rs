@@ -25,7 +25,7 @@ use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
-    ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider, ProviderError,
+    ChainSpecProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
