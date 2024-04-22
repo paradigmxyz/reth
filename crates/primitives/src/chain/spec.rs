@@ -243,6 +243,12 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             (Hardfork::Cancun, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "optimism")]
+            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "optimism")]
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
+            #[cfg(feature = "optimism")]
+            (Hardfork::Ecotone, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
