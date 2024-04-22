@@ -23,7 +23,7 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Evm: ConfigureEvm;
     /// Provides instances of executors to execute blocks, for individual blocks and batches of
     /// blocks (historical sync).
-    type Executor: BlockExecutorProvider;
+    type BlockExecutor: BlockExecutorProvider;
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> Self::Evm;
@@ -38,7 +38,7 @@ pub trait NodeTypes: Send + Sync + 'static {
     /// Blocked by <https://github.com/paradigmxyz/reth/issues/7154>
     ///
     /// TODO add prune modes etc as arguments
-    fn executor(&self) -> Self::Executor;
+    fn block_executor(&self) -> Self::BlockExecutor;
 }
 
 /// A helper type that is downstream of the [NodeTypes] trait and adds stateful components to the
@@ -77,14 +77,14 @@ where
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
     type Evm = Types::Evm;
-    type Executor = Types::Executor;
+    type BlockExecutor = Types::BlockExecutor;
 
     fn evm_config(&self) -> Self::Evm {
         self.types.evm_config()
     }
 
-    fn executor(&self) -> Self::Executor {
-        self.types.executor()
+    fn block_executor(&self) -> Self::BlockExecutor {
+        self.types.block_executor()
     }
 }
 
@@ -132,7 +132,7 @@ pub struct FullNodeComponentsAdapter<Node: FullNodeTypes, Pool> {
     pub provider: Node::Provider,
     /// Provides instances of executors to execute blocks, for individual blocks and batches of
     /// blocks (historical sync).
-    pub executor_provider: Node::Executor,
+    pub block_executor: Node::BlockExecutor,
     /// The payload builder service handle of the node.
     pub payload_builder: PayloadBuilderHandle<Node::Engine>,
     /// The task executor of the node.
@@ -156,14 +156,14 @@ where
     type Primitives = Node::Primitives;
     type Engine = Node::Engine;
     type Evm = Node::Evm;
-    type Executor = Node::Executor;
+    type BlockExecutor = Node::BlockExecutor;
 
     fn evm_config(&self) -> Self::Evm {
         self.evm_config.clone()
     }
 
-    fn executor(&self) -> Self::Executor {
-        self.executor_provider.clone()
+    fn block_executor(&self) -> Self::BlockExecutor {
+        self.block_executor.clone()
     }
 }
 
@@ -205,7 +205,7 @@ where
             pool: self.pool.clone(),
             network: self.network.clone(),
             provider: self.provider.clone(),
-            executor_provider: self.executor_provider.clone(),
+            block_executor: self.block_executor.clone(),
             payload_builder: self.payload_builder.clone(),
             executor: self.executor.clone(),
         }

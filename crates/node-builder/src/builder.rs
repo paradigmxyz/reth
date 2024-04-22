@@ -51,7 +51,6 @@ use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
 };
 use reth_prune::PrunerBuilder;
-use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -62,11 +61,11 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-type RethFullProviderType<DB, Evm> =
-    BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory<Evm>>>;
+type RethFullProviderType<DB, Executor> =
+    BlockchainProvider<DB, ShareableBlockchainTree<DB, Executor>>;
 
 type RethFullAdapter<DB, N> =
-    FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
+    FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::BlockExecutor>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
@@ -541,6 +540,7 @@ where
 
         // Configure the blockchain tree for the node
         let evm_config = types.evm_config();
+        let executor = types.block_executor(config.chain.clone());
         let tree_config = BlockchainTreeConfig::default();
         let tree_externals = TreeExternals::new(
             provider_factory.clone(),
