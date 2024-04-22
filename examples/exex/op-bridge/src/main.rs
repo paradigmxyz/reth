@@ -94,6 +94,7 @@ async fn op_bridge_exex<Node: FullNodeComponents>(
 ) -> eyre::Result<()> {
     // Process all new chain state notifications
     while let Some(notification) = ctx.notifications.recv().await {
+        // Revert all deposits and withdrawals, if any
         if let Some(reverted_chain) = notification.reverted() {
             let events = decode_chain_into_events(&reverted_chain);
 
@@ -125,23 +126,23 @@ async fn op_bridge_exex<Node: FullNodeComponents>(
             info!(block_range = ?reverted_chain.range(), %deposits, %withdrawals, "Reverted chain events");
         }
 
-        // Insert all new deposits and withdrawals
-        let committed_chain = notification.committed();
-        let events = decode_chain_into_events(&committed_chain);
+        // Insert all new deposits and withdrawals, if fny
+        if let Some(committed_chain) = notification.try_committed() {
+            let events = decode_chain_into_events(&committed_chain);
 
-        let mut deposits = 0;
-        let mut withdrawals = 0;
+            let mut deposits = 0;
+            let mut withdrawals = 0;
 
-        for (block, tx, log, event) in events {
-            match event {
-                // L1 -> L2 deposit
-                L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
-                    amount,
-                    from,
-                    to,
-                    ..
-                }) => {
-                    let inserted = connection.execute(
+            for (block, tx, log, event) in events {
+                match event {
+                    // L1 -> L2 deposit
+                    L1StandardBridgeEvents::ETHBridgeInitiated(ETHBridgeInitiated {
+                        amount,
+                        from,
+                        to,
+                        ..
+                    }) => {
+                        let inserted = connection.execute(
                                 r#"
                                 INSERT INTO deposits (block_number, tx_hash, contract_address, "from", "to", amount)
                                 VALUES (?, ?, ?, ?, ?, ?)
@@ -155,16 +156,16 @@ async fn op_bridge_exex<Node: FullNodeComponents>(
                                     amount.to_string(),
                                 ),
                             )?;
-                    deposits += inserted;
-                }
-                // L2 -> L1 withdrawal
-                L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
-                    amount,
-                    from,
-                    to,
-                    ..
-                }) => {
-                    let inserted = connection.execute(
+                        deposits += inserted;
+                    }
+                    // L2 -> L1 withdrawal
+                    L1StandardBridgeEvents::ETHBridgeFinalized(ETHBridgeFinalized {
+                        amount,
+                        from,
+                        to,
+                        ..
+                    }) => {
+                        let inserted = connection.execute(
                                 r#"
                                 INSERT INTO withdrawals (block_number, tx_hash, contract_address, "from", "to", amount)
                                 VALUES (?, ?, ?, ?, ?, ?)
@@ -178,13 +179,14 @@ async fn op_bridge_exex<Node: FullNodeComponents>(
                                     amount.to_string(),
                                 ),
                             )?;
-                    withdrawals += inserted;
-                }
-                _ => continue,
-            };
-        }
+                        withdrawals += inserted;
+                    }
+                    _ => continue,
+                };
+            }
 
-        info!(block_range = ?committed_chain.range(), %deposits, %withdrawals, "Committed chain events");
+            info!(block_range = ?committed_chain.range(), %deposits, %withdrawals, "Committed chain events");
+        }
 
         // Send a finished height event, signaling the node that we don't need any blocks below
         // this height anymore
