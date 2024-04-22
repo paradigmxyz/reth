@@ -47,7 +47,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
     payload_store: PayloadStore<EngineT>,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
-    /// The latency metrics for engine api calls
+    /// The latency and response type metrics for engine api calls
     metrics: EngineApiMetrics,
 }
 

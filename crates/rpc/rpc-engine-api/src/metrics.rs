@@ -1,8 +1,7 @@
-use metrics::{Counter, Histogram};
-use reth_rpc_types::engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
-use reth_metrics::Metrics;
-
 use crate::EngineApiError;
+use metrics::{Counter, Histogram};
+use reth_metrics::Metrics;
+use reth_rpc_types::engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
 
 /// All beacon consensus engine metrics
 #[derive(Default)]
@@ -64,8 +63,7 @@ pub(crate) struct ForkchoiceUpdatedResponseMetrics {
     /// [Accepted](reth_rpc_types::engine::PayloadStatusEnum#Accepted).
     pub(crate) forkchoice_updated_accepted: Counter,
     /// The total count of forkchoice updated messages that were unsuccessful, i.e. we responded
-    /// with an error type that is not a
-    /// [PayloadStatusEnum](reth_rpc_types::engine::PayloadStatusEnum).
+    /// with an error type that is not a [PayloadStatusEnum].
     pub(crate) forkchoice_updated_error: Counter,
 }
 
@@ -88,7 +86,7 @@ pub(crate) struct NewPayloadStatusResponseMetrics {
     /// [Accepted](reth_rpc_types::engine::PayloadStatusEnum#Accepted).
     pub(crate) new_payload_accepted: Counter,
     /// The total count of new payload messages that were unsuccessful, i.e. we responded with an
-    /// error type that is not a [PayloadStatusEnum](reth_rpc_types::engine::PayloadStatusEnum).
+    /// error type that is not a [PayloadStatusEnum].
     pub(crate) new_payload_error: Counter,
 }
 
@@ -101,7 +99,7 @@ impl NewPayloadStatusResponseMetrics {
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
                 PayloadStatusEnum::Invalid { .. } => self.new_payload_invalid.increment(1),
-            }
+            },
             Err(_) => self.new_payload_error.increment(1),
         }
         self.new_payload_messages.increment(1);
@@ -110,14 +108,17 @@ impl NewPayloadStatusResponseMetrics {
 
 impl ForkchoiceUpdatedResponseMetrics {
     /// Increment the forkchoiceUpdated counter based on the given rpc result
-    pub(crate) fn update_response_metrics(&self, result: &Result<ForkchoiceUpdated, EngineApiError>) {
+    pub(crate) fn update_response_metrics(
+        &self,
+        result: &Result<ForkchoiceUpdated, EngineApiError>,
+    ) {
         match result {
             Ok(status) => match status.payload_status.status {
                 PayloadStatusEnum::Valid => self.forkchoice_updated_valid.increment(1),
                 PayloadStatusEnum::Syncing => self.forkchoice_updated_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.forkchoice_updated_accepted.increment(1),
                 PayloadStatusEnum::Invalid { .. } => self.forkchoice_updated_invalid.increment(1),
-            }
+            },
             Err(_) => self.forkchoice_updated_error.increment(1),
         }
         self.forkchoice_updated_messages.increment(1);
