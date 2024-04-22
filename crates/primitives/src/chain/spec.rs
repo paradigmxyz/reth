@@ -661,15 +661,34 @@ impl ChainSpec {
     }
 
     /// Get the [BaseFeeParams] for the chain at the given timestamp.
-    pub fn base_fee_params(&self, timestamp: u64) -> BaseFeeParams {
+    pub fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         match self.base_fee_params {
             BaseFeeParamsKind::Constant(bf_params) => bf_params,
-            BaseFeeParamsKind::Variable(ForkBaseFeeParams { 0: ref bf_params }) => {
+            BaseFeeParamsKind::Variable(ForkBaseFeeParams(ref bf_params)) => {
                 // Walk through the base fee params configuration in reverse order, and return the
                 // first one that corresponds to a hardfork that is active at the
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.is_fork_active_at_timestamp(*fork, timestamp) {
+                        return *params
+                    }
+                }
+
+                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
+            }
+        }
+    }
+
+    /// Get the [BaseFeeParams] for the chain at the given block number
+    pub fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
+        match self.base_fee_params {
+            BaseFeeParamsKind::Constant(bf_params) => bf_params,
+            BaseFeeParamsKind::Variable(ForkBaseFeeParams(ref bf_params)) => {
+                // Walk through the base fee params configuration in reverse order, and return the
+                // first one that corresponds to a hardfork that is active at the
+                // given timestamp.
+                for (fork, params) in bf_params.iter().rev() {
+                    if self.is_fork_active_at_block(*fork, block_number) {
                         return *params
                     }
                 }
@@ -768,6 +787,12 @@ impl ChainSpec {
     #[inline]
     pub fn is_fork_active_at_timestamp(&self, fork: Hardfork, timestamp: u64) -> bool {
         self.fork(fork).active_at_timestamp(timestamp)
+    }
+
+    /// Convenience method to check if a fork is active at a given block number
+    #[inline]
+    pub fn is_fork_active_at_block(&self, fork: Hardfork, block_number: u64) -> bool {
+        self.fork(fork).active_at_block(block_number)
     }
 
     /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
@@ -3168,8 +3193,9 @@ Post-merge hard forks (timestamp based):
             genesis.hash_slow(),
             b256!("f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd")
         );
-        let base_fee =
-            genesis.next_block_base_fee(BASE_MAINNET.base_fee_params(genesis.timestamp)).unwrap();
+        let base_fee = genesis
+            .next_block_base_fee(BASE_MAINNET.base_fee_params_at_timestamp(genesis.timestamp))
+            .unwrap();
         // <https://base.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
     }
@@ -3182,8 +3208,9 @@ Post-merge hard forks (timestamp based):
             genesis.hash_slow(),
             b256!("0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4")
         );
-        let base_fee =
-            genesis.next_block_base_fee(BASE_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
+        let base_fee = genesis
+            .next_block_base_fee(BASE_SEPOLIA.base_fee_params_at_timestamp(genesis.timestamp))
+            .unwrap();
         // <https://base-sepolia.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
     }
@@ -3196,8 +3223,9 @@ Post-merge hard forks (timestamp based):
             genesis.hash_slow(),
             b256!("102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d")
         );
-        let base_fee =
-            genesis.next_block_base_fee(OP_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
+        let base_fee = genesis
+            .next_block_base_fee(OP_SEPOLIA.base_fee_params_at_timestamp(genesis.timestamp))
+            .unwrap();
         // <https://optimism-sepolia.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
     }
