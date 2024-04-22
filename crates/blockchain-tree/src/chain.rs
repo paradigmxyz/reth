@@ -29,6 +29,7 @@ use std::{
     ops::{Deref, DerefMut},
     time::Instant,
 };
+use reth_evm::execute::ExecutorProvider;
 
 /// A chain in the blockchain tree that has functionality to execute blocks and append them to
 /// itself.
@@ -104,18 +105,18 @@ impl AppendableChain {
     /// Create a new chain that forks off of an existing sidechain.
     ///
     /// This differs from [AppendableChain::new_canonical_fork] in that this starts a new fork.
-    pub(crate) fn new_chain_fork<DB, EF>(
+    pub(crate) fn new_chain_fork<DB, E>(
         &self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
-        externals: &TreeExternals<DB, EF>,
+        externals: &TreeExternals<DB, E>,
         block_validation_kind: BlockValidationKind,
     ) -> Result<Self, InsertBlockErrorKind>
     where
         DB: Database + Clone,
-        EF: ExecutorFactory,
+        E: ExecutorProvider,
     {
         let parent_number = block.number - 1;
         let parent = self.blocks().get(&parent_number).ok_or(
@@ -166,18 +167,18 @@ impl AppendableChain {
     ///   - [BlockAttachment] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
     ///   - [BlockValidationKind] determines if the state root __should__ be validated.
-    fn validate_and_execute<BSDP, DB, EVM>(
+    fn validate_and_execute<BSDP, DB, E>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
         bundle_state_data_provider: BSDP,
-        externals: &TreeExternals<DB, EVM>,
+        externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
         BSDP: BundleStateDataProvider,
         DB: Database + Clone,
-        EVM: ExecutorFactory,
+        E: ExecutorProvider,
     {
         // some checks are done before blocks comes here.
         externals.consensus.validate_header_against_parent(&block, parent_block)?;
@@ -202,6 +203,8 @@ impl AppendableChain {
             .state_provider_by_block_number(canonical_fork.number)?;
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
+
+        let
 
         let mut executor = externals.executor_factory.with_state(&provider);
         let block_hash = block.hash();
@@ -259,19 +262,19 @@ impl AppendableChain {
     /// __not__ the canonical head.
     #[track_caller]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn append_block<DB, EF>(
+    pub(crate) fn append_block<DB, E>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        externals: &TreeExternals<DB, EF>,
+        externals: &TreeExternals<DB, E>,
         canonical_fork: ForkBlock,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<(), InsertBlockErrorKind>
     where
         DB: Database + Clone,
-        EF: ExecutorFactory,
+        E: ExecutorProvider,
     {
         let parent_block = self.chain.tip();
 

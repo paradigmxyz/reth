@@ -1,7 +1,7 @@
 //! Traits for execution.
 
-use reth_interfaces::provider::ProviderError;
-use reth_primitives::U256;
+use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
+use reth_primitives::{BlockWithSenders, Receipts, U256};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
@@ -85,10 +85,21 @@ impl<'a, Block> From<(&'a Block, U256)> for EthBlockExecutionInput<'a, Block> {
 /// A type that can create a new executor.
 pub trait ExecutorProvider: Send + Sync + Clone {
     /// An executor that can execute a single block given a database.
-    type Executor<DB: Database<Error = ProviderError>>: Executor<DB>;
+    type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
+        DB,
+        Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>,
+        Output = EthBlockOutput<Receipts>,
+        Error: Into<BlockExecutionError>,
+    >;
     /// An executor that can execute a batch of blocks given a database.
 
-    type BatchExecutor<DB: Database<Error = ProviderError>>: BatchExecutor<DB>;
+    type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
+        DB,
+        Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>,
+        // TODO: change to bundle state with receipts
+        Output = EthBlockOutput<Receipts>,
+        Error: Into<BlockExecutionError>,
+    >;
     /// Creates a new executor for single block execution.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
@@ -103,6 +114,7 @@ pub trait ExecutorProvider: Send + Sync + Clone {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_primitives::Block;
     use revm::db::{CacheDB, EmptyDBTyped};
     use std::marker::PhantomData;
 
@@ -131,19 +143,19 @@ mod tests {
     struct TestExecutor<DB>(PhantomData<DB>);
 
     impl<DB> Executor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'static str;
-        type Output = ();
-        type Error = String;
+        type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
+        type Output = EthBlockOutput<Receipts>;
+        type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Ok(())
+            Err(BlockExecutionError::UnavailableForTest)
         }
     }
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'static str;
-        type Output = ();
-        type Error = String;
+        type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
+        type Output = EthBlockOutput<Receipts>;
+        type Error = BlockExecutionError;
 
         fn execute_one(
             &mut self,
@@ -152,7 +164,9 @@ mod tests {
             Ok(BatchBlockOutput { size_hint: None })
         }
 
-        fn finalize(self) -> Self::Output {}
+        fn finalize(self) -> Self::Output {
+            todo!()
+        }
     }
 
     #[test]
@@ -160,6 +174,9 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        executor.execute("test").unwrap();
+        let block =
+            Block { header: Default::default(), body: vec![], ommers: vec![], withdrawals: None };
+        let block = BlockWithSenders::new(block, Default::default()).unwrap();
+        let _ = executor.execute(EthBlockExecutionInput::new(&block, U256::ZERO));
     }
 }

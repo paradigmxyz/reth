@@ -32,6 +32,7 @@ use std::{
     sync::Arc,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
+use reth_evm::execute::ExecutorProvider;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A Tree of chains.
@@ -57,13 +58,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB, EVM> {
+pub struct BlockchainTree<DB, E> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
     state: TreeState,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, EVM>,
+    externals: TreeExternals<DB, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -75,7 +76,7 @@ pub struct BlockchainTree<DB, EVM> {
     prune_modes: Option<PruneModes>,
 }
 
-impl<DB, EVM> BlockchainTree<DB, EVM> {
+impl<DB, E> BlockchainTree<DB, E> {
     /// Subscribe to new blocks events.
     ///
     /// Note: Only canonical blocks are emitted by the tree.
@@ -89,10 +90,10 @@ impl<DB, EVM> BlockchainTree<DB, EVM> {
     }
 }
 
-impl<DB, EVM> BlockchainTree<DB, EVM>
+impl<DB, E> BlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    EVM: ExecutorFactory,
+    E: ExecutorProvider,
 {
     /// Builds the blockchain tree for the node.
     ///
@@ -115,7 +116,7 @@ where
     ///   storage space efficiently. It's important to validate this configuration to ensure it does
     ///   not lead to unintended data loss.
     pub fn new(
-        externals: TreeExternals<DB, EVM>,
+        externals: TreeExternals<DB, E>,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
