@@ -119,11 +119,16 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + 'static {
     >;
 
     /// Creates a new executor for single block execution.
+    ///
+    /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error = ProviderError>;
 
     /// Creates a new batch executor with the given database and pruning modes.
+    ///
+    /// Batch executor is used to execute multiple blocks in sequence and keep track of the state
+    /// during historical sync which involves executing multiple blocks in sequence.
     ///
     /// The pruning modes are used to determine which parts of the state should be kept during
     /// execution.
