@@ -23,7 +23,7 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
 struct ExExMetrics {
-    /// The total number of canonical state notifications sent to an ExEx.
+    /// The total number of notifications sent to an ExEx.
     notifications_sent_total: Counter,
     /// The total number of events an ExEx has sent to the manager.
     events_sent_total: Counter,
@@ -60,20 +60,20 @@ impl ExExHandle {
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
     /// [`Receiver`] for [`ExExNotification`]s that should be given to the ExEx.
     pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<ExExNotification>) {
-        let (canon_tx, canon_rx) = mpsc::channel(1);
+        let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         (
             Self {
                 id: id.clone(),
                 metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
-                sender: PollSender::new(canon_tx),
+                sender: PollSender::new(notification_tx),
                 receiver: event_rx,
                 next_notification_id: 0,
                 finished_height: None,
             },
             event_tx,
-            canon_rx,
+            notification_rx,
         )
     }
 
