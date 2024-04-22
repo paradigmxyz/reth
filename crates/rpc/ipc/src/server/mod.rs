@@ -739,7 +739,9 @@ mod tests {
     use futures::future::{select, Either};
     use jsonrpsee::{
         core::client::{ClientT, Subscription, SubscriptionClientT},
-        rpc_params, PendingSubscriptionSink, RpcModule, SubscriptionMessage,
+        rpc_params,
+        types::Request,
+        PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use parity_tokio_ipc::dummy_endpoint;
     use tokio::sync::broadcast;
@@ -853,5 +855,51 @@ mod tests {
 
         let items = sub.take(16).collect::<Vec<_>>().await;
         assert_eq!(items.len(), 16);
+    }
+
+    #[tokio::test]
+    async fn test_rpc_middleware() {
+        #[derive(Clone)]
+        struct ModifyRequestIf<S>(S);
+
+        impl<'a, S> RpcServiceT<'a> for ModifyRequestIf<S>
+        where
+            S: Send + Sync + RpcServiceT<'a>,
+        {
+            type Future = S::Future;
+
+            fn call(&self, mut req: Request<'a>) -> Self::Future {
+                // Re-direct all calls that isn't `say_hello` to `say_goodbye`
+                if req.method == "say_hello" {
+                    req.method = "say_goodbye".into();
+                } else if req.method == "say_goodbye" {
+                    req.method = "say_hello".into();
+                }
+
+                self.0.call(req)
+            }
+        }
+
+        reth_tracing::init_test_tracing();
+        let endpoint = dummy_endpoint();
+
+        let rpc_middleware = RpcServiceBuilder::new().layer_fn(ModifyRequestIf);
+        let server = Builder::default().set_rpc_middleware(rpc_middleware).build(&endpoint);
+
+        let mut module = RpcModule::new(());
+        let goodbye_msg = r#"{"jsonrpc":"2.0","id":83,"result":"goodbye"}"#;
+        let hello_msg = r#"{"jsonrpc":"2.0","id":83,"result":"hello"}"#;
+        module.register_method("say_hello", move |_, _| hello_msg).unwrap();
+        module.register_method("say_goodbye", move |_, _| goodbye_msg).unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let say_hello_response: String = client.request("say_hello", rpc_params![]).await.unwrap();
+        let say_goodbye_response: String =
+            client.request("say_goodbye", rpc_params![]).await.unwrap();
+
+        assert_eq!(say_hello_response, goodbye_msg);
+        assert_eq!(say_goodbye_response, hello_msg);
     }
 }
