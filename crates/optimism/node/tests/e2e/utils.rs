@@ -12,7 +12,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{span, Level};
 
-pub(crate) fn setup() -> (NodeConfig, TaskManager, TaskExecutor, Wallet) {
+pub(crate) async fn setup(
+    num_nodes: usize,
+) -> eyre::Result<(Vec<OpNode>, TaskManager, TaskExecutor, Wallet)> {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
 
@@ -31,16 +33,33 @@ pub(crate) fn setup() -> (NodeConfig, TaskManager, TaskExecutor, Wallet) {
         ..NetworkArgs::default()
     };
 
-    (
-        NodeConfig::test()
-            .with_chain(chain_spec)
-            .with_network(network_config)
+    // Create nodes and peer them
+    let mut nodes: Vec<OpNode> = Vec::with_capacity(num_nodes);
+    for idx in 0..num_nodes {
+        let node_config = NodeConfig::test()
+            .with_chain(chain_spec.clone())
+            .with_network(network_config.clone())
             .with_unused_ports()
-            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http()),
-        tasks,
-        exec,
-        Wallet::default().with_chain_id(chain_id),
-    )
+            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
+
+        let mut node =  node(node_config, exec.clone(), idx + 1).await?;
+        
+        // Connect each node in a chain.
+        if let Some(previous_node) = nodes.last_mut() {
+            previous_node.connect(&mut node).await;
+        }
+
+        // Connect last node with the first if there are more than two
+        if idx + 1 == num_nodes && num_nodes > 2 {
+            if let Some(first_node) = nodes.first_mut() {
+                node.connect(first_node).await;
+            }
+        }
+
+        nodes.push(node);
+    }
+
+    Ok((nodes, tasks, exec, Wallet::default().with_chain_id(chain_id)))
 }
 
 pub(crate) async fn node(
