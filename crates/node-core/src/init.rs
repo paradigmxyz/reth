@@ -235,10 +235,7 @@ pub fn insert_genesis_header<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-
     use reth_db::{
         cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -246,8 +243,8 @@ mod tests {
         DatabaseEnv,
     };
     use reth_primitives::{
-        Address, Chain, ChainSpec, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
-        GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
+        Chain, ForkTimestamps, Genesis, IntegerList, GOERLI, GOERLI_GENESIS_HASH, MAINNET,
+        MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 

@@ -6920,7 +6920,6 @@ dependencies = [
  "procfs",
  "proptest",
  "rand 0.8.5",
- "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-config",
  "reth-consensus-common",
