@@ -54,7 +54,7 @@ pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
-impl IpcServer {
+impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
     /// Returns the configured [Endpoint]
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
@@ -147,7 +147,7 @@ where
         let incoming = match self.endpoint.incoming() {
             Ok(connections) => {
                 #[cfg(windows)]
-                let connections = Box::pin(connections);
+                    let connections = Box::pin(connections);
                 Incoming::new(connections)
             }
             Err(err) => {

@@ -171,7 +171,9 @@ use jsonrpsee::{
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+pub use reth_ipc::server::{
+    Builder as IpcServerBuilder, Endpoint, RpcServiceBuilder as IpcRpcServiceBuilder,
+};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
@@ -1756,13 +1758,12 @@ impl RpcServerConfig {
         server.ws_http = self.build_ws_http(modules).await?;
 
         if let Some(builder) = self.ipc_server_config {
-            // let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::new).unwrap_or_default();
+            let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::ipc).unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
             let ipc = builder
-                // TODO(mattsse): add metrics middleware for IPC
-                // .set_middleware(metrics)
+                .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
                 .build(ipc_path.path());
             server.ipc = Some(ipc);
         }
@@ -2127,7 +2128,7 @@ pub struct RpcServer {
     /// Configured ws,http servers
     ws_http: WsHttpServer,
     /// ipc server
-    ipc: Option<IpcServer>,
+    ipc: Option<IpcServer<Identity, Stack<RpcRequestMetrics, Identity>>>,
 }
 
 // === impl RpcServer ===
