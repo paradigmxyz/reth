@@ -1,11 +1,15 @@
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
-    ChainSpec, Header, Withdrawal, B256, U256,
+    address, constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call,
+    Address, ChainSpec, Header, Withdrawal, B256, U256,
 };
-use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
-use std::collections::HashMap;
+use revm::{
+    interpreter::Host,
+    primitives::{Account, AccountInfo, StorageSlot},
+    Database, DatabaseCommit, Evm,
+};
+use std::{collections::HashMap, ops::Rem};
 
 /// Collect all balance changes at the end of the block.
 ///
@@ -51,11 +55,100 @@ pub fn post_block_balance_increments(
     balance_increments
 }
 
-/// Applies the pre-block call to the EIP-4788 beacon block root contract, using the given block,
+// todo: temporary move over of constants from revm until we've migrated to the latest version
+const HISTORY_SERVE_WINDOW: usize = 8192;
+const HISTORY_STORAGE_ADDRESS: Address = address!("25a219378dad9b3503c8268c9ca836a52427a4fb");
+
+/// Applies the pre-block state change outlined in [EIP-2935] to store historical blockhashes in a
+/// system contract.
+///
+/// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
+/// state changes are made.
+///
+/// If the provided block is the fork activation block, this will generate multiple state changes,
+/// as it inserts multiple historical blocks, as outlined in the EIP.
+///
+/// If the provided block is after Prague has been activated, this will only insert a single block
+/// hash.
+///
+/// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
+#[inline]
+pub fn apply_blockhashes_update<EXT, DB: Database + DatabaseCommit>(
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    block_number: u64,
+    parent_timestamp: u64,
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<(), BlockExecutionError>
+where
+    DB::Error: std::fmt::Display,
+{
+    // If Prague is not activated or this is the genesis block, no hashes are added.
+    if !chain_spec.is_prague_active_at_timestamp(block_timestamp) || block_number == 0 {
+        return Ok(())
+    }
+    assert!(block_number > 0);
+
+    // Create an empty account using the `From<AccountInfo>` impl of `Account`. This marks the
+    // account internally as `Loaded`, which is required, since we want the EVM to retrieve storage
+    // values from the DB when `BLOCKHASH` is invoked.
+    let mut account = Account::from(AccountInfo::default());
+
+    // Insert the state change for the slot
+    let (slot, value) = eip2935_block_hash_slot(block_number - 1, evm)
+        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
+    account.storage.insert(slot, value);
+
+    // If Prague was not activated at the parent block, then this is the fork activation block, and
+    // we add the parent's direct `HISTORY_SERVE_WINDOW - 1` ancestors as well.
+    //
+    // Note: The -1 is because the ancestor itself was already inserted up above.
+    if !chain_spec.is_prague_active_at_timestamp(parent_timestamp) {
+        let mut ancestor_block_number = block_number - 1;
+        for _ in 0..HISTORY_SERVE_WINDOW - 1 {
+            // Stop at genesis
+            if ancestor_block_number == 0 {
+                break
+            }
+            ancestor_block_number = ancestor_block_number - 1;
+
+            let (slot, value) =
+                eip2935_block_hash_slot(ancestor_block_number, evm).map_err(|err| {
+                    BlockValidationError::Eip2935StateTransition { message: err.to_string() }
+                })?;
+            account.storage.insert(slot, value);
+        }
+    }
+
+    // Commit the state change
+    evm.context.evm.db.commit(HashMap::from([(HISTORY_STORAGE_ADDRESS, account)]));
+
+    Ok(())
+}
+
+/// Helper function to create a [`StorageSlot`] for [EIP-2935] state transitions for a given block
+/// number.
+///
+/// This calculates the correct storage slot in the `BLOCKHASH` history storage address, fetches the
+/// blockhash and creates a [`StorageSlot`] with appropriate previous and new values.
+fn eip2935_block_hash_slot<EXT, DB: Database>(
+    block_number: u64,
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<(U256, StorageSlot), DB::Error> {
+    let slot = U256::from(block_number).rem(U256::from(HISTORY_SERVE_WINDOW));
+    let current_hash = evm.db_mut().storage(HISTORY_STORAGE_ADDRESS, slot)?;
+    let ancestor_hash = evm.db_mut().block_hash(U256::from(block_number))?;
+
+    Ok((slot, StorageSlot::new_changed(current_hash, ancestor_hash.into())))
+}
+
+/// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
 /// [ChainSpec], EVM.
 ///
-/// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
+/// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
+///
+/// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
 #[inline]
 pub fn apply_beacon_root_contract_call<EXT, DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,

@@ -25,7 +25,8 @@ use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
 use reth_revm::state_change::{
-    apply_beacon_root_contract_call, post_block_withdrawals_balance_increments,
+    apply_beacon_root_contract_call, apply_blockhashes_update,
+    post_block_withdrawals_balance_increments,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -886,6 +887,16 @@ where
         attributes.timestamp(),
         block_number,
         attributes.parent_beacon_block_root(),
+        &mut evm_pre_block,
+    )
+    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    // todo: the parent timestamp stuff is really annoying -.- how do we not make this pollute
+    // the api
+    apply_blockhashes_update(
+        chain_spec,
+        attributes.timestamp(),
+        block_number,
+        0,
         &mut evm_pre_block,
     )
     .map_err(|err| PayloadBuilderError::Internal(err.into()))

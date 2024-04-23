@@ -30,7 +30,9 @@ use crate::{
     database::StateProviderDatabase,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     stack::{InspectorStack, InspectorStackConfig},
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update, post_block_balance_increments,
+    },
 };
 
 /// EVMProcessor is a block executor that uses revm to execute blocks or multiple blocks.
@@ -152,7 +154,7 @@ where
 
     /// Applies the pre-block call to the EIP-4788 beacon block root contract.
     ///
-    /// If cancun is not activated or the block is the genesis block, then this is a no-op, and no
+    /// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
     fn apply_beacon_root_contract_call(
         &mut self,
@@ -163,6 +165,23 @@ where
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
+            &mut self.evm,
+        )?;
+        Ok(())
+    }
+
+    /// Applies the pre-block state transition to the EIP-2935 blockhash history contract.
+    ///
+    /// If Prague is not activated or the block is the genesis block, then this is a no-op, and no
+    /// state changes are made.
+    fn apply_blockhashes_update(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
+        // todo: the parent timestamp stuff is really annoying -.- how do we not make this pollute
+        // the api
+        apply_blockhashes_update(
+            &self.chain_spec,
+            block.timestamp,
+            block.number,
+            0,
             &mut self.evm,
         )?;
         Ok(())
@@ -261,6 +280,7 @@ where
     ) -> Result<Vec<Receipt>, BlockExecutionError> {
         self.init_env(&block.header, total_difficulty);
         self.apply_beacon_root_contract_call(block)?;
+        self.apply_blockhashes_update(block)?;
         let (receipts, cumulative_gas_used) = self.execute_transactions(block, total_difficulty)?;
 
         // Check if gas used matches the value set in header.

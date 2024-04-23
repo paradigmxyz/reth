@@ -23,7 +23,9 @@ use reth_revm::{
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     processor::verify_receipt,
     stack::InspectorStack,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update, post_block_balance_increments,
+    },
     Evm, State,
 };
 use revm_primitives::{
@@ -152,6 +154,9 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
+        // todo: the parent timestamp stuff is really annoying -.- how do we not make this pollute
+        // the api
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, 0, &mut evm)?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;

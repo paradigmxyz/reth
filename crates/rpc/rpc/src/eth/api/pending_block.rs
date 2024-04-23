@@ -77,6 +77,7 @@ impl PendingBlockEnv {
 
         let chain_spec = client.chain_spec();
 
+        // todo: apply blockhash history state change
         let parent_beacon_block_root = if origin.is_actual_pending() {
             // apply eip-4788 pre block contract call if we got the block from the CL with the real
             // parent beacon block root
