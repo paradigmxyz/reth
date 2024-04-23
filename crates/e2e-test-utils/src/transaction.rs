@@ -66,7 +66,7 @@ fn tx(chain_id: u64, data: Option<Bytes>) -> TransactionRequest {
         nonce: Some(0),
         value: Some(U256::from(100)),
         to: Some(Address::random()),
-        gas: Some(21000),
+        gas: Some(210000),
         max_fee_per_gas: Some(20e9 as u128),
         max_priority_fee_per_gas: Some(20e9 as u128),
         chain_id: Some(chain_id),
