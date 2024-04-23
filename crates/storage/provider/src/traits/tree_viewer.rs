@@ -12,3 +12,11 @@ pub trait TreeViewer:
     + BlockchainTreeEngine
 {
 }
+
+impl<T> TreeViewer for T where
+    T: BlockchainTreeViewer
+        + BlockchainTreePendingStateProvider
+        + CanonStateSubscriptions
+        + BlockchainTreeEngine
+{
+}
