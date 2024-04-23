@@ -2302,6 +2302,11 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
     ) -> ProviderResult<()> {
+        trace!(
+            target: "providers::db",
+            ?account_transitions,
+            "appending account history indices"
+        );
         self.append_history_index::<_, tables::AccountsHistory>(
             account_transitions,
             ShardedKey::new,
