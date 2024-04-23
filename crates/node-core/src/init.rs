@@ -322,6 +322,7 @@ pub fn init_from_state_dump<DB: Database>(
             }
 
             tx.commit()?;
+            accounts.clear();
         }
 
         if n == 0 {
