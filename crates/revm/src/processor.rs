@@ -166,8 +166,7 @@ where
             block.number,
             block.parent_beacon_block_root,
             &mut self.evm,
-        )?;
-        Ok(())
+        )
     }
 
     /// Applies the pre-block state transition to the EIP-2935 blockhash history contract.
@@ -175,8 +174,7 @@ where
     /// If Prague is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
     fn apply_blockhashes_update(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
-        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, &mut self.evm)?;
-        Ok(())
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, &mut self.evm)
     }
 
     /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
