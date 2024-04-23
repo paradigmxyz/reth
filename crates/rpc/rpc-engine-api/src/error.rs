@@ -222,7 +222,6 @@ mod tests {
         err: impl Into<jsonrpsee_types::error::ErrorObject<'static>>,
     ) {
         let err = err.into();
-        dbg!(&err);
         assert_eq!(err.code(), code);
         assert_eq!(err.message(), message);
     }
