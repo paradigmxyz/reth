@@ -257,8 +257,8 @@ pub fn init_from_state_dump<DB: Database>(
     mut reader: impl BufRead,
     factory: ProviderFactory<DB>,
 ) -> eyre::Result<B256> {
-    let block = factory.last_block_number()?;
-    let hash = factory.block_hash(block)?.unwrap();
+   // let block = factory.last_block_number()?;
+   // let hash = factory.block_hash(block)??;
 
     let block = 0;
     let hash = factory.chain_spec().genesis_hash();
