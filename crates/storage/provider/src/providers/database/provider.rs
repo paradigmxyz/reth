@@ -52,12 +52,12 @@ use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
-    fmt::{self, Debug},
+    fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
@@ -987,18 +987,11 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         mut sharded_key_factory: impl FnMut(P, BlockNumber) -> T::Key,
     ) -> ProviderResult<()>
     where
-        P: Copy + fmt::Debug,
+        P: Copy,
         T: Table<Value = BlockNumberList>,
     {
         for (partial_key, indices) in index_updates {
             let last_shard = self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
-
-            trace!(target: "providers::db",
-                ?partial_key,
-                ?last_shard,
-                "last shard for key"
-            );
-
             // chunk indices and insert them in shards of N size.
             let indices = last_shard.iter().chain(indices.iter());
             let chunks = indices
@@ -1006,12 +999,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 .into_iter()
                 .map(|chunks| chunks.copied().collect())
                 .collect::<Vec<Vec<_>>>();
-
-            trace!(target: "providers::db",
-                ?partial_key,
-                ?chunks,
-                "inserting chunks of indices for key"
-            );
 
             let mut chunks = chunks.into_iter().peekable();
             while let Some(list) = chunks.next() {
@@ -2309,11 +2296,6 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
     ) -> ProviderResult<()> {
-        trace!(
-            target: "providers::db",
-            ?account_transitions,
-            "appending account history indices"
-        );
         self.append_history_index::<_, tables::AccountsHistory>(
             account_transitions,
             ShardedKey::new,

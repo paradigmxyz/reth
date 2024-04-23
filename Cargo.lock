@@ -6912,7 +6912,6 @@ dependencies = [
  "futures",
  "humantime",
  "hyper 0.14.28",
- "itertools 0.12.1",
  "jsonrpsee",
  "metrics",
  "metrics-exporter-prometheus",
