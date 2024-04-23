@@ -4,21 +4,18 @@ use crate::{
 };
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
+use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
-    providers::{BlockReaderIdExt, CanonStateSubscriptions},
+    providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::{
         eth::{error::EthResult, EthTransactions},
-        types::engine::PayloadAttributes,
+        types::engine::PayloadStatusEnum,
     },
 };
-use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{Address, BlockNumber, Bytes, B256};
-use std::{
-    marker::PhantomData,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use reth_primitives::{stage::StageId, BlockHash, BlockNumber, Bytes, B256};
+use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
 
 /// An helper struct to handle node actions
@@ -27,7 +24,7 @@ where
     Node: FullNodeComponents,
 {
     pub inner: FullNode<Node>,
-    payload: PayloadHelper<Node::Engine>,
+    pub payload: PayloadHelper<Node::Engine>,
     pub network: NetworkHelper,
     pub engine_api: EngineApiHelper<Node::Engine>,
 }
@@ -52,12 +49,53 @@ where
         })
     }
 
-    /// Advances the node forward
+    pub async fn connect(&mut self, node: &mut NodeHelper<Node>) {
+        self.network.add_peer(node.network.record()).await;
+        node.network.add_peer(self.network.record()).await;
+        node.network.expect_session().await;
+        self.network.expect_session().await;
+    }
+
+    /// Advances the chain `length` blocks.
+    ///
+    /// Returns the added chain as a Vec of block hashes.
     pub async fn advance(
+        &mut self,
+        length: u64,
+        tx_generator: impl Fn() -> Pin<Box<dyn Future<Output = Bytes>>>,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes
+            + Copy,
+    ) -> eyre::Result<
+        Vec<(
+            <Node::Engine as EngineTypes>::BuiltPayload,
+            <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+        )>,
+    >
+    where
+        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+    {
+        let mut chain = Vec::with_capacity(length as usize);
+        for _ in 0..length {
+            let (payload, _) =
+                self.advance_block(tx_generator().await, attributes_generator).await?;
+            chain.push(payload);
+        }
+        Ok(chain)
+    }
+
+    /// Advances the node forward one block
+    pub async fn advance_block(
         &mut self,
         raw_tx: Bytes,
         attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
-    ) -> eyre::Result<(B256, B256)>
+    ) -> eyre::Result<(
+        (
+            <Node::Engine as EngineTypes>::BuiltPayload,
+            <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+        ),
+        B256,
+    )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
             From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
@@ -81,15 +119,54 @@ where
         let payload = self.payload.expect_built_payload().await?;
 
         // submit payload via engine api
-        let block_number = payload.block().number;
-        let block_hash = self.engine_api.submit_payload(payload, eth_attr.clone()).await?;
+        let block_hash = self
+            .engine_api
+            .submit_payload(payload.clone(), eth_attr.clone(), PayloadStatusEnum::Valid)
+            .await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
         self.engine_api.update_forkchoice(block_hash).await?;
 
         // assert the block has been committed to the blockchain
-        self.assert_new_block(tx_hash, block_hash, block_number).await?;
-        Ok((block_hash, tx_hash))
+        self.assert_new_block(tx_hash, block_hash, payload.block().number).await?;
+        Ok(((payload, eth_attr), tx_hash))
+    }
+
+    /// Waits for block to be available on node.
+    pub async fn wait_block(
+        &self,
+        number: BlockNumber,
+        expected_block_hash: BlockHash,
+        wait_finish_checkpoint: bool,
+    ) -> eyre::Result<()> {
+        let mut check = !wait_finish_checkpoint;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            if !check && wait_finish_checkpoint {
+                if let Some(checkpoint) =
+                    self.inner.provider.get_stage_checkpoint(StageId::Finish)?
+                {
+                    if checkpoint.block_number >= number {
+                        check = true
+                    }
+                }
+            }
+
+            if check {
+                if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
+                    if latest_block.hash_slow() != expected_block_hash {
+                        // TODO: only if its awaiting a reorg
+                        continue
+                    }
+                    break
+                }
+                if wait_finish_checkpoint {
+                    panic!("Finish checkpoint matches, but could not fetch block.");
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Injects a raw transaction into the node tx pool via RPC server
@@ -128,18 +205,4 @@ where
         }
         Ok(())
     }
-}
-
-/// Helper function to create a new eth payload attributes
-pub fn eth_payload_attributes() -> EthPayloadBuilderAttributes {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-    let attributes = PayloadAttributes {
-        timestamp,
-        prev_randao: B256::ZERO,
-        suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
-        parent_beacon_block_root: Some(B256::ZERO),
-    };
-    EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }

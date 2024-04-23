@@ -7,7 +7,7 @@ use tokio_stream::wrappers::BroadcastStream;
 pub struct PayloadHelper<E: EngineTypes + 'static> {
     pub payload_event_stream: BroadcastStream<Events<E>>,
     payload_builder: PayloadBuilderHandle<E>,
-    timestamp: u64,
+    pub timestamp: u64,
 }
 
 impl<E: EngineTypes + 'static> PayloadHelper<E> {
