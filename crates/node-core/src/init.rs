@@ -156,6 +156,8 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
                 storage,
             ),
         );
+
+        trace!(target: "reth::cli", "Inserted state");
     }
     let all_reverts_init: RevertsInit = HashMap::from([(0, reverts_init)]);
 
@@ -182,6 +184,8 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
         alloc.clone().map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
+    trace!(target: "reth::cli", "Inserted account hashes");
+
     let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
         account.storage.as_ref().map(|storage| {
@@ -196,6 +200,8 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
+    trace!(target: "reth::cli", "Inserted storage hashes");
+
     Ok(())
 }
 
@@ -208,11 +214,15 @@ pub fn insert_genesis_history<'a, 'b, DB: Database>(
         alloc.clone().map(|(addr, _)| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
 
+    trace!(target: "reth::cli", "Inserted account history");
+
     let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
         .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![0])))
         .collect::<BTreeMap<_, _>>();
     provider.insert_storage_history_index(storage_transitions)?;
+
+    trace!(target: "reth::cli", "Inserted storage history");
 
     Ok(())
 }
