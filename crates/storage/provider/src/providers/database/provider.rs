@@ -52,12 +52,12 @@ use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
-    fmt::Debug,
+    fmt::{self, Debug},
     ops::{Bound, Deref, DerefMut, Range, RangeBounds, RangeInclusive},
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB> = DatabaseProvider<<DB as Database>::TX>;
@@ -987,7 +987,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         mut sharded_key_factory: impl FnMut(P, BlockNumber) -> T::Key,
     ) -> ProviderResult<()>
     where
-        P: Copy,
+        P: Copy + fmt::Debug,
         T: Table<Value = BlockNumberList>,
     {
         for (partial_key, indices) in index_updates {
@@ -999,6 +999,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 .into_iter()
                 .map(|chunks| chunks.copied().collect())
                 .collect::<Vec<Vec<_>>>();
+
+                trace!(target: "providers::db", ?partial_key, ?chunks, "indices chunks for key");
 
             let mut chunks = chunks.into_iter().peekable();
             while let Some(list) = chunks.next() {
