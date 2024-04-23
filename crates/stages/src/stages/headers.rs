@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -10,7 +11,6 @@ use reth_db::{
 };
 use reth_etl::Collector;
 use reth_interfaces::{
-    consensus::Consensus,
     p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
     provider::ProviderError,
 };

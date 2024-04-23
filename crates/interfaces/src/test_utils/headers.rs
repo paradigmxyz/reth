@@ -1,19 +1,17 @@
 //! Testing support for headers related interfaces.
 
-use crate::{
-    consensus::{self, Consensus, ConsensusError},
-    p2p::{
-        download::DownloadClient,
-        error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
-        headers::{
-            client::{HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
-            error::HeadersDownloaderResult,
-        },
-        priority::Priority,
+use crate::p2p::{
+    download::DownloadClient,
+    error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
+    headers::{
+        client::{HeadersClient, HeadersRequest},
+        downloader::{HeaderDownloader, SyncTarget},
+        error::HeadersDownloaderResult,
     },
+    priority::Priority,
 };
 use futures::{Future, FutureExt, Stream, StreamExt};
+use reth_consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, WithPeerId, U256,
 };
@@ -274,7 +272,7 @@ impl TestConsensus {
 impl Consensus for TestConsensus {
     fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
         if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
+            Err(ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }
@@ -286,7 +284,7 @@ impl Consensus for TestConsensus {
         _parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
+            Err(ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }
@@ -298,15 +296,15 @@ impl Consensus for TestConsensus {
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
+            Err(ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }
     }
 
-    fn validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::ConsensusError> {
+    fn validate_block(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
         if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
+            Err(ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }

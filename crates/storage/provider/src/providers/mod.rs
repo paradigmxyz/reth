@@ -17,7 +17,6 @@ use reth_interfaces::{
         BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
         InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
     provider::ProviderResult,
     RethResult,
 };
@@ -61,6 +60,7 @@ use chain_info::ChainInfoTracker;
 
 mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
+use reth_rpc_types::engine::ForkchoiceState;
 
 /// The main type for interacting with the blockchain.
 ///

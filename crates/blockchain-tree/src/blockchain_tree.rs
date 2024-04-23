@@ -5,13 +5,13 @@ use crate::{
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
     provider::RootMismatch,
     RethResult,

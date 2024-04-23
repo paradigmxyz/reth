@@ -22,6 +22,7 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -29,7 +30,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
-use reth_interfaces::{consensus::Consensus, p2p::either::EitherDownloader};
+use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
 use reth_node_api::{
     FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
