@@ -848,7 +848,6 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     })
 }
 
-// todo: do this for payloads
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
 /// This constructs a new [Evm] with the given DB, and environment
