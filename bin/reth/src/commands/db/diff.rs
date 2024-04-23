@@ -171,7 +171,7 @@ where
     T::Key: Hash,
     T::Value: PartialEq,
 {
-    let table = T::TABLE;
+    let table = T::NAME;
 
     info!("Analyzing table {table}...");
     let result = find_diffs_advanced::<T>(&primary_tx, &secondary_tx)?;

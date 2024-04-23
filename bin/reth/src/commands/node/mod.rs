@@ -10,7 +10,7 @@ use crate::{
 };
 use clap::{value_parser, Args, Parser};
 use reth_cli_runner::CliContext;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{init_db, DatabaseEnv, Tables};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{node_config::NodeConfig, version};
 use reth_primitives::ChainSpec;
@@ -183,7 +183,9 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let db_path = data_dir.db_path();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
+        let database =
+            Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics(tables));
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

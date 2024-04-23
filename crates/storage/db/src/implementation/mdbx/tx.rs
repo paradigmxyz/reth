@@ -1,10 +1,10 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use super::cursor::Cursor;
+use super::{cursor::Cursor, MAX_DBS};
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     table::{Compress, DupSort, Encode, Table, TableImporter},
-    tables::{utils::decode_one, Tables},
+    tables::utils::decode_one,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -39,7 +39,7 @@ pub struct Tx<K: TransactionKind> {
 
     /// Database table handle cache.
     // TODO: Use `std::sync::OnceLock` once `get_or_try_init` is stable.
-    db_handles: [OnceCell<DBI>; Tables::COUNT],
+    db_handles: [OnceCell<DBI>; MAX_DBS],
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -75,7 +75,7 @@ impl<K: TransactionKind> Tx<K> {
         #[allow(clippy::declare_interior_mutable_const)]
         const ONCECELL_DBI_NEW: OnceCell<DBI> = OnceCell::new();
         #[allow(clippy::declare_interior_mutable_const)]
-        const DB_HANDLES: [OnceCell<DBI>; Tables::COUNT] = [ONCECELL_DBI_NEW; Tables::COUNT];
+        const DB_HANDLES: [OnceCell<DBI>; MAX_DBS] = [ONCECELL_DBI_NEW; MAX_DBS];
         Self { inner, db_handles: DB_HANDLES, metrics_handler }
     }
 
@@ -86,7 +86,7 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Gets a table database handle if it exists, otherwise creates it.
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
-        self.db_handles[T::TABLE as usize]
+        self.db_handles[T::INDEX]
             .get_or_try_init(|| {
                 self.inner
                     .open_db(Some(T::NAME))
@@ -170,7 +170,7 @@ impl<K: TransactionKind> Tx<K> {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
-                .record_operation(T::TABLE, operation, value_size, || f(&self.inner))
+                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }
@@ -393,7 +393,7 @@ impl DbTxMut for Tx<RW> {
 mod tests {
     use crate::{
         database::Database, mdbx::DatabaseArguments, models::client_version::ClientVersion, tables,
-        transaction::DbTx, DatabaseEnv, DatabaseEnvKind,
+        transaction::DbTx, DatabaseEnv, DatabaseEnvKind, Tables,
     };
     use reth_interfaces::db::DatabaseError;
     use reth_libmdbx::MaxReadTransactionDuration;
@@ -409,7 +409,9 @@ mod tests {
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+        let tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
+        let db =
+            DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics(tables);
 
         let mut tx = db.tx().unwrap();
         tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
@@ -435,7 +437,9 @@ mod tests {
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+        let tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
+        let db =
+            DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics(tables);
 
         let mut tx = db.tx().unwrap();
         tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;

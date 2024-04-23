@@ -1,4 +1,3 @@
-use crate::Tables;
 use metrics::{Gauge, Histogram};
 use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
@@ -20,7 +19,7 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 #[derive(Debug)]
 pub struct DatabaseEnvMetrics {
     /// Caches OperationMetrics handles for each table and operation tuple.
-    operations: FxHashMap<(Tables, Operation), OperationMetrics>,
+    operations: FxHashMap<(String, Operation), OperationMetrics>,
     /// Caches TransactionMetrics handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -31,11 +30,11 @@ pub struct DatabaseEnvMetrics {
 }
 
 impl DatabaseEnvMetrics {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(tables: Vec<&'static str>) -> Self {
         // Pre-populate metric handle maps with all possible combinations of labels
         // to avoid runtime locks on the map when recording metrics.
         Self {
-            operations: Self::generate_operation_handles(),
+            operations: Self::generate_operation_handles(tables),
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
@@ -43,17 +42,19 @@ impl DatabaseEnvMetrics {
 
     /// Generate a map of all possible operation handles for each table and operation tuple.
     /// Used for tracking all operation metrics.
-    fn generate_operation_handles() -> FxHashMap<(Tables, Operation), OperationMetrics> {
+    fn generate_operation_handles(
+        tables: Vec<&'static str>,
+    ) -> FxHashMap<(String, Operation), OperationMetrics> {
         let mut operations = FxHashMap::with_capacity_and_hasher(
-            Tables::COUNT * Operation::COUNT,
+            tables.len() * Operation::COUNT,
             BuildHasherDefault::<FxHasher>::default(),
         );
-        for table in Tables::ALL {
+        for table in tables {
             for operation in Operation::iter() {
                 operations.insert(
-                    (*table, operation),
+                    (table.into(), operation),
                     OperationMetrics::new_with_labels(&[
-                        (Labels::Table.as_str(), table.name()),
+                        (Labels::Table.as_str(), table),
                         (Labels::Operation.as_str(), operation.as_str()),
                     ]),
                 );
@@ -104,13 +105,13 @@ impl DatabaseEnvMetrics {
     /// Panics if a metric recorder is not found for the given table and operation.
     pub(crate) fn record_operation<R>(
         &self,
-        table: Tables,
+        table: &'static str,
         operation: Operation,
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
     ) -> R {
         self.operations
-            .get(&(table, operation))
+            .get(&(table.into(), operation))
             .expect("operation & table metric handle not found")
             .record(value_size, f)
     }

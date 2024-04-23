@@ -43,7 +43,6 @@ use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
     PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
-use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -125,14 +124,16 @@ macro_rules! tables {
 
             // Ideally this implementation wouldn't exist, but it is necessary to derive `Debug`
             // when a type is generic over `T: Table`. See: https://github.com/rust-lang/rust/issues/26925
-            impl fmt::Debug for $name {
-                fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+            impl std::fmt::Debug for $name {
+                fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     unreachable!("this type cannot be instantiated")
                 }
             }
 
             impl $crate::table::Table for $name {
-                const TABLE: Tables = Tables::$name;
+                const NAME: &'static str = stringify!($name);
+                const INDEX: usize = Tables::$name as usize;
+                const DUPSORT: bool = tables!(@bool $($subkey)?);
 
                 type Key = $key;
                 type Value = $value;
@@ -163,9 +164,6 @@ macro_rules! tables {
             /// All the tables in the database.
             pub const ALL: &'static [Self] = &[$(Self::$name,)*];
 
-            /// The number of tables in the database.
-            pub const COUNT: usize = Self::ALL.len();
-
             /// Returns the name of the table as a string.
             pub const fn name(&self) -> &'static str {
                 match self {
@@ -185,18 +183,18 @@ macro_rules! tables {
             }
 
             /// The type of the given table in database.
-            pub const fn table_type(&self) -> TableType {
+            pub const fn table_type(&self) -> $crate::TableType {
                 if self.is_dupsort() {
-                    TableType::DupSort
+                    $crate::TableType::DupSort
                 } else {
-                    TableType::Table
+                    $crate::TableType::Table
                 }
             }
 
             /// Allows to operate on specific table type
             pub fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
             where
-                T: TableViewer<R>,
+                T: $crate::TableViewer<R>,
             {
                 match self {
                     $(
@@ -206,16 +204,16 @@ macro_rules! tables {
             }
         }
 
-        impl fmt::Debug for Tables {
+        impl std::fmt::Debug for Tables {
             #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.write_str(self.name())
             }
         }
 
-        impl fmt::Display for Tables {
+        impl std::fmt::Display for Tables {
             #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 self.name().fmt(f)
             }
         }

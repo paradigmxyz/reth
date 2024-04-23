@@ -126,8 +126,11 @@ pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result
     #[cfg(feature = "mdbx")]
     {
         let client_version = args.client_version().clone();
+        let default_tables = args.default_tables().unwrap_or(true);
         let db = create_db(path, args)?;
-        db.create_tables()?;
+        if default_tables {
+            db.create_default_tables()?;
+        }
         db.record_client_version(client_version)?;
         Ok(db)
     }

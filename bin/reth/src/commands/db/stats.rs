@@ -78,7 +78,7 @@ impl Command {
         ]);
 
         tool.provider_factory.db_ref().view(|tx| {
-            let mut db_tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>();
+            let mut db_tables = Tables::ALL.iter().map(|table| table.name()).collect::<Vec<_>>(); // TODO: custom tables
             db_tables.sort();
             let mut total_size = 0;
             for db_table in db_tables {
@@ -318,7 +318,7 @@ impl Command {
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);
 
-        let db_tables = Tables::ALL;
+        let db_tables = Tables::ALL; // TODO: custom tables
         let mut total_elapsed = Duration::default();
 
         for db_table in db_tables {

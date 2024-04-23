@@ -41,6 +41,9 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 #[cfg(not(windows))]
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
+/// Maximum number of allowed databases/tables.
+const MAX_DBS: usize = 256;
+
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
 pub enum DatabaseEnvKind {
@@ -58,7 +61,7 @@ impl DatabaseEnvKind {
 }
 
 /// Arguments for database initialization.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
@@ -87,6 +90,26 @@ pub struct DatabaseArguments {
     ///
     /// This flag affects only at environment opening but can't be changed after.
     exclusive: Option<bool>,
+    /// Creates default tables.
+    ///
+    /// If 'true', the default tables are created when the database is opened. If [None], the
+    /// default value is used.
+    ///
+    /// If 'false', the default tables are not created when the database is opened.
+    /// This is useful when using the database only for custom tables.
+    default_tables: Option<bool>,
+}
+
+impl Default for DatabaseArguments {
+    fn default() -> Self {
+        Self {
+            client_version: ClientVersion::default(),
+            log_level: None,
+            max_read_transaction_duration: None,
+            exclusive: None,
+            default_tables: Some(true),
+        }
+    }
 }
 
 impl DatabaseArguments {
@@ -97,6 +120,7 @@ impl DatabaseArguments {
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
+            default_tables: Some(true),
         }
     }
 
@@ -121,9 +145,20 @@ impl DatabaseArguments {
         self
     }
 
+    /// Set the default tables flag.
+    pub fn with_default_tables(mut self, default_tables: Option<bool>) -> Self {
+        self.default_tables = default_tables;
+        self
+    }
+
     /// Returns the client version if any.
     pub fn client_version(&self) -> &ClientVersion {
         &self.client_version
+    }
+
+    /// Returns the default tables flag if any.
+    pub fn default_tables(&self) -> Option<bool> {
+        self.default_tables
     }
 }
 
@@ -169,6 +204,7 @@ impl DatabaseMetrics for DatabaseEnv {
 
         let _ = self
             .view(|tx| {
+                // TODO: custom tables
                 for table in Tables::ALL.iter().map(Tables::name) {
                     let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
 
@@ -245,7 +281,7 @@ impl DatabaseMetadata for DatabaseEnv {
 impl DatabaseEnv {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
-    /// It does not create the tables, for that call [`DatabaseEnv::create_tables`].
+    /// It does not create the tables, for that call [`DatabaseEnv::create_default_tables`].
     pub fn open(
         path: &Path,
         kind: DatabaseEnvKind,
@@ -264,8 +300,7 @@ impl DatabaseEnv {
 
         // Note: We set max dbs to 256 here to allow for custom tables. This needs to be set on
         // environment creation.
-        debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
-        inner_env.set_max_dbs(256);
+        inner_env.set_max_dbs(MAX_DBS);
         inner_env.set_geometry(Geometry {
             // Maximum database size of 4 terabytes
             size: Some(0..(4 * TERABYTE)),
@@ -371,7 +406,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level))
+                return Err(DatabaseError::LogLevelUnavailable(log_level));
             }
         }
 
@@ -388,13 +423,24 @@ impl DatabaseEnv {
     }
 
     /// Enables metrics on the database.
-    pub fn with_metrics(mut self) -> Self {
-        self.metrics = Some(DatabaseEnvMetrics::new().into());
+    pub fn with_metrics(mut self, tables: Vec<&'static str>) -> Self {
+        self.metrics = Some(DatabaseEnvMetrics::new(tables).into());
         self
     }
 
-    /// Creates all the defined tables, if necessary.
-    pub fn create_tables(&self) -> Result<(), DatabaseError> {
+    /// Creates a table.
+    pub fn create_table(&self, name: &'static str, dupsort: bool) -> Result<(), DatabaseError> {
+        let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+
+        let flags = if dupsort { DatabaseFlags::DUP_SORT } else { DatabaseFlags::default() };
+        tx.create_db(Some(name), flags).map_err(|e| DatabaseError::CreateTable(e.into()))?;
+        tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;
+
+        Ok(())
+    }
+
+    /// Creates all the defined default tables, if necessary.
+    pub fn create_default_tables(&self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
         for table in Tables::ALL {
@@ -415,7 +461,7 @@ impl DatabaseEnv {
     /// Records version that accesses the database with write privileges.
     pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
         if version.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let tx = self.tx_mut()?;
@@ -473,7 +519,7 @@ mod tests {
     fn create_test_db_with_path(kind: DatabaseEnvKind, path: &Path) -> DatabaseEnv {
         let env = DatabaseEnv::open(path, kind, DatabaseArguments::new(ClientVersion::default()))
             .expect(ERROR_DB_CREATION);
-        env.create_tables().expect(ERROR_TABLE_CREATION);
+        env.create_default_tables().expect(ERROR_TABLE_CREATION);
         env
     }
 
