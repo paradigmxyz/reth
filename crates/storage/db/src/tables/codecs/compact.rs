@@ -129,7 +129,7 @@ mod tests {
     use crate::{codecs::{compact::{CompactClientVersion, CompactU64}, CompactU256}, models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals}};
     
     #[test]
-    fn test_ensure_backwards_compatability() {
+    fn test_ensure_backwards_compatibility() {
         assert!(Account::bitflag_encoded_bytes() == 2);
         assert!(Account::bitflag_unused_bits() == 5);
         assert!(AccountHashingCheckpoint::bitflag_encoded_bytes() == 1);
