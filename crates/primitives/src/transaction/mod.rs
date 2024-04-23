@@ -997,8 +997,9 @@ impl TransactionSignedNoHash {
             }
 
             // pre bedrock system transactions were sent from the zero address as legacy
-            // transactions with an empty signature Note: this is very hacky and only
-            // relevant for op-mainnet pre bedrock
+            // transactions with an empty signature
+            //
+            // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
             if self.is_legacy() && self.signature == Signature::optimism_deposit_tx_signature() {
                 return Some(Address::ZERO)
             }
@@ -1822,6 +1823,25 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
+impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
+    type Error = ConversionError;
+
+    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
+
+        TransactionSigned::from_transaction_and_signature(
+            tx.try_into()?,
+            Signature {
+                r: signature.r,
+                s: signature.s,
+                odd_y_parity: signature.y_parity.ok_or(ConversionError::MissingYParity)?.0,
+            },
+        )
+        .try_into_ecrecovered()
+        .map_err(|_| ConversionError::InvalidSignature)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -2194,7 +2214,14 @@ mod tests {
         );
 
         let encoded = &alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("c98080808080801b8080"), encoded[..]);
+        assert_eq!(
+            if cfg!(feature = "optimism") {
+                hex!("c9808080808080808080")
+            } else {
+                hex!("c98080808080801b8080")
+            },
+            &encoded[..]
+        );
         assert_eq!(MIN_LENGTH_LEGACY_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();

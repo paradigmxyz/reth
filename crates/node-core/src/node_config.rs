@@ -12,15 +12,13 @@ use crate::{
 use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
-use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
-use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_interfaces::{consensus::Consensus, p2p::headers::client::HeadersClient, RethResult};
+use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
+    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, BlockNumReader, HeaderProvider,
@@ -29,7 +27,6 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use tokio::sync::mpsc::Receiver;
 use tracing::*;
 
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
@@ -291,18 +288,6 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Get the [MiningMode] from the given dev args
-    pub fn mining_mode(&self, pending_transactions_listener: Receiver<TxHash>) -> MiningMode {
-        if let Some(interval) = self.dev.block_time {
-            MiningMode::interval(interval)
-        } else if let Some(max_transactions) = self.dev.block_max_transactions {
-            MiningMode::instant(max_transactions, pending_transactions_listener)
-        } else {
-            info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
-            MiningMode::instant(1, pending_transactions_listener)
-        }
-    }
-
     /// Create the [NetworkConfig] for the node
     pub fn network_config<C>(
         &self,
@@ -337,18 +322,6 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Returns the [Consensus] instance to use.
-    ///
-    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
-    /// will be an [AutoSealConsensus] instance.
-    pub fn consensus(&self) -> Arc<dyn Consensus> {
-        if self.dev.dev {
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        }
-    }
-
     /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
         Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
@@ -365,6 +338,7 @@ impl NodeConfig {
         prometheus_handle: PrometheusHandle,
         db: Metrics,
         static_file_provider: StaticFileProvider,
+        task_executor: TaskExecutor,
     ) -> eyre::Result<()>
     where
         Metrics: DatabaseMetrics + 'static + Send + Sync,
@@ -377,6 +351,7 @@ impl NodeConfig {
                 db,
                 static_file_provider,
                 metrics_process::Collector::default(),
+                task_executor,
             )
             .await?;
         }

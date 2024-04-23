@@ -23,9 +23,7 @@ reth-tasks.workspace = true
 reth-tracing.workspace = true
 
 ## async
-futures.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 tokio-util.workspace = true
 
 ## misc

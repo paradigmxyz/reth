@@ -1,4 +1,3 @@
-#![cfg(feature = "c-kzg")]
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
 #[cfg(any(test, feature = "arbitrary"))]

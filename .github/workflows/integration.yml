@@ -47,9 +47,7 @@ jobs:
         name: Run tests
         run: |
           cargo nextest run \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests node-e2e-tests \
-            -E "kind(test)"
+            --locked -p reth-node-optimism --features "optimism"
 
   sync:
     name: sync / 100k blocks

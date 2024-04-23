@@ -277,10 +277,9 @@ impl StorageInner {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // check previous block for base fee
-        let base_fee_per_gas = self
-            .headers
-            .get(&self.best_block)
-            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params(timestamp)));
+        let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
+            parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
+        });
 
         let mut header = Header {
             parent_hash: self.best_hash,

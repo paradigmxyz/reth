@@ -35,8 +35,8 @@ revm-primitives.workspace = true
 # async
 async-trait.workspace = true
 hyper.workspace = true
-http = "0.2.8"
-http-body = "0.4.5"
+http.workspace = true
+http-body.workspace = true
 reqwest = { version = "0.11", default-features = false, features = [
     "rustls-tls",
 ]}
@@ -52,8 +52,12 @@ thiserror.workspace = true
 jsonrpsee.workspace = true
 
 [dev-dependencies]
+reth.workspace = true
 reth-db.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"]}
+reth-e2e-test-utils.workspace = true
+tokio.workspace = true
+alloy-primitives.workspace = true
 
 [features]
 optimism = [

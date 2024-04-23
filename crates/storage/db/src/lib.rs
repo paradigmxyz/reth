@@ -38,7 +38,7 @@
 //!
 //! # Overview
 //!
-//! An overview of the current data model of reth can be found in the [`tables`] module.
+//! An overview of the current data model of reth can be found in the [`mod@tables`] module.
 //!
 //! [`Database`]: crate::abstraction::database::Database
 //! [`DbTx`]: crate::abstraction::transaction::DbTx
