@@ -8,6 +8,7 @@ members = [
     "crates/consensus/beacon/",
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
+    "crates/consensus/consensus/",
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/etl/",
@@ -85,7 +86,7 @@ members = [
     "examples/exex/minimal/",
     "examples/exex/op-bridge/",
     "examples/exex/rollup/",
-    "testing/ef-tests/",
+    "testing/ef-tests/"
 ]
 default-members = ["bin/reth"]
 
@@ -208,6 +209,7 @@ reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
+reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
 reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }

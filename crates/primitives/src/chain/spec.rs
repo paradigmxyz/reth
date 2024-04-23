@@ -813,6 +813,15 @@ impl ChainSpec {
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
     }
 
+    /// Convenience method to check if [Hardfork::Prague] is active at a given timestamp.
+    #[inline]
+    pub fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork_timestamps
+            .prague
+            .map(|prague| timestamp >= prague)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Prague, timestamp))
+    }
+
     /// Convenience method to check if [Hardfork::Byzantium] is active at a given block number.
     #[inline]
     pub fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
@@ -1055,10 +1064,12 @@ impl From<Genesis> for ChainSpec {
 /// Various timestamps of forks
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct ForkTimestamps {
-    /// The timestamp of the shanghai fork
+    /// The timestamp of the Shanghai fork
     pub shanghai: Option<u64>,
-    /// The timestamp of the cancun fork
+    /// The timestamp of the Cancun fork
     pub cancun: Option<u64>,
+    /// The timestamp of the Prague fork
+    pub prague: Option<u64>,
     /// The timestamp of the Regolith fork
     #[cfg(feature = "optimism")]
     pub regolith: Option<u64>,
@@ -1080,6 +1091,9 @@ impl ForkTimestamps {
         if let Some(cancun) = forks.get(&Hardfork::Cancun).and_then(|f| f.as_timestamp()) {
             timestamps = timestamps.cancun(cancun);
         }
+        if let Some(prague) = forks.get(&Hardfork::Prague).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.prague(prague);
+        }
         #[cfg(feature = "optimism")]
         {
             if let Some(regolith) = forks.get(&Hardfork::Regolith).and_then(|f| f.as_timestamp()) {
@@ -1095,15 +1109,21 @@ impl ForkTimestamps {
         timestamps
     }
 
-    /// Sets the given shanghai timestamp
+    /// Sets the given Shanghai timestamp
     pub fn shanghai(mut self, shanghai: u64) -> Self {
         self.shanghai = Some(shanghai);
         self
     }
 
-    /// Sets the given cancun timestamp
+    /// Sets the given Cancun timestamp
     pub fn cancun(mut self, cancun: u64) -> Self {
         self.cancun = Some(cancun);
+        self
+    }
+
+    /// Sets the given Prague timestamp
+    pub fn prague(mut self, prague: u64) -> Self {
+        self.prague = Some(prague);
         self
     }
 

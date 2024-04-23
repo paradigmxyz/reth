@@ -4,7 +4,7 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
-use reth_e2e_test_utils::{node::NodeHelper, wallet::Wallet};
+use reth_e2e_test_utils::{node::NodeHelper, setup, wallet::Wallet};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 use std::sync::Arc;
@@ -13,38 +13,24 @@ use std::sync::Arc;
 async fn can_run_eth_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let exec = TaskManager::current();
-    let exec = exec.executor();
+    let (mut nodes, _tasks, mut wallet) = setup::<EthereumNode>(
+        1,
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .build(),
+        ),
+        false,
+    )
+    .await?;
 
-    // Chain spec with test allocs
-    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
-    let chain_spec = Arc::new(
-        ChainSpecBuilder::default()
-            .chain(MAINNET.chain)
-            .genesis(genesis)
-            .cancun_activated()
-            .build(),
-    );
-
-    // Node setup
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(exec)
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
-    let mut node = NodeHelper::new(node).await?;
-
-    // Configure wallet from test mnemonic and create dummy transfer tx
-    let mut wallet = Wallet::default();
+    let mut node = nodes.pop().unwrap();
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
-    node.advance(raw_tx, eth_payload_attributes).await?;
+    node.advance_block(raw_tx, eth_payload_attributes).await?;
 
     Ok(())
 }
@@ -83,7 +69,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let raw_tx = wallet.transfer_tx().await;
 
     // make the node advance
-    node.advance(raw_tx, crate::utils::eth_payload_attributes).await?;
+    node.advance_block(raw_tx, crate::utils::eth_payload_attributes).await?;
 
     Ok(())
 }
