@@ -264,10 +264,10 @@ pub fn init_from_state_dump<DB: Database>(
         Ok(root) => {
             trace!(target: "reth::cli",
                 root=%root.root,
-                "read state root from file"
+                "Read state root from file"
             );
             Some(root)
-        },
+        }
         Err(_) => {
             let GenesisAccountWithAddress { genesis_account, address } =
                 serde_json::from_str(&line)?;
@@ -280,11 +280,6 @@ pub fn init_from_state_dump<DB: Database>(
 
     // remaining lines are accounts
     while let Ok(n) = reader.read_line(&mut line) {
-        trace!(target: "reth::cli",
-            line,
-            "read line"
-        );
-
         if accounts.len() == DEFAULT_LEN_ACCOUNTS_CHUNK || n == 0 {
             debug!(target: "reth::cli",
                 block,
