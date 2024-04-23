@@ -40,6 +40,6 @@ tokio = { workspace = true, features = ["full"] }
 secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
-test-utils = ["secp256k1", "rand", "parking_lot"]
+test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
 cli = ["clap"]
 optimism = ["reth-eth-wire-types/optimism"]

@@ -14,6 +14,10 @@ use reth_primitives::{
 };
 use std::fmt::Debug;
 
+#[cfg(any(test, feature = "test-utils"))]
+/// test helpers for mocking consensus
+pub mod test_utils;
+
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {

@@ -16,3 +16,6 @@ reth-primitives.workspace = true
 # misc
 auto_impl.workspace = true
 thiserror.workspace = true
+
+[features]
+test-utils = []
