@@ -162,7 +162,7 @@ impl Command {
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
         #[cfg(feature = "optimism")]
-        let evm_config = reth_evm_optimism::OptimismEvmConfig::default();
+        let evm_config = reth_node_optimism::OptimismEvmConfig::default();
 
         #[cfg(not(feature = "optimism"))]
         let evm_config = EthEvmConfig::default();
@@ -289,7 +289,7 @@ impl Command {
         #[cfg(feature = "optimism")]
         let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
             self.chain.clone(),
-            reth_evm_optimism::OptimismEvmConfig::default(),
+            reth_node_optimism::OptimismEvmConfig::default(),
         )
         .compute_pending_block();
 

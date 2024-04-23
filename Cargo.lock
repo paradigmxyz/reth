@@ -6070,7 +6070,6 @@ dependencies = [
  "reth-discv4",
  "reth-downloaders",
  "reth-ethereum-payload-builder",
- "reth-evm-optimism",
  "reth-exex",
  "reth-interfaces",
  "reth-network",
