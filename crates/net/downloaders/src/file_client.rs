@@ -434,12 +434,10 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use rand::Rng;
-    use reth_interfaces::{
-        p2p::{
-            bodies::downloader::BodyDownloader,
-            headers::downloader::{HeaderDownloader, SyncTarget},
-        },
-        test_utils::TestConsensus,
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_interfaces::p2p::{
+        bodies::downloader::BodyDownloader,
+        headers::downloader::{HeaderDownloader, SyncTarget},
     };
     use reth_provider::test_utils::create_test_provider_factory;
     use std::{mem, sync::Arc};

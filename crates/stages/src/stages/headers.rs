@@ -371,13 +371,13 @@ mod tests {
     mod test_runner {
         use super::*;
         use crate::test_utils::{TestRunnerError, TestStageDB};
+        use reth_consensus::test_utils::TestConsensus;
         use reth_db::{test_utils::TempDatabase, DatabaseEnv};
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_interfaces::test_utils::{
-            generators, generators::random_header_range, TestConsensus, TestHeaderDownloader,
-            TestHeadersClient,
+            generators, generators::random_header_range, TestHeaderDownloader, TestHeadersClient,
         };
         use reth_provider::BlockNumReader;
         use tokio::sync::watch;

@@ -170,7 +170,8 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_interfaces::p2p::error::DownloadError;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
