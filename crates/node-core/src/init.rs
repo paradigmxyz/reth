@@ -241,7 +241,7 @@ pub fn insert_genesis_header<DB: Database>(
     Ok(())
 }
 
-/// Initialize chain with state at specific block, from a file with state dump.
+/// Initialize chain with state at specific block, from reader of state dump.
 pub fn init_from_state_dump<DB: Database>(
     mut reader: impl BufRead,
     factory: ProviderFactory<DB>,
