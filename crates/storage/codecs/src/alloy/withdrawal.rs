@@ -7,16 +7,16 @@ use reth_codecs_derive::main_codec;
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip4895::Withdrawal`
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
-    pub(crate) index: u64,
+    index: u64,
     /// Index of validator associated with withdrawal.
-    pub(crate) validator_index: u64,
+    validator_index: u64,
     /// Target address for withdrawn ether.
-    pub(crate) address: Address,
+    address: Address,
     /// Value of the withdrawal in gwei.
-    pub(crate) amount: u64,
+    amount: u64,
 }
 
 impl Compact for AlloyWithdrawal {
