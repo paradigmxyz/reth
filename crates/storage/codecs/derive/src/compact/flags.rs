@@ -51,11 +51,8 @@ pub(crate) fn generate_flag_struct(
 
     let docs =
         format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
-    let bitflag_encoded_bytes =
-        format!("Used bytes by [`{flags_ident}`]");
-    let bitflag_unused_bits =
-        format!("Unused bits for new fields by [`{flags_ident}`]");
-
+    let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
+    let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
 
     // Generate the flag struct.
     quote! {
@@ -163,17 +160,15 @@ fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> (u8, 
 
 /// Placeholder struct for when there are no bitfields to be added.
 fn placeholder_flag_struct(ident: &Ident, flags: &Ident) -> TokenStream2 {
-    let bitflag_encoded_bytes =
-        format!("Used bytes by [`{flags}`]");
-    let bitflag_unused_bits =
-        format!("Unused bits for new fields by [`{flags}`]");
+    let bitflag_encoded_bytes = format!("Used bytes by [`{flags}`]");
+    let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags}`]");
     quote! {
         impl #ident {
             #[doc = #bitflag_encoded_bytes]
             pub const fn bitflag_encoded_bytes() -> usize {
                 0
             }
-    
+
             #[doc = #bitflag_unused_bits]
             pub const fn bitflag_unused_bits() -> usize {
                 0
