@@ -26,7 +26,7 @@ use reth_primitives::{
     Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
     db::states::bundle_state::BundleRetention,
@@ -97,6 +97,17 @@ where
                 warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to apply beacon root contract call for empty payload");
                 err
             })?;
+
+        // apply eip-2935 blockhashes update
+        apply_blockhashes_update(
+            &chain_spec,
+            initialized_block_env.timestamp.to::<u64>(),
+            block_number,
+            &mut db,
+        ).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } =
                 commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals.clone()).map_err(|err| {
@@ -217,6 +228,15 @@ where
         &initialized_block_env,
         &attributes,
     )?;
+
+    // apply eip-2935 blockhashes update
+    apply_blockhashes_update(
+        &chain_spec,
+        initialized_block_env.timestamp.to::<u64>(),
+        block_number,
+        &mut db,
+    )
+    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
