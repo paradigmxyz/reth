@@ -7,8 +7,9 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
-    StaticFileSegment, StorageEntry, B256, U256,
+    stage::{StageCheckpoint, StageId},
+    Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
+    StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
@@ -317,7 +318,7 @@ pub fn init_from_state_dump<DB: Database>(
 
             // insert sync stage
             for stage in StageId::ALL.iter() {
-                tx.put::<tables::StageCheckpoints>(stage.to_string(), Default::default())?;
+                tx.put::<tables::StageCheckpoints>(stage.to_string(), StageCheckpoint::new(block))?;
             }
 
             tx.commit()?;
