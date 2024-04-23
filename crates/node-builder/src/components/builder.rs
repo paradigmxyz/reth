@@ -164,7 +164,7 @@ impl Default for ComponentsBuilder<(), (), (), ()> {
 
 /// A type that configures all the customizable components of the node and knows how to build them.
 ///
-/// Implementors of this trait are responsible for building all the components of the node: See
+/// Implementers of this trait are responsible for building all the components of the node: See
 /// [NodeComponents].
 ///
 /// The [ComponentsBuilder] is a generic implementation of this trait that can be used to customize

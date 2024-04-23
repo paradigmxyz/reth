@@ -131,7 +131,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
-    /// Implementors should take care when acting on the input to this method, specifically
+    /// Implementers should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
     #[method(name = "getPayloadBodiesByRangeV1")]
