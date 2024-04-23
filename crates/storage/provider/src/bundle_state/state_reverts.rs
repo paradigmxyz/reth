@@ -97,7 +97,7 @@ impl StateReverts {
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },
                     )?;
                 } else {
-                    account_changeset_cursor.insert(
+                    account_changeset_cursor.upsert(
                         block_number,
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },
                     )?;
