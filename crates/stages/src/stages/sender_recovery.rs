@@ -1,3 +1,4 @@
+use reth_consensus::ConsensusError;
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
@@ -6,7 +7,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_consensus_api::ConsensusError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,

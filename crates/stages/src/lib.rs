@@ -15,7 +15,7 @@
 //! # use std::sync::Arc;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
-//! # reth_consensus_api::Consensus;
+//! # reth_consensus::Consensus;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
 //! # use reth_revm::EvmProcessorFactory;
 //! # use reth_primitives::{PeerId, MAINNET, B256, PruneModes};

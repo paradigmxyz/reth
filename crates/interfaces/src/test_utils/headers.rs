@@ -1,21 +1,20 @@
 //! Testing support for headers related interfaces.
 
-use crate::p2p::
-    {
-        download::DownloadClient,
-        error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
-        headers::{
-            client::{HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
-            error::HeadersDownloaderResult,
-        },
-        priority::Priority,
-    };
+use crate::p2p::{
+    download::DownloadClient,
+    error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
+    headers::{
+        client::{HeadersClient, HeadersRequest},
+        downloader::{HeaderDownloader, SyncTarget},
+        error::HeadersDownloaderResult,
+    },
+    priority::Priority,
+};
 use futures::{Future, FutureExt, Stream, StreamExt};
+use reth_consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, WithPeerId, U256,
 };
-use reth_consensus_api::{self,Consensus,ConsensusError};
 use std::{
     fmt,
     pin::Pin,

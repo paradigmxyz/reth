@@ -5,6 +5,7 @@ use crate::{
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
@@ -15,7 +16,6 @@ use reth_interfaces::{
     provider::RootMismatch,
     RethResult,
 };
-use reth_consensus_api::{Consensus,ConsensusError};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, U256,

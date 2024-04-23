@@ -5,6 +5,7 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
@@ -13,7 +14,6 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_consensus_api::{Consensus,ConsensusError};
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };

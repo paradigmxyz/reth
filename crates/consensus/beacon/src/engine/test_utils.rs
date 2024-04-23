@@ -9,6 +9,7 @@ use reth_blockchain_tree::{
 use reth_config::config::EtlConfig;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 type DatabaseEnv = TempDatabase<DE>;
+use reth_consensus::Consensus;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -19,7 +20,6 @@ use reth_interfaces::{
     sync::NoopSyncStateUpdater,
     test_utils::{NoopFullBlockClient, TestConsensus},
 };
-use reth_consensus_api::Consensus;
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};

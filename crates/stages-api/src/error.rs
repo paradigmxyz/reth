@@ -1,7 +1,7 @@
+use reth_consensus::ConsensusError;
 use reth_interfaces::{
     db::DatabaseError as DbError, executor, p2p::error::DownloadError, RethError,
 };
-use reth_consensus_api::ConsensusError;
 use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use reth_provider::ProviderError;
 use thiserror::Error;

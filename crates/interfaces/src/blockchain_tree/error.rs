@@ -5,7 +5,7 @@ use crate::{
     provider::ProviderError,
     RethError,
 };
-use reth_consensus_api::ConsensusError;
+use reth_consensus::ConsensusError;
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
 /// Various error cases that can occur when a block violates tree assumptions.

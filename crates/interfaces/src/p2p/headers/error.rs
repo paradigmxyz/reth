@@ -1,4 +1,4 @@
-use reth_consensus_api::ConsensusError;
+use reth_consensus::ConsensusError;
 use reth_primitives::SealedHeader;
 use thiserror::Error;
 

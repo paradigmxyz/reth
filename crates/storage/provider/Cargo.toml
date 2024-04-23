@@ -15,12 +15,12 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
+reth-rpc-types.workspace = true
 reth-db.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
-reth-consensus-api.workspace = true
 
 revm.workspace = true
 

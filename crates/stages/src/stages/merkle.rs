@@ -1,10 +1,10 @@
 use reth_codecs::Compact;
+use reth_consensus::ConsensusError;
 use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_consensus_api::ConsensusError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,

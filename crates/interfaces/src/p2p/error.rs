@@ -1,6 +1,6 @@
 use super::headers::client::HeadersRequest;
 use crate::{db::DatabaseError, provider::ProviderError};
-use reth_consensus_api::ConsensusError;
+use reth_consensus::ConsensusError;
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{
     BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, WithPeerId, B256,

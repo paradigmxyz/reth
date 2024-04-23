@@ -26,7 +26,6 @@ reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
-reth-consensus-api.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -57,6 +56,7 @@ reth-revm.workspace = true
 reth-downloaders.workspace = true
 reth-node-ethereum.workspace = true
 reth-config.workspace = true
+reth-consensus.workspace = true
 
 assert_matches.workspace = true
 

@@ -2,11 +2,11 @@ use super::request::BodiesRequestFuture;
 use crate::metrics::BodyDownloaderMetrics;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
+use reth_consensus::Consensus;
 use reth_interfaces::p2p::{
-        bodies::{client::BodiesClient, response::BlockResponse},
-        error::DownloadResult,
-    };
-use reth_consensus_api::Consensus;
+    bodies::{client::BodiesClient, response::BlockResponse},
+    error::DownloadResult,
+};
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
     pin::Pin,

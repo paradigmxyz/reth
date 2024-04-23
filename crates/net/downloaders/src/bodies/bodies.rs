@@ -3,15 +3,15 @@ use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
+use reth_consensus::Consensus;
 use reth_interfaces::p2p::{
-        bodies::{
-            client::BodiesClient,
-            downloader::{BodyDownloader, BodyDownloaderResult},
-            response::BlockResponse,
-        },
-        error::{DownloadError, DownloadResult},
-    };
-use reth_consensus_api::Consensus;
+    bodies::{
+        client::BodiesClient,
+        downloader::{BodyDownloader, BodyDownloaderResult},
+        response::BlockResponse,
+    },
+    error::{DownloadError, DownloadResult},
+};
 use reth_primitives::{BlockNumber, SealedHeader};
 use reth_provider::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};

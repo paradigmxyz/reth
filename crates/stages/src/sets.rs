@@ -58,9 +58,11 @@ use crate::{
     StageSet, StageSetBuilder,
 };
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::database::Database;
-use reth_interfaces::p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
-use reth_consensus_api::Consensus;
+use reth_interfaces::p2p::{
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader,
+};
 use reth_provider::{ExecutorFactory, HeaderSyncGapProvider, HeaderSyncMode};
 use std::sync::Arc;
 

@@ -552,11 +552,11 @@ mod tests {
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
+    use reth_consensus::ConsensusError;
     use reth_interfaces::{
         provider::ProviderError,
         test_utils::{generators, generators::random_header},
     };
-    use reth_consensus_api::ConsensusError;
     use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
     use tokio_stream::StreamExt;
@@ -922,9 +922,7 @@ mod tests {
                             5,
                             Default::default(),
                         )),
-                        error: BlockErrorKind::Validation(
-                            ConsensusError::BaseFeeMissing,
-                        ),
+                        error: BlockErrorKind::Validation(ConsensusError::BaseFeeMissing),
                     }))
                     .add_unwind(Ok(UnwindOutput { checkpoint: StageCheckpoint::new(0) }))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),

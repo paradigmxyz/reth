@@ -16,12 +16,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-};
-use reth_consensus_api::{Consensus,ConsensusError};
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,

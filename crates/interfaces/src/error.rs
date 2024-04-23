@@ -4,7 +4,7 @@ use crate::{
     executor::BlockExecutionError,
     provider::ProviderError,
 };
-use reth_consensus_api::ConsensusError;
+use reth_consensus::ConsensusError;
 use reth_network_api::NetworkError;
 use reth_primitives::fs::FsPathError;
 
