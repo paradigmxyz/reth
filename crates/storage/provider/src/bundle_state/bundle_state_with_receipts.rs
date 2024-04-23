@@ -18,7 +18,6 @@ use revm::{
     primitives::AccountInfo,
 };
 use std::collections::HashMap;
-use tracing::trace;
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -295,11 +294,11 @@ impl BundleStateWithReceipts {
     }
 
     /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
-    /// files if `static_file_producer` is `Some`. It should be `None` if there is any kind of
+    /// files if `static_file_producer` is `Some`. It should be none if there is any kind of
     /// pruning/filtering over the receipts.
     ///
-    /// `omit_changed_check` should be set to `true` if bundle has some of its data detached, this
-    /// would make some original values not known.
+    /// `omit_changed_check` should be set to true of bundle has some of it data
+    /// detached, This would make some original values not known.
     pub fn write_to_storage<TX>(
         self,
         tx: &TX,
@@ -309,12 +308,6 @@ impl BundleStateWithReceipts {
     where
         TX: DbTxMut + DbTx,
     {
-
-        trace!(target: "provider::bundle_state",
-        receipts_len=self.receipts.len(),
-        "writing receipts to static file"
-    );
-
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
