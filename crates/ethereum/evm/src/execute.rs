@@ -154,9 +154,7 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
-        // todo: the parent timestamp stuff is really annoying -.- how do we not make this pollute
-        // the api
-        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, 0, &mut evm)?;
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, &mut evm)?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;

@@ -77,7 +77,6 @@ pub fn apply_blockhashes_update<EXT, DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
-    parent_timestamp: u64,
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<(), BlockExecutionError>
 where
@@ -99,11 +98,21 @@ where
         .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
     account.storage.insert(slot, value);
 
-    // If Prague was not activated at the parent block, then this is the fork activation block, and
-    // we add the parent's direct `HISTORY_SERVE_WINDOW - 1` ancestors as well.
+    // If the first slot in the ring is `U256::ZERO`, then we can assume the ring has not been
+    // filled before, and this is the activation block.
+    //
+    // todo: explain why
+    let is_activation_block = evm
+        .db_mut()
+        .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
+        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?
+        .is_zero();
+
+    // If this is the activation block, then we backfill the storage of the account with up to
+    // `HISTORY_SERVE_WINDOW - 1` ancestors' blockhashes as well, per the EIP.
     //
     // Note: The -1 is because the ancestor itself was already inserted up above.
-    if !chain_spec.is_prague_active_at_timestamp(parent_timestamp) {
+    if is_activation_block {
         let mut ancestor_block_number = block_number - 1;
         for _ in 0..HISTORY_SERVE_WINDOW - 1 {
             // Stop at genesis

@@ -175,15 +175,7 @@ where
     /// If Prague is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
     fn apply_blockhashes_update(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
-        // todo: the parent timestamp stuff is really annoying -.- how do we not make this pollute
-        // the api
-        apply_blockhashes_update(
-            &self.chain_spec,
-            block.timestamp,
-            block.number,
-            0,
-            &mut self.evm,
-        )?;
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, &mut self.evm)?;
         Ok(())
     }
 

@@ -890,16 +890,8 @@ where
         &mut evm_pre_block,
     )
     .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
-    // todo: the parent timestamp stuff is really annoying -.- how do we not make this pollute
-    // the api
-    apply_blockhashes_update(
-        chain_spec,
-        attributes.timestamp(),
-        block_number,
-        0,
-        &mut evm_pre_block,
-    )
-    .map_err(|err| PayloadBuilderError::Internal(err.into()))
+    apply_blockhashes_update(chain_spec, attributes.timestamp(), block_number, &mut evm_pre_block)
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
 /// Checks if the new payload is better than the current best.
