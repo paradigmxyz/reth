@@ -6,7 +6,7 @@ pub mod client;
 /// A downloader that receives and verifies block headers, is generic
 /// over the Consensus and the HeadersClient being used.
 ///
-/// [`Consensus`]: crate::consensus::Consensus
+/// [`Consensus`]: reth_consensus::Consensus
 /// [`HeadersClient`]: client::HeadersClient
 pub mod downloader;
 

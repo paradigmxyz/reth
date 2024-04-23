@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "ef-tests"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "rayon",
@@ -4723,7 +4723,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
- "reth-provider",
+ "reth-tracing",
  "tokio",
 ]
 
@@ -6033,7 +6033,7 @@ dependencies = [
 
 [[package]]
 name = "reth"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "ahash",
  "alloy-rlp",
@@ -6064,6 +6064,7 @@ dependencies = [
  "reth-blockchain-tree",
  "reth-cli-runner",
  "reth-config",
+ "reth-consensus",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
@@ -6111,16 +6112,18 @@ dependencies = [
 
 [[package]]
 name = "reth-auto-seal-consensus"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
+ "reth-consensus",
  "reth-engine-primitives",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-rpc-types",
  "reth-stages-api",
  "reth-transaction-pool",
  "tokio",
@@ -6130,7 +6133,7 @@ dependencies = [
 
 [[package]]
 name = "reth-basic-payload-builder"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "futures-core",
@@ -6152,7 +6155,7 @@ dependencies = [
 
 [[package]]
 name = "reth-beacon-consensus"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "assert_matches",
  "futures",
@@ -6160,12 +6163,14 @@ dependencies = [
  "reth-beacon-consensus-core",
  "reth-blockchain-tree",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-engine-primitives",
+ "reth-ethereum-engine-primitives",
+ "reth-evm-ethereum",
  "reth-interfaces",
  "reth-metrics",
- "reth-node-ethereum",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -6189,16 +6194,16 @@ dependencies = [
 
 [[package]]
 name = "reth-beacon-consensus-core"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
+ "reth-consensus",
  "reth-consensus-common",
- "reth-interfaces",
  "reth-primitives",
 ]
 
 [[package]]
 name = "reth-blockchain-tree"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "aquamarine",
  "assert_matches",
@@ -6206,6 +6211,7 @@ dependencies = [
  "lru",
  "metrics",
  "parking_lot 0.12.1",
+ "reth-consensus",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6222,7 +6228,7 @@ dependencies = [
 
 [[package]]
 name = "reth-cli-runner"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "futures",
  "reth-tasks",
@@ -6232,7 +6238,7 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -6249,7 +6255,7 @@ dependencies = [
 
 [[package]]
 name = "reth-codecs-derive"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -6260,7 +6266,7 @@ dependencies = [
 
 [[package]]
 name = "reth-config"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "confy",
  "humantime-serde",
@@ -6275,10 +6281,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-consensus"
+version = "0.2.0-beta.6"
+dependencies = [
+ "auto_impl",
+ "reth-primitives",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-consensus-common"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "mockall",
+ "reth-consensus",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -6286,7 +6302,7 @@ dependencies = [
 
 [[package]]
 name = "reth-db"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "arbitrary",
  "assert_matches",
@@ -6323,7 +6339,7 @@ dependencies = [
 
 [[package]]
 name = "reth-discv4"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "discv5",
@@ -6346,7 +6362,7 @@ dependencies = [
 
 [[package]]
 name = "reth-discv5"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "derive_more",
@@ -6370,7 +6386,7 @@ dependencies = [
 
 [[package]]
 name = "reth-dns-discovery"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "data-encoding",
@@ -6393,7 +6409,7 @@ dependencies = [
 
 [[package]]
 name = "reth-downloaders"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
@@ -6405,6 +6421,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6422,7 +6439,7 @@ dependencies = [
 
 [[package]]
 name = "reth-e2e-test-utils"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -6449,7 +6466,7 @@ dependencies = [
 
 [[package]]
 name = "reth-ecies"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "aes 0.8.4",
  "alloy-rlp",
@@ -6480,7 +6497,7 @@ dependencies = [
 
 [[package]]
 name = "reth-engine-primitives"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "reth-primitives",
  "reth-rpc-types",
@@ -6490,7 +6507,7 @@ dependencies = [
 
 [[package]]
 name = "reth-eth-wire"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -6524,7 +6541,7 @@ dependencies = [
 
 [[package]]
 name = "reth-eth-wire-types"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -6547,7 +6564,7 @@ dependencies = [
 
 [[package]]
 name = "reth-ethereum-engine-primitives"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "reth-engine-primitives",
@@ -6562,7 +6579,7 @@ dependencies = [
 
 [[package]]
 name = "reth-ethereum-forks"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
@@ -6577,7 +6594,7 @@ dependencies = [
 
 [[package]]
 name = "reth-ethereum-payload-builder"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "reth-basic-payload-builder",
  "reth-payload-builder",
@@ -6591,7 +6608,7 @@ dependencies = [
 
 [[package]]
 name = "reth-etl"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "rayon",
  "reth-db",
@@ -6601,7 +6618,7 @@ dependencies = [
 
 [[package]]
 name = "reth-evm"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "reth-interfaces",
  "reth-primitives",
@@ -6611,7 +6628,7 @@ dependencies = [
 
 [[package]]
 name = "reth-evm-ethereum"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "reth-evm",
  "reth-interfaces",
@@ -6624,7 +6641,7 @@ dependencies = [
 
 [[package]]
 name = "reth-exex"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "eyre",
  "metrics",
@@ -6642,17 +6659,17 @@ dependencies = [
 
 [[package]]
 name = "reth-interfaces"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "auto_impl",
  "clap",
  "futures",
  "parking_lot 0.12.1",
  "rand 0.8.5",
+ "reth-consensus",
  "reth-eth-wire-types",
  "reth-network-api",
  "reth-primitives",
- "reth-rpc-types",
  "secp256k1 0.27.0",
  "thiserror",
  "tokio",
@@ -6661,7 +6678,7 @@ dependencies = [
 
 [[package]]
 name = "reth-ipc"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6680,7 +6697,7 @@ dependencies = [
 
 [[package]]
 name = "reth-libmdbx"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "bitflags 2.5.0",
  "byteorder",
@@ -6702,7 +6719,7 @@ dependencies = [
 
 [[package]]
 name = "reth-mdbx-sys"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "bindgen",
  "cc",
@@ -6711,7 +6728,7 @@ dependencies = [
 
 [[package]]
 name = "reth-metrics"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "futures",
  "metrics",
@@ -6722,7 +6739,7 @@ dependencies = [
 
 [[package]]
 name = "reth-metrics-derive"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "metrics",
  "once_cell",
@@ -6736,7 +6753,7 @@ dependencies = [
 
 [[package]]
 name = "reth-net-common"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "pin-project",
  "reth-primitives",
@@ -6745,7 +6762,7 @@ dependencies = [
 
 [[package]]
 name = "reth-net-nat"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "igd-next",
  "pin-project-lite",
@@ -6759,7 +6776,7 @@ dependencies = [
 
 [[package]]
 name = "reth-network"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-node-bindings",
  "alloy-provider",
@@ -6781,6 +6798,7 @@ dependencies = [
  "pin-project",
  "pprof",
  "rand 0.8.5",
+ "reth-consensus",
  "reth-discv4",
  "reth-discv5",
  "reth-dns-discovery",
@@ -6814,7 +6832,7 @@ dependencies = [
 
 [[package]]
 name = "reth-network-api"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "enr",
  "reth-discv4",
@@ -6828,7 +6846,7 @@ dependencies = [
 
 [[package]]
 name = "reth-nippy-jar"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "anyhow",
  "bincode",
@@ -6849,7 +6867,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-api"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "reth-db",
  "reth-engine-primitives",
@@ -6863,7 +6881,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-builder"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "aquamarine",
  "confy",
@@ -6875,6 +6893,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-exex",
@@ -6900,7 +6919,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-core"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "assert_matches",
  "clap",
@@ -6921,7 +6940,6 @@ dependencies = [
  "procfs",
  "proptest",
  "rand 0.8.5",
- "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-config",
  "reth-consensus-common",
@@ -6959,7 +6977,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-ethereum"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "eyre",
  "futures",
@@ -6987,19 +7005,19 @@ dependencies = [
 
 [[package]]
 name = "reth-node-events"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "futures",
  "humantime",
  "pin-project",
  "reth-beacon-consensus",
  "reth-db",
- "reth-interfaces",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-rpc-types",
  "reth-stages",
  "reth-static-file",
  "tokio",
@@ -7008,7 +7026,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-optimism"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -7050,7 +7068,7 @@ dependencies = [
 
 [[package]]
 name = "reth-optimism-payload-builder"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "reth-basic-payload-builder",
@@ -7071,7 +7089,7 @@ dependencies = [
 
 [[package]]
 name = "reth-payload-builder"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "futures-util",
  "metrics",
@@ -7093,7 +7111,7 @@ dependencies = [
 
 [[package]]
 name = "reth-payload-validator"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "reth-primitives",
  "reth-rpc-types",
@@ -7102,7 +7120,7 @@ dependencies = [
 
 [[package]]
 name = "reth-primitives"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-chains",
  "alloy-eips",
@@ -7155,7 +7173,7 @@ dependencies = [
 
 [[package]]
 name = "reth-provider"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
@@ -7174,6 +7192,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-rpc-types",
  "reth-trie",
  "revm",
  "strum 0.26.2",
@@ -7185,7 +7204,7 @@ dependencies = [
 
 [[package]]
 name = "reth-prune"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "assert_matches",
  "derive_more",
@@ -7209,7 +7228,7 @@ dependencies = [
 
 [[package]]
 name = "reth-revm"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "reth-consensus-common",
  "reth-evm",
@@ -7224,7 +7243,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-primitives",
@@ -7277,7 +7296,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-api"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "jsonrpsee",
  "reth-engine-primitives",
@@ -7289,7 +7308,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-api-testing-util"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "futures",
  "jsonrpsee",
@@ -7303,7 +7322,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-builder"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "hyper 0.14.28",
  "jsonrpsee",
@@ -7340,7 +7359,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-engine-api"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
@@ -7369,7 +7388,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-types"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -7398,7 +7417,7 @@ dependencies = [
 
 [[package]]
 name = "reth-rpc-types-compat"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
@@ -7409,7 +7428,7 @@ dependencies = [
 
 [[package]]
 name = "reth-stages"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "assert_matches",
@@ -7423,6 +7442,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-etl",
@@ -7444,13 +7464,14 @@ dependencies = [
 
 [[package]]
 name = "reth-stages-api"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "aquamarine",
  "assert_matches",
  "auto_impl",
  "futures-util",
  "metrics",
+ "reth-consensus",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -7466,7 +7487,7 @@ dependencies = [
 
 [[package]]
 name = "reth-static-file"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "assert_matches",
  "clap",
@@ -7486,7 +7507,7 @@ dependencies = [
 
 [[package]]
 name = "reth-tasks"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "dyn-clone",
  "futures-util",
@@ -7502,7 +7523,7 @@ dependencies = [
 
 [[package]]
 name = "reth-tokio-util"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "tokio",
  "tokio-stream",
@@ -7510,7 +7531,7 @@ dependencies = [
 
 [[package]]
 name = "reth-tracing"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "clap",
  "eyre",
@@ -7524,7 +7545,7 @@ dependencies = [
 
 [[package]]
 name = "reth-transaction-pool"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "aquamarine",
@@ -7562,7 +7583,7 @@ dependencies = [
 
 [[package]]
 name = "reth-trie"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "auto_impl",
@@ -7588,7 +7609,7 @@ dependencies = [
 
 [[package]]
 name = "reth-trie-parallel"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "criterion",
