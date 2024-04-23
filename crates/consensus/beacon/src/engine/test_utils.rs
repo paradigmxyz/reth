@@ -43,13 +43,7 @@ type DatabaseEnv = TempDatabase<DE>;
 
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
-    BlockchainProvider<
-        Arc<DatabaseEnv>,
-        ShareableBlockchainTree<
-            Arc<DatabaseEnv>,
-            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory<EthEvmConfig>>,
-        >,
-    >,
+    BlockchainProvider<Arc<DatabaseEnv>>,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
     EthEngineTypes,
 >;
@@ -423,9 +417,9 @@ where
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let tree = ShareableBlockchainTree::new(
+        let tree = Arc::new(ShareableBlockchainTree::new(
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),
-        );
+        ));
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
         let blockchain_provider =
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
