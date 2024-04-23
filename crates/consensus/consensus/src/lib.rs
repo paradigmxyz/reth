@@ -1,11 +1,18 @@
+//! Consensus protocol functions
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use reth_primitives::{
     BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, HeaderValidationError,
     InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
 };
 use std::fmt::Debug;
-
-/// Re-export fork choice state
-pub use reth_rpc_types::engine::ForkchoiceState;
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]

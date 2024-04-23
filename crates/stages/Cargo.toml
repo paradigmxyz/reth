@@ -23,6 +23,7 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-etl.workspace = true
 reth-config.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-consensus.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

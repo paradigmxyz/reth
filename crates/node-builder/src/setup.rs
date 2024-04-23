@@ -2,18 +2,16 @@
 
 use crate::ConfigureEvm;
 use reth_config::{config::StageConfig, PruneConfig};
+use reth_consensus::Consensus;
 use reth_db::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
-        headers::{client::HeadersClient, downloader::HeaderDownloader},
-    },
+use reth_interfaces::p2p::{
+    bodies::{client::BodiesClient, downloader::BodyDownloader},
+    headers::{client::HeadersClient, downloader::HeaderDownloader},
 };
 use reth_node_core::{
     node_config::NodeConfig,

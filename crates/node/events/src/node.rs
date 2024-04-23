@@ -6,7 +6,6 @@ use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
 use reth_db::{database::Database, database_metrics::DatabaseMetadata};
-use reth_interfaces::consensus::ForkchoiceState;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{
@@ -15,6 +14,7 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_prune::PrunerEvent;
+use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages::{ExecOutput, PipelineEvent};
 use reth_static_file::StaticFileProducerEvent;
 use std::{

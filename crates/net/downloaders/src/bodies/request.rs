@@ -1,12 +1,10 @@
 use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
 use futures::{Future, FutureExt};
-use reth_interfaces::{
-    consensus::{Consensus as ConsensusTrait, Consensus},
-    p2p::{
-        bodies::{client::BodiesClient, response::BlockResponse},
-        error::{DownloadError, DownloadResult},
-        priority::Priority,
-    },
+use reth_consensus::Consensus;
+use reth_interfaces::p2p::{
+    bodies::{client::BodiesClient, response::BlockResponse},
+    error::{DownloadError, DownloadResult},
+    priority::Priority,
 };
 use reth_primitives::{
     BlockBody, GotExpected, PeerId, SealedBlock, SealedHeader, WithPeerId, B256,

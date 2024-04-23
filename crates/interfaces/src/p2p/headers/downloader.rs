@@ -1,11 +1,8 @@
 use super::error::HeadersDownloaderResult;
-use crate::{
-    consensus::Consensus,
-    p2p::error::{DownloadError, DownloadResult},
-};
+use crate::p2p::error::{DownloadError, DownloadResult};
 use futures::Stream;
+use reth_consensus::Consensus;
 use reth_primitives::{BlockHashOrNumber, SealedHeader, B256};
-
 /// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
