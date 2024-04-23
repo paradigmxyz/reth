@@ -265,6 +265,9 @@ impl Subcommands {
             },
             Subcommands::NumBlocks { amount } => last.saturating_sub(*amount),
         } + 1;
+        if target > last {
+            eyre::bail!("Target block number is higher than the latest block number")
+        }
         Ok(target..=last)
     }
 }
