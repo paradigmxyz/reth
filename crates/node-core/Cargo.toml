@@ -7,10 +7,8 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-
 [lints]
 workspace = true
-
 
 [dependencies]
 # reth
@@ -31,17 +29,14 @@ reth-config.workspace = true
 reth-discv4.workspace = true
 reth-net-nat.workspace = true
 reth-network-api.workspace = true
-reth-node-api.workspace = true
+reth-evm.workspace = true
+reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
-reth-downloaders.workspace = true
-reth-revm.workspace = true
-reth-stages.workspace = true
-reth-prune.workspace = true
-reth-blockchain-tree.workspace = true
-reth-static-file.workspace = true
+
+# ethereum
+discv5.workspace = true
 
 # async
 tokio.workspace = true
@@ -57,11 +52,10 @@ reth-metrics.workspace = true
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
-humantime = "2.1.0"
+humantime.workspace = true
 thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
-pin-project.workspace = true
 derive_more.workspace = true
 
 # io
@@ -77,28 +71,23 @@ hyper.workspace = true
 tracing.workspace = true
 
 # crypto
-alloy-rlp.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # async
 futures.workspace = true
 
-[target.'cfg(not(windows))'.dependencies]
-jemalloc-ctl = { version = "0.5.0", optional = true }
+[target.'cfg(unix)'.dependencies]
+tikv-jemalloc-ctl = { version = "0.5.0", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16.0" }
+procfs = "0.16.0"
 
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
 tempfile.workspace = true
 jsonrpsee.workspace = true
-assert_matches.version = "1.5.0"
+assert_matches.workspace = true
 
 [features]
 optimism = [
@@ -106,19 +95,13 @@ optimism = [
     "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-rpc-engine-api/optimism",
-    "reth-transaction-pool/optimism",
     "reth-provider/optimism",
-    "reth-network/optimism",
-    "reth-network-api/optimism",
-    "reth-rpc-types/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-auto-seal-consensus/optimism",
     "reth-consensus-common/optimism",
-    "reth-blockchain-tree/optimism",
-    "reth-beacon-consensus/optimism"
+    "reth-beacon-consensus/optimism",
 ]
 
-jemalloc = ["dep:jemalloc-ctl"]
+jemalloc = ["dep:tikv-jemalloc-ctl"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

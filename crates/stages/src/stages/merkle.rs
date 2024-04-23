@@ -1,11 +1,10 @@
-use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_codecs::Compact;
+use reth_consensus::ConsensusError;
 use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::consensus;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
     trie::StoredSubNode,
@@ -15,13 +14,16 @@ use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StatsReader,
 };
+use reth_stages_api::{
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+};
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
 use std::fmt::Debug;
 use tracing::*;
 
 /// The default threshold (in number of blocks) for switching from incremental trie building
 /// of changes to whole rebuild.
-pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 50_000;
+pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 5_000;
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
@@ -325,7 +327,7 @@ fn validate_state_root(
     } else {
         warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Failed to verify block state root");
         Err(StageError::Block {
-            error: BlockErrorKind::Validation(consensus::ConsensusError::BodyStateRootDiff(
+            error: BlockErrorKind::Validation(ConsensusError::BodyStateRootDiff(
                 GotExpected { got, expected: expected.state_root }.into(),
             )),
             block: Box::new(expected),

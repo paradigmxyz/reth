@@ -21,10 +21,12 @@ mod account;
 pub mod basefee;
 mod block;
 mod chain;
+#[cfg(feature = "zstd-codec")]
 mod compression;
 pub mod constants;
 pub mod eip4844;
 mod error;
+mod exex;
 pub mod fs;
 pub mod genesis;
 mod header;
@@ -58,24 +60,28 @@ pub use chain::{
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
     NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
+#[cfg(feature = "zstd-codec")]
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
+pub use exex::FinishedExExHeight;
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
-    GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES, SEPOLIA_BOOTNODES,
+    NodeRecordParseError, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
+    SEPOLIA_BOOTNODES,
 };
-pub use peer::{PeerId, WithPeerId};
+pub use peer::{id2pk, pk2id, AnyNode, PeerId, WithPeerId};
 pub use prune::{
-    PruneCheckpoint, PruneMode, PruneModes, PruneProgress, PrunePurpose, PruneSegment,
-    PruneSegmentError, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
+    PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneModes, PruneProgress,
+    PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,
+    MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use static_file::StaticFileSegment;
@@ -90,12 +96,13 @@ pub use transaction::{
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction,
-    InvalidTransactionError, Signature, Transaction, TransactionKind, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
-    TxEip4844, TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    AccessList, AccessListItem, IntoRecoveredTransaction, InvalidTransactionError, Signature,
+    Transaction, TransactionKind, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844,
+    TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
+
 pub use withdrawal::{Withdrawal, Withdrawals};
 
 // Re-exports
@@ -137,7 +144,11 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::{
-        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA},
+        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA},
+        net::{
+            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, BASE_BOOTNODES,
+            BASE_TESTNET_BOOTNODES, OP_BOOTNODES, OP_TESTNET_BOOTNODES,
+        },
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }

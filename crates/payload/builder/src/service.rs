@@ -11,7 +11,7 @@ use crate::{
     KeepPayloadJobAlive, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
-use reth_node_api::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
+use reth_engine_primitives::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
 use reth_provider::CanonStateNotification;
 use reth_rpc_types::engine::PayloadId;
 use std::{
@@ -131,7 +131,9 @@ where
     }
 
     /// Returns the best payload for the given identifier.
-    async fn best_payload(
+    ///
+    /// Note: this does not resolve the job if it's still in progress.
+    pub async fn best_payload(
         &self,
         id: PayloadId,
     ) -> Option<Result<Engine::BuiltPayload, PayloadBuilderError>> {
@@ -259,18 +261,6 @@ where
 
         let handle = service.handle();
         (service, handle)
-    }
-
-    /// Notifies the service on new attribute event.
-    pub fn on_new_attributes(
-        &self,
-        attributes: &Option<
-            Result<<Engine as EngineTypes>::PayloadBuilderAttributes, PayloadBuilderError>,
-        >,
-    ) {
-        if let Some(Ok(ref attributes)) = attributes {
-            self.payload_events.send(Events::Attributes(attributes.clone())).ok();
-        }
     }
 
     /// Returns a handle to the service.
@@ -417,12 +407,13 @@ where
                         } else {
                             // no job for this payload yet, create one
                             let parent = attr.parent();
-                            match this.generator.new_payload_job(attr) {
+                            match this.generator.new_payload_job(attr.clone()) {
                                 Ok(job) => {
                                     info!(%id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
+                                    this.payload_events.send(Events::Attributes(attr.clone())).ok();
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();
@@ -440,7 +431,6 @@ where
                     }
                     PayloadServiceCommand::PayloadAttributes(id, tx) => {
                         let attributes = this.payload_attributes(id);
-                        this.on_new_attributes(&attributes);
                         let _ = tx.send(attributes);
                     }
                     PayloadServiceCommand::Resolve(id, tx) => {

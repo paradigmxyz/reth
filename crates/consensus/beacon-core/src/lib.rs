@@ -8,8 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use reth_consensus::{Consensus, ConsensusError};
 use reth_consensus_common::validation;
-use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     constants::MAXIMUM_EXTRA_DATA_SIZE, Chain, ChainSpec, Hardfork, Header, SealedBlock,
     SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
@@ -46,14 +46,27 @@ impl Consensus for BeaconConsensus {
         Ok(())
     }
 
+    #[allow(unused_assignments)]
+    #[allow(unused_mut)]
     fn validate_header_with_total_difficulty(
         &self,
         header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
+        let mut is_post_merge = self
+            .chain_spec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(total_difficulty, header.difficulty);
+
+        #[cfg(feature = "optimism")]
         {
-            if !header.is_zero_difficulty() {
+            // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
+            // reached.
+            is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
+        }
+
+        if is_post_merge {
+            if !self.chain_spec.is_optimism() && !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
@@ -94,10 +107,10 @@ impl Consensus for BeaconConsensus {
                 })
             }
 
-            // Goerli exception:
+            // Goerli and early OP exception:
             //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
-            //  support clique.
-            if self.chain_spec.chain != Chain::goerli() {
+            //  support clique. Same goes for OP blocks below Bedrock.
+            if self.chain_spec.chain != Chain::goerli() && !self.chain_spec.is_optimism() {
                 validate_header_extradata(header)?;
             }
         }

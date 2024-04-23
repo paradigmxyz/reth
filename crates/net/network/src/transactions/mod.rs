@@ -31,8 +31,9 @@ use reth_primitives::{
     B256,
 };
 use reth_transaction_pool::{
-    error::PoolResult, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
-    PropagatedTransactions, TransactionPool, ValidPoolTransaction,
+    error::{PoolError, PoolResult},
+    GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
+    TransactionPool, ValidPoolTransaction,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -609,8 +610,8 @@ where
         // get handle to peer's session, if the session is still active
         let Some(peer) = self.peers.get_mut(&peer_id) else {
             trace!(
-                peer_id=format!("{peer_id:#}"),
-                msg=?msg,
+                peer_id = format!("{peer_id:#}"),
+                ?msg,
                 "discarding announcement from inactive peer"
             );
 
@@ -636,9 +637,9 @@ where
                 .increment(count_txns_already_seen_by_peer);
 
             trace!(target: "net::tx",
-                count_txns_already_seen_by_peer=%count_txns_already_seen_by_peer,
+                %count_txns_already_seen_by_peer,
                 peer_id=format!("{peer_id:#}"),
-                client=?client,
+                ?client,
                 "Peer sent hashes that have already been marked as seen by peer"
             );
 
@@ -649,7 +650,7 @@ where
         let (validation_outcome, mut partially_valid_msg) =
             self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
@@ -698,7 +699,7 @@ where
                 .filter_valid_entries_66(partially_valid_msg)
         };
 
-        if let FilterOutcome::ReportPeer = validation_outcome {
+        if validation_outcome == FilterOutcome::ReportPeer {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
@@ -746,8 +747,8 @@ where
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*hashes,
-                msg_version=%msg_version,
-                client_version=%client,
+                %msg_version,
+                %client,
                 "buffering hashes announced by busy peer"
             );
 
@@ -773,8 +774,8 @@ where
             trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 surplus_hashes=?*surplus_hashes,
-                msg_version=%msg_version,
-                client_version=%client,
+                %msg_version,
+                %client,
                 "some hashes in announcement from peer didn't fit in `GetPooledTransactions` request, buffering surplus hashes"
             );
 
@@ -784,8 +785,8 @@ where
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
             hashes=?*hashes_to_request,
-            msg_version=%msg_version,
-            client_version=%client,
+            %msg_version,
+            %client,
             "sending hashes in `GetPooledTransactions` request to peer's session"
         );
 
@@ -798,11 +799,11 @@ where
         {
             let conn_eth_version = peer.version;
 
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?*failed_to_request_hashes,
-                conn_eth_version=%conn_eth_version,
-                client_version=%client,
+                %conn_eth_version,
+                %client,
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
@@ -1013,9 +1014,9 @@ where
                                 peer_id=format!("{peer_id:#}"),
                                 hash=%tx.hash(),
                                 client_version=%peer.client_version,
-                                "received an invalid transaction from peer"
+                                "received a known bad transaction from peer"
                             );
-                            self.metrics.bad_imports.increment(1);
+                            has_bad_transactions = true;
                         }
                     }
                 }
@@ -1079,18 +1080,7 @@ where
                     self.on_good_import(hash);
                 }
                 Err(err) => {
-                    // If we're _currently_ syncing and the transaction is bad we
-                    // ignore it, otherwise we penalize the peer that sent the bad
-                    // transaction with the assumption that the peer should have
-                    // known that this transaction is bad. (e.g. consensus rules).
-                    // Note: nonce gaps are not considered bad transactions.
-                    //
-                    if err.is_bad_transaction() && !self.network.is_syncing() {
-                        debug!(target: "net::tx", %err, "bad pool transaction import");
-                        self.on_bad_import(err.hash);
-                        continue
-                    }
-                    self.on_good_import(err.hash);
+                    self.on_bad_import(err);
                 }
             }
         }
@@ -1112,7 +1102,7 @@ where
         }
     }
 
-    /// Runs an operation to fetch hashes that are cached in in [`TransactionFetcher`].
+    /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
     fn on_fetch_hashes_pending_fetch(&mut self) {
         // try drain transaction hashes pending fetch
         let info = &self.pending_pool_imports_info;
@@ -1157,15 +1147,45 @@ where
         self.transactions_by_peers.remove(&hash);
     }
 
-    /// Penalize the peers that sent the bad transaction and cache it to avoid fetching or
-    /// importing it again.
-    fn on_bad_import(&mut self, hash: TxHash) {
-        if let Some(peers) = self.transactions_by_peers.remove(&hash) {
+    /// Penalize the peers that intentionally sent the bad transaction, and cache it to avoid
+    /// fetching or importing it again.
+    ///
+    /// Errors that count as bad transactions are:
+    ///
+    /// - intrinsic gas too low
+    /// - exceeds gas limit
+    /// - gas uint overflow
+    /// - exceeds max init code size
+    /// - oversized data
+    /// - signer account has bytecode
+    /// - chain id mismatch
+    /// - old legacy chain id
+    /// - tx type not supported
+    ///
+    /// (and additionally for blobs txns...)
+    ///
+    /// - no blobs
+    /// - too many blobs
+    /// - invalid kzg proof
+    /// - kzg error
+    /// - not blob transaction (tx type mismatch)
+    /// - wrong versioned kzg commitment hash
+    fn on_bad_import(&mut self, err: PoolError) {
+        let peers = self.transactions_by_peers.remove(&err.hash);
+
+        // if we're _currently_ syncing, we ignore a bad transaction
+        if !err.is_bad_transaction() || self.network.is_syncing() {
+            return
+        }
+        // otherwise we penalize the peer that sent the bad transaction, with the assumption that
+        // the peer should have known that this transaction is bad (e.g. violating consensus rules)
+        if let Some(peers) = peers {
             for peer_id in peers {
                 self.report_peer_bad_transactions(peer_id);
             }
         }
-        self.bad_imports.insert(hash);
+        self.metrics.bad_imports.increment(1);
+        self.bad_imports.insert(err.hash);
     }
 
     /// Returns `true` if [`TransactionsManager`] has capacity to request pending hashes. Returns
@@ -1495,7 +1515,7 @@ impl PeerMetadata {
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
             seen_transactions: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).expect("infallible"),
+                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).unwrap(),
             ),
             request_tx,
             version,
@@ -2006,7 +2026,7 @@ mod tests {
                 assert_eq!(transactions.len(), 1);
             }
             Err(e) => {
-                panic!("error: {:?}", e);
+                panic!("error: {e:?}");
             }
         }
     }

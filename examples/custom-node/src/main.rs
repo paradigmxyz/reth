@@ -17,7 +17,6 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_chains::Chain;
 use reth::{
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
@@ -46,14 +45,13 @@ use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, ChainSpec, Genesis, Header, Withdrawals, B256};
+use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
         PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
-    withdrawal::Withdrawal,
-    ExecutionPayloadV1,
+    ExecutionPayloadV1, Withdrawal,
 };
 use reth_tracing::{RethTracer, Tracer};
 use serde::{Deserialize, Serialize};
@@ -241,7 +239,7 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_rlp_bytes())
+            .extradata(conf.extradata_bytes())
             .max_gas_limit(conf.max_gas_limit());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(

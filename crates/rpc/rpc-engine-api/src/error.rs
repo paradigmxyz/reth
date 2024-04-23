@@ -2,7 +2,7 @@ use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_node_api::EngineObjectValidationError;
+use reth_engine_primitives::EngineObjectValidationError;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{B256, U256};
 use thiserror::Error;
@@ -207,12 +207,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 Some(ErrorData::new(error)),
             ),
         }
-    }
-}
-
-impl From<EngineApiError> for jsonrpsee_core::error::Error {
-    fn from(error: EngineApiError) -> Self {
-        jsonrpsee_core::error::Error::Call(error.into())
     }
 }
 

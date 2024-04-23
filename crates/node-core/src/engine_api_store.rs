@@ -1,8 +1,8 @@
 //! Stores engine API messages to disk for later inspection and replay.
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_node_api::EngineTypes;
-use reth_primitives::fs::{self};
+use reth_engine_primitives::EngineTypes;
+use reth_primitives::fs;
 use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState},
     ExecutionPayload,
@@ -119,8 +119,7 @@ impl EngineApiStore {
         Engine: EngineTypes,
         BeaconEngineMessage<Engine>: std::fmt::Debug,
     {
-        loop {
-            let Some(msg) = rx.recv().await else { break };
+        while let Some(msg) = rx.recv().await {
             if let Err(error) = self.on_message(&msg, SystemTime::now()) {
                 error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
             }

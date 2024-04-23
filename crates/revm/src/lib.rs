@@ -14,6 +14,8 @@ pub mod database;
 /// revm implementation of reth block and transaction executors.
 mod factory;
 
+pub mod batch;
+
 /// new revm account state executor
 pub mod processor;
 
@@ -36,7 +38,7 @@ pub mod stack;
 pub mod optimism;
 
 /// Common test helpers
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 // Convenience re-exports.

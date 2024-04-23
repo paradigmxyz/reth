@@ -7,8 +7,8 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Bytecode, ChainSpec, Receipts, StaticFileSegment, StorageEntry, B256,
-    U256,
+    stage::StageId, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
+    StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
@@ -72,17 +72,19 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
     debug!("Writing genesis block.");
 
+    let alloc = &genesis.alloc;
+
     // use transaction to insert genesis header
     let provider_rw = factory.provider_rw()?;
-    insert_genesis_hashes(&provider_rw, genesis)?;
-    insert_genesis_history(&provider_rw, genesis)?;
+    insert_genesis_hashes(&provider_rw, alloc.iter())?;
+    insert_genesis_history(&provider_rw, alloc.iter())?;
 
     // Insert header
     let tx = provider_rw.into_tx();
     let static_file_provider = factory.static_file_provider();
     insert_genesis_header::<DB>(&tx, &static_file_provider, chain.clone())?;
 
-    insert_genesis_state::<DB>(&tx, genesis)?;
+    insert_genesis_state::<DB>(&tx, alloc.len(), alloc.iter())?;
 
     // insert sync stage
     for stage in StageId::ALL.iter() {
@@ -96,15 +98,16 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 }
 
 /// Inserts the genesis state into the database.
-pub fn insert_genesis_state<DB: Database>(
+pub fn insert_genesis_state<'a, 'b, DB: Database>(
     tx: &<DB as Database>::TXMut,
-    genesis: &reth_primitives::Genesis,
+    capacity: usize,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
-    let mut state_init: BundleStateInit = HashMap::new();
-    let mut reverts_init = HashMap::new();
-    let mut contracts: HashMap<B256, Bytecode> = HashMap::new();
+    let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
+    let mut reverts_init = HashMap::with_capacity(capacity);
+    let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
 
-    for (address, account) in &genesis.alloc {
+    for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
             let bytecode = Bytecode::new_raw(code.clone());
             let hash = bytecode.hash_slow();
@@ -162,24 +165,24 @@ pub fn insert_genesis_state<DB: Database>(
 }
 
 /// Inserts hashes for the genesis state.
-pub fn insert_genesis_hashes<DB: Database>(
+pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-    genesis: &reth_primitives::Genesis,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
     // insert and hash accounts to hashing table
-    let alloc_accounts = genesis
-        .alloc
-        .clone()
-        .into_iter()
-        .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
+    let alloc_accounts =
+        alloc.clone().map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
 
-    let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
+    let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
-        account.storage.map(|storage| {
+        account.storage.as_ref().map(|storage| {
             (
-                addr,
-                storage.into_iter().map(|(key, value)| StorageEntry { key, value: value.into() }),
+                *addr,
+                storage
+                    .clone()
+                    .into_iter()
+                    .map(|(key, value)| StorageEntry { key, value: value.into() }),
             )
         })
     });
@@ -189,17 +192,15 @@ pub fn insert_genesis_hashes<DB: Database>(
 }
 
 /// Inserts history indices for genesis accounts and storage.
-pub fn insert_genesis_history<DB: Database>(
+pub fn insert_genesis_history<'a, 'b, DB: Database>(
     provider: &DatabaseProviderRW<DB>,
-    genesis: &reth_primitives::Genesis,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
     let account_transitions =
-        genesis.alloc.keys().map(|addr| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
+        alloc.clone().map(|(addr, _)| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
 
-    let storage_transitions = genesis
-        .alloc
-        .iter()
+    let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
         .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![0])))
         .collect::<BTreeMap<_, _>>();
@@ -235,7 +236,6 @@ pub fn insert_genesis_header<DB: Database>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use reth_db::{
         cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -243,8 +243,8 @@ mod tests {
         DatabaseEnv,
     };
     use reth_primitives::{
-        Address, Chain, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
-        GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
+        Chain, ForkTimestamps, Genesis, IntegerList, GOERLI, GOERLI_GENESIS_HASH, MAINNET,
+        MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 
@@ -318,7 +318,7 @@ mod tests {
         let chain_spec = Arc::new(ChainSpec {
             chain: Chain::from_id(1),
             genesis: Genesis {
-                alloc: HashMap::from([
+                alloc: BTreeMap::from([
                     (
                         address_with_balance,
                         GenesisAccount { balance: U256::from(1), ..Default::default() },
@@ -326,7 +326,7 @@ mod tests {
                     (
                         address_with_storage,
                         GenesisAccount {
-                            storage: Some(HashMap::from([(storage_key, B256::random())])),
+                            storage: Some(BTreeMap::from([(storage_key, B256::random())])),
                             ..Default::default()
                         },
                     ),

@@ -26,6 +26,8 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 
 /// Extracts the [L1BlockInfo] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
+///
+/// Returns an error if the L1 info transaction is not found, if the block is empty.
 pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError> {
     let l1_info_tx_data = block
         .body

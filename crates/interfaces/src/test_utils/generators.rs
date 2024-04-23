@@ -196,7 +196,6 @@ pub type ChangeSet = Vec<(Address, Account, Vec<StorageEntry>)>;
 type AccountState = (Account, Vec<StorageEntry>);
 
 /// Generate a range of changesets for given blocks and accounts.
-/// Assumes all accounts start with an empty storage.
 ///
 /// Returns a Vec of account and storage changes for each block,
 /// along with the final state of all accounts and storages.
@@ -216,7 +215,7 @@ where
         .map(|(addr, (acc, st))| (addr, (acc, st.into_iter().map(|e| (e.key, e.value)).collect())))
         .collect();
 
-    let valid_addresses = state.keys().copied().collect();
+    let valid_addresses = state.keys().copied().collect::<Vec<_>>();
 
     let mut changesets = Vec::new();
 
@@ -251,7 +250,7 @@ where
                     }
                     old
                 };
-                Some(StorageEntry { value: old.unwrap_or(U256::from(0)), ..entry })
+                Some(StorageEntry { value: old.unwrap_or(U256::ZERO), ..entry })
             })
             .collect();
         old_entries.sort_by_key(|entry| entry.key);
@@ -279,7 +278,7 @@ where
 /// Returns two addresses, a balance_change, and a Vec of new storage entries.
 pub fn random_account_change<R: Rng>(
     rng: &mut R,
-    valid_addresses: &Vec<Address>,
+    valid_addresses: &[Address],
     n_storage_changes: Range<u64>,
     key_range: Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
@@ -340,6 +339,7 @@ pub fn random_contract_account_range<R: Rng>(
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
+        // todo: can a non-eoa account have a nonce > 0?
         let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
         accounts.push((address, account))
     }
@@ -374,11 +374,11 @@ pub fn random_receipt<R: Rng>(
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
     let data_byte_count = rng.gen::<u8>() as usize;
     let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
-    Log {
-        address: address.unwrap_or_else(|| rng.gen()),
-        topics: std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
-        data: std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
-    }
+    Log::new_unchecked(
+        address.unwrap_or_else(|| rng.gen()),
+        std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
+        std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
+    )
 }
 
 #[cfg(test)]

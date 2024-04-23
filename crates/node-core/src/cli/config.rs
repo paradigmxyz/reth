@@ -7,8 +7,8 @@ use reth_rpc::{
     JwtError, JwtSecret,
 };
 use reth_rpc_builder::{
-    auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
-    ServerBuilder, TransportRpcModuleConfig,
+    auth::AuthServerConfig, error::RpcError, EthConfig, Identity, IpcServerBuilder,
+    RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, path::PathBuf, time::Duration};
@@ -46,10 +46,10 @@ pub trait RethRpcConfig {
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig;
 
     /// Returns the default server builder for http/ws
-    fn http_ws_server_builder(&self) -> ServerBuilder;
+    fn http_ws_server_builder(&self) -> ServerBuilder<Identity, Identity>;
 
     /// Returns the default ipc server builder
-    fn ipc_server_builder(&self) -> IpcServerBuilder;
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
 
     /// Creates the [RpcServerConfig] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
@@ -86,9 +86,9 @@ pub trait PayloadBuilderConfig {
     /// Block extra data set by the payload builder.
     fn extradata(&self) -> Cow<'_, str>;
 
-    /// Returns the rlp-encoded extradata bytes.
-    fn extradata_rlp_bytes(&self) -> Bytes {
-        alloy_rlp::encode(self.extradata().as_bytes()).into()
+    /// Returns the extradata as bytes.
+    fn extradata_bytes(&self) -> Bytes {
+        self.extradata().as_bytes().to_vec().into()
     }
 
     /// The interval at which the job should build a new payload after the last.

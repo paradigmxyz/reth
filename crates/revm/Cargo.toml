@@ -17,7 +17,8 @@ reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
 reth-consensus-common.workspace = true
-reth-node-api.workspace = true
+reth-evm.workspace = true
+reth-trie = { workspace = true, optional = true }
 
 # revm
 revm.workspace = true
@@ -30,6 +31,7 @@ tracing.workspace = true
 reth-trie.workspace = true
 
 [features]
+test-utils = ["dep:reth-trie"]
 optimism = [
     "revm/optimism",
     "reth-primitives/optimism",

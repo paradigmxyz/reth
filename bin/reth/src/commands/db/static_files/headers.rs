@@ -91,15 +91,15 @@ impl Command {
                 },
                 |provider| {
                     Ok(provider
-                        .header_by_number(num as u64)?
-                        .ok_or(ProviderError::HeaderNotFound((num as u64).into()))?)
+                        .header_by_number(num)?
+                        .ok_or(ProviderError::HeaderNotFound((num).into()))?)
                 },
             )?;
         }
 
         // BENCHMARK QUERYING A RANDOM HEADER BY HASH
         {
-            let num = row_indexes[rng.gen_range(0..row_indexes.len())] as u64;
+            let num = row_indexes[rng.gen_range(0..row_indexes.len())];
             let header_hash = provider_factory
                 .header_by_number(num)?
                 .ok_or(ProviderError::HeaderNotFound(num.into()))?
@@ -107,7 +107,7 @@ impl Command {
 
             bench(
                 BenchKind::RandomHash,
-                provider_factory.clone(),
+                provider_factory,
                 StaticFileSegment::Headers,
                 filters,
                 compression,

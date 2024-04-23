@@ -30,13 +30,17 @@ pub use headers::*;
 pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
+
 pub use sender_recovery::*;
 pub use tx_lookup::*;
+
+mod utils;
+use utils::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{stage::Stage, test_utils::TestStageDB, ExecInput};
+    use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use reth_db::{
         cursor::DbCursorRO,
@@ -46,8 +50,9 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         AccountsHistory, DatabaseEnv,
     };
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_exex::ExExManagerHandle;
     use reth_interfaces::test_utils::generators::{self, random_block};
-    use reth_node_ethereum::EthEvmConfig;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
         PruneModes, SealedBlock, StaticFileSegment, U256,
@@ -57,6 +62,7 @@ mod tests {
         StorageReader,
     };
     use reth_revm::EvmProcessorFactory;
+    use reth_stages_api::{ExecInput, Stage};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -146,6 +152,7 @@ mod tests {
                 },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
                 prune_modes.clone(),
+                ExExManagerHandle::empty(),
             );
 
             execution_stage.execute(&provider, input).unwrap();
@@ -170,7 +177,7 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.account_history {
+            if prune_modes.account_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {
@@ -186,7 +193,7 @@ mod tests {
                 ..Default::default()
             };
 
-            if let Some(PruneMode::Full) = prune_modes.storage_history {
+            if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
                 assert!(acc_indexing_stage.execute(&provider, input).is_err());
             } else {

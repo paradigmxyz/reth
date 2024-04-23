@@ -11,7 +11,11 @@ mod logs_utils;
 mod pubsub;
 pub mod revm_utils;
 mod signer;
+pub mod traits;
 pub(crate) mod utils;
+
+#[cfg(feature = "optimism")]
+pub mod optimism;
 
 pub use api::{
     fee_history::{fee_history_cache_new_blocks_task, FeeHistoryCache, FeeHistoryCacheConfig},

@@ -16,11 +16,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_interfaces::{
-    consensus::{Consensus, ConsensusError},
-    executor::{BlockExecutionError, BlockValidationError},
-};
-use reth_node_api::{ConfigureEvm, EngineTypes};
+use reth_consensus::{Consensus, ConsensusError};
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
@@ -276,10 +275,9 @@ impl StorageInner {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // check previous block for base fee
-        let base_fee_per_gas = self
-            .headers
-            .get(&self.best_block)
-            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params(timestamp)));
+        let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
+            parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
+        });
 
         let mut header = Header {
             parent_hash: self.best_hash,
@@ -409,8 +407,8 @@ impl StorageInner {
         // calculate the state root
         let state_root = client
             .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
-            .state_root(bundle_state)
+            .map_err(BlockExecutionError::LatestBlock)?
+            .state_root(bundle_state.state())
             .unwrap();
         header.state_root = state_root;
         Ok(header)
@@ -439,7 +437,9 @@ impl StorageInner {
 
         // now execute the block
         let db = State::builder()
-            .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
+            .with_database_boxed(Box::new(StateProviderDatabase::new(
+                client.latest().map_err(BlockExecutionError::LatestBlock)?,
+            )))
             .with_bundle_update()
             .build();
         let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);
@@ -449,16 +449,17 @@ impl StorageInner {
         let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
 
-        let mut blob_gas_used = None;
-        if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
+        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
             let mut sum_blob_gas_used = 0;
             for tx in &body.transactions {
                 if let Some(blob_tx) = tx.transaction.as_eip4844() {
                     sum_blob_gas_used += blob_tx.blob_gas();
                 }
             }
-            blob_gas_used = Some(sum_blob_gas_used);
-        }
+            Some(sum_blob_gas_used)
+        } else {
+            None
+        };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 

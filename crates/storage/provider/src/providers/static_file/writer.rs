@@ -237,7 +237,7 @@ impl StaticFileProviderRW {
             .user_header()
             .block_end()
             .map(|b| b + 1)
-            .unwrap_or(self.writer.user_header().expected_block_start());
+            .unwrap_or_else(|| self.writer.user_header().expected_block_start());
 
         if expected_block_number != next_static_file_block {
             return Err(ProviderError::UnexpectedStaticFileBlockNumber(

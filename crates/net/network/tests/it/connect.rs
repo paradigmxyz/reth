@@ -1,7 +1,7 @@
 //! Connection tests
 
 use alloy_node_bindings::Geth;
-use ethers_providers::{Http, Middleware, Provider};
+use alloy_provider::{admin::AdminApi, ProviderBuilder};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
@@ -15,7 +15,7 @@ use reth_network::{
     NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
-use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
+use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
@@ -319,10 +319,14 @@ async fn test_incoming_node_id_blacklist() {
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+
+        let provider = ProviderBuilder::new()
+            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
+            .unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let enr = provider.node_info().await.unwrap().enr;
+        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
         let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
@@ -343,7 +347,7 @@ async fn test_incoming_node_id_blacklist() {
         // make geth connect to us
         let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
-        provider.add_peer(our_enode.to_string()).await.unwrap();
+        provider.add_peer(&our_enode.to_string()).await.unwrap();
 
         let mut event_stream = NetworkEventStream::new(events);
 
@@ -371,10 +375,13 @@ async fn test_incoming_connect_with_single_geth() {
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider = ProviderBuilder::new()
+            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
+            .unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let enr = provider.node_info().await.unwrap().enr;
+        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
@@ -392,7 +399,7 @@ async fn test_incoming_connect_with_single_geth() {
         // make geth connect to us
         let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
-        provider.add_peer(our_enode.to_string()).await.unwrap();
+        provider.add_peer(&our_enode.to_string()).await.unwrap();
 
         // check for a sessionestablished event
         let incoming_peer_id = event_stream.next_session_established().await.unwrap();
@@ -431,10 +438,13 @@ async fn test_outgoing_connect_with_single_geth() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider = ProviderBuilder::new()
+            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
+            .unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let enr = provider.node_info().await.unwrap().enr;
+        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
         // add geth as a peer then wait for a `SessionEstablished` event
         handle.add_peer(geth_peer_id, geth_socket);
@@ -475,10 +485,13 @@ async fn test_geth_disconnect() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = Provider::<Http>::try_from(format!("http://{geth_endpoint}")).unwrap();
+        let provider = ProviderBuilder::new()
+            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
+            .unwrap();
 
         // get the peer id we should be expecting
-        let geth_peer_id: PeerId = enr_to_peer_id(provider.node_info().await.unwrap().enr);
+        let enr = provider.node_info().await.unwrap().enr;
+        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
         handle.add_peer(geth_peer_id, geth_socket);
@@ -588,61 +601,41 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_always_accept_incoming_connections_from_trusted_peers() {
     reth_tracing::init_test_tracing();
-    let other_peer1 = new_random_peer(10, HashSet::new()).await;
-    let other_peer2 = new_random_peer(10, HashSet::new()).await;
-    let other_peer3 = new_random_peer(0, HashSet::new()).await;
+    let peer1 = new_random_peer(10, HashSet::new()).await;
+    let peer2 = new_random_peer(0, HashSet::new()).await;
 
     //  setup the peer with max_inbound = 1, and add other_peer_3 as trust nodes
-    let peer = new_random_peer(
-        1,
-        HashSet::from([NodeRecord::new(other_peer3.local_addr(), *other_peer3.peer_id())]),
-    )
-    .await;
+    let peer =
+        new_random_peer(0, HashSet::from([NodeRecord::new(peer2.local_addr(), *peer2.peer_id())]))
+            .await;
 
     let handle = peer.handle().clone();
-    let other_peer_handle1 = other_peer1.handle().clone();
-    let other_peer_handle2 = other_peer2.handle().clone();
-    let other_peer_handle3 = other_peer3.handle().clone();
+    let peer1_handle = peer1.handle().clone();
+    let peer2_handle = peer2.handle().clone();
 
     tokio::task::spawn(peer);
-    tokio::task::spawn(other_peer1);
-    tokio::task::spawn(other_peer2);
-    tokio::task::spawn(other_peer3);
+    tokio::task::spawn(peer1);
+    tokio::task::spawn(peer2);
 
     let mut events = NetworkEventStream::new(handle.event_listener());
-    let mut events2 = NetworkEventStream::new(other_peer_handle2.event_listener());
-
-    // though we added other_peer3 as a trust node, the incoming connection should fail because
-    // peer3 doesn't allow inbound connections
-    let (peer_id, reason) = events.next_session_closed().await.unwrap();
-    assert_eq!(peer_id, *other_peer_handle3.peer_id());
-    assert_eq!(reason, Some(DisconnectReason::TooManyPeers));
-
-    // incoming connection should succeed
-    other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr());
-    let peer_id = events.next_session_established().await.unwrap();
-    assert_eq!(peer_id, *other_peer_handle1.peer_id());
-    assert_eq!(handle.num_connected_peers(), 1);
+    let mut events_peer1 = NetworkEventStream::new(peer1_handle.event_listener());
 
     // incoming connection should fail because exceeding max_inbound
-    other_peer_handle2.add_peer(*handle.peer_id(), handle.local_addr());
-    let (peer_id, reason) = events.next_session_closed().await.unwrap();
-    assert_eq!(peer_id, *other_peer_handle2.peer_id());
-    // fixme: this should be `Some(DisconnectReason::TooManyPeers)` but `None`
-    assert_eq!(reason, None);
+    peer1_handle.add_peer(*handle.peer_id(), handle.local_addr());
 
-    let (peer_id, reason) = events2.next_session_closed().await.unwrap();
+    let (peer_id, reason) = events_peer1.next_session_closed().await.unwrap();
     assert_eq!(peer_id, *handle.peer_id());
     assert_eq!(reason, Some(DisconnectReason::TooManyPeers));
 
-    // outbound connection from `other_peer3` should succeed
-    other_peer_handle3.add_peer(*handle.peer_id(), handle.local_addr());
     let peer_id = events.next_session_established().await.unwrap();
-    assert_eq!(peer_id, *other_peer_handle3.peer_id());
+    assert_eq!(peer_id, *peer1_handle.peer_id());
 
-    // sleep is needed because the disconnect event happened after session_established event
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    assert_eq!(handle.num_connected_peers(), 2);
+    // outbound connection from `peer2` should succeed
+    peer2_handle.add_peer(*handle.peer_id(), handle.local_addr());
+    let peer_id = events.next_session_established().await.unwrap();
+    assert_eq!(peer_id, *peer2_handle.peer_id());
+
+    assert_eq!(handle.num_connected_peers(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

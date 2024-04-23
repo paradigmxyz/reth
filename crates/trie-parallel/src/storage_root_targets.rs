@@ -38,8 +38,8 @@ impl IntoIterator for StorageRootTargets {
 
 #[cfg(feature = "parallel")]
 impl rayon::iter::IntoParallelIterator for StorageRootTargets {
-    type Item = (B256, PrefixSet);
     type Iter = rayon::collections::hash_map::IntoIter<B256, PrefixSet>;
+    type Item = (B256, PrefixSet);
 
     fn into_par_iter(self) -> Self::Iter {
         self.0.into_par_iter()

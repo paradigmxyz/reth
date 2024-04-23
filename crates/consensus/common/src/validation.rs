@@ -1,6 +1,7 @@
 //! Collection of methods for block validation.
 
-use reth_interfaces::{consensus::ConsensusError, RethResult};
+use reth_consensus::ConsensusError;
+use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
@@ -65,6 +66,7 @@ pub fn validate_transaction_regarding_header(
     at_timestamp: u64,
     base_fee: Option<u64>,
 ) -> Result<(), ConsensusError> {
+    #[allow(unreachable_patterns)]
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
@@ -120,8 +122,10 @@ pub fn validate_transaction_regarding_header(
 
             Some(*chain_id)
         }
-        #[cfg(feature = "optimism")]
-        Transaction::Deposit(_) => None,
+        _ => {
+            // Op Deposit
+            None
+        }
     };
     if let Some(chain_id) = chain_id {
         if chain_id != chain_spec.chain().id() {

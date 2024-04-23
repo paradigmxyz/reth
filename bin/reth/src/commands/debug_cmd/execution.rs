@@ -6,23 +6,22 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
 };
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
-use reth_config::Config;
+use reth_cli_runner::CliContext;
+use reth_config::{config::EtlConfig, Config};
+use reth_consensus::Consensus;
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-};
+use reth_exex::ExExManagerHandle;
+use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_core::init::init_genesis;
@@ -38,11 +37,7 @@ use reth_stages::{
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use std::{
-    net::{SocketAddr, SocketAddrV4},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 
@@ -146,6 +141,7 @@ impl Command {
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    ExExManagerHandle::empty(),
                 )),
             )
             .build(provider_factory, static_file_producer);
@@ -166,11 +162,11 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
-            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
+            .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 self.network.discovery.port,
-            )))
+            ))
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
@@ -204,10 +200,16 @@ impl Command {
 
     /// Execute `execution-debug` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let config = Config::default();
+        let mut config = Config::default();
 
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db_path();
+
+        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+        if config.stages.etl.dir.is_none() {
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+        }
+
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =
@@ -264,7 +266,7 @@ impl Command {
         );
         ctx.task_executor.spawn_critical(
             "events task",
-            reth_node_core::events::node::handle_events(
+            reth_node_events::node::handle_events(
                 Some(network.clone()),
                 latest_block_number,
                 events,
@@ -289,7 +291,7 @@ impl Command {
             {
                 provider_factory
                     .provider_rw()?
-                    .take_block_and_execution_range(&self.chain, next_block..=target_block)?;
+                    .take_block_and_execution_range(next_block..=target_block)?;
             }
 
             // Update latest block

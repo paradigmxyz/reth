@@ -2,7 +2,6 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_chains::Chain;
 use reth::{
     builder::{node::NodeTypes, NodeBuilder},
     primitives::{
@@ -12,15 +11,16 @@ use reth::{
     },
     revm::{
         handler::register::EvmHandler,
+        inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId, Precompiles},
-        Database, Evm, EvmBuilder,
+        Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode};
-use reth_primitives::{ChainSpec, Genesis, Header, Transaction};
+use reth_primitives::{Chain, ChainSpec, Genesis, Header, Transaction};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
@@ -89,12 +89,17 @@ impl ConfigureEvm for MyEvmConfig {
             .build()
     }
 
-    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
+    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    where
+        DB: Database + 'a,
+        I: GetInspector<DB>,
+    {
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
+            .append_handler_register(inspector_handle_register)
             .build()
     }
 }

@@ -4,7 +4,7 @@ use crate::{
 };
 use rayon::prelude::*;
 use reth_db::{database::Database, tables};
-use reth_primitives::{PruneMode, PruneSegment};
+use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};
 
@@ -42,7 +42,10 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             }
         }
         .into_inner();
-        let tx_range = start..=(end.min(start + input.delete_limit as u64 - 1));
+        let tx_range = start..=
+            Some(end)
+                .min(input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1))
+                .unwrap();
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
@@ -60,15 +63,18 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             ))
         }
 
+        let mut limiter = input.limiter;
+
         let mut last_pruned_transaction = None;
-        let (pruned, _) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
+        let (pruned, done) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
             hashes,
-            input.delete_limit,
+            &mut limiter,
             |row| {
                 last_pruned_transaction = Some(last_pruned_transaction.unwrap_or(row.1).max(row.1))
             },
         )?;
-        let done = tx_range_end == end;
+
+        let done = done && tx_range_end == end;
         trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
 
         let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
@@ -81,8 +87,10 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             // run.
             .checked_sub(if done { 0 } else { 1 });
 
+        let progress = PruneProgress::new(done, &limiter);
+
         Ok(PruneOutput {
-            done,
+            progress,
             pruned,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: last_pruned_block,
@@ -102,7 +110,10 @@ mod tests {
     };
     use reth_db::tables;
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
-    use reth_primitives::{BlockNumber, PruneCheckpoint, PruneMode, PruneSegment, TxNumber, B256};
+    use reth_primitives::{
+        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
+        PruneSegment, TxNumber, B256,
+    };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::ops::Sub;
@@ -132,8 +143,10 @@ mod tests {
             db.table::<tables::TransactionHashNumbers>().unwrap().len()
         );
 
-        let test_prune = |to_block: BlockNumber, expected_result: (bool, usize)| {
+        let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
+            let segment = TransactionLookup::new(prune_mode);
+            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -142,9 +155,8 @@ mod tests {
                     .get_prune_checkpoint(PruneSegment::TransactionLookup)
                     .unwrap(),
                 to_block,
-                delete_limit: 10,
+                limiter: limiter.clone(),
             };
-            let segment = TransactionLookup::new(prune_mode);
 
             let next_tx_number_to_prune = db
                 .factory
@@ -161,7 +173,10 @@ mod tests {
                 .take(to_block as usize)
                 .map(|block| block.body.len())
                 .sum::<usize>()
-                .min(next_tx_number_to_prune as usize + input.delete_limit)
+                .min(
+                    next_tx_number_to_prune as usize +
+                        input.limiter.deleted_entries_limit().unwrap(),
+                )
                 .sub(1);
 
             let last_pruned_block_number = blocks
@@ -180,11 +195,14 @@ mod tests {
 
             let provider = db.factory.provider_rw().unwrap();
             let result = segment.prune(&provider, input).unwrap();
+            limiter.increment_deleted_entries_count_by(result.pruned);
+
             assert_matches!(
                 result,
-                PruneOutput {done, pruned, checkpoint: Some(_)}
-                    if (done, pruned) == expected_result
+                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                    if (progress, pruned) == expected_result
             );
+
             segment
                 .save_checkpoint(
                     &provider,
@@ -193,8 +211,8 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let last_pruned_block_number =
-                last_pruned_block_number.checked_sub(if result.done { 0 } else { 1 });
+            let last_pruned_block_number = last_pruned_block_number
+                .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
 
             assert_eq!(
                 db.table::<tables::TransactionHashNumbers>().unwrap().len(),
@@ -214,8 +232,11 @@ mod tests {
             );
         };
 
-        test_prune(6, (false, 10));
-        test_prune(6, (true, 2));
-        test_prune(10, (true, 8));
+        test_prune(
+            6,
+            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
+        );
+        test_prune(6, (PruneProgress::Finished, 2));
+        test_prune(10, (PruneProgress::Finished, 8));
     }
 }

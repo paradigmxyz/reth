@@ -1,7 +1,9 @@
 use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
+use reth_config::config::EtlConfig;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
+use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, PruneModes};
@@ -94,6 +96,7 @@ async fn unwind_and_copy<DB: Database>(
         },
         MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
         PruneModes::all(),
+        ExExManagerHandle::empty(),
     );
 
     exec_stage.unwind(
@@ -106,12 +109,20 @@ async fn unwind_and_copy<DB: Database>(
     )?;
 
     // Bring hashes to TO
-    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .unwrap();
-    StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
-        .execute(&provider, execute_input)
-        .unwrap();
+    AccountHashingStage {
+        clean_threshold: u64::MAX,
+        commit_threshold: u64::MAX,
+        etl_config: EtlConfig::default(),
+    }
+    .execute(&provider, execute_input)
+    .unwrap();
+    StorageHashingStage {
+        clean_threshold: u64::MAX,
+        commit_threshold: u64::MAX,
+        etl_config: EtlConfig::default(),
+    }
+    .execute(&provider, execute_input)
+    .unwrap();
 
     let unwind_inner_tx = provider.into_tx();
 

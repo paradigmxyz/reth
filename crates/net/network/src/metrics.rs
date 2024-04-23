@@ -34,6 +34,12 @@ pub struct NetworkMetrics {
     /// Number of active outgoing connections
     pub(crate) outgoing_connections: Gauge,
 
+    /// Number of currently pending outgoing connections
+    pub(crate) pending_outgoing_connections: Gauge,
+
+    /// Total number of pending connections, incoming and outgoing.
+    pub(crate) total_pending_connections: Gauge,
+
     /// Total Number of incoming connections handled
     pub(crate) total_incoming_connections: Counter,
 
@@ -75,7 +81,7 @@ pub struct NetworkMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct SessionManagerMetrics {
-    /// Number of dials that resulted in a peer being added to the peerset
+    /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
 }
 
@@ -112,7 +118,9 @@ pub struct TransactionsManagerMetrics {
     /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
-    /// Total number of bad imports.
+    /// Total number of bad imports, imports that fail because the transaction is badly formed
+    /// (i.e. have no chance of passing validation, unlike imports that fail due to e.g. nonce
+    /// gaps).
     pub(crate) bad_imports: Counter,
     /// Number of inflight requests at which the
     /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
@@ -194,7 +202,12 @@ pub struct TransactionFetcherMetrics {
     pub(crate) egress_peer_channel_full: Counter,
     /// Total number of hashes pending fetch.
     pub(crate) hashes_pending_fetch: Gauge,
-
+    /// Total number of fetched transactions.
+    pub(crate) fetched_transactions: Counter,
+    /// Total number of transactions that were received in
+    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) responses, that weren't
+    /// requested.
+    pub(crate) unsolicited_transactions: Counter,
     /* ================ SEARCH DURATION ================ */
     /// Time spent searching for an idle peer in call to
     /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`](crate::transactions::TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash).
@@ -331,6 +344,7 @@ pub struct TxTypesCounter {
 
 impl TxTypesCounter {
     pub(crate) fn increase_by_tx_type(&mut self, tx_type: TxType) {
+        #[allow(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => {
                 self.legacy += 1;
@@ -344,8 +358,7 @@ impl TxTypesCounter {
             TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
-            #[cfg(feature = "optimism")]
-            TxType::Deposit => {}
+            _ => {}
         }
     }
 }

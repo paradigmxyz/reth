@@ -89,7 +89,7 @@ impl TxDeposit {
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
-    /// <https://github.com/ethereum-optimism/optimism/blob/develop/specs/deposits.md#the-deposited-transaction-type>
+    /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/deposits.md#the-deposited-transaction-type>
     pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
         self.source_hash.encode(out);
         self.from.encode(out);

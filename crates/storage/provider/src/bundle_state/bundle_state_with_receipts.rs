@@ -12,13 +12,12 @@ use reth_primitives::{
     StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
+pub use revm::db::states::OriginalValuesKnown;
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
 use std::collections::HashMap;
-
-pub use revm::db::states::OriginalValuesKnown;
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -219,11 +218,13 @@ impl BundleStateWithReceipts {
         self.first_block
     }
 
-    /// Revert to given block number.
+    /// Revert the state to the given block number.
     ///
-    /// If number is in future, or in the past return false
+    /// Returns false if the block number is not in the bundle state.
     ///
-    /// NOTE: Provided block number will stay inside the bundle state.
+    /// # Note
+    ///
+    /// The provided block number will stay inside the bundle state.
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
         let Some(index) = self.block_number_to_index(block_number) else { return false };
 
@@ -366,8 +367,7 @@ mod tests {
             EmptyDB,
         },
         primitives::{
-            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, HashMap,
-            StorageSlot,
+            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot,
         },
         DatabaseCommit, State,
     };
@@ -863,7 +863,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account_info.clone(),
+                info: account_info,
                 // 0x00 => 0 => 9
                 storage: HashMap::from([(
                     U256::ZERO,
@@ -1072,7 +1072,7 @@ mod tests {
             address1,
             RevmAccount {
                 status: AccountStatus::Touched,
-                info: account1.clone(),
+                info: account1,
                 // 0x01 => 0 => 5
                 storage: HashMap::from([(
                     U256::from(1),
@@ -1135,7 +1135,7 @@ mod tests {
         assert!(this.revert_to(16));
         assert_eq!(this.receipts.len(), 7);
 
-        let mut this = base.clone();
+        let mut this = base;
         assert!(!this.revert_to(17));
         assert_eq!(this.receipts.len(), 7);
     }

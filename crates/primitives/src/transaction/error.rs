@@ -63,3 +63,15 @@ pub enum TransactionConversionError {
     #[error("Transaction is not supported for p2p")]
     UnsupportedForP2P,
 }
+
+/// Represents error variants than can happen when trying to convert a
+/// [`TransactionSignedEcRecovered`](crate::TransactionSignedEcRecovered) transaction.
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
+pub enum TryFromRecoveredTransactionError {
+    /// Thrown if the transaction type is unsupported.
+    #[error("Unsupported transaction type: {0}")]
+    UnsupportedTransactionType(u8),
+    /// This error variant is used when a blob sidecar is missing.
+    #[error("Blob sidecar missing for an EIP-4844 transaction")]
+    BlobSidecarMissing,
+}

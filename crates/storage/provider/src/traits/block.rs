@@ -6,8 +6,8 @@ use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
-    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, ChainSpec,
-    Header, PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
+    Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
+    PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::ops::RangeInclusive;
@@ -133,6 +133,15 @@ pub trait BlockReader:
     ///
     /// Note: returns only available blocks
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>>;
+
+    /// retrieves a range of blocks from the database, along with the senders of each
+    /// transaction in the blocks.
+    ///
+    /// The `transaction_kind` parameter determines whether to return its hash
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>>;
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.
@@ -259,25 +268,22 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
     /// Get range of blocks and its execution result
     fn get_block_and_execution_range(
         &self,
-        chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<false>(chain_spec, range)
+        self.get_or_take_block_and_execution_range::<false>(range)
     }
 
     /// Take range of blocks and its execution result
     fn take_block_and_execution_range(
         &self,
-        chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<true>(chain_spec, range)
+        self.get_or_take_block_and_execution_range::<true>(range)
     }
 
     /// Return range of blocks and its execution result
     fn get_or_take_block_and_execution_range<const TAKE: bool>(
         &self,
-        chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain>;
 }

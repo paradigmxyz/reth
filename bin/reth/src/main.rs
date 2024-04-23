@@ -3,7 +3,7 @@
 // We use jemalloc for performance reasons.
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(all(feature = "optimism", not(test)))]
 compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");

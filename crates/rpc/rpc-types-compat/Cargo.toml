@@ -21,4 +21,4 @@ alloy-rpc-types.workspace = true
 serde_json.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-rpc-types/optimism"]
+optimism = ["reth-primitives/optimism"]

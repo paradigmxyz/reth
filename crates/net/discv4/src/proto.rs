@@ -7,7 +7,7 @@ use alloy_rlp::{
 use enr::{Enr, EnrKey};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, ForkId, NodeRecord, B256,
+    keccak256, pk2id, ForkId, NodeRecord, B256,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -161,7 +161,7 @@ impl Message {
         let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_slice())?;
 
         let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
-        let node_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+        let node_id = pk2id(&pk);
 
         let msg_type = packet[97];
         let payload = &mut &packet[98..];
@@ -665,9 +665,10 @@ mod tests {
         let msg = rng_message(&mut rng);
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
         let (buf, _) = msg.encode(&secret_key);
-        let mut buf = BytesMut::from(buf.as_ref());
-        buf.put_u8(0);
-        match Message::decode(buf.as_ref()).unwrap_err() {
+
+        let mut buf_vec = buf.to_vec();
+        buf_vec.push(0);
+        match Message::decode(buf_vec.as_slice()).unwrap_err() {
             DecodePacketError::HashMismatch => {}
             err => {
                 unreachable!("unexpected err {}", err)
@@ -723,7 +724,7 @@ mod tests {
         for _ in 0..100 {
             let msg = rng_message(&mut rng);
             let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-            let sender_id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+            let sender_id = pk2id(&pk);
 
             let (buf, _) = msg.encode(&secret_key);
 

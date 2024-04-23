@@ -23,7 +23,6 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
-use std::collections::HashSet;
 
 fn main() {
     Cli::<RethCliTxpoolExt>::parse()
@@ -31,8 +30,6 @@ fn main() {
             // launch the node
             let NodeHandle { mut node, node_exit_future } =
                 builder.node(EthereumNode::default()).launch().await?;
-
-            let recipients = args.recipients.iter().copied().collect::<HashSet<_>>();
 
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
@@ -48,8 +45,8 @@ fn main() {
                     let tx = event.transaction;
                     println!("Transaction received: {tx:?}");
 
-                    if let Some(tx_recipient_address) = tx.to() {
-                        if recipients.is_empty() || recipients.contains(&tx_recipient_address) {
+                    if let Some(recipient) = tx.to() {
+                        if args.is_match(&recipient) {
                             // trace the transaction with `trace_call`
                             let callrequest =
                                 transaction_to_call_request(tx.to_recovered_transaction());
@@ -75,4 +72,11 @@ struct RethCliTxpoolExt {
     /// recipients addresses that we want to trace
     #[arg(long, value_delimiter = ',')]
     pub recipients: Vec<Address>,
+}
+
+impl RethCliTxpoolExt {
+    /// Check if the recipient is in the list of recipients to trace.
+    pub fn is_match(&self, recipient: &Address) -> bool {
+        self.recipients.is_empty() || self.recipients.contains(recipient)
+    }
 }

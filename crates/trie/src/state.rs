@@ -2,7 +2,7 @@ use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    StateRoot, StateRootError,
+    StateRoot,
 };
 use reth_db::{
     cursor::DbCursorRO,
@@ -11,6 +11,7 @@ use reth_db::{
     transaction::DbTx,
     DatabaseError,
 };
+use reth_interfaces::trie::StateRootError;
 use reth_primitives::{
     keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, BlockNumber, B256,
     U256,

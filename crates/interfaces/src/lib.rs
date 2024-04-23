@@ -12,9 +12,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Consensus traits.
-pub mod consensus;
-
 /// Database error
 pub mod db;
 
@@ -27,6 +24,9 @@ pub use error::{RethError, RethResult};
 
 /// P2P traits.
 pub mod p2p;
+
+/// Trie error
+pub mod trie;
 
 /// Provider error
 pub mod provider;

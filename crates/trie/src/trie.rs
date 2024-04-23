@@ -7,10 +7,10 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
-    StateRootError, StorageRootError,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::transaction::DbTx;
+use reth_interfaces::trie::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
@@ -1083,9 +1083,9 @@ mod tests {
         assert_eq!(nibbles2b[..], [0xB, 0x0]);
         assert_eq!(node2a, node2b);
         tx.commit().unwrap();
-        let tx = factory.provider_rw().unwrap();
 
         {
+            let tx = factory.provider_rw().unwrap();
             let mut hashed_account_cursor =
                 tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 
@@ -1138,11 +1138,10 @@ mod tests {
             assert_ne!(node1c.hashes[0], node1b.hashes[0]);
             assert_eq!(node1c.hashes[1], node1b.hashes[1]);
             assert_eq!(node1c.hashes[2], node1b.hashes[2]);
-            drop(tx);
         }
 
-        let tx = factory.provider_rw().unwrap();
         {
+            let tx = factory.provider_rw().unwrap();
             let mut hashed_account_cursor =
                 tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
 

@@ -81,7 +81,7 @@ impl StaticFileSegment {
         format!("static_file_{}_{}_{}", self.as_ref(), block_range.start(), block_range.end())
     }
 
-    /// Returns file name for the provided segment and range, alongisde filters, compression.
+    /// Returns file name for the provided segment and range, alongside filters, compression.
     pub fn filename_with_configuration(
         &self,
         filters: Filters,

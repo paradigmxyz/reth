@@ -1,4 +1,3 @@
-#![cfg(feature = "c-kzg")]
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -442,6 +441,9 @@ impl BlobTransactionSidecarRlp {
 impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut arr = [0u8; BYTES_PER_BLOB];
+
+        // Note: the "fix" for this is kinda pointless.
+        #[allow(clippy::large_stack_frames)]
         let blobs: Vec<Blob> = (0..u.int_in_range(1..=16)?)
             .map(|_| {
                 arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
@@ -542,7 +544,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Assert commitment equality
         assert_eq!(
@@ -616,7 +618,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();
@@ -647,7 +649,7 @@ mod tests {
         .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs
-        let sidecar = generate_blob_sidecar(blobs.clone());
+        let sidecar = generate_blob_sidecar(blobs);
 
         // Create a vector to store the encoded RLP
         let mut encoded_rlp = Vec::new();

@@ -82,7 +82,7 @@ async fn test_large_tx_req() {
             txs.into_iter().for_each(|tx| assert!(txs_hashes.contains(tx.hash())));
         }
         Err(e) => {
-            panic!("error: {:?}", e);
+            panic!("error: {e:?}");
         }
     }
 }

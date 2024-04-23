@@ -46,7 +46,7 @@ use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use reth_provider::{BlockNumReader, BlockReader};
-use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;
@@ -177,8 +177,9 @@ where
         let NetworkConfig {
             client,
             secret_key,
+            discovery_v4_addr,
             mut discovery_v4_config,
-            discovery_addr,
+            discovery_v5_config,
             listener_addr,
             peers_config,
             sessions_config,
@@ -193,9 +194,7 @@ where
             dns_discovery_config,
             extra_protocols,
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-                optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
-            ..
+            transactions_manager_config: _,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -213,11 +212,17 @@ where
             disc_config
         });
 
-        let discovery =
-            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
-                .await?;
+        let discovery = Discovery::new(
+            discovery_v4_addr,
+            secret_key,
+            discovery_v4_config,
+            discovery_v5_config,
+            dns_discovery_config,
+        )
+        .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
+        let discv4 = discovery.discv4();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
         let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
@@ -251,8 +256,7 @@ where
             bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-            sequencer_endpoint,
+            discv4,
         );
 
         Ok(Self {
@@ -357,6 +361,7 @@ where
                 head: status.blockhash,
                 network: status.chain.id(),
                 genesis: status.genesis,
+                config: Default::default(),
             },
         }
     }
@@ -646,9 +651,7 @@ where
             SwarmEvent::OutgoingTcpConnection { remote_addr, peer_id } => {
                 trace!(target: "net", ?remote_addr, ?peer_id, "Starting outbound connection.");
                 self.metrics.total_outgoing_connections.increment(1);
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
+                self.update_pending_connection_metrics()
             }
             SwarmEvent::SessionEstablished {
                 peer_id,
@@ -662,7 +665,7 @@ where
             } => {
                 let total_active = self.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                 self.metrics.connected_peers.set(total_active as f64);
-                trace!(
+                debug!(
                     target: "net",
                     ?remote_addr,
                     %client_version,
@@ -683,6 +686,8 @@ where
                 if direction.is_outgoing() {
                     self.swarm.state_mut().peers_mut().on_active_outgoing_established(peer_id);
                 }
+
+                self.update_active_connection_metrics();
 
                 self.event_listeners.notify(NetworkEvent::SessionEstablished {
                     peer_id,
@@ -731,15 +736,8 @@ where
                     self.swarm.state_mut().peers_mut().on_active_session_gracefully_closed(peer_id);
                 }
                 self.metrics.closed_sessions.increment(1);
-                // This can either be an incoming or outgoing connection which
-                // was closed. So we update
-                // both metrics
-                self.metrics
-                    .incoming_connections
-                    .set(self.swarm.state().peers().num_inbound_connections() as f64);
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
+                self.update_active_connection_metrics();
+
                 if let Some(reason) = reason {
                     self.disconnect_metrics.increment(reason);
                 }
@@ -815,9 +813,8 @@ where
                         .on_outgoing_pending_session_gracefully_closed(&peer_id);
                 }
                 self.metrics.closed_sessions.increment(1);
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
+                self.update_pending_connection_metrics();
+
                 self.metrics.backed_off_peers.set(
                         self.swarm
                             .state()
@@ -842,9 +839,6 @@ where
                     &error,
                 );
 
-                self.metrics
-                    .outgoing_connections
-                    .set(self.swarm.state().peers().num_outbound_connections() as f64);
                 self.metrics.backed_off_peers.set(
                         self.swarm
                             .state()
@@ -853,6 +847,7 @@ where
                             .saturating_sub(1)
                             as f64,
                     );
+                self.update_pending_connection_metrics();
             }
             SwarmEvent::BadMessage { peer_id } => {
                 self.swarm
@@ -868,6 +863,28 @@ where
                     .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
             }
         }
+    }
+
+    /// Updates the metrics for active,established connections
+    #[inline]
+    fn update_active_connection_metrics(&self) {
+        self.metrics
+            .incoming_connections
+            .set(self.swarm.state().peers().num_inbound_connections() as f64);
+        self.metrics
+            .outgoing_connections
+            .set(self.swarm.state().peers().num_outbound_connections() as f64);
+    }
+
+    /// Updates the metrics for pending connections
+    #[inline]
+    fn update_pending_connection_metrics(&self) {
+        self.metrics
+            .pending_outgoing_connections
+            .set(self.swarm.state().peers().num_pending_outbound_connections() as f64);
+        self.metrics
+            .total_pending_connections
+            .set(self.swarm.sessions().num_pending_connections() as f64);
     }
 }
 
@@ -1010,7 +1027,7 @@ pub enum NetworkEvent {
     PeerRemoved(PeerId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveredEvent {
     EventQueued { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
 }

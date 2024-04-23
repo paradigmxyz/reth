@@ -1,7 +1,6 @@
 use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
-    AccountReader, BlockHashReader, BundleStateWithReceipts, ProviderError, StateProvider,
-    StateRootProvider,
+    AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -17,6 +16,7 @@ use reth_primitives::{
     StaticFileSegment, StorageKey, StorageValue, B256,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
+use revm::db::BundleState;
 use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
@@ -257,18 +257,15 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn state_root(&self, state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+    fn state_root(&self, state: &BundleState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(state.hash_state_slow());
+        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
         revert_state.state_root(self.tx).map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
-        &self,
-        state: &BundleStateWithReceipts,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
+    fn state_root_with_updates(&self, state: &BundleState) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(state.hash_state_slow());
+        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
         revert_state
             .state_root_with_updates(self.tx)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -497,8 +494,7 @@ mod tests {
         // run
         assert_eq!(
             HistoricalStateProviderRef::new(&tx, 1, static_file_provider.clone())
-                .basic_account(ADDRESS)
-                .clone(),
+                .basic_account(ADDRESS),
             Ok(None)
         );
         assert_eq!(
@@ -548,7 +544,7 @@ mod tests {
             Ok(None)
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider.clone())
+            HistoricalStateProviderRef::new(&tx, 1000, static_file_provider)
                 .basic_account(HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
@@ -712,7 +708,7 @@ mod tests {
                 account_history_block_number: Some(1),
                 storage_history_block_number: Some(1),
             },
-            static_file_provider.clone(),
+            static_file_provider,
         );
         assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
         assert_eq!(

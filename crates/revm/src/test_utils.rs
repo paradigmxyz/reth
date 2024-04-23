@@ -1,5 +1,5 @@
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     keccak256, revm::config::revm_spec, trie::AccountProof, Account, Address, BlockNumber,
     Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, Transaction, B256, U256,
@@ -7,22 +7,25 @@ use reth_primitives::{
 
 #[cfg(not(feature = "optimism"))]
 use reth_primitives::revm::env::fill_tx_env;
+use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
+use reth_trie::updates::TrieUpdates;
+use revm::{
+    db::BundleState,
+    primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+};
+use std::collections::HashMap;
+
 #[cfg(feature = "optimism")]
 use {
     reth_primitives::revm::env::fill_op_tx_env,
     revm::{
+        inspector_handle_register,
         primitives::{HandlerCfg, SpecId},
-        Database, Evm, EvmBuilder,
+        Database, Evm, EvmBuilder, GetInspector,
     },
 };
 
-use reth_provider::{
-    AccountReader, BlockHashReader, BundleStateWithReceipts, StateProvider, StateRootProvider,
-};
-use reth_trie::updates::TrieUpdates;
-use revm::primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
-use std::collections::HashMap;
-
+/// Mock state for testing
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct StateProviderTest {
     accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
@@ -74,13 +77,13 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn state_root(&self, _bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256> {
+    fn state_root(&self, _bundle_state: &BundleState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
     fn state_root_with_updates(
         &self,
-        _bundle_state: &BundleStateWithReceipts,
+        _bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
@@ -162,12 +165,17 @@ impl ConfigureEvm for TestEvmConfig {
     }
 
     #[cfg(feature = "optimism")]
-    fn evm_with_inspector<'a, DB: Database + 'a, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB> {
+    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    where
+        DB: Database + 'a,
+        I: GetInspector<DB>,
+    {
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
             .with_handler_cfg(handler_cfg)
+            .append_handler_register(inspector_handle_register)
             .build()
     }
 }

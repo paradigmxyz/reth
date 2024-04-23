@@ -116,8 +116,9 @@ pub struct PeersManager {
     /// How long peers to which we could not connect for non-fatal reasons, e.g.
     /// [`DisconnectReason::TooManyPeers`], are put in time out.
     backoff_durations: PeerBackoffDurations,
-    /// If non-trusted peers should be connected to
-    connect_trusted_nodes_only: bool,
+    /// If non-trusted peers should be connected to, or the connection from non-trusted
+    /// incoming peers should be accepted.
+    trusted_nodes_only: bool,
     /// Timestamp of the last time [Self::tick] was called.
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
@@ -137,7 +138,7 @@ impl PeersManager {
             ban_duration,
             backoff_durations,
             trusted_nodes,
-            connect_trusted_nodes_only,
+            trusted_nodes_only,
             basic_nodes,
             max_backoff_count,
         } = config;
@@ -173,7 +174,7 @@ impl PeersManager {
             backed_off_peers: Default::default(),
             ban_duration,
             backoff_durations,
-            connect_trusted_nodes_only,
+            trusted_nodes_only,
             last_tick: Instant::now(),
             max_backoff_count,
             net_connection_state: NetworkConnectionState::default(),
@@ -207,10 +208,16 @@ impl PeersManager {
         self.connection_info.num_inbound
     }
 
-    /// Returns the number of currently active outbound connections.
+    /// Returns the number of currently __active__ outbound connections.
     #[inline]
     pub(crate) fn num_outbound_connections(&self) -> usize {
         self.connection_info.num_outbound
+    }
+
+    /// Returns the number of currently pending outbound connections.
+    #[inline]
+    pub(crate) fn num_pending_outbound_connections(&self) -> usize {
+        self.connection_info.num_pending_out
     }
 
     /// Returns the number of currently backed off peers.
@@ -229,6 +236,15 @@ impl PeersManager {
         if self.ban_list.is_banned_ip(&addr) {
             return Err(InboundConnectionError::IpBanned)
         }
+
+        if (!self.connection_info.has_in_capacity() || self.connection_info.max_inbound == 0) &&
+            self.trusted_peer_ids.is_empty()
+        {
+            // if we don't have any inbound slots and no trusted peers, we don't accept any new
+            // connections
+            return Err(InboundConnectionError::ExceedsCapacity)
+        }
+
         self.connection_info.inc_pending_in();
         Ok(())
     }
@@ -269,10 +285,19 @@ impl PeersManager {
     /// If the reputation of the peer is below the `BANNED_REPUTATION` threshold, a disconnect will
     /// be scheduled.
     pub(crate) fn on_incoming_session_established(&mut self, peer_id: PeerId, addr: SocketAddr) {
+        self.connection_info.decr_pending_in();
+
         // we only need to check the peer id here as the ip address will have been checked at
-        // on_inbound_pending_session. We also check if the peer is in the backoff list here.
+        // on_incoming_pending_session. We also check if the peer is in the backoff list here.
         if self.ban_list.is_banned_peer(&peer_id) {
             self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
+            return
+        }
+
+        // check if the peer is trustable or not
+        let mut is_trusted = self.trusted_peer_ids.contains(&peer_id);
+        if self.trusted_nodes_only && !is_trusted {
+            self.queued_actions.push_back(PeerAction::DisconnectUntrustedIncoming { peer_id });
             return
         }
 
@@ -280,19 +305,24 @@ impl PeersManager {
         self.tick();
 
         let has_in_capacity = self.connection_info.has_in_capacity();
-        self.connection_info.decr_pending_in();
         self.connection_info.inc_in();
 
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
-                let value = entry.get_mut();
-                if value.is_banned() {
+                let peer = entry.get_mut();
+                if peer.is_banned() {
                     self.queued_actions.push_back(PeerAction::DisconnectBannedIncoming { peer_id });
                     return
                 }
-                value.state = PeerConnectionState::In;
+                // it might be the case that we're also trying to connect to this peer at the same
+                // time, so we need to adjust the state here
+                if peer.state.is_pending_out() {
+                    self.connection_info.decr_state(peer.state);
+                }
 
-                let is_trusted = value.is_trusted() || self.trusted_peer_ids.contains(&peer_id);
+                peer.state = PeerConnectionState::In;
+
+                is_trusted = is_trusted || peer.is_trusted();
 
                 // if a peer is not trusted and we don't have capacity for more inbound connections,
                 // disconnecting the peer
@@ -310,8 +340,6 @@ impl PeersManager {
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
-
-                let is_trusted = self.trusted_peer_ids.contains(&peer_id);
 
                 // disconnect the peer if we don't have capacity for more inbound connections
                 if !is_trusted && !has_in_capacity {
@@ -513,6 +541,16 @@ impl PeersManager {
         peer_id: &PeerId,
         err: &io::Error,
     ) {
+        // there's a race condition where we accepted an incoming connection while we were trying to
+        // connect to the same peer at the same time. if the outgoing connection failed
+        // after the incoming connection was accepted, we can ignore this error
+        if let Some(peer) = self.peers.get(peer_id) {
+            if peer.state.is_incoming() {
+                // we already have an active connection to the peer, so we can ignore this error
+                return
+            }
+        }
+
         self.on_connection_failure(remote_addr, peer_id, err, ReputationChangeKind::FailedToConnect)
     }
 
@@ -603,8 +641,8 @@ impl PeersManager {
                 self.connection_info.decr_pending_in();
             }
             Direction::Outgoing(_) => {
-                // need to decrement the outgoing counter
-                self.connection_info.decr_out();
+                // cleanup is handled when the incoming active session is activated in
+                // `on_incoming_session_established`
             }
         }
     }
@@ -727,7 +765,7 @@ impl PeersManager {
     /// Peers that are `trusted`, see [PeerKind], are prioritized as long as they're not currently
     /// marked as banned or backed off.
     ///
-    /// If `connect_trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
+    /// If `trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
     /// `trusted` peers.
     ///
     /// Returns `None` if no peer is available.
@@ -736,7 +774,7 @@ impl PeersManager {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
                 peer.state.is_unconnected() &&
-                (!self.connect_trusted_nodes_only || peer.is_trusted())
+                (!self.trusted_nodes_only || peer.is_trusted())
         });
 
         // keep track of the best peer, if there's one
@@ -881,7 +919,7 @@ impl Default for PeersManager {
 }
 
 /// Tracks stats about connected nodes
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(default))]
 pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
@@ -1148,6 +1186,12 @@ impl PeerConnectionState {
     fn is_unconnected(&self) -> bool {
         matches!(self, PeerConnectionState::Idle)
     }
+
+    /// Returns true if there's currently an outbound dial to that peer.
+    #[inline]
+    fn is_pending_out(&self) -> bool {
+        matches!(self, PeerConnectionState::PendingOut)
+    }
 }
 
 /// Commands the [`PeersManager`] listens for.
@@ -1190,6 +1234,11 @@ pub enum PeerAction {
         /// The peer ID of the established connection.
         peer_id: PeerId,
     },
+    /// Disconnect an untrusted incoming connection when trust-node-only is enabled.
+    DisconnectUntrustedIncoming {
+        /// The peer ID.
+        peer_id: PeerId,
+    },
     /// Ban the peer in discovery.
     DiscoveryBanPeerId {
         /// The peer ID.
@@ -1219,7 +1268,7 @@ pub enum PeerAction {
 }
 
 /// Config type for initiating a [`PeersManager`] instance.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct PeersConfig {
@@ -1228,8 +1277,9 @@ pub struct PeersConfig {
     pub refill_slots_interval: Duration,
     /// Trusted nodes to connect to.
     pub trusted_nodes: HashSet<NodeRecord>,
-    /// Connect to trusted nodes only?
-    pub connect_trusted_nodes_only: bool,
+    /// Connect to or accept from trusted nodes only?
+    #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
+    pub trusted_nodes_only: bool,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     ///
     /// The max time spent of a peer before it's removed from the set is determined by the
@@ -1271,7 +1321,7 @@ impl Default for PeersConfig {
             ban_duration: Duration::from_secs(60 * 60 * 12),
             backoff_durations: Default::default(),
             trusted_nodes: Default::default(),
-            connect_trusted_nodes_only: false,
+            trusted_nodes_only: false,
             basic_nodes: Default::default(),
             max_backoff_count: 5,
         }
@@ -1344,8 +1394,8 @@ impl PeersConfig {
     }
 
     /// Connect only to trusted nodes.
-    pub fn with_connect_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
-        self.connect_trusted_nodes_only = trusted_only;
+    pub fn with_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
+        self.trusted_nodes_only = trusted_only;
         self
     }
 
@@ -1371,6 +1421,11 @@ impl PeersConfig {
     pub fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
         self.backoff_durations = backoff_durations;
         self
+    }
+
+    /// Returns the maximum number of peers, inbound and outbound.
+    pub const fn max_peers(&self) -> usize {
+        self.connection_info.max_outbound + self.connection_info.max_inbound
     }
 
     /// Read from file nodes available at launch. Ignored if None.
@@ -1403,7 +1458,7 @@ impl PeersConfig {
 /// The durations to use when a backoff should be applied to a peer.
 ///
 /// See also [`BackoffKind`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerBackoffDurations {
     /// Applies to connection problems where there is a chance that they will be resolved after the
@@ -1468,9 +1523,13 @@ impl Default for PeerBackoffDurations {
     }
 }
 
-#[derive(Debug, Error)]
+/// Error thrown when a incoming connection is rejected right away
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum InboundConnectionError {
+    /// The remote's ip address is banned
     IpBanned,
+    /// No capacity for new inbound connections
+    ExceedsCapacity,
 }
 
 impl Display for InboundConnectionError {
@@ -1487,7 +1546,7 @@ mod tests {
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
             reputation::DEFAULT_REPUTATION,
-            PeerAction,
+            InboundConnectionError, PeerAction,
         },
         session::PendingSessionHandshakeError,
         PeersConfig,
@@ -2042,6 +2101,9 @@ mod tests {
     async fn accept_incoming_trusted_unknown_peer_address() {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 99)), 8008);
         let mut peers = PeersManager::new(PeersConfig::test().with_max_inbound(2));
+        // try to connect trusted peer
+        let trusted = PeerId::random();
+        peers.add_trusted_peer_id(trusted);
 
         // saturate the inbound slots
         for i in 0..peers.connection_info.max_inbound {
@@ -2078,10 +2140,6 @@ mod tests {
             }
             _ => unreachable!(),
         }
-
-        // try to connect trusted peer
-        let trusted = PeerId::random();
-        peers.add_trusted_peer_id(trusted);
 
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 100)), 8008);
         assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
@@ -2346,7 +2404,10 @@ mod tests {
         match a {
             Ok(_) => panic!(),
             Err(err) => match err {
-                super::InboundConnectionError::IpBanned {} => {}
+                super::InboundConnectionError::IpBanned {} => {
+                    assert_eq!(peer_manager.connection_info.num_pending_in, 0)
+                }
+                _ => unreachable!(),
             },
         }
     }
@@ -2359,7 +2420,14 @@ mod tests {
         let ban_list = BanList::new(vec![given_peer_id], HashSet::new());
         let config = PeersConfig::test().with_ban_list(ban_list);
         let mut peer_manager = PeersManager::new(config);
+        assert!(peer_manager.on_incoming_pending_session(socket_addr.ip()).is_ok());
+        // non-trusted nodes should also increase pending_in
+        assert_eq!(peer_manager.connection_info.num_pending_in, 1);
         peer_manager.on_incoming_session_established(given_peer_id, socket_addr);
+        // after the connection is established, the peer should be removed, the num_pending_in
+        // should be decreased, and the num_inbound should not be increased
+        assert_eq!(peer_manager.connection_info.num_pending_in, 0);
+        assert_eq!(peer_manager.connection_info.num_inbound, 0);
 
         let Some(PeerAction::DisconnectBannedIncoming { peer_id }) =
             peer_manager.queued_actions.pop_front()
@@ -2457,7 +2525,7 @@ mod tests {
                 udp_port: 8008,
                 id: trusted_peer,
             }]))
-            .with_connect_trusted_nodes_only(true);
+            .with_trusted_nodes_only(true);
         let mut peers = PeersManager::new(config);
 
         let basic_peer = PeerId::random();
@@ -2482,6 +2550,85 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_incoming_with_trusted_nodes_only() {
+        let trusted_peer = PeerId::random();
+        let config = PeersConfig::test()
+            .with_trusted_nodes(HashSet::from([NodeRecord {
+                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+                tcp_port: 8008,
+                udp_port: 8008,
+                id: trusted_peer,
+            }]))
+            .with_trusted_nodes_only(true);
+        let mut peers = PeersManager::new(config);
+
+        let basic_peer = PeerId::random();
+        let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
+        // non-trusted nodes should also increase pending_in
+        assert_eq!(peers.connection_info.num_pending_in, 1);
+        peers.on_incoming_session_established(basic_peer, basic_sock);
+        // after the connection is established, the peer should be removed, the num_pending_in
+        // should be decreased, and the num_inbound mut not be increased
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_inbound, 0);
+
+        let Some(PeerAction::DisconnectUntrustedIncoming { peer_id }) =
+            peers.queued_actions.pop_front()
+        else {
+            panic!()
+        };
+        assert_eq!(basic_peer, peer_id);
+        assert!(!peers.peers.contains_key(&basic_peer));
+    }
+
+    #[tokio::test]
+    async fn test_incoming_without_trusted_nodes_only() {
+        let trusted_peer = PeerId::random();
+        let config = PeersConfig::test()
+            .with_trusted_nodes(HashSet::from([NodeRecord {
+                address: IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)),
+                tcp_port: 8008,
+                udp_port: 8008,
+                id: trusted_peer,
+            }]))
+            .with_trusted_nodes_only(false);
+        let mut peers = PeersManager::new(config);
+
+        let basic_peer = PeerId::random();
+        let basic_sock = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        assert!(peers.on_incoming_pending_session(basic_sock.ip()).is_ok());
+
+        // non-trusted nodes should also increase pending_in
+        assert_eq!(peers.connection_info.num_pending_in, 1);
+        peers.on_incoming_session_established(basic_peer, basic_sock);
+        // after the connection is established, the peer should be removed, the num_pending_in
+        // should be decreased, and the num_inbound must be increased
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert!(peers.peers.contains_key(&basic_peer));
+    }
+
+    #[tokio::test]
+    async fn test_incoming_at_capacity() {
+        let mut config = PeersConfig::test();
+        config.connection_info.max_inbound = 1;
+        let mut peers = PeersManager::new(config);
+
+        let peer = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        assert!(peers.on_incoming_pending_session(addr.ip()).is_ok());
+
+        peers.on_incoming_session_established(peer, addr);
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        assert_eq!(
+            peers.on_incoming_pending_session(addr.ip()).unwrap_err(),
+            InboundConnectionError::ExceedsCapacity
+        );
     }
 
     #[tokio::test]
@@ -2553,6 +2700,67 @@ mod tests {
         let peer = peers.peers.get(&peer_id).unwrap();
         assert_eq!(peer.state, PeerConnectionState::Idle);
         assert!(!peer.remove_after_disconnect);
+    }
+
+    #[tokio::test]
+    async fn test_incoming_outgoing_already_connected() {
+        let peer_id = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        let mut peers = PeersManager::default();
+
+        peers.on_incoming_pending_session(addr.ip()).unwrap();
+        peers.add_peer(peer_id, addr, None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+
+        peers.on_incoming_session_established(peer_id, addr);
+        peers.on_already_connected(Direction::Outgoing(peer_id));
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::In);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.connection_info.num_pending_out, 0);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_outbound, 0);
+    }
+
+    #[tokio::test]
+    async fn test_already_connected_incoming_outgoing_connection_error() {
+        let peer_id = PeerId::random();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        let mut peers = PeersManager::default();
+
+        peers.on_incoming_pending_session(addr.ip()).unwrap();
+        peers.add_peer(peer_id, addr, None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(_) => {}
+            _ => unreachable!(),
+        }
+
+        match event!(peers) {
+            PeerAction::Connect { .. } => {}
+            _ => unreachable!(),
+        }
+
+        peers.on_incoming_session_established(peer_id, addr);
+
+        peers.on_outgoing_connection_failure(
+            &addr,
+            &peer_id,
+            &io::Error::new(io::ErrorKind::ConnectionRefused, ""),
+        );
+        assert_eq!(peers.peers.get(&peer_id).unwrap().state, PeerConnectionState::In);
+        assert_eq!(peers.connection_info.num_inbound, 1);
+        assert_eq!(peers.connection_info.num_pending_out, 0);
+        assert_eq!(peers.connection_info.num_pending_in, 0);
+        assert_eq!(peers.connection_info.num_outbound, 0);
     }
 
     #[tokio::test]

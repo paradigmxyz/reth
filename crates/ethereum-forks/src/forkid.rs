@@ -108,7 +108,6 @@ impl From<ForkFilterKey> for u64 {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(PropTestArbitrary, Arbitrary))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable, RlpMaxEncodedLen)]
-
 pub struct ForkId {
     /// CRC32 checksum of the all fork blocks and timestamps from genesis.
     pub hash: ForkHash,
@@ -560,6 +559,25 @@ mod tests {
             ForkId::decode(&mut (&hex!("ce84ffffffff88ffffffffffffffff") as &[u8])).unwrap(),
             ForkId { hash: ForkHash(hex!("ffffffff")), next: u64::MAX }
         );
+    }
+
+    #[test]
+    fn fork_id_rlp() {
+        // <https://github.com/ethereum/go-ethereum/blob/767b00b0b514771a663f3362dd0310fc28d40c25/core/forkid/forkid_test.go#L370-L370>
+        let val = hex!("c6840000000080");
+        let id = ForkId::decode(&mut &val[..]).unwrap();
+        assert_eq!(id, ForkId { hash: ForkHash(hex!("00000000")), next: 0 });
+        assert_eq!(alloy_rlp::encode(id), &val[..]);
+
+        let val = hex!("ca84deadbeef84baddcafe");
+        let id = ForkId::decode(&mut &val[..]).unwrap();
+        assert_eq!(id, ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE });
+        assert_eq!(alloy_rlp::encode(id), &val[..]);
+
+        let val = hex!("ce84ffffffff88ffffffffffffffff");
+        let id = ForkId::decode(&mut &val[..]).unwrap();
+        assert_eq!(id, ForkId { hash: ForkHash(u32::MAX.to_be_bytes()), next: u64::MAX });
+        assert_eq!(alloy_rlp::encode(id), &val[..]);
     }
 
     #[test]

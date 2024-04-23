@@ -106,7 +106,7 @@ mod elias_fano {
     impl fmt::Debug for IntegerList {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let vec: Vec<usize> = self.0.iter(0).collect();
-            write!(f, "IntegerList {:?}", vec)
+            write!(f, "IntegerList {vec:?}")
         }
     }
 

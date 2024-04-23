@@ -1,7 +1,7 @@
-use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -11,7 +11,6 @@ use reth_db::{
 };
 use reth_etl::Collector;
 use reth_interfaces::{
-    consensus::Consensus,
     p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
     provider::ProviderError,
 };
@@ -25,6 +24,9 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode,
+};
+use reth_stages_api::{
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use std::{
     sync::Arc,
@@ -84,7 +86,7 @@ where
             consensus,
             sync_gap: None,
             hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
-            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
+            header_collector: Collector::new(etl_config.file_size / 2, etl_config.dir),
             is_etl_ready: false,
         }
     }
@@ -231,7 +233,7 @@ where
         let local_head_number = gap.local_head.number;
 
         // let the downloader know what to sync
-        self.downloader.update_sync_gap(gap.local_head, gap.target.clone());
+        self.downloader.update_sync_gap(gap.local_head, gap.target);
 
         // We only want to stop once we have all the headers on ETL filespace (disk).
         loop {
@@ -369,13 +371,13 @@ mod tests {
     mod test_runner {
         use super::*;
         use crate::test_utils::{TestRunnerError, TestStageDB};
+        use reth_consensus::test_utils::TestConsensus;
         use reth_db::{test_utils::TempDatabase, DatabaseEnv};
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_interfaces::test_utils::{
-            generators, generators::random_header_range, TestConsensus, TestHeaderDownloader,
-            TestHeadersClient,
+            generators, generators::random_header_range, TestHeaderDownloader, TestHeadersClient,
         };
         use reth_provider::BlockNumReader;
         use tokio::sync::watch;

@@ -23,9 +23,6 @@ pub enum ProviderError {
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
     SenderRecoveryError,
-    /// Inconsistent header gap.
-    #[error("inconsistent header gap in the database")]
-    InconsistentHeaderGap,
     /// The header number was not found for the given block hash.
     #[error("block hash {0} does not exist in Headers table")]
     BlockHashNotFound(BlockHash),
@@ -65,9 +62,6 @@ pub enum ProviderError {
     /// The specific receipt is missing
     #[error("no receipt found for {0:?}")]
     ReceiptNotFound(TxHashOrNumber),
-    /// Unable to find a specific block.
-    #[error("block does not exist {0:?}")]
-    BlockNotFound(BlockHashOrNumber),
     /// Unable to find the best block.
     #[error("best block does not exist")]
     BestBlockNotFound,
@@ -131,6 +125,9 @@ pub enum ProviderError {
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),
+    /// Consistent view error.
+    #[error("failed to initialize consistent view: {0}")]
+    ConsistentView(Box<ConsistentViewError>),
 }
 
 impl From<reth_primitives::fs::FsPathError> for ProviderError {
@@ -152,18 +149,24 @@ pub struct RootMismatch {
 }
 
 /// Consistent database view error.
-#[derive(Error, Debug)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ConsistentViewError {
     /// Error thrown on attempt to initialize provider while node is still syncing.
-    #[error("node is syncing. best block: {0}")]
-    Syncing(BlockNumber),
+    #[error("node is syncing. best block: {best_block:?}")]
+    Syncing {
+        /// Best block diff.
+        best_block: GotExpected<BlockNumber>,
+    },
     /// Error thrown on inconsistent database view.
     #[error("inconsistent database state: {tip:?}")]
     Inconsistent {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
     },
-    /// Underlying provider error.
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
+}
+
+impl From<ConsistentViewError> for ProviderError {
+    fn from(value: ConsistentViewError) -> Self {
+        Self::ConsistentView(Box::new(value))
+    }
 }

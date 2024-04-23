@@ -87,12 +87,22 @@ pub use reth_net_nat::{external_ip, NatResolver};
 /// The default address for discv4 via UDP
 ///
 /// Note: the default TCP address is the same.
-pub const DEFAULT_DISCOVERY_ADDR: Ipv4Addr = Ipv4Addr::UNSPECIFIED;
+pub const DEFAULT_DISCOVERY_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 
 /// The default port for discv4 via UDP
 ///
 /// Note: the default TCP port is the same.
 pub const DEFAULT_DISCOVERY_PORT: u16 = 30303;
+
+/// The default address for discv5 via UDP.
+///
+/// Note: the default TCP address is the same.
+pub const DEFAULT_DISCOVERY_V5_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
+/// The default port for discv5 via UDP.
+///
+/// Default is port 9000.
+pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9000;
 
 /// The default address for discv4 via UDP: "0.0.0.0:30303"
 ///
@@ -201,14 +211,14 @@ impl Discv4 {
     /// # use std::io;
     /// use rand::thread_rng;
     /// use reth_discv4::{Discv4, Discv4Config};
-    /// use reth_primitives::{NodeRecord, PeerId};
+    /// use reth_primitives::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
     /// // generate a (random) keypair
     /// let mut rng = thread_rng();
     /// let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
-    /// let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+    /// let id = pk2id(&pk);
     ///
     /// let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     /// let local_enr =
@@ -590,7 +600,7 @@ impl Discv4Service {
 
     /// Returns the current enr sequence of the local record.
     fn enr_seq(&self) -> Option<u64> {
-        (self.config.enable_eip868).then(|| self.local_eip_868_enr.seq())
+        self.config.enable_eip868.then(|| self.local_eip_868_enr.seq())
     }
 
     /// Sets the [Interval] used for periodically looking up targets over the network
@@ -1389,7 +1399,7 @@ impl Discv4Service {
 
     fn evict_expired_requests(&mut self, now: Instant) {
         self.pending_enr_requests.retain(|_node_id, enr_request| {
-            now.duration_since(enr_request.sent_at) < self.config.ping_expiration
+            now.duration_since(enr_request.sent_at) < self.config.enr_expiration
         });
 
         let mut failed_pings = Vec::new();
@@ -1567,8 +1577,7 @@ impl Discv4Service {
             }
 
             // re-ping some peers
-            if self.ping_interval.poll_tick(cx).is_ready() {
-                let _ = self.ping_interval.poll_tick(cx);
+            while self.ping_interval.poll_tick(cx).is_ready() {
                 self.re_ping_oldest();
             }
 
@@ -1688,7 +1697,7 @@ impl Discv4Service {
             // try resending buffered pings
             self.ping_buffered();
 
-            // evict expired nodes
+            // evict expired requests
             while self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
                 self.evict_expired_requests(Instant::now());
             }
@@ -2259,12 +2268,27 @@ mod tests {
         let local_addr = service.local_addr();
 
         let mut num_inserted = 0;
-        for _ in 0..MAX_NODES_PING {
+        loop {
             let node = NodeRecord::new(local_addr, PeerId::random());
             if service.add_node(node) {
                 num_inserted += 1;
                 assert!(service.pending_pings.contains_key(&node.id));
                 assert_eq!(service.pending_pings.len(), num_inserted);
+                if num_inserted == MAX_NODES_PING {
+                    break;
+                }
+            }
+        }
+
+        // `pending_pings` is full, insert into `queued_pings`.
+        num_inserted = 0;
+        for _ in 0..MAX_NODES_PING {
+            let node = NodeRecord::new(local_addr, PeerId::random());
+            if service.add_node(node) {
+                num_inserted += 1;
+                assert!(!service.pending_pings.contains_key(&node.id));
+                assert_eq!(service.pending_pings.len(), MAX_NODES_PING);
+                assert_eq!(service.queued_pings.len(), num_inserted);
             }
         }
     }
@@ -2534,6 +2558,71 @@ mod tests {
         let _handle = service.spawn();
         discv4.send_lookup_self();
         let _ = discv4.lookup_self().await;
+    }
+
+    #[tokio::test]
+    async fn test_requests_timeout() {
+        reth_tracing::init_test_tracing();
+        let fork_id = ForkId { hash: ForkHash(hex!("743f3d89")), next: 16191202 };
+
+        let config = Discv4Config::builder()
+            .request_timeout(Duration::from_millis(200))
+            .ping_expiration(Duration::from_millis(200))
+            .add_eip868_pair("eth", fork_id)
+            .build();
+        let (_disv4, mut service) = create_discv4_with_config(config).await;
+
+        let id = PeerId::random();
+        let key = kad_key(id);
+        let record = NodeRecord::new("0.0.0.0:0".parse().unwrap(), id);
+
+        let _ = service.kbuckets.insert_or_update(
+            &key,
+            NodeEntry::new_proven(record),
+            NodeStatus {
+                direction: ConnectionDirection::Incoming,
+                state: ConnectionState::Connected,
+            },
+        );
+
+        service.lookup_self();
+        assert_eq!(service.pending_find_nodes.len(), 1);
+
+        let ctx = service.pending_find_nodes.values().next().unwrap().lookup_context.clone();
+
+        service.pending_lookup.insert(record.id, (Instant::now(), ctx));
+
+        assert_eq!(service.pending_lookup.len(), 1);
+
+        let ping = Ping {
+            from: service.local_node_record.into(),
+            to: record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: service.enr_seq(),
+        };
+        let echo_hash = service.send_packet(Message::Ping(ping), record.udp_addr());
+        let ping_request = PingRequest {
+            sent_at: Instant::now(),
+            node: record,
+            echo_hash,
+            reason: PingReason::InitialInsert,
+        };
+        service.pending_pings.insert(record.id, ping_request);
+
+        assert_eq!(service.pending_pings.len(), 1);
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        poll_fn(|cx| {
+            let _ = service.poll(cx);
+
+            assert_eq!(service.pending_find_nodes.len(), 0);
+            assert_eq!(service.pending_lookup.len(), 0);
+            assert_eq!(service.pending_pings.len(), 0);
+
+            Poll::Ready(())
+        })
+        .await;
     }
 
     // sends a PING packet with wrong 'to' field and expects a PONG response.

@@ -79,7 +79,7 @@
 //!     }
 //! }
 //!
-//! /// A [PayloadJob] is a a future that's being polled by the `PayloadBuilderService`
+//! /// A [PayloadJob] is a future that's being polled by the `PayloadBuilderService`
 //! impl Future for EmptyBlockPayloadJob {
 //!  type Output = Result<(), PayloadBuilderError>;
 //!
@@ -105,8 +105,6 @@ pub mod database;
 pub mod error;
 mod events;
 mod metrics;
-mod optimism;
-mod payload;
 mod service;
 mod traits;
 
@@ -115,8 +113,11 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use optimism::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
-pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
+pub use events::Events;
 pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore};
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+
+// re-export the Ethereum engine primitives for convenience
+#[doc(inline)]
+pub use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadBuilderAttributes};

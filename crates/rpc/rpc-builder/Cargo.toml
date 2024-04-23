@@ -20,13 +20,15 @@ reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
-reth-node-api.workspace = true
+reth-evm.workspace = true
+reth-engine-primitives.workspace = true
 
 # rpc/net
 jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["full"] }
 hyper.workspace = true
+pin-project.workspace = true
 
 # metrics
 reth-metrics = { workspace = true, features = ["common"] }

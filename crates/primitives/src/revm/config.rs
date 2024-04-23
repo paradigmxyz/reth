@@ -10,14 +10,14 @@ pub fn revm_spec_by_timestamp_after_merge(
 ) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
-        if chain_spec.fork(Hardfork::Ecotone).active_at_timestamp(timestamp) {
-            return revm_primitives::ECOTONE
+        return if chain_spec.fork(Hardfork::Ecotone).active_at_timestamp(timestamp) {
+            revm_primitives::ECOTONE
         } else if chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp) {
-            return revm_primitives::CANYON
+            revm_primitives::CANYON
         } else if chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
-            return revm_primitives::REGOLITH
+            revm_primitives::REGOLITH
         } else {
-            return revm_primitives::BEDROCK
+            revm_primitives::BEDROCK
         }
     }
 
@@ -142,7 +142,7 @@ mod tests {
         {
             #[inline(always)]
             fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().chain(alloy_chains::Chain::from_id(10));
+                let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::from_id(10));
                 f(cs).build()
             }
 

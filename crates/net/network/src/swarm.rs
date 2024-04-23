@@ -203,6 +203,9 @@ where
                         InboundConnectionError::IpBanned => {
                             trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
                         }
+                        InboundConnectionError::ExceedsCapacity => {
+                            trace!(target: "net", ?remote_addr, "No capacity for incoming connection");
+                        }
                     }
                     return None
                 }

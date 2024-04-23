@@ -3,13 +3,16 @@
 use clap::Parser;
 use reth::cli::Cli;
 use reth_node_builder::NodeHandle;
-use reth_node_optimism::{args::RollupArgs, OptimismEngineTypes, OptimismNode};
+use reth_node_optimism::{
+    args::RollupArgs, rpc::SequencerClient, OptimismEngineTypes, OptimismNode,
+};
 use reth_provider::BlockReaderIdExt;
+use std::sync::Arc;
 
 // We use jemalloc for performance reasons
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(not(feature = "optimism"))]
 compile_error!("Cannot build the `op-reth` binary with the `optimism` feature flag disabled. Did you mean to build `reth`?");
@@ -24,8 +27,20 @@ fn main() {
     }
 
     if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
-        let NodeHandle { node, node_exit_future } =
-            builder.launch_node(OptimismNode::new(rollup_args.clone())).await?;
+        let NodeHandle { node, node_exit_future } = builder
+            .node(OptimismNode::new(rollup_args.clone()))
+            .extend_rpc_modules(move |ctx| {
+                // register sequencer tx forwarder
+                if let Some(sequencer_http) = rollup_args.sequencer_http.clone() {
+                    ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(SequencerClient::new(
+                        sequencer_http,
+                    )));
+                }
+
+                Ok(())
+            })
+            .launch()
+            .await?;
 
         // If `enable_genesis_walkback` is set to true, the rollup client will need to
         // perform the derivation pipeline from genesis, validating the data dir.

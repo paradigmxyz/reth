@@ -5,7 +5,7 @@ use reth_primitives::{TxHash, B256};
 use std::path::PathBuf;
 
 /// Parameters for debugging purposes
-#[derive(Debug, Clone, Args, PartialEq, Default)]
+#[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Debug")]
 pub struct DebugArgs {
     /// Prompt the downloader to download blocks one at a time.
@@ -58,6 +58,10 @@ pub struct DebugArgs {
         conflicts_with = "hook_transaction"
     )]
     pub hook_all: bool,
+
+    /// If provided, the engine will skip `n` consecutive FCUs.
+    #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
+    pub skip_fcu: Option<usize>,
 
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages

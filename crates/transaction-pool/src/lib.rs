@@ -523,7 +523,7 @@ where
     }
 }
 
-impl<V: TransactionValidator, T: TransactionOrdering, S> TransactionPoolExt for Pool<V, T, S>
+impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,

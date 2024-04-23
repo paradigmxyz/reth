@@ -1,10 +1,10 @@
 use crate::{
     blockchain_tree::error::{BlockchainTreeError, CanonicalError},
-    consensus::ConsensusError,
     db::DatabaseError,
     executor::BlockExecutionError,
     provider::ProviderError,
 };
+use reth_consensus::ConsensusError;
 use reth_network_api::NetworkError;
 use reth_primitives::fs::FsPathError;
 
@@ -70,11 +70,11 @@ mod size_asserts {
         };
     }
 
-    static_assert_size!(RethError, 56);
-    static_assert_size!(BlockExecutionError, 48);
+    static_assert_size!(RethError, 64);
+    static_assert_size!(BlockExecutionError, 56);
     static_assert_size!(ConsensusError, 48);
     static_assert_size!(DatabaseError, 40);
     static_assert_size!(ProviderError, 48);
     static_assert_size!(NetworkError, 0);
-    static_assert_size!(CanonicalError, 48);
+    static_assert_size!(CanonicalError, 56);
 }

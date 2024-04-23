@@ -4,9 +4,9 @@ use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
+    state::StateOverride, AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
     EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
-    StateContext, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
+    StateContext, SyncStatus, Transaction, TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -73,8 +73,10 @@ pub trait EthApi {
 
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
-    async fn block_receipts(&self, block_id: BlockId)
-        -> RpcResult<Option<Vec<TransactionReceipt>>>;
+    async fn block_receipts(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<Vec<AnyTransactionReceipt>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
@@ -137,7 +139,7 @@ pub trait EthApi {
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
-    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<TransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<AnyTransactionReceipt>>;
 
     /// Returns the balance of the account of given address.
     #[method(name = "getBalance")]

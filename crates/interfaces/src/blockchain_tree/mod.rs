@@ -1,9 +1,11 @@
-use crate::{blockchain_tree::error::InsertBlockError, RethResult};
+use crate::{blockchain_tree::error::InsertBlockError, provider::ProviderError, RethResult};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
 use std::collections::{BTreeMap, HashSet};
+
+use self::error::CanonicalError;
 
 pub mod error;
 
@@ -94,10 +96,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// # Returns
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
-    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome>;
-
-    /// Unwind tables and put it inside state
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()>;
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError>;
 }
 
 /// Represents the kind of validation that should be performed when inserting a block.
@@ -289,17 +288,8 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
 
-    /// Given the parent hash of a block, this tries to find the last ancestor that is part of the
-    /// canonical chain.
-    ///
-    /// In other words, this will walk up the (side) chain starting with the given hash and return
-    /// the first block that's canonical.
-    ///
-    /// Note: this could be the given `parent_hash` if it's already canonical.
-    fn find_canonical_ancestor(&self, parent_hash: BlockHash) -> Option<BlockHash>;
-
     /// Return whether or not the block is known and in the canonical chain.
-    fn is_canonical(&self, hash: BlockHash) -> RethResult<bool>;
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError>;
 
     /// Given the hash of a block, this checks the buffered blocks for the lowest ancestor in the
     /// buffer.

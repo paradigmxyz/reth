@@ -128,7 +128,7 @@ fn remove_size(store: &mut HashMap<B256, BlobTransactionSidecar>, tx: &B256) -> 
     store.remove(tx).map(|rem| rem.size()).unwrap_or_default()
 }
 
-/// Inserts the given blob into the store and returns the size of the blob that was added
+/// Inserts the given blob into the store and returns the size of the blob that was added.
 ///
 /// We don't need to handle the size updates for replacements because transactions are unique.
 #[inline]
@@ -138,6 +138,6 @@ fn insert_size(
     blob: BlobTransactionSidecar,
 ) -> usize {
     let add = blob.size();
-    store.insert(tx, blob).map(|rem| rem.size());
+    store.insert(tx, blob);
     add
 }

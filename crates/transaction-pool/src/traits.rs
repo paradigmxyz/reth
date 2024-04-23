@@ -10,11 +10,12 @@ use crate::{
 use futures_util::{ready, Stream};
 use reth_eth_wire::HandleMempoolData;
 use reth_primitives::{
-    kzg::KzgSettings, AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
-    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, U256,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
+    BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
+    IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionKind,
+    TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip4844, TxHash, B256,
+    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -494,8 +495,7 @@ impl PropagateKind {
     /// Returns the peer the transaction was sent to
     pub const fn peer(&self) -> &PeerId {
         match self {
-            PropagateKind::Full(peer) => peer,
-            PropagateKind::Hash(peer) => peer,
+            PropagateKind::Full(peer) | PropagateKind::Hash(peer) => peer,
         }
     }
 }
@@ -503,8 +503,7 @@ impl PropagateKind {
 impl From<PropagateKind> for PeerId {
     fn from(value: PropagateKind) -> Self {
         match value {
-            PropagateKind::Full(peer) => peer,
-            PropagateKind::Hash(peer) => peer,
+            PropagateKind::Full(peer) | PropagateKind::Hash(peer) => peer,
         }
     }
 }
@@ -532,7 +531,7 @@ pub struct NewBlobSidecar {
     /// hash of the EIP-4844 transaction.
     pub tx_hash: TxHash,
     /// the blob transaction sidecar.
-    pub sidecar: BlobTransactionSidecar,
+    pub sidecar: Arc<BlobTransactionSidecar>,
 }
 
 /// Where the transaction originates from.
@@ -758,7 +757,7 @@ pub trait PoolTransaction:
     + Send
     + Sync
     + FromRecoveredPooledTransaction
-    + FromRecoveredTransaction
+    + TryFromRecoveredTransaction
     + IntoRecoveredTransaction
 {
     /// Hash of the transaction.
@@ -916,6 +915,8 @@ impl EthPooledTransaction {
     /// [EthBlobTransactionSidecar::Missing]
     pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
+
+        #[allow(unreachable_patterns)]
         let gas_cost = match &transaction.transaction {
             Transaction::Legacy(t) => {
                 U256::from(t.gas_price).saturating_mul(U256::from(t.gas_limit))
@@ -930,8 +931,7 @@ impl EthPooledTransaction {
                 blob_sidecar = EthBlobTransactionSidecar::Missing;
                 U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
             }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => U256::ZERO,
+            _ => U256::ZERO,
         };
         let mut cost = transaction.value();
         cost = cost.saturating_add(gas_cost);
@@ -1011,13 +1011,13 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
+        #[allow(unreachable_patterns)]
         match &self.transaction.transaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
+            _ => 0,
         }
     }
 
@@ -1029,12 +1029,12 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        #[allow(unreachable_patterns)]
         match &self.transaction.transaction {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
+            _ => None,
         }
     }
 
@@ -1112,12 +1112,32 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl FromRecoveredTransaction for EthPooledTransaction {
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
-        // missing.
+impl TryFromRecoveredTransaction for EthPooledTransaction {
+    type Error = TryFromRecoveredTransactionError;
+
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error> {
+        // ensure we can handle the transaction type and its format
+        match tx.tx_type() as u8 {
+            0..=EIP1559_TX_TYPE_ID => {
+                // supported
+            }
+            EIP4844_TX_TYPE_ID => {
+                // doesn't have a blob sidecar
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
+            }
+            unsupported => {
+                // unsupported transaction type
+                return Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
+                    unsupported,
+                ));
+            }
+        };
+
         let encoded_length = tx.length_without_header();
-        EthPooledTransaction::new(tx, encoded_length)
+        let transaction = EthPooledTransaction::new(tx, encoded_length);
+        Ok(transaction)
     }
 }
 

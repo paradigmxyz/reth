@@ -23,7 +23,7 @@ reth-tracing.workspace = true
 # codecs
 serde = { workspace = true, default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-modular-bitfield = "0.11.2"
+modular-bitfield.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -36,7 +36,7 @@ thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
 eyre.workspace = true
-paste = "1.0"
+paste.workspace = true
 rustc-hash = "1.1.0"
 
 # arbitrary utils
@@ -60,13 +60,13 @@ test-fuzz.workspace = true
 
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
-iai = "0.1.1"
+iai-callgrind = "0.10.2"
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 
-paste = "1.0"
+paste.workspace = true
 
 assert_matches.workspace = true
 

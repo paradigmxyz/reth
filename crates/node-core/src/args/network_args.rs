@@ -3,7 +3,10 @@
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
 use reth_config::Config;
-use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{
+    DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT, DEFAULT_DISCOVERY_V5_ADDR,
+    DEFAULT_DISCOVERY_V5_PORT,
+};
 use reth_net_nat::NatResolver;
 use reth_network::{
     transactions::{
@@ -11,17 +14,17 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder,
+    HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
-use std::{net::Ipv4Addr, path::PathBuf, sync::Arc};
+use std::{net::IpAddr, path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
-    /// Disable the discovery service.
+    /// Arguments to setup discovery service.
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
@@ -67,7 +70,7 @@ pub struct NetworkArgs {
 
     /// Network listening address
     #[arg(long = "addr", value_name = "ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
-    pub addr: Ipv4Addr,
+    pub addr: IpAddr,
 
     /// Network listening port
     #[arg(long = "port", value_name = "PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
@@ -114,7 +117,7 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
-        let peer_config = config
+        let peers_config = config
             .peers
             .clone()
             .with_max_inbound_opt(self.max_inbound_peers)
@@ -131,7 +134,10 @@ impl NetworkArgs {
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
-            .peer_config(peer_config)
+            .sessions_config(
+                SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
+            )
+            .peer_config(peers_config)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config);
@@ -208,13 +214,27 @@ pub struct DiscoveryArgs {
     #[arg(long, conflicts_with = "disable_discovery")]
     pub disable_discv4_discovery: bool,
 
-    /// The UDP address to use for P2P discovery/networking
-    #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
-    pub addr: Ipv4Addr,
+    /// Enable Discv5 discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub enable_discv5_discovery: bool,
 
-    /// The UDP port to use for P2P discovery/networking
+    /// The UDP address to use for devp2p peer discovery version 4.
+    #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
+    pub addr: IpAddr,
+
+    /// The UDP port to use for devp2p peer discovery version 4.
     #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
+
+    /// The UDP address to use for devp2p peer discovery version 5.
+    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR",
+    default_value_t = DEFAULT_DISCOVERY_V5_ADDR)]
+    pub discv5_addr: IpAddr,
+
+    /// The UDP port to use for devp2p peer discovery version 5.
+    #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
+    default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    pub discv5_port: u16,
 }
 
 impl DiscoveryArgs {
@@ -230,6 +250,12 @@ impl DiscoveryArgs {
         if self.disable_discovery || self.disable_discv4_discovery {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
+
+        if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
+            network_config_builder = network_config_builder.disable_discv4_discovery();
+            network_config_builder = network_config_builder.enable_discv5_discovery();
+        }
+
         network_config_builder
     }
 
@@ -246,9 +272,12 @@ impl Default for DiscoveryArgs {
         Self {
             disable_discovery: false,
             disable_dns_discovery: false,
-            disable_discv4_discovery: false,
+            disable_discv4_discovery: cfg!(feature = "optimism"),
+            enable_discv5_discovery: cfg!(feature = "optimism"),
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
+            discv5_addr: DEFAULT_DISCOVERY_V5_ADDR,
+            discv5_port: DEFAULT_DISCOVERY_V5_PORT,
         }
     }
 }
@@ -312,6 +341,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "optimism"))]
     #[test]
     fn network_args_default_sanity_test() {
         let default_args = NetworkArgs::default();

@@ -10,16 +10,16 @@ use reth_db::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{
     blockchain_tree::{
-        error::InsertBlockError, BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer,
-        CanonicalOutcome, InsertPayloadOk,
+        error::{CanonicalError, InsertBlockError},
+        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+        InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
     provider::ProviderResult,
-    RethError, RethResult,
+    RethResult,
 };
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
@@ -60,6 +60,7 @@ use chain_info::ChainInfoTracker;
 
 mod consistent_view;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
+use reth_rpc_types::engine::ForkchoiceState;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -309,6 +310,13 @@ where
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         self.database.block_range(range)
+    }
+
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        self.database.block_with_senders_range(range)
     }
 }
 
@@ -668,12 +676,8 @@ where
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> RethResult<CanonicalOutcome> {
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         self.tree.make_canonical(block_hash)
-    }
-
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
-        self.tree.unwind(unwind_to)
     }
 }
 
@@ -710,11 +714,7 @@ where
         self.tree.canonical_blocks()
     }
 
-    fn find_canonical_ancestor(&self, hash: BlockHash) -> Option<BlockHash> {
-        self.tree.find_canonical_ancestor(hash)
-    }
-
-    fn is_canonical(&self, hash: BlockHash) -> Result<bool, RethError> {
+    fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
         self.tree.is_canonical(hash)
     }
 

@@ -14,9 +14,11 @@ use crate::{
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
+use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
+use reth_exex::ExExManagerHandle;
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
@@ -119,14 +121,14 @@ pub struct Command {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);
@@ -153,11 +155,12 @@ impl Command {
                 Arc::clone(&db),
                 factory.static_file_provider(),
                 metrics_process::Collector::default(),
+                ctx.task_executor,
             )
             .await?;
         }
 
-        let batch_size = self.batch_size.unwrap_or(self.to - self.from + 1);
+        let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = EtlConfig::new(
             Some(
@@ -172,7 +175,7 @@ impl Command {
                     let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                     let mut config = config;
-                    config.peers.connect_trusted_nodes_only = self.network.trusted_only;
+                    config.peers.trusted_nodes_only = self.network.trusted_only;
                     if !self.network.trusted_peers.is_empty() {
                         self.network.trusted_peers.iter().for_each(|peer| {
                             config.peers.trusted_nodes.insert(*peer);
@@ -239,6 +242,7 @@ impl Command {
                             },
                             config.stages.merkle.clean_threshold,
                             config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                            ExExManagerHandle::empty(),
                         )),
                         None,
                     )
@@ -247,21 +251,27 @@ impl Command {
                     (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
                 }
                 StageEnum::AccountHashing => {
-                    (Box::new(AccountHashingStage::new(1, batch_size)), None)
+                    (Box::new(AccountHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::StorageHashing => {
-                    (Box::new(StorageHashingStage::new(1, batch_size)), None)
+                    (Box::new(StorageHashingStage::new(1, batch_size, etl_config)), None)
                 }
                 StageEnum::Merkle => (
                     Box::new(MerkleStage::default_execution()),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
-                StageEnum::AccountHistory => (Box::<IndexAccountHistoryStage>::default(), None),
-                StageEnum::StorageHistory => (Box::<IndexStorageHistoryStage>::default(), None),
+                StageEnum::AccountHistory => (
+                    Box::new(IndexAccountHistoryStage::default().with_etl_config(etl_config)),
+                    None,
+                ),
+                StageEnum::StorageHistory => (
+                    Box::new(IndexStorageHistoryStage::default().with_etl_config(etl_config)),
+                    None,
+                ),
                 _ => return Ok(()),
             };
         if let Some(unwind_stage) = &unwind_stage {
-            assert!(exec_stage.type_id() == unwind_stage.type_id());
+            assert_eq!((*exec_stage).type_id(), (**unwind_stage).type_id());
         }
 
         let checkpoint = provider_rw.get_stage_checkpoint(exec_stage.id())?.unwrap_or_default();

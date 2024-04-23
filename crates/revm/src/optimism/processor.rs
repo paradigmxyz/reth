@@ -1,8 +1,8 @@
 use crate::processor::{compare_receipts_root_and_logs_bloom, EVMProcessor};
+use reth_evm::ConfigureEvm;
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
-use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
     Bloom, ChainSpec, Hardfork, Receipt, ReceiptWithBloom, TxType, B256, U256,
@@ -44,15 +44,6 @@ where
 {
     type Error = BlockExecutionError;
 
-    fn execute(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError> {
-        let receipts = self.execute_inner(block, total_difficulty)?;
-        self.save_receipts(receipts)
-    }
-
     fn execute_and_verify_receipt(
         &mut self,
         block: &BlockWithSenders,
@@ -80,7 +71,7 @@ where
             self.stats.receipt_root_duration += time.elapsed();
         }
 
-        self.save_receipts(receipts)
+        self.batch_record.save_receipts(receipts)
     }
 
     fn execute_transactions(
@@ -145,7 +136,11 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|_| BlockExecutionError::ProviderError)?;
+                .map_err(|_| {
+                    BlockExecutionError::OptimismBlockExecution(
+                        OptimismBlockExecutionError::AccountLoadFailed(*sender),
+                    )
+                })?;
 
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, *sender)?;
@@ -190,11 +185,10 @@ where
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
-            receipts,
-            self.first_block.unwrap_or_default(),
+            self.batch_record.take_receipts(),
+            self.batch_record.first_block().unwrap_or_default(),
         )
     }
 
@@ -211,8 +205,8 @@ mod tests {
         test_utils::{StateProviderTest, TestEvmConfig},
     };
     use reth_primitives::{
-        Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey, StorageValue,
-        Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
+        b256, Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey,
+        StorageValue, Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use revm::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr, sync::Arc};
@@ -264,7 +258,10 @@ mod tests {
             number: 1,
             gas_limit: 1_000_000,
             gas_used: 42_000,
-            ..Header::default()
+            receipts_root: b256!(
+                "83465d1e7d01578c0d609be33570f91242f013e9e295b0879905346abbd63731"
+            ),
+            ..Default::default()
         };
 
         let mut db = create_op_state_provider();
@@ -301,10 +298,10 @@ mod tests {
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![tx, tx_deposit],
                         ommers: vec![],
                         withdrawals: None,
@@ -315,8 +312,8 @@ mod tests {
             )
             .unwrap();
 
-        let tx_receipt = executor.receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = executor.receipts[0][1].as_ref().unwrap();
+        let tx_receipt = executor.receipts()[0][0].as_ref().unwrap();
+        let deposit_receipt = executor.receipts()[0][1].as_ref().unwrap();
 
         // deposit_receipt_version is not present in pre canyon transactions
         assert!(deposit_receipt.deposit_receipt_version.is_none());
@@ -335,7 +332,10 @@ mod tests {
             number: 1,
             gas_limit: 1_000_000,
             gas_used: 42_000,
-            ..Header::default()
+            receipts_root: b256!(
+                "fffc85c4004fd03c7bfbe5491fae98a7473126c099ac11e8286fd0013f15f908"
+            ),
+            ..Default::default()
         };
 
         let mut db = create_op_state_provider();
@@ -372,10 +372,10 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute(
+            .execute_and_verify_receipt(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![tx, tx_deposit],
                         ommers: vec![],
                         withdrawals: None,
@@ -386,10 +386,10 @@ mod tests {
             )
             .expect("Executing a block while canyon is active should not fail");
 
-        let tx_receipt = executor.receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = executor.receipts[0][1].as_ref().unwrap();
+        let tx_receipt = executor.receipts()[0][0].as_ref().unwrap();
+        let deposit_receipt = executor.receipts()[0][1].as_ref().unwrap();
 
-        // deposit_receipt_version is set to 1 for post canyon deposit transations
+        // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert_eq!(deposit_receipt.deposit_receipt_version, Some(1));
         assert!(tx_receipt.deposit_receipt_version.is_none());
 

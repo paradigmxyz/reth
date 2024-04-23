@@ -230,7 +230,7 @@ impl PendingBlockEnv {
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
-        let state_root = state_provider.state_root(&bundle)?;
+        let state_root = state_provider.state_root(bundle.state())?;
 
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);

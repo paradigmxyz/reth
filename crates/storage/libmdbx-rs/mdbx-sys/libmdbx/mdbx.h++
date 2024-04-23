@@ -1,7 +1,7 @@
 ﻿/// \file mdbx.h++
 /// \brief The libmdbx C++ API header file.
 ///
-/// \author Copyright (c) 2020-2023, Leonid Yuriev <leo@yuriev.ru>.
+/// \author Copyright (c) 2020-2024, Leonid Yuriev <leo@yuriev.ru>.
 /// \copyright SPDX-License-Identifier: Apache-2.0
 ///
 /// Tested with:

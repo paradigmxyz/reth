@@ -27,9 +27,10 @@ alloy-trie = { workspace = true, features = ["serde"] }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
-# crypto
-secp256k1 = { workspace = true, features = ["global-context", "recovery"] }
+enr = { workspace = true, features = ["rust-secp256k1"] }
 
+# crypto
+secp256k1 = { workspace = true, features = ["global-context", "recovery", "rand"] }
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
@@ -39,15 +40,16 @@ byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
 derive_more.workspace = true
 itertools.workspace = true
-modular-bitfield = "0.11.2"
+modular-bitfield.workspace = true
 once_cell.workspace = true
 rayon.workspace = true
+serde_with.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10.7"
-tempfile.workspace = true
+sha2 = { version = "0.10.7", optional = true }
+tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
-zstd = { version = "0.12", features = ["experimental"] }
+zstd = { version = "0.13", features = ["experimental"], optional = true }
 roaring = "0.10.2"
 cfg-if = "1.0.0"
 
@@ -62,14 +64,17 @@ proptest-derive = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+# eth
+revm-primitives = { workspace = true, features = ["arbitrary"] }
+nybbles = { workspace = true, features = ["arbitrary"] }
+alloy-trie = { workspace = true, features = ["arbitrary"] }
+alloy-eips = { workspace = true, features = ["arbitrary"] }
+
 arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
-revm-primitives = { workspace = true, features = ["arbitrary"] }
-nybbles = { workspace = true, features = ["arbitrary"] }
-alloy-trie = { workspace = true, features = ["arbitrary"] }
 serde_json.workspace = true
 test-fuzz.workspace = true
 toml.workspace = true
@@ -88,7 +93,7 @@ pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterio
 secp256k1.workspace = true
 
 [features]
-default = ["c-kzg"]
+default = ["c-kzg", "zstd-codec"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "revm-primitives/arbitrary",
@@ -97,11 +102,16 @@ arbitrary = [
     "nybbles/arbitrary",
     "alloy-trie/arbitrary",
     "alloy-chains/arbitrary",
+    "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
+    "zstd-codec"
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg"]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
+zstd-codec = [
+    "dep:zstd"
+]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
@@ -117,7 +127,7 @@ harness = false
 
 [[bench]]
 name = "validate_blob_tx"
-required-features = ["arbitrary"]
+required-features = ["arbitrary", "c-kzg"]
 harness = false
 
 [[bench]]

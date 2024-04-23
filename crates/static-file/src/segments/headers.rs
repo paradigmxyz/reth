@@ -96,15 +96,16 @@ impl<DB: Database> Segment<DB> for Headers {
 
         // Generate list of hashes for filters & PHF
         let mut cursor = provider.tx_ref().cursor_read::<RawTable<tables::CanonicalHeaders>>()?;
-        let mut hashes = None;
-        if config.filters.has_filters() {
-            hashes = Some(
+        let hashes = if config.filters.has_filters() {
+            Some(
                 cursor
                     .walk(Some(RawKey::from(*block_range.start())))?
                     .take(range_len)
                     .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into())),
-            );
-        }
+            )
+        } else {
+            None
+        };
 
         create_static_file_T1_T2_T3::<
             tables::Headers,

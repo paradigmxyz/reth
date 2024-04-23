@@ -11,8 +11,8 @@
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
+use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_interfaces::RethResult;
-use reth_node_api::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
@@ -194,23 +194,22 @@ where
     }
 
     fn on_new_state(&mut self, new_state: CanonStateNotification) {
-        if let Some(committed) = new_state.committed() {
-            let mut cached = CachedReads::default();
+        let mut cached = CachedReads::default();
 
-            // extract the state from the notification and put it into the cache
-            let new_state = committed.state();
-            for (addr, acc) in new_state.bundle_accounts_iter() {
-                if let Some(info) = acc.info.clone() {
-                    // we want pre cache existing accounts and their storage
-                    // this only includes changed accounts and storage but is better than nothing
-                    let storage =
-                        acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
-                    cached.insert_account(addr, info, storage);
-                }
+        // extract the state from the notification and put it into the cache
+        let committed = new_state.committed();
+        let new_state = committed.state();
+        for (addr, acc) in new_state.bundle_accounts_iter() {
+            if let Some(info) = acc.info.clone() {
+                // we want pre cache existing accounts and their storage
+                // this only includes changed accounts and storage but is better than nothing
+                let storage =
+                    acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
+                cached.insert_account(addr, info, storage);
             }
-
-            self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
         }
+
+        self.pre_cached = Some(PrecachedState { block: committed.tip().hash(), cached });
     }
 }
 

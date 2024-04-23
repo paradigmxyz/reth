@@ -124,6 +124,11 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
     pub fn run(&mut self, targets: StaticFileTargets) -> StaticFileProducerResult {
+        // If there are no targets, do not produce any static files and return early
+        if !targets.any() {
+            return Ok(targets)
+        }
+
         debug_assert!(targets.is_contiguous_to_highest_static_files(
             self.static_file_provider.get_highest_static_files()
         ));
@@ -376,11 +381,8 @@ mod tests {
     fn only_one() {
         let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory,
-            static_file_provider.clone(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory, static_file_provider, PruneModes::default());
 
         let (tx, rx) = channel();
 

@@ -255,15 +255,6 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Address>> {
-        let txs = self.transactions_by_tx_range(range)?;
-        TransactionSignedNoHash::recover_signers(&txs, txs.len())
-            .ok_or(ProviderError::SenderRecoveryError)
-    }
-
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
@@ -280,6 +271,15 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
             }
         }
         Ok(txes)
+    }
+
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
+        let txs = self.transactions_by_tx_range(range)?;
+        TransactionSignedNoHash::recover_signers(&txs, txs.len())
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {

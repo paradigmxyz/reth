@@ -3,55 +3,62 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{
-        ComponentsBuilder, FullNodeComponents, FullNodeComponentsAdapter, NodeComponents,
-        NodeComponentsBuilder, PoolBuilder,
-    },
+    components::{ComponentsBuilder, NodeComponents, NodeComponentsBuilder, PoolBuilder},
+    exex::BoxedLaunchExEx,
     hooks::NodeHooks,
-    node::{FullNode, FullNodeTypes, FullNodeTypesAdapter, NodeTypes},
+    node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     Node, NodeHandle,
 };
 use eyre::Context;
-use futures::{future::Either, stream, stream_select, StreamExt};
+use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
+use rayon::ThreadPoolBuilder;
+use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine,
+    BeaconConsensus, BeaconConsensusEngine,
 };
-use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree};
+use reth_blockchain_tree::{
+    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+};
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
 };
+use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkEvents, NetworkHandle};
+use reth_node_api::{
+    FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
+};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethRpcConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     engine_api_store::EngineApiStore,
-    events::cl::ConsensusLayerHealthEvents,
+    engine_skip_fcu::EngineApiSkipFcu,
     exit::NodeExitFuture,
     init::init_genesis,
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
-use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    format_ether, ChainSpec,
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, format_ether, ChainSpec};
+use reth_provider::{
+    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
 };
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, ProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, error, info};
 use reth_transaction_pool::{PoolConfig, TransactionPool};
-use std::{str::FromStr, sync::Arc};
+use std::{cmp::max, str::FromStr, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
@@ -62,6 +69,7 @@ type RethFullProviderType<DB, Evm> =
 type RethFullAdapter<DB, N> =
     FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
 ///
 /// [`NodeBuilder`] provides a [builder-like interface][builder] for composing
@@ -114,6 +122,26 @@ type RethFullAdapter<DB, N> =
 /// All hooks accept a closure that is then invoked at the appropriate time in the node's launch
 /// process.
 ///
+/// ## Flow
+///
+/// The [NodeBuilder] is intended to sit behind a CLI that provides the necessary [NodeConfig]
+/// input: [NodeBuilder::new]
+///
+/// From there the builder is configured with the node's types, components, and hooks, then launched
+/// with the [NodeBuilder::launch] method. On launch all the builtin internals, such as the
+/// `Database` and its providers [BlockchainProvider] are initialized before the configured
+/// [NodeComponentsBuilder] is invoked with the [BuilderContext] to create the transaction pool,
+/// network, and payload builder components. When the RPC is configured, the corresponding hooks are
+/// invoked to allow for custom rpc modules to be injected into the rpc server:
+/// [NodeBuilder::extend_rpc_modules]
+///
+/// Finally all components are created and all services are launched and a [NodeHandle] is returned
+/// that can be used to interact with the node: [FullNode]
+///
+/// The following diagram shows the flow of the node builder from CLI to a launched node.
+///
+/// include_mmd!("docs/mermaid/builder.mmd")
+///
 /// ## Internals
 ///
 /// The node builder is fully type safe, it uses the [NodeTypes] trait to enforce that all
@@ -154,12 +182,12 @@ impl<DB, State> NodeBuilder<DB, State> {
         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config = confy::load_path::<reth_config::Config>(&config_path)
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))?;
+            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Update the config with the command line arguments
-        config.peers.connect_trusted_nodes_only = self.config.network.trusted_only;
+        config.peers.trusted_nodes_only = self.config.network.trusted_only;
 
         if !self.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
@@ -298,6 +326,7 @@ where
                 components_builder,
                 hooks: NodeHooks::new(),
                 rpc: RpcHooks::new(),
+                exexs: Vec::new(),
             },
         }
     }
@@ -332,6 +361,7 @@ where
                 components_builder: f(self.state.components_builder),
                 hooks: self.state.hooks,
                 rpc: self.state.rpc,
+                exexs: self.state.exexs,
             },
         }
     }
@@ -409,6 +439,30 @@ where
         self
     }
 
+    /// Installs an ExEx (Execution Extension) in the node.
+    ///
+    /// # Note
+    ///
+    /// The ExEx ID must be unique.
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: Fn(
+                ExExContext<
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+            ) -> R
+            + Send
+            + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        self.state.exexs.push((exex_id.into(), Box::new(exex)));
+        self
+    }
+
     /// Launches the node and returns a handle to it.
     ///
     /// This bootstraps the node internals, creates all the components with the provider
@@ -432,13 +486,21 @@ where
 
         let Self {
             config,
-            state: ComponentsState { types, components_builder, hooks, rpc },
+            state: ComponentsState { types, components_builder, hooks, rpc, exexs: _ },
             database,
         } = self;
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         fdlimit::raise_fd_limit()?;
+
+        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
+        let _ = ThreadPoolBuilder::new()
+            .num_threads(
+                available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
+            )
+            .build_global()
+            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
 
         let provider_factory = ProviderFactory::new(
             database.clone(),
@@ -454,6 +516,7 @@ where
                 prometheus_handle,
                 database.clone(),
                 provider_factory.static_file_provider(),
+                executor.clone(),
             )
             .await?;
 
@@ -461,27 +524,36 @@ where
 
         let genesis_hash = init_genesis(provider_factory.clone())?;
 
-        info!(target: "reth::cli", "{}",config.chain.display_hardforks());
+        info!(target: "reth::cli", "\n{}", config.chain.display_hardforks());
 
-        let consensus = config.consensus();
+        // setup the consensus instance
+        let consensus: Arc<dyn Consensus> = if config.dev.dev {
+            Arc::new(AutoSealConsensus::new(Arc::clone(&config.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&config.chain)))
+        };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
         executor.spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        let prune_config = config.prune_config()?.or(reth_config.prune.clone());
+        let prune_config = config.prune_config()?.or_else(|| reth_config.prune.clone());
 
+        // Configure the blockchain tree for the node
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
-        let tree = config.build_blockchain_tree(
+        let tree_externals = TreeExternals::new(
             provider_factory.clone(),
             consensus.clone(),
-            prune_config.clone(),
-            sync_metrics_tx.clone(),
+            EvmProcessorFactory::new(config.chain.clone(), evm_config.clone()),
+        );
+        let tree = BlockchainTree::new(
+            tree_externals,
             tree_config,
-            evm_config.clone(),
-        )?;
+            prune_config.as_ref().map(|config| config.segments.clone()),
+        )?
+        .with_sync_metrics_tx(sync_metrics_tx.clone());
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = ShareableBlockchainTree::new(tree);
@@ -495,14 +567,15 @@ where
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
 
-        let ctx = BuilderContext {
+        let ctx = BuilderContext::new(
             head,
-            provider: blockchain_db,
+            blockchain_db,
             executor,
             data_dir,
             config,
             reth_config,
-        };
+            evm_config.clone(),
+        );
 
         debug!(target: "reth::cli", "creating components");
         let NodeComponents { transaction_pool, network, payload_builder } =
@@ -530,9 +603,92 @@ where
         debug!(target: "reth::cli", "calling on_component_initialized hook");
         on_component_initialized.on_event(node_components.clone())?;
 
+        // spawn exexs
+        let mut exex_handles = Vec::with_capacity(self.state.exexs.len());
+        let mut exexs = Vec::with_capacity(self.state.exexs.len());
+        for (id, exex) in self.state.exexs {
+            // create a new exex handle
+            let (handle, events, notifications) = ExExHandle::new(id.clone());
+            exex_handles.push(handle);
+
+            // create the launch context for the exex
+            let context = ExExContext {
+                head,
+                provider: blockchain_db.clone(),
+                task_executor: executor.clone(),
+                data_dir: data_dir.clone(),
+                config: config.clone(),
+                reth_config: reth_config.clone(),
+                pool: transaction_pool.clone(),
+                events,
+                notifications,
+            };
+
+            let executor = executor.clone();
+            exexs.push(async move {
+                debug!(target: "reth::cli", id, "spawning exex");
+                let span = reth_tracing::tracing::info_span!("exex", id);
+                let _enter = span.enter();
+
+                // init the exex
+                let exex = exex.launch(context).await.unwrap();
+
+                // spawn it as a crit task
+                executor.spawn_critical("exex", async move {
+                    info!(target: "reth::cli", id, "ExEx started");
+                    match exex.await {
+                        Ok(_) => panic!("ExEx {id} finished. ExEx's should run indefinitely"),
+                        Err(err) => panic!("ExEx {id} crashed: {err}"),
+                    }
+                });
+            });
+        }
+
+        future::join_all(exexs).await;
+
+        // spawn exex manager
+        let exex_manager_handle = if !exex_handles.is_empty() {
+            debug!(target: "reth::cli", "spawning exex manager");
+            // todo(onbjerg): rm magic number
+            let exex_manager = ExExManager::new(exex_handles, 1024);
+            let exex_manager_handle = exex_manager.handle();
+            executor.spawn_critical("exex manager", async move {
+                exex_manager.await.expect("exex manager crashed");
+            });
+
+            // send notifications from the blockchain tree to exex manager
+            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            let mut handle = exex_manager_handle.clone();
+            executor.spawn_critical("exex manager blockchain tree notifications", async move {
+                while let Ok(notification) = canon_state_notifications.recv().await {
+                    handle
+                        .send_async(notification.into())
+                        .await
+                        .expect("blockchain tree notification could not be sent to exex manager");
+                }
+            });
+
+            info!(target: "reth::cli", "ExEx Manager started");
+
+            Some(exex_manager_handle)
+        } else {
+            None
+        };
+
         // create pipeline
         let network_client = network.fetch_client().await?;
         let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+
+        if let Some(skip_fcu_threshold) = config.debug.skip_fcu {
+            debug!(target: "reth::cli", "spawning skip FCU task");
+            let (skip_fcu_tx, skip_fcu_rx) = unbounded_channel();
+            let engine_skip_fcu = EngineApiSkipFcu::new(skip_fcu_threshold);
+            executor.spawn_critical(
+                "skip FCU interceptor",
+                engine_skip_fcu.intercept(consensus_engine_rx, skip_fcu_tx),
+            );
+            consensus_engine_rx = skip_fcu_rx;
+        }
 
         if let Some(store_path) = config.debug.engine_api_store.clone() {
             debug!(target: "reth::cli", "spawning engine API store");
@@ -563,6 +719,8 @@ where
         }
 
         // Configure the pipeline
+        let pipeline_exex_handle =
+            exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
         let (mut pipeline, client) = if config.dev.dev {
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
@@ -570,7 +728,17 @@ where
                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
 
-            let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
+            // install auto-seal
+            let pending_transactions_listener = transaction_pool.pending_transactions_listener();
+
+            let mining_mode = if let Some(interval) = config.dev.block_time {
+                MiningMode::interval(interval)
+            } else if let Some(max_transactions) = config.dev.block_max_transactions {
+                MiningMode::instant(max_transactions, pending_transactions_listener)
+            } else {
+                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
+                MiningMode::instant(1, pending_transactions_listener)
+            };
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
                 Arc::clone(&config.chain),
@@ -583,20 +751,21 @@ where
             )
             .build();
 
-            let mut pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let mut pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+                pipeline_exex_handle,
+            )
+            .await?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -605,20 +774,21 @@ where
 
             (pipeline, EitherDownloader::Left(client))
         } else {
-            let pipeline = config
-                .build_networked_pipeline(
-                    &reth_config.stages,
-                    network_client.clone(),
-                    Arc::clone(&consensus),
-                    provider_factory.clone(),
-                    &executor,
-                    sync_metrics_tx,
-                    prune_config.clone(),
-                    max_block,
-                    static_file_producer,
-                    evm_config,
-                )
-                .await?;
+            let pipeline = crate::setup::build_networked_pipeline(
+                &config,
+                &reth_config.stages,
+                network_client.clone(),
+                Arc::clone(&consensus),
+                provider_factory.clone(),
+                &executor,
+                sync_metrics_tx,
+                prune_config.clone(),
+                max_block,
+                static_file_producer,
+                evm_config,
+                pipeline_exex_handle,
+            )
+            .await?;
 
             (pipeline, EitherDownloader::Right(network_client))
         };
@@ -628,10 +798,16 @@ where
         let initial_target = config.initial_pipeline_target(genesis_hash);
 
         let prune_config = prune_config.unwrap_or_default();
-        let mut pruner = PrunerBuilder::new(prune_config.clone())
+        let mut pruner_builder = PrunerBuilder::new(prune_config.clone())
             .max_reorg_depth(tree_config.max_reorg_depth() as usize)
             .prune_delete_limit(config.chain.prune_delete_limit)
-            .build(provider_factory.clone());
+            .timeout(PrunerBuilder::DEFAULT_TIMEOUT);
+        if let Some(exex_manager_handle) = &exex_manager_handle {
+            pruner_builder =
+                pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
+        }
+
+        let mut pruner = pruner_builder.build(provider_factory.clone());
 
         let pruner_events = pruner.events();
         hooks.add(PruneHook::new(pruner, Box::new(executor.clone())));
@@ -672,12 +848,7 @@ where
         );
         executor.spawn_critical(
             "events task",
-            reth_node_core::events::node::handle_events(
-                Some(network.clone()),
-                Some(head.number),
-                events,
-                database.clone(),
-            ),
+            node::handle_events(Some(network.clone()), Some(head.number), events, database.clone()),
         );
 
         let engine_api = EngineApi::new(
@@ -1013,6 +1184,26 @@ where
         self
     }
 
+    /// Installs an ExEx (Execution Extension) in the node.
+    pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
+    where
+        F: Fn(
+                ExExContext<
+                    FullNodeComponentsAdapter<
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        Components::Pool,
+                    >,
+                >,
+            ) -> R
+            + Send
+            + 'static,
+        R: Future<Output = eyre::Result<E>> + Send,
+        E: Future<Output = eyre::Result<()>> + Send,
+    {
+        self.builder.state.exexs.push((exex_id.into(), Box::new(exex)));
+        self
+    }
+
     /// Launches the node and returns a handle to it.
     pub async fn launch(
         self,
@@ -1038,7 +1229,6 @@ where
 }
 
 /// Captures the necessary context for building the components of the node.
-#[derive(Debug)]
 pub struct BuilderContext<Node: FullNodeTypes> {
     /// The current head of the blockchain at launch.
     head: Head,
@@ -1052,12 +1242,32 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     config: NodeConfig,
     /// loaded config
     reth_config: reth_config::Config,
+    /// EVM config of the node
+    evm_config: Node::Evm,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
+    /// Create a new instance of [BuilderContext]
+    pub fn new(
+        head: Head,
+        provider: Node::Provider,
+        executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+        config: NodeConfig,
+        reth_config: reth_config::Config,
+        evm_config: Node::Evm,
+    ) -> Self {
+        Self { head, provider, executor, data_dir, config, reth_config, evm_config }
+    }
+
     /// Returns the configured provider to interact with the blockchain.
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
+    }
+
+    /// Returns the configured evm.
+    pub fn evm_config(&self) -> &Node::Evm {
+        &self.evm_config
     }
 
     /// Returns the current head of the blockchain at launch.
@@ -1094,16 +1304,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.config().txpool.pool_config()
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
+    /// Loads `MAINNET_KZG_TRUSTED_SETUP`.
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        if let Some(ref trusted_setup_file) = self.config().trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
-        } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-        }
+        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
 
     /// Returns the config for payload building.
@@ -1170,6 +1373,18 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 }
 
+impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BuilderContext")
+            .field("head", &self.head)
+            .field("provider", &std::any::type_name::<Node::Provider>())
+            .field("executor", &self.executor)
+            .field("data_dir", &self.data_dir)
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
 /// The initial state of the node builder process.
 #[derive(Debug, Default)]
 #[non_exhaustive]
@@ -1191,7 +1406,6 @@ where
 ///
 /// Additionally, this state captures additional hooks that are called at specific points in the
 /// node's launch lifecycle.
-#[derive(Debug)]
 pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     /// The types of the node.
     types: Types,
@@ -1201,4 +1415,20 @@ pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
     hooks: NodeHooks<FullNode>,
     /// Additional RPC hooks.
     rpc: RpcHooks<FullNode>,
+    /// The ExExs (execution extensions) of the node.
+    exexs: Vec<(String, Box<dyn BoxedLaunchExEx<FullNode>>)>,
+}
+
+impl<Types, Components, FullNode: FullNodeComponents> std::fmt::Debug
+    for ComponentsState<Types, Components, FullNode>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ComponentsState")
+            .field("types", &std::any::type_name::<Types>())
+            .field("components_builder", &std::any::type_name::<Components>())
+            .field("hooks", &self.hooks)
+            .field("rpc", &self.rpc)
+            .field("exexs", &self.exexs.len())
+            .finish()
+    }
 }

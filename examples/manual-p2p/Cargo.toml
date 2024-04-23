@@ -15,5 +15,5 @@ reth-discv4.workspace = true
 reth-eth-wire.workspace = true
 reth-ecies.workspace = true
 futures.workspace = true
-secp256k1.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 tokio.workspace = true

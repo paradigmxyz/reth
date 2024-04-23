@@ -5,7 +5,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use alloy_rlp::Decodable;
@@ -18,18 +17,14 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_runner::CliContext;
+use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_interfaces::RethResult;
 use reth_node_api::PayloadBuilderAttributes;
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::EthEvmConfig;
-#[cfg(feature = "optimism")]
-use reth_node_optimism::OptimismEvmConfig;
 use reth_payload_builder::database::CachedReads;
-#[cfg(not(feature = "optimism"))]
-use reth_payload_builder::EthPayloadBuilderAttributes;
-#[cfg(feature = "optimism")]
-use reth_payload_builder::OptimismPayloadBuilderAttributes;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     fs,
@@ -167,7 +162,7 @@ impl Command {
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
         #[cfg(feature = "optimism")]
-        let evm_config = OptimismEvmConfig::default();
+        let evm_config = reth_node_optimism::OptimismEvmConfig::default();
 
         #[cfg(not(feature = "optimism"))]
         let evm_config = EthEvmConfig::default();
@@ -265,7 +260,7 @@ impl Command {
             Arc::clone(&best_block),
             Bytes::default(),
             #[cfg(feature = "optimism")]
-            OptimismPayloadBuilderAttributes::try_new(
+            reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 OptimismPayloadAttributes {
                     payload_attributes: payload_attrs,
@@ -275,7 +270,10 @@ impl Command {
                 },
             )?,
             #[cfg(not(feature = "optimism"))]
-            EthPayloadBuilderAttributes::try_new(best_block.hash(), payload_attrs)?,
+            reth_payload_builder::EthPayloadBuilderAttributes::try_new(
+                best_block.hash(),
+                payload_attrs,
+            )?,
             self.chain.clone(),
         );
 
@@ -289,9 +287,11 @@ impl Command {
         );
 
         #[cfg(feature = "optimism")]
-        let payload_builder =
-            reth_optimism_payload_builder::OptimismPayloadBuilder::new(self.chain.clone())
-                .compute_pending_block();
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+            self.chain.clone(),
+            reth_node_optimism::OptimismEvmConfig::default(),
+        )
+        .compute_pending_block();
 
         #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();

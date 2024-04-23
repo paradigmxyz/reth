@@ -40,7 +40,7 @@ const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
 
 /// [`HANDSHAKE_TIMEOUT`] determines the amount of time to wait before determining that a `p2p`
 /// handshake has timed out.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// [`PING_TIMEOUT`] determines the amount of time to wait before determining that a `p2p` ping has
 /// timed out.
@@ -226,7 +226,7 @@ where
 /// This stream emits _non-empty_ Bytes that start with the normalized message id, so that the first
 /// byte of each message starts from 0. If this stream only supports a single capability, for
 /// example `eth` then the first byte of each message will match
-/// [EthMessageID](crate::types::EthMessageID).
+/// [EthMessageID](reth_eth_wire_types::message::EthMessageID).
 #[pin_project]
 #[derive(Debug)]
 pub struct P2PStream<S> {
@@ -335,10 +335,10 @@ impl<S> DisconnectP2P for P2PStream<S> {
         // clear any buffered messages and queue in
         self.outgoing_messages.clear();
         let disconnect = P2PMessage::Disconnect(reason);
-        let mut buf = BytesMut::with_capacity(disconnect.length());
+        let mut buf = Vec::with_capacity(disconnect.length());
         disconnect.encode(&mut buf);
 
-        let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(buf.len() - 1));
+        let mut compressed = vec![0u8; 1 + snap::raw::max_compress_len(buf.len() - 1)];
         let compressed_size =
             self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
                 debug!(
@@ -357,7 +357,7 @@ impl<S> DisconnectP2P for P2PStream<S> {
         // message
         compressed[0] = buf[0];
 
-        self.outgoing_messages.push_back(compressed.freeze());
+        self.outgoing_messages.push_back(compressed.into());
         self.disconnecting = true;
         Ok(())
     }
@@ -478,7 +478,7 @@ where
                     this.pinger.on_pong()?
                 }
                 _ if id == P2PMessageID::Disconnect as u8 => {
-                    // At this point, the `decempres_buf` contains the snappy decompressed
+                    // At this point, the `decompress_buf` contains the snappy decompressed
                     // disconnect message.
                     //
                     // It's possible we already tried to RLP decode this, but it was snappy
@@ -579,6 +579,11 @@ where
                 message_size: item.len(),
                 max_size: MAX_PAYLOAD_SIZE,
             })
+        }
+
+        if item.is_empty() {
+            // empty messages are not allowed
+            return Err(P2PStreamError::EmptyProtocolMessage)
         }
 
         // ensure we have free capacity

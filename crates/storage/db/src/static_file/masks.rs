@@ -3,7 +3,7 @@ use crate::{
     add_static_file_mask,
     static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask},
     table::Table,
-    HeaderTerminalDifficulties, Receipts, Transactions,
+    HeaderTerminalDifficulties, RawValue, Receipts, Transactions,
 };
 use reth_primitives::{BlockHash, Header};
 
@@ -19,3 +19,4 @@ add_static_file_mask!(ReceiptMask, <Receipts as Table>::Value, 0b1);
 
 // TRANSACTION MASKS
 add_static_file_mask!(TransactionMask, <Transactions as Table>::Value, 0b1);
+add_static_file_mask!(TransactionMask, RawValue<<Transactions as Table>::Value>, 0b1);

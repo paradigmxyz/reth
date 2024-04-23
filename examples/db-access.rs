@@ -1,4 +1,4 @@
-use reth_db::{mdbx::DatabaseArguments, models::client_version::ClientVersion, open_db_read_only};
+use reth_db::open_db_read_only;
 use reth_primitives::{Address, ChainSpecBuilder, B256};
 use reth_provider::{
     AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
@@ -19,10 +19,7 @@ fn main() -> eyre::Result<()> {
     //  doing in 2 steps.
     let db_path = std::env::var("RETH_DB_PATH")?;
     let db_path = Path::new(&db_path);
-    let db = open_db_read_only(
-        db_path.join("db").as_path(),
-        DatabaseArguments::new(ClientVersion::default()),
-    )?;
+    let db = open_db_read_only(db_path.join("db").as_path(), Default::default())?;
 
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
@@ -204,7 +201,7 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
         let receipts = provider.receipt(header_num)?.ok_or(eyre::eyre!("receipt not found"))?;
         for log in &receipts.logs {
             if filter_params.filter_address(&log.address) &&
-                filter_params.filter_topics(&log.topics)
+                filter_params.filter_topics(log.topics())
             {
                 // Do something with the log e.g. decode it.
                 println!("Matching log found! {log:?}")

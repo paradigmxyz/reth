@@ -82,23 +82,29 @@ op-build-native-%:
 #
 # The resulting binaries will be created in the `target/` directory.
 
+# For aarch64, disable asm-keccak optimizations and set the page size for
+# jemalloc. When cross compiling, we must compile jemalloc with a large page
+# size, otherwise it will use the current system's page size which may not work
+# on other systems. JEMALLOC_SYS_WITH_LG_PAGE=16 tells jemalloc to use 64-KiB
+# pages. See: https://github.com/paradigmxyz/reth/issues/6742
+build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
+build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+
+op-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak,$(FEATURES))
+op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
+
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
-
-# Disable asm-keccak optimizations and jemalloc.
-# Some aarch64 systems use larger page sizes and jemalloc doesn't play well.
-# See: https://github.com/paradigmxyz/reth/issues/6742
-build-aarch64-unknown-linux-gnu: FEATURES := $(filter-out asm-keccak jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
 build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
- 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
+		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 op-build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
- 		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
+		cross build --bin op-reth --target $* --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
@@ -302,6 +308,53 @@ lint:
 	make lint-reth && \
 	make lint-op-reth && \
 	make lint-other-targets
+
+fix-lint-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "ethereum $(BIN_OTHER_FEATURES)" \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint-op-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "op-reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "optimism $(BIN_OTHER_FEATURES)" \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint-other-targets:
+	cargo +nightly clippy \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	--fix \
+	--allow-staged \
+	--allow-dirty \
+	-- -D warnings
+
+fix-lint:
+	make lint-reth && \
+	make lint-op-reth && \
+	make lint-other-targets && \
+	make fmt
 
 .PHONY: rustdocs
 rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc` directory
