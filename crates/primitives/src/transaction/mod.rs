@@ -868,6 +868,15 @@ impl TransactionKind {
     }
 }
 
+impl From<reth_rpc_types::TransactionKind> for TransactionKind {
+    fn from(kind: reth_rpc_types::TransactionKind) -> Self {
+        match kind {
+            reth_rpc_types::TransactionKind::Call(to) => Self::Call(to),
+            reth_rpc_types::TransactionKind::Create => Self::Create,
+        }
+    }
+}
+
 impl Compact for TransactionKind {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
