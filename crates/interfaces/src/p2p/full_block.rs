@@ -5,7 +5,7 @@ use crate::p2p::{
     headers::client::{HeadersClient, SingleHeaderRequest},
 };
 use futures::Stream;
-use reth_consensus::{test_utils::TestConsensus, Consensus, ConsensusError};
+use reth_consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
 };
@@ -36,7 +36,7 @@ impl<Client> FullBlockClient<Client> {
     /// Returns a client with Test consensus
     #[cfg(any(test, feature = "test-utils"))]
     pub fn test_client(client: Client) -> Self {
-        Self::new(client, Arc::new(TestConsensus::default()))
+        Self::new(client, Arc::new(reth_consensus::test_utils::TestConsensus::default()))
     }
 }
 

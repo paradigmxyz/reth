@@ -34,6 +34,8 @@ parking_lot = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-consensus = { workspace = true, features = ["test-utils"] }
+
 parking_lot.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["full"] }
