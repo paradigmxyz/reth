@@ -287,6 +287,10 @@ revm-primitives = { version = "3.1.0", features = ["std"], default-features = fa
 # revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "3d2077e" }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", branch = "bumprevm" }
 
+# compiler
+revm-jit = { path = "../revm-jit/crates/revm-jit" }
+revm-jit-build = { path = "../revm-jit/crates/revm-jit-build" }
+
 # eth
 alloy-chains = "0.1.15"
 alloy-primitives = "0.7.1"
@@ -344,6 +348,7 @@ dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
 rustc-hash = "1.1.0"
+indexmap = "2"
 
 # proc-macros
 proc-macro2 = "1.0"

@@ -6382,6 +6382,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
+ "revm-jit-build",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -6924,12 +6925,14 @@ name = "reth-evm-compiler"
 version = "0.2.0-beta.5"
 dependencies = [
  "confy",
- "libc",
+ "indexmap 2.2.6",
+ "libloading",
  "rayon",
  "reth-primitives",
  "reth-tracing",
  "revm",
  "revm-jit",
+ "revm-jit-build",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -8058,6 +8061,10 @@ dependencies = [
  "ruint",
  "tracing",
 ]
+
+[[package]]
+name = "revm-jit-build"
+version = "0.1.0"
 
 [[package]]
 name = "revm-jit-builtins"

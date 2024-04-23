@@ -1,21 +1,23 @@
 use crate::{is_evm_version, EvmCompilerError, EvmCompilerResult, EvmVersions, SymbolBuffer};
+use indexmap::{map::Entry, IndexMap};
 use rayon::prelude::*;
 use reth_primitives::{fs, keccak256, Bytes, B256};
 use revm::primitives::SpecId;
 use revm_jit::{debug_time, llvm, EvmCompiler, EvmLlvmBackend, Linker};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{hash_map::Entry, HashMap},
     fmt,
     io::{self, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicU8, Ordering},
         mpsc,
     },
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
+
+// TODO: Invalidate metadata if the compiler dependency version changes.
 
 const OBJ_NAME: &str = if cfg!(windows) { "object.obj" } else { "object.o" };
 
@@ -207,15 +209,15 @@ impl EvmParCompiler {
             info!("starting to compile {} contracts", to_compile.len());
             let stopwatch = Instant::now();
 
-            let counter = AtomicUsize::new(0);
             let total = to_compile.len();
             self.with_bg_tasks(total, |tx| {
                 to_compile
                     .par_iter()
                     .map(|(evm_version, hash, contract)| {
+                        let start = Instant::now();
                         self.compile_one(*evm_version, hash, &contract.contract)?;
-                        let prev = counter.fetch_add(1, Ordering::Relaxed);
-                        let _ = tx.send(BgNotification::Increment(prev + 1));
+                        let elapsed = start.elapsed();
+                        let _ = tx.send(BgNotification::CompiledOne(elapsed));
                         Ok(())
                     })
                     .collect::<EvmCompilerResult<()>>()
@@ -347,10 +349,13 @@ impl EvmParCompiler {
             let builder = thread::Builder::new().name("evm-compiler-bg-tasks".into());
             // TODO: Make this not save every single notification, but capped at an interval.
             let bg = builder.spawn_scoped(scope, move || -> EvmCompilerResult<()> {
+                let mut n = 0;
+                let max_n = total.ilog10() as usize + 1;
                 while let Ok(notification) = rx.recv() {
                     match notification {
-                        BgNotification::Increment(n) => {
-                            info!("compiled {n}/{total}...");
+                        BgNotification::CompiledOne(elapsed) => {
+                            n += 1;
+                            info!("compiled a contract in {elapsed:?} ({n: >max_n$}/{total})");
                             self.save()?;
                             if n == total {
                                 break;
@@ -382,7 +387,7 @@ impl Drop for EvmParCompiler {
 }
 
 enum BgNotification {
-    Increment(usize),
+    CompiledOne(Duration),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -390,12 +395,12 @@ struct Metadata {
     /// Length of the states Vec below.
     spec_id_count: usize,
     /// hash -> (contract, evm_version -> state)
-    contracts: HashMap<B256, MetadataContract>,
+    contracts: IndexMap<B256, MetadataContract>,
 }
 
 impl Metadata {
     fn new(spec_id_count: usize) -> Self {
-        Self { spec_id_count, contracts: HashMap::new() }
+        Self { spec_id_count, contracts: IndexMap::new() }
     }
 
     fn load(path: &Path) -> fs::Result<Self> {
@@ -639,7 +644,7 @@ mod tests {
         assert!(meta_path.exists());
         let meta = Metadata::load(&meta_path).unwrap();
         let expected_meta =
-            Metadata { spec_id_count: EvmVersions::enabled().len(), contracts: HashMap::new() };
+            Metadata { spec_id_count: EvmVersions::enabled().len(), contracts: IndexMap::new() };
         assert_eq!(meta, expected_meta);
 
         assert_fs(root, &default_fs());
@@ -669,7 +674,7 @@ mod tests {
         let spec_id_count = EvmVersions::enabled().len();
         let expected_meta = Metadata {
             spec_id_count,
-            contracts: HashMap::from([(
+            contracts: IndexMap::from([(
                 hash,
                 MetadataContract {
                     contract,
@@ -712,22 +717,33 @@ mod tests {
         let contracts = ContractsConfig::load(&contracts_path).expect("failed to load contracts");
         let mut compiler = EvmParCompiler::new(root.into()).unwrap();
         let spec_id = SpecId::CANCUN;
+        // for c in compiler.metadata.contracts.values_mut() {
+        //     c.contract.starting_evm_version = spec_id;
+        // }
         // for (_, _, c, _) in compiler.metadata.all_contracts() {
         //     c.state(SpecId::CANCUN).set(ContractState::None);
         // }
-        // compiler.save().unwrap();
+        compiler.save().unwrap();
         compiler.background_tasks = true;
         compiler.force_link = true;
         let all = compiler.run_to_end(&contracts).unwrap();
 
         let dll_path = root.join(dll_filename(&format!("{spec_id:?}")));
-        let mut dll = crate::EvmCompilerDll::open(&dll_path).unwrap();
+        let mut dll = unsafe { crate::EvmCompilerDll::open(&dll_path) }.unwrap();
 
-        for (_, hash) in all.iter().filter(|(v, _)| *v == spec_id) {
+        let mut interpreter =
+            revm::interpreter::Interpreter::new(Default::default(), u64::MAX, false);
+        let mut host = revm::interpreter::DummyHost::default();
+        let hashes = all.iter().filter(|(v, _)| *v == spec_id).map(|(_, x)| x);
+        for hash in hashes {
             let contract = compiler.metadata.contract(hash);
             let state = contract.state(spec_id);
             assert_eq!(state.get(), ContractState::Linked);
-            assert!(dll.get_function(*hash).is_some());
+            let function = dll.get_function(*hash).unwrap().unwrap();
+            eprintln!("{function:?}");
+            let t = Instant::now();
+            let _r = unsafe { function.call_with_interpreter(&mut interpreter, &mut host) };
+            eprintln!("{:?} - {:?}", t.elapsed(), interpreter.instruction_result);
         }
     }
 

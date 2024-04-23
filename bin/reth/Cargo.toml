@@ -48,9 +48,7 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
-reth-node-optimism = { workspace = true, optional = true, features = [
-    "optimism",
-] }
+reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
 reth-node-core.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
@@ -85,12 +83,7 @@ ratatui = { version = "0.26", default-features = false, features = [
 human_bytes = "0.4.1"
 
 # async
-tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
-] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 
 # misc
@@ -115,6 +108,9 @@ libc = "0.2"
 [dev-dependencies]
 jsonrpsee.workspace = true
 assert_matches = "1.5.0"
+
+[build-dependencies]
+revm-jit-build.workspace = true
 
 [features]
 default = ["jemalloc"]

@@ -13,19 +13,17 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-# reth-interfaces.workspace = true
 revm.workspace = true
-revm-jit = { path = "../../../../revm-jit/crates/revm-jit" }
+revm-jit.workspace = true
 
 confy.workspace = true
+libloading = "0.8"
 rayon.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
+indexmap = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 reth-tracing.workspace = true
@@ -33,6 +31,9 @@ reth-tracing.workspace = true
 similar-asserts.workspace = true
 tempfile.workspace = true
 walkdir.workspace = true
+
+[build-dependencies]
+revm-jit-build.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism", "revm/optimism", "revm-jit/optimism"]
