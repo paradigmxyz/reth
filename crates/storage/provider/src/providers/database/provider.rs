@@ -1000,7 +1000,11 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 .map(|chunks| chunks.copied().collect())
                 .collect::<Vec<Vec<_>>>();
 
-                trace!(target: "providers::db", ?partial_key, ?chunks, "indices chunks for key");
+                trace!(target: "providers::db",
+                    ?partial_key,
+                    ?chunks,
+                    "inserting chunks of indices for key"
+                );
 
             let mut chunks = chunks.into_iter().peekable();
             while let Some(list) = chunks.next() {

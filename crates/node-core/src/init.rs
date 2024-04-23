@@ -207,6 +207,7 @@ pub fn insert_genesis_history<'a, 'b, DB: Database>(
 ) -> ProviderResult<()> {
     let account_transitions = alloc
         .clone()
+        .unique_by(|(address, _)| **address)
         .map(|(addr, _)| (*addr, vec![0]))
         .collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
