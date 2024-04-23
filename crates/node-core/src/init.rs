@@ -326,6 +326,7 @@ pub fn init_from_state_dump<DB: Database>(
             }
 
             tx.commit()?;
+            static_file_provider.commit()?;
             accounts.clear();
         }
 

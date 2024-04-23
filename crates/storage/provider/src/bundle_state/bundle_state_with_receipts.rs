@@ -309,6 +309,12 @@ impl BundleStateWithReceipts {
     where
         TX: DbTxMut + DbTx,
     {
+
+        trace!(target: "provider::bundle_state",
+        receipts_len=self.receipts.len(),
+        "writing receipts to static file"
+    );
+
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
@@ -316,11 +322,6 @@ impl BundleStateWithReceipts {
         // write receipts
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-
-        trace!(target: "provider::bundle_state",
-            receipts_len=self.receipts.len(),
-            "writing receipts to static file"
-        );
 
         for (idx, receipts) in self.receipts.into_iter().enumerate() {
             let block_number = self.first_block + idx as u64;
