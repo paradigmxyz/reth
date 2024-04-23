@@ -126,6 +126,7 @@ impl<K: TransactionKind> Tx<K> {
             if outcome.is_commit() {
                 debug!(
                     target: "storage::db::mdbx",
+                    ?result,
                     ?total_duration,
                     ?commit_latency,
                     is_read_only = K::IS_READ_ONLY,
