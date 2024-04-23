@@ -11,7 +11,6 @@ use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::EthEvmConfig;
 type DatabaseEnv = TempDatabase<DE>;
-use reth_consensus::Consensus;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,

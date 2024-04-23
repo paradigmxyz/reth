@@ -6162,7 +6162,6 @@ dependencies = [
  "reth-beacon-consensus-core",
  "reth-blockchain-tree",
  "reth-config",
- "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-engine-primitives",
