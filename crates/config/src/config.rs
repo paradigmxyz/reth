@@ -24,6 +24,8 @@ pub struct Config {
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
     pub sessions: SessionsConfig,
+    /// Configuration for the EVM bytecode compiler.
+    pub compiler: CompilerConfig,
 }
 
 impl Config {
@@ -302,6 +304,40 @@ pub struct PruneConfig {
 impl Default for PruneConfig {
     fn default() -> Self {
         Self { block_interval: 5, segments: PruneModes::none() }
+    }
+}
+
+/// EVM bytecode compiler configuration.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct CompilerConfig {
+    /// The block number at which the compiled contracts stop being run.
+    ///
+    /// Defaults to 19 million.
+    pub end_block: u64,
+    /// Path to a file that contains all the contracts to compile.
+    ///
+    /// Defaults to `<datadir>/contracts.toml`.
+    pub contracts_file: Option<PathBuf>,
+    /// Directory in which intermediate artifacts, metadata, and results are stored.
+    ///
+    /// Defaults to `<datadir>/compiled_contracts`.
+    pub out_dir: Option<PathBuf>,
+    /// Which C compiler to use for linking.
+    pub cc: Option<PathBuf>,
+    /// Additional arguments to pass to the C compiler when linking.
+    pub cflags: Vec<String>,
+}
+
+impl Default for CompilerConfig {
+    fn default() -> Self {
+        Self {
+            end_block: 19_000_000,
+            contracts_file: None,
+            out_dir: None,
+            cc: None,
+            cflags: vec![],
+        }
     }
 }
 

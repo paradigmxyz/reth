@@ -1,0 +1,38 @@
+[package]
+name = "reth-evm-compiler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+# reth-interfaces.workspace = true
+revm.workspace = true
+revm-jit = { path = "../../../../revm-jit/crates/revm-jit" }
+
+confy.workspace = true
+rayon.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+reth-tracing.workspace = true
+
+similar-asserts.workspace = true
+tempfile.workspace = true
+walkdir.workspace = true
+
+[features]
+optimism = ["reth-primitives/optimism", "revm/optimism", "revm-jit/optimism"]

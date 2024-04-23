@@ -1,8 +1,9 @@
 //! Wrapper for `std::fs` methods
 
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    fs::{self, ReadDir},
-    io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -103,7 +104,7 @@ pub enum FsPathError {
     },
 
     /// Error variant for failed file read as JSON operation with additional path context.
-    #[error("failed to parse json file: {path:?}: {source}")]
+    #[error("failed to parse JSON file {path:?}: {source}")]
     ReadJson {
         /// The source `serde_json::Error`.
         source: serde_json::Error,
@@ -112,7 +113,7 @@ pub enum FsPathError {
     },
 
     /// Error variant for failed JSON write to file operation with additional path context.
-    #[error("failed to write to json file: {path:?}: {source}")]
+    #[error("failed to write to JSON file {path:?}: {source}")]
     WriteJson {
         /// The source `serde_json::Error`.
         source: serde_json::Error,
@@ -187,7 +188,8 @@ impl FsPathError {
     }
 }
 
-type Result<T> = std::result::Result<T, FsPathError>;
+/// Result type for `std::fs` operations with path context.
+pub type Result<T> = std::result::Result<T, FsPathError>;
 
 /// Wrapper for `std::fs::read_to_string`
 pub fn read_to_string(path: impl AsRef<Path>) -> Result<String> {
@@ -209,10 +211,27 @@ pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
     fs::write(path, contents).map_err(|err| FsPathError::write(err, path))
 }
 
-/// Wrapper for `std::fs::remove_dir_all`
-pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
+/// Reads the JSON file and deserialize it into the provided type.
+pub fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    // Read the file into a byte array first.
+    // https://github.com/serde-rs/json/issues/160
+    let b = read(path)?;
+    serde_json::from_slice(&b).map_err(|source| FsPathError::ReadJson { source, path: path.into() })
+}
+
+/// Writes the object as a JSON object.
+pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
+    let file = create_file(path)?;
+    let mut writer = io::BufWriter::new(file);
+    serde_json::to_writer(&mut writer, obj)
+        .map_err(|source| FsPathError::WriteJson { source, path: path.into() })?;
+    writer.flush().map_err(|e| FsPathError::write(e, path))
+}
+
+/// Wrapper for [`File::create`].
+pub fn create_file(path: impl AsRef<Path>) -> Result<fs::File> {
     let path = path.as_ref();
-    fs::remove_dir_all(path).map_err(|err| FsPathError::remove_dir(err, path))
+    fs::File::create(path).map_err(|err| FsPathError::create_file(err, path))
 }
 
 /// Wrapper for `std::fs::remove_file`
@@ -227,8 +246,14 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
     fs::create_dir_all(path).map_err(|err| FsPathError::create_dir(err, path))
 }
 
+/// Wrapper for `std::fs::remove_dir_all`
+pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
+    let path = path.as_ref();
+    fs::remove_dir_all(path).map_err(|err| FsPathError::remove_dir(err, path))
+}
+
 /// Wrapper for `std::fs::read_dir`
-pub fn read_dir(path: impl AsRef<Path>) -> Result<ReadDir> {
+pub fn read_dir(path: impl AsRef<Path>) -> Result<fs::ReadDir> {
     let path = path.as_ref();
     fs::read_dir(path).map_err(|err| FsPathError::read_dir(err, path))
 }

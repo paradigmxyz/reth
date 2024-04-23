@@ -12,6 +12,7 @@ members = [
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/etl/",
+    "crates/evm/compiler/",
     "crates/evm/",
     "crates/ethereum/evm",
     "crates/exex/",
@@ -238,6 +239,7 @@ reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
+reth-evm-compiler = { path = "crates/evm/compiler" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-exex = { path = "crates/exex" }
 reth-optimism-payload-builder = { path = "crates/payload/optimism" }
@@ -341,6 +343,7 @@ smallvec = "1"
 dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
+rustc-hash = "1.1.0"
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -399,6 +402,7 @@ proptest-derive = "0.4"
 serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
+walkdir = "2"
 
 [patch.crates-io]
 revm = { git = "https://github.com/danipopes/revm", rev = "67c13f3daaba8620829d949b93fb0583d8f8fcd7" }

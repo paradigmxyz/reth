@@ -4067,6 +4067,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "inkwell"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b597a7b2cdf279aeef6d7149071e35e4bc87c2cf05a5b7f2d731300bffe587ea"
+dependencies = [
+ "either",
+ "inkwell_internals",
+ "libc",
+ "llvm-sys",
+ "once_cell",
+ "thiserror",
+]
+
+[[package]]
+name = "inkwell_internals"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fa4d8d74483041a882adaa9a29f633253a66dde85055f0495c121620ac484b2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.60",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4473,7 +4498,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -4704,6 +4729,20 @@ name = "litemap"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9d642685b028806386b2b6e75685faadd3eb65a85fff7df711ce18446a422da"
+
+[[package]]
+name = "llvm-sys"
+version = "170.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eed90f72df5504c0af2e3a08ee7762a4a3e42ec2605811fc19f64879de40c50a"
+dependencies = [
+ "anyhow",
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex-lite",
+ "semver 1.0.22",
+]
 
 [[package]]
 name = "lock_api"
@@ -6161,6 +6200,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30b661b2f27137bdbc16f00eda72866a92bb28af1753ffbd56744fb6e2e9cd8e"
+
+[[package]]
 name = "regex-syntax"
 version = "0.6.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6875,6 +6920,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-evm-compiler"
+version = "0.2.0-beta.5"
+dependencies = [
+ "confy",
+ "libc",
+ "rayon",
+ "reth-primitives",
+ "reth-tracing",
+ "revm",
+ "revm-jit",
+ "serde",
+ "serde_json",
+ "similar-asserts",
+ "tempfile",
+ "thiserror",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "reth-evm-ethereum"
 version = "0.2.0-beta.6"
 dependencies = [
@@ -6892,6 +6957,7 @@ name = "reth-evm-optimism"
 version = "0.2.0-beta.6"
 dependencies = [
  "reth-evm",
+ "reth-evm-compiler",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -7965,6 +8031,61 @@ source = "git+https://github.com/danipopes/revm?rev=67c13f3daaba8620829d949b93fb
 dependencies = [
  "revm-primitives",
  "serde",
+]
+
+[[package]]
+name = "revm-jit"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "bitflags 2.5.0",
+ "bitvec",
+ "revm-interpreter",
+ "revm-jit-backend",
+ "revm-jit-builtins",
+ "revm-jit-context",
+ "revm-jit-llvm",
+ "revm-primitives",
+ "rustc-hash",
+ "tracing",
+]
+
+[[package]]
+name = "revm-jit-backend"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "ruint",
+ "tracing",
+]
+
+[[package]]
+name = "revm-jit-builtins"
+version = "0.1.0"
+dependencies = [
+ "revm-interpreter",
+ "revm-jit-backend",
+ "revm-jit-context",
+ "revm-primitives",
+ "tracing",
+]
+
+[[package]]
+name = "revm-jit-context"
+version = "0.1.0"
+dependencies = [
+ "revm-interpreter",
+ "revm-primitives",
+]
+
+[[package]]
+name = "revm-jit-llvm"
+version = "0.1.0"
+dependencies = [
+ "inkwell",
+ "revm-jit-backend",
+ "rustc-hash",
+ "tracing",
 ]
 
 [[package]]

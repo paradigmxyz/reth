@@ -17,6 +17,7 @@ reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
+reth-evm-compiler = { workspace = true, optional = true }
 
 # Ethereum
 revm-primitives.workspace = true
@@ -26,3 +27,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
+
+[features]
+compiler = ["reth-evm-compiler"]

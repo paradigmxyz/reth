@@ -4,6 +4,7 @@ crates/blockchain-tree      @rakita @rkrasiuk
 crates/cli/                 @onbjerg @mattsse
 crates/consensus            @rkrasiuk @mattsse @Rjected
 crates/exex                 @onbjerg @shekhirin
+crates/evm/compiler/        @DaniPopes
 crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
