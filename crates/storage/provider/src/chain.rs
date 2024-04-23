@@ -17,7 +17,9 @@ use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 ///
 /// Used inside the BlockchainTree.
 ///
-/// CAUTION: A chain of blocks should not be empty.
+/// # Warning
+///
+/// A chain of blocks should not be empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
     /// All blocks in this chain.
