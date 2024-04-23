@@ -260,17 +260,18 @@ pub fn init_from_state_dump<DB: Database>(
 
     // first line can be state root, then it can be used for verifying against computed state root
     reader.read_line(&mut line)?;
-    trace!(target: "reth::cli",
-        line,
-        "read line"
-    );
     let _state_root = match serde_json::from_str::<StateRoot>(&line) {
-        Ok(root) => Some(root),
+        Ok(root) => {
+            trace!(target: "reth::cli",
+                root=%root.root,
+                "read state root from file"
+            );
+            Some(root)
+        },
         Err(_) => {
             let GenesisAccountWithAddress { genesis_account, address } =
                 serde_json::from_str(&line)?;
             accounts.push((address, genesis_account));
-            line.clear();
 
             None
         }
