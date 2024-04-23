@@ -264,7 +264,7 @@ pub fn init_from_state_dump<DB: Database>(
         line,
         "read line"
     );
-    let _state_root = match serde_json::from_str::<B256>(&line) {
+    let _state_root = match serde_json::from_str::<StateRoot>(&line) {
         Ok(root) => Some(root),
         Err(_) => {
             let GenesisAccountWithAddress { genesis_account, address } =
@@ -282,7 +282,7 @@ pub fn init_from_state_dump<DB: Database>(
             line,
             "read line"
         );
-        
+
         if accounts.len() == DEFAULT_LEN_ACCOUNTS_CHUNK || n == 0 {
             debug!(target: "reth::cli",
                 block,
@@ -329,9 +329,14 @@ pub fn init_from_state_dump<DB: Database>(
     Ok(hash)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct StateRoot {
+    root: B256,
+}
+
 /// An account as in the state dump file. This contains a [`GenesisAccount`] and the account's
 /// address.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct GenesisAccountWithAddress {
     /// The account's balance, nonce, code, and storage.
     #[serde(flatten)]
