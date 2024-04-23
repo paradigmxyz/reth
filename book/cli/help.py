@@ -22,6 +22,11 @@ Automatically-generated CLI reference from `--help` output.
 {{#include ./SUMMARY.md}}
 """
 
+def write_file(file_path, content):
+    content = '\n'.join([line.rstrip() for line in content.split("\n")])
+    with open(file_path, "w") as f:
+        f.write(content)
+
 
 def main():
     args = parse_args(sys.argv[1:])
@@ -65,13 +70,11 @@ def main():
 
         root_summary += cmd_summary(root_path, cmd, obj, args.root_indentation)
         root_summary += "\n"
-    with open(path.join(args.out_dir, "SUMMARY.md"), "w") as f:
-        f.write(summary)
+    write_file(path.join(args.out_dir, "SUMMARY.md"), summary)
 
     # Generate README.md.
     if args.readme:
-        with open(path.join(args.out_dir, "README.md"), "w") as f:
-            f.write(README)
+        write_file(path.join(args.out_dir, "README.md"), README)
 
     if args.root_summary:
         update_root_summary(args.root_dir, root_summary)
@@ -162,8 +165,7 @@ def cmd_markdown(out_dir: str, cmd: str, obj: object):
         for arg in cmd:
             out_path = path.join(out_path, arg)
         makedirs(path.dirname(out_path), exist_ok=True)
-        with open(f"{out_path}.md", "w") as f:
-            f.write(out)
+        write_file(f"{out_path}.md", out)
 
         for k, v in obj.items():
             if k == HELP_KEY:
