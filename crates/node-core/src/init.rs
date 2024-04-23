@@ -276,6 +276,7 @@ pub fn init_from_state_dump<DB: Database>(
             None
         }
     };
+    line.clear();
 
     // remaining lines are accounts
     while let Ok(n) = reader.read_line(&mut line) {
