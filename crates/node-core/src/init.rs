@@ -29,7 +29,7 @@ use tracing::{debug, trace};
 /// Number of accounts from state dump file to insert into database at once.
 ///
 /// Default is 10k accounts.
-pub const DEFAULT_LEN_ACCOUNTS_CHUNK: usize = 100;
+pub const DEFAULT_LEN_ACCOUNTS_CHUNK: usize = 10_000;
 
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
@@ -277,11 +277,8 @@ pub fn init_from_state_dump<DB: Database>(
     mut reader: impl BufRead,
     factory: ProviderFactory<DB>,
 ) -> eyre::Result<B256> {
-    // let block = factory.last_block_number()?;
-    // let hash = factory.block_hash(block)??;
-
-    let block = 0;
-    let hash = factory.chain_spec().genesis_hash();
+    let block = factory.last_block_number()?;
+    let hash = factory.block_hash(block)?.unwrap();
 
     debug!(target: "reth::cli",
         block,
@@ -289,7 +286,8 @@ pub fn init_from_state_dump<DB: Database>(
         "Initializing state at block"
     );
 
-    let mut accounts = Vec::with_capacity(10_000);
+    let mut total_inserted_accounts = 0;
+    let mut accounts = Vec::with_capacity(DEFAULT_LEN_ACCOUNTS_CHUNK);
     let mut line = String::new();
 
     // first line can be state root, then it can be used for verifying against computed state root
@@ -315,9 +313,11 @@ pub fn init_from_state_dump<DB: Database>(
     // remaining lines are accounts
     while let Ok(n) = reader.read_line(&mut line) {
         if accounts.len() == DEFAULT_LEN_ACCOUNTS_CHUNK || n == 0 {
+            total_inserted_accounts += accounts.len();
             debug!(target: "reth::cli",
                 block,
-                accounts_len=accounts.len(),
+                parsed_new_accounts=accounts.len(),
+                total_inserted_accounts,
                 "Writing accounts to db"
             );
             // use transaction to insert genesis header
@@ -332,9 +332,9 @@ pub fn init_from_state_dump<DB: Database>(
                 block,
             )?;
 
+            // block is already written to static files
             let tx = provider_rw.into_tx();
-            let static_file_provider = factory.static_file_provider();
-            insert_genesis_header::<DB>(&tx, &static_file_provider, factory.chain_spec().clone())?;
+
             insert_state::<DB>(
                 &tx,
                 accounts.len(),
@@ -349,7 +349,6 @@ pub fn init_from_state_dump<DB: Database>(
             }
 
             tx.commit()?;
-            static_file_provider.commit()?;
             accounts.clear();
         }
 
