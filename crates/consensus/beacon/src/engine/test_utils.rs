@@ -7,7 +7,7 @@ use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::config::EtlConfig;
-use reth_consensus::Consensus;
+use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -19,7 +19,7 @@ use reth_interfaces::{
     executor::BlockExecutionError,
     p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
     sync::NoopSyncStateUpdater,
-    test_utils::{NoopFullBlockClient, TestConsensus},
+    test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
