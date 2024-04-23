@@ -42,8 +42,8 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
 jsonrpsee.workspace = true
-http = "0.2.8"
-http-body = "0.4.5"
+http.workspace = true
+http-body.workspace = true
 hyper.workspace = true
 jsonwebtoken = "8"
 

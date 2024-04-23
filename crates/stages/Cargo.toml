@@ -60,7 +60,7 @@ paste.workspace = true
 tempfile.workspace = true
 
 # Stage benchmarks
-criterion = { workspace = true, features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 
 # io
 serde_json.workspace = true

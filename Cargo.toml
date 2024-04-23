@@ -160,7 +160,7 @@ unnecessary_struct_initialization = "allow"
 use_self = "allow"
 
 [workspace.package]
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 edition = "2021"
 rust-version = "1.76"
 license = "MIT OR Apache-2.0"
@@ -344,6 +344,7 @@ tokio = { version = "1.21", default-features = false }
 tokio-util = { version = "0.7.4", features = ["codec"] }
 
 # async
+async-stream = "0.3"
 async-trait = "0.1.68"
 futures = "0.3.26"
 pin-project = "1.0.12"
@@ -351,6 +352,8 @@ futures-util = "0.3.25"
 hyper = "0.14.25"
 tower = "0.4"
 tower-http = "0.4"
+http = "0.2.8"
+http-body = "0.4.5"
 
 # p2p
 discv5 = { git = "https://github.com/sigp/discv5", rev = "04ac004" }

@@ -254,14 +254,14 @@ where
 /// - [`HistoryIndexingStages`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct OfflineStages<EF: ExecutorFactory> {
+pub struct OfflineStages<EF> {
     /// Executor factory needs for execution stage
     pub executor_factory: EF,
     /// ETL configuration
     etl_config: EtlConfig,
 }
 
-impl<EF: ExecutorFactory> OfflineStages<EF> {
+impl<EF> OfflineStages<EF> {
     /// Create a new set of offline stages with default values.
     pub fn new(executor_factory: EF, etl_config: EtlConfig) -> Self {
         Self { executor_factory, etl_config }
@@ -280,12 +280,12 @@ impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ExecutionStages<EF: ExecutorFactory> {
+pub struct ExecutionStages<EF> {
     /// Executor factory that will create executors.
     executor_factory: EF,
 }
 
-impl<EF: ExecutorFactory + 'static> ExecutionStages<EF> {
+impl<EF> ExecutionStages<EF> {
     /// Create a new set of execution stages with default values.
     pub fn new(executor_factory: EF) -> Self {
         Self { executor_factory }
