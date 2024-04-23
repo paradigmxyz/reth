@@ -25,7 +25,7 @@ pub(crate) struct Incoming<T, Item> {
 }
 impl<T, Item> Incoming<T, Item>
 where
-    T: Stream<Item = io::Result<Item>> + Unpin + 'static,
+    T: Stream<Item = io::Result<Item>> + Unpin,
     Item: AsyncRead + AsyncWrite,
 {
     /// Create a new instance.
@@ -44,7 +44,7 @@ where
 
 impl<T, Item> Stream for Incoming<T, Item>
 where
-    T: Stream<Item = io::Result<Item>> + 'static,
+    T: Stream<Item = io::Result<Item>>,
     Item: AsyncRead + AsyncWrite,
 {
     type Item = io::Result<IpcConn<JsonRpcStream<Item>>>;

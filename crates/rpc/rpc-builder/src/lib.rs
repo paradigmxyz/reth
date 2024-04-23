@@ -172,7 +172,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{
-    Builder as IpcServerBuilder, Endpoint, RpcServiceBuilder as IpcRpcServiceBuilder,
+    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
@@ -1476,7 +1476,7 @@ pub struct RpcServerConfig {
     /// Configs for JSON-RPC IPC server
     ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// The Endpoint where to launch the ipc server
-    ipc_endpoint: Option<Endpoint>,
+    ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
 }
@@ -1490,7 +1490,7 @@ impl fmt::Debug for RpcServerConfig {
             .field("ws_server_config", &self.ws_server_config)
             .field("ws_addr", &self.ws_addr)
             .field("ipc_server_config", &self.ipc_server_config)
-            .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
+            .field("ipc_endpoint", &self.ipc_endpoint)
             .field("jwt_secret", &self.jwt_secret)
             .finish()
     }
@@ -1599,7 +1599,7 @@ impl RpcServerConfig {
     ///
     /// Default is [DEFAULT_IPC_ENDPOINT]
     pub fn with_ipc_endpoint(mut self, path: impl Into<String>) -> Self {
-        self.ipc_endpoint = Some(Endpoint::new(path.into()));
+        self.ipc_endpoint = Some(path.into());
         self
     }
 
@@ -1629,8 +1629,8 @@ impl RpcServerConfig {
     }
 
     /// Returns the [Endpoint] of the ipc server
-    pub fn ipc_endpoint(&self) -> Option<&Endpoint> {
-        self.ipc_endpoint.as_ref()
+    pub fn ipc_endpoint(&self) -> Option<String> {
+        self.ipc_endpoint.clone()
     }
 
     /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
@@ -1759,12 +1759,10 @@ impl RpcServerConfig {
 
         if let Some(builder) = self.ipc_server_config {
             let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::ipc).unwrap_or_default();
-            let ipc_path = self
-                .ipc_endpoint
-                .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
+            let ipc_path = self.ipc_endpoint.unwrap_or_else(|| DEFAULT_IPC_ENDPOINT.into());
             let ipc = builder
                 .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
-                .build(ipc_path.path());
+                .build(ipc_path);
             server.ipc = Some(ipc);
         }
 
@@ -2153,7 +2151,7 @@ impl RpcServer {
     }
 
     /// Returns the [`Endpoint`] of the ipc server if started.
-    pub fn ipc_endpoint(&self) -> Option<&Endpoint> {
+    pub fn ipc_endpoint(&self) -> Option<String> {
         self.ipc.as_ref().map(|ipc| ipc.endpoint())
     }
 
@@ -2161,7 +2159,7 @@ impl RpcServer {
     ///
     /// This returns an [RpcServerHandle] that's connected to the server task(s) until the server is
     /// stopped or the [RpcServerHandle] is dropped.
-    #[instrument(name = "start", skip_all, fields(http = ?self.http_local_addr(), ws = ?self.ws_local_addr(), ipc = ?self.ipc_endpoint().map(|ipc|ipc.path())), target = "rpc", level = "TRACE")]
+    #[instrument(name = "start", skip_all, fields(http = ?self.http_local_addr(), ws = ?self.ws_local_addr(), ipc = ?self.ipc_endpoint()), target = "rpc", level = "TRACE")]
     pub async fn start(self, modules: TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
         trace!(target: "rpc", "staring RPC server");
         let Self { ws_http, ipc: ipc_server } = self;
@@ -2183,7 +2181,7 @@ impl RpcServer {
         if let Some((server, module)) =
             ipc_server.and_then(|server| ipc.map(|module| (server, module)))
         {
-            handle.ipc_endpoint = Some(server.endpoint().path().to_string());
+            handle.ipc_endpoint = Some(server.endpoint());
             handle.ipc = Some(server.start(module).await?);
         }
 

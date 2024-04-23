@@ -79,13 +79,11 @@ pub enum IpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parity_tokio_ipc::{dummy_endpoint, Endpoint};
+    use crate::server::dummy_endpoint;
 
     #[tokio::test]
     async fn test_connect() {
         let endpoint = dummy_endpoint();
-        let _incoming = Endpoint::new(endpoint.clone()).incoming().unwrap();
-
         let (tx, rx) = IpcTransportClientBuilder::default().build(endpoint).await.unwrap();
         let _ = IpcClientBuilder::default().build_with_tokio(tx, rx);
     }

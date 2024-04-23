@@ -15,7 +15,6 @@ workspace = true
 
 # async/net
 futures.workspace = true
-interprocess = "1.2.1"
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tokio-stream.workspace = true
@@ -30,9 +29,11 @@ tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 futures-util = "0.3.30"
+interprocess = { git = "https://github.com/kotauskas/interprocess", rev = "5023981c", features = ["tokio"] }
+rand.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = {version = "0.52.0", features = ["Win32_Foundation"]}
+windows-sys = { version = "0.52.0", features = ["Win32_Foundation"] }
 
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }

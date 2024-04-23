@@ -5,6 +5,9 @@ use crate::server::{
     future::{ConnectionGuard, FutureDriver, StopHandle},
 };
 use futures::{FutureExt, Stream, StreamExt};
+use interprocess::local_socket::{
+    traits::tokio::ListenerExt, GenericFilePath, ListenerOptions, ToFsName,
+};
 use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
     server::{
@@ -46,7 +49,7 @@ mod rpc_service;
 // This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
 pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
-    endpoint: Endpoint,
+    endpoint: String,
     id_provider: Arc<dyn IdProvider>,
     cfg: Settings,
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
@@ -55,8 +58,8 @@ pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
 
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
     /// Returns the configured [Endpoint]
-    pub fn endpoint(&self) -> &Endpoint {
-        &self.endpoint
+    pub fn endpoint(&self) -> String {
+        self.endpoint.clone()
     }
 }
 
@@ -122,14 +125,35 @@ where
         stop_handle: StopHandle,
         on_ready: oneshot::Sender<Result<(), IpcServerStartError>>,
     ) {
-        trace!(endpoint = ?self.endpoint.path(), "starting ipc server");
+        trace!(endpoint = ?self.endpoint, "starting ipc server");
 
         if cfg!(unix) {
             // ensure the file does not exist
-            if std::fs::remove_file(self.endpoint.path()).is_ok() {
-                debug!(endpoint = ?self.endpoint.path(), "removed existing IPC endpoint file");
+            if std::fs::remove_file(&self.endpoint).is_ok() {
+                debug!(endpoint = ?self.endpoint, "removed existing IPC endpoint file");
             }
         }
+
+        let name = match self.endpoint.clone().to_fs_name::<GenericFilePath>() {
+            Ok(n) => n,
+            Err(err) => {
+                on_ready
+                    .send(Err(IpcServerStartError { endpoint: self.endpoint.clone(), source: err }))
+                    .ok();
+                return
+            }
+        };
+
+        let listener_ops = ListenerOptions::new().name(name);
+        let listener = match listener_ops.create_tokio() {
+            Err(err) => {
+                on_ready
+                    .send(Err(IpcServerStartError { endpoint: self.endpoint.clone(), source: err }))
+                    .ok();
+                return
+            }
+            Ok(listener) => listener,
+        };
 
         let message_buffer_capacity = self.cfg.message_buffer_capacity;
         let max_request_body_size = self.cfg.max_request_body_size;
@@ -142,20 +166,8 @@ where
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
         let mut connections = FutureDriver::default();
-        let endpoint_path = self.endpoint.path().to_string();
-        let incoming = match self.endpoint.incoming() {
-            Ok(connections) => {
-                #[cfg(windows)]
-                    let connections = Box::pin(connections);
-                Incoming::new(connections)
-            }
-            Err(err) => {
-                on_ready
-                    .send(Err(IpcServerStartError { endpoint: endpoint_path, source: err }))
-                    .ok();
-                return
-            }
-        };
+        let incoming = Incoming::new(listener.incoming());
+
         // signal that we're ready to accept connections
         on_ready.send(Ok(())).ok();
 
@@ -220,7 +232,7 @@ where
 impl std::fmt::Debug for IpcServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcServer")
-            .field("endpoint", &self.endpoint.path())
+            .field("endpoint", &self.endpoint)
             .field("cfg", &self.cfg)
             .field("id_provider", &self.id_provider)
             .finish()
@@ -461,7 +473,7 @@ enum MonitoredError<E> {
 
 impl<'a, T, Item> Future for Monitored<'a, Incoming<T, Item>>
 where
-    T: Stream<Item = io::Result<Item>> + Unpin + 'static,
+    T: Stream<Item = io::Result<Item>> + Unpin,
     Item: AsyncRead + AsyncWrite,
 {
     type Output = Result<IpcConn<JsonRpcStream<Item>>, MonitoredError<io::Error>>;
@@ -725,17 +737,8 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
     pub fn build(self, endpoint: impl AsRef<str>) -> IpcServer<HttpMiddleware, RpcMiddleware> {
-        let endpoint = Endpoint::new(endpoint.as_ref().to_string());
-        self.build_with_endpoint(endpoint)
-    }
-
-    /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub fn build_with_endpoint(
-        self,
-        endpoint: Endpoint,
-    ) -> IpcServer<HttpMiddleware, RpcMiddleware> {
         IpcServer {
-            endpoint,
+            endpoint: endpoint.as_ref().to_string(),
             cfg: self.settings,
             id_provider: self.id_provider,
             http_middleware: self.http_middleware,
@@ -770,6 +773,16 @@ impl ServerHandle {
     /// Check if the server has been stopped.
     pub fn is_stopped(&self) -> bool {
         self.0.is_closed()
+    }
+}
+
+/// For testing/examples
+pub fn dummy_endpoint() -> String {
+    let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
+    if cfg!(windows) {
+        format!(r"\\.\pipe\my-pipe-{}", num)
+    } else {
+        format!(r"/tmp/my-uds-{}", num)
     }
 }
 
