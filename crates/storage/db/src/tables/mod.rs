@@ -101,6 +101,7 @@ pub trait TableViewer<R> {
     }
 }
 
+#[macro_export]
 /// Defines all the tables in the database.
 macro_rules! tables {
     (@bool) => { false };
