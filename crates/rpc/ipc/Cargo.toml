@@ -29,6 +29,8 @@ serde_json.workspace = true
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+futures-util = "0.3.30"
 
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }
+reth-tracing.workspace = true
