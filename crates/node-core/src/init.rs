@@ -309,7 +309,8 @@ pub fn init_from_state_dump<DB: Database>(
             )?;
 
             let tx = provider_rw.into_tx();
-
+            let static_file_provider = factory.static_file_provider();
+            insert_genesis_header::<DB>(&tx, &static_file_provider, factory.chain_spec().clone())?;
             insert_genesis_state::<DB>(
                 &tx,
                 accounts.len(),
