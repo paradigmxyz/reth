@@ -38,7 +38,9 @@ pub struct Chain {
 impl Chain {
     /// Create new Chain from blocks and state.
     ///
-    /// CAUTION: A chain of blocks should not be empty.
+    /// # Warning
+    ///
+    /// A chain of blocks should not be empty.
     pub fn new(
         blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
         state: BundleStateWithReceipts,
