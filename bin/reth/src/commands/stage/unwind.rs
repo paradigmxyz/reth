@@ -236,10 +236,12 @@ impl Command {
 /// `reth stage unwind` subcommand
 #[derive(Subcommand, Debug, Eq, PartialEq)]
 enum Subcommands {
-    /// Unwinds the database until the given block number (range is inclusive).
+    /// Unwinds the database from the latest block, until the given block number or hash has been
+    /// reached, that block is not included.
     #[command(name = "to-block")]
     ToBlock { target: BlockHashOrNumber },
-    /// Unwinds the given number of blocks from the database.
+    /// Unwinds the database from the latest block, until the given number of blocks have been
+    /// reached.
     #[command(name = "num-blocks")]
     NumBlocks { amount: u64 },
 }
