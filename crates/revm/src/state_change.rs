@@ -128,7 +128,7 @@ where
             if ancestor_block_number == 0 {
                 break
             }
-            ancestor_block_number = ancestor_block_number - 1;
+            ancestor_block_number -= 1;
 
             let (slot, value) =
                 eip2935_block_hash_slot(ancestor_block_number, db).map_err(|err| {
