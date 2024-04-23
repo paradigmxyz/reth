@@ -1,15 +1,13 @@
 use node::NodeHelper;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    blockchain_tree::ShareableBlockchainTree,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
-    revm::EvmProcessorFactory,
     tasks::TaskManager,
 };
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::{NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
-    FullNodeComponentsAdapter, FullNodeTypesAdapter, NodeTypes,
+    FullNodeComponentsAdapter, FullNodeTypesAdapter,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
@@ -100,12 +98,10 @@ where
 // Type aliases
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type EvmType<N> = EvmProcessorFactory<<N as NodeTypes>::Evm>;
-type RethProvider<N> = BlockchainProvider<TmpDB, ShareableBlockchainTree<TmpDB, EvmType<N>>>;
 type TmpPool<N> = <<N as reth_node_builder::Node<TmpNodeAdapter<N>>>::PoolBuilder as PoolBuilder<
     TmpNodeAdapter<N>,
 >>::Pool;
-type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, RethProvider<N>>;
+type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
 
 /// Type alias for a type of NodeHelper
 pub type NodeHelperType<N> = NodeHelper<FullNodeComponentsAdapter<TmpNodeAdapter<N>, TmpPool<N>>>;
