@@ -112,6 +112,16 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
+    insert_state::<DB>(tx, capacity, alloc, 0)
+}
+
+/// Inserts state at given block into database.
+pub fn insert_state<'a, 'b, DB: Database>(
+    tx: &<DB as Database>::TXMut,
+    capacity: usize,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
     let mut reverts_init = HashMap::with_capacity(capacity);
     let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
@@ -158,14 +168,14 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
             ),
         );
     }
-    let all_reverts_init: RevertsInit = HashMap::from([(0, reverts_init)]);
+    let all_reverts_init: RevertsInit = HashMap::from([(block, reverts_init)]);
 
     let bundle = BundleStateWithReceipts::new_init(
         state_init,
         all_reverts_init,
         contracts.into_iter().collect(),
         Receipts::new(),
-        0,
+        block,
     );
 
     bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
@@ -211,15 +221,24 @@ pub fn insert_genesis_history<'a, 'b, DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
+    insert_history::<DB>(provider, alloc, 0)
+}
+
+/// Inserts history indices for genesis accounts and storage.
+pub fn insert_history<'a, 'b, DB: Database>(
+    provider: &DatabaseProviderRW<DB>,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
+    block: u64,
+) -> ProviderResult<()> {
     let account_transitions =
-        alloc.clone().map(|(addr, _)| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
+        alloc.clone().map(|(addr, _)| (*addr, vec![block])).collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
 
     trace!(target: "reth::cli", "Inserted account history");
 
     let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
-        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![0])))
+        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![block])))
         .collect::<BTreeMap<_, _>>();
     provider.insert_storage_history_index(storage_transitions)?;
 
@@ -306,9 +325,10 @@ pub fn init_from_state_dump<DB: Database>(
                 &provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
             )?;
-            insert_genesis_history(
+            insert_history(
                 &provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
+                block
             )?;
 
             let tx = provider_rw.into_tx();
