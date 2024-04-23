@@ -30,7 +30,7 @@ pub enum StageEnum {
     ///
     /// Manages operations related to hashing storage data.
     StorageHashing,
-    /// The hashing stage within the pipeline, including `account-hashing` and `storage-hashing`.
+    /// The account and storage hashing stages within the pipeline.
     ///
     /// Covers general data hashing operations.
     Hashing,
