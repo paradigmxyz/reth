@@ -260,6 +260,10 @@ pub fn init_from_state_dump<DB: Database>(
 
     // first line can be state root, then it can be used for verifying against computed state root
     reader.read_line(&mut line)?;
+    trace!(target: "reth::cli",
+        line,
+        "read line"
+    );
     let _state_root = match serde_json::from_str::<B256>(&line) {
         Ok(root) => Some(root),
         Err(_) => {
