@@ -51,13 +51,13 @@ impl<E: EngineTypes + 'static> EngineApiTestContext<E> {
     }
 
     /// Sends forkchoice update to the engine api
-    pub async fn update_forkchoice(&self, hash: B256) -> eyre::Result<()> {
+    pub async fn update_forkchoice(&self, current_head: B256, new_head: B256) -> eyre::Result<()> {
         EngineApiClient::<E>::fork_choice_updated_v2(
             &self.engine_api_client,
             ForkchoiceState {
-                head_block_hash: hash,
-                safe_block_hash: hash,
-                finalized_block_hash: hash,
+                head_block_hash: new_head,
+                safe_block_hash: current_head,
+                finalized_block_hash: current_head,
             },
             None,
         )

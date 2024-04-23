@@ -93,7 +93,7 @@ where
             self.engine_api.submit_payload(payload, eth_attr.clone(), versioned_hashes).await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.engine_api.update_forkchoice(block_hash).await?;
+        self.engine_api.update_forkchoice(block_hash, block_hash).await?;
 
         Ok((block_hash, block_number))
     }

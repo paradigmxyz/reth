@@ -5,9 +5,12 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
-use reth_e2e_test_utils::{node::NodeTestContext, wallet::Wallet};
+use reth_e2e_test_utils::{
+    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
+};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
+use reth_primitives::{b256, ChainSpecBuilder, Genesis, MAINNET};
+use reth_tracing::tracing::info;
 use reth_transaction_pool::TransactionPool;
 
 use crate::utils::eth_payload_attributes;
@@ -38,8 +41,21 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 
     let mut node = NodeTestContext::new(node).await?;
 
-    let mut wallet = Wallet::default();
-    let blob_tx = wallet.tx_with_blobs().await?;
+    let wallets = Wallet::new(2).gen();
+    let blob_wallet = wallets.first().unwrap();
+    let second_wallet = wallets.last().unwrap();
+
+    // inject normal tx
+    let raw_tx = TransactionTestContext::transfer_tx(1, second_wallet.clone(), None).await;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+    // build payload with normal tx
+    let (payload, attributes) = node.new_payload(eth_payload_attributes).await?;
+
+    // clean the pool
+    node.inner.pool.remove_transactions(vec![tx_hash]);
+
+    // build blob tx
+    let blob_tx = TransactionTestContext::tx_with_blobs(1, blob_wallet.clone()).await?;
 
     // inject blob tx to the pool
     let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
@@ -50,27 +66,26 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 
     // build a payload
     let (blob_payload, blob_attr) = node.new_payload(eth_payload_attributes).await?;
-    // clean the pool
-    node.inner.pool.remove_transactions(vec![blob_tx_hash]);
-
-    // inject normal tx
-    let raw_tx = wallet.transfer_tx(None).await;
-    node.rpc.inject_tx(raw_tx).await?;
-    // build payload with normal tx
-    let (payload, attributes) = node.new_payload(eth_payload_attributes).await?;
 
     // submit the blob payload
     let blob_block_hash =
         node.engine_api.submit_payload(blob_payload, blob_attr, versioned_hashes.clone()).await?;
 
-    // submit the payload
-    let block_hash = node.engine_api.submit_payload(payload, attributes, vec![]).await?;
+    let genesis_hash = b256!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3");
 
-    // send fcu with normal hash
-    node.engine_api.update_forkchoice(block_hash).await?;
+    let (_, _) = tokio::join!(
+        // send fcu with blob hash
+        node.engine_api.update_forkchoice(genesis_hash, blob_block_hash),
+        // send fcu with normal hash
+        node.engine_api.update_forkchoice(genesis_hash, payload.block().hash())
+    );
 
-    // send fcu with blob hash
-    node.engine_api.update_forkchoice(blob_block_hash).await?;
+    // submit normal payload
+    node.engine_api.submit_payload(payload, attributes, vec![]).await?;
+
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+    info!(?blob_tx_hash, "Checking the blob tx is still in the pool");
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;

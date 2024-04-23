@@ -5,7 +5,9 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
-use reth_e2e_test_utils::{node::NodeTestContext, wallet::Wallet};
+use reth_e2e_test_utils::{
+    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
+};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 
@@ -55,8 +57,8 @@ async fn can_sync() -> eyre::Result<()> {
 
     let mut second_node = NodeTestContext::new(node).await?;
 
-    let mut wallet = Wallet::default();
-    let raw_tx = wallet.transfer_tx(None).await;
+    let wallet = Wallet::default();
+    let raw_tx = TransactionTestContext::transfer_tx(1, wallet.inner, None).await;
 
     // Make them peer
     first_node.network.add_peer(second_node.network.record()).await;
@@ -75,7 +77,7 @@ async fn can_sync() -> eyre::Result<()> {
     first_node.assert_new_block(tx_hash, block_hash, block_number).await?;
 
     // only send forkchoice update to second node
-    second_node.engine_api.update_forkchoice(block_hash).await?;
+    second_node.engine_api.update_forkchoice(block_hash, block_hash).await?;
 
     // expect second node advanced via p2p gossip
     second_node.assert_new_block(tx_hash, block_hash, 1).await?;

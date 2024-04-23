@@ -4,6 +4,9 @@ pub mod node;
 /// Helper type to yield accounts from mnemonic
 pub mod wallet;
 
+/// Helper for transactions
+pub mod transaction;
+
 /// Helper for payload operations
 mod payload;
 

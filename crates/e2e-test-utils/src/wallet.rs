@@ -1,19 +1,19 @@
-use alloy_consensus::{BlobTransactionSidecar, SidecarBuilder, SimpleCoder};
-use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
-use alloy_rpc_types::{TransactionInput, TransactionRequest};
+use alloy_signer::Signer;
 use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
-use reth_primitives::{Address, Bytes, U256};
+
 /// One of the accounts of the genesis allocations.
 pub struct Wallet {
-    inner: LocalWallet,
+    pub inner: LocalWallet,
     chain_id: u64,
+    amount: usize,
+    derivation_path: Option<String>,
 }
 
 impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
-    pub(crate) fn new(phrase: &str) -> Self {
-        let inner = MnemonicBuilder::<English>::default().phrase(phrase).build().unwrap();
-        Self { inner, chain_id: 1 }
+    pub fn new(amount: usize) -> Self {
+        let inner = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC).build().unwrap();
+        Self { inner, chain_id: 1, amount, derivation_path: None }
     }
 
     /// Sets chain id
@@ -22,43 +22,34 @@ impl Wallet {
         self
     }
 
-    /// Creates a static transfer and signs it
-    pub async fn transfer_tx(&mut self, data: Option<Bytes>) -> Bytes {
-        let tx = self.tx(data);
-        let signer = EthereumSigner::from(self.inner.clone());
-        tx.build(&signer).await.unwrap().encoded_2718().into()
-    }
-
-    /// Creates a transaction with data and signs it
-    fn tx(&mut self, data: Option<Bytes>) -> TransactionRequest {
-        TransactionRequest {
-            nonce: Some(0),
-            value: Some(U256::from(100)),
-            to: Some(Address::random()),
-            gas: Some(21000),
-            max_fee_per_gas: Some(20e9 as u128),
-            max_priority_fee_per_gas: Some(20e9 as u128),
-            chain_id: Some(self.chain_id),
-            input: TransactionInput { input: None, data },
-            ..Default::default()
+    #[must_use]
+    pub fn derivation_path(mut self, derivation_path: impl Into<String>) -> Self {
+        let mut derivation_path = derivation_path.into();
+        if !derivation_path.ends_with('/') {
+            derivation_path.push('/');
         }
+        self.derivation_path = Some(derivation_path);
+        self
     }
 
-    /// Creates a tx with blob sidecar and sign it
-    pub async fn tx_with_blobs(&mut self) -> eyre::Result<Bytes> {
-        let mut tx = self.tx(None);
+    fn get_derivation_path(&self) -> &str {
+        self.derivation_path.as_deref().unwrap_or("m/44'/60'/0'/0/")
+    }
 
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"dummy blob");
-        let sidecar: BlobTransactionSidecar = builder.build()?;
+    pub fn gen(&self) -> Vec<LocalWallet> {
+        let builder = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC);
 
-        tx.set_blob_sidecar(sidecar);
-        tx.set_max_fee_per_blob_gas(15e9 as u128);
+        // use the derivation path
+        let derivation_path = self.get_derivation_path();
 
-        let signer = EthereumSigner::from(self.inner.clone());
-        let signed = tx.clone().build(&signer).await.unwrap();
-
-        Ok(signed.encoded_2718().into())
+        let mut wallets = Vec::with_capacity(self.amount);
+        for idx in 0..self.amount {
+            let builder =
+                builder.clone().derivation_path(&format!("{derivation_path}{idx}")).unwrap();
+            let wallet = builder.build().unwrap().with_chain_id(Some(self.chain_id));
+            wallets.push(wallet)
+        }
+        wallets
     }
 }
 
@@ -66,6 +57,6 @@ const TEST_MNEMONIC: &str = "test test test test test test test test test test t
 
 impl Default for Wallet {
     fn default() -> Self {
-        Wallet::new(TEST_MNEMONIC)
+        Wallet::new(1)
     }
 }
