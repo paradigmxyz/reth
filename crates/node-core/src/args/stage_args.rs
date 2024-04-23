@@ -30,11 +30,11 @@ pub enum StageEnum {
     ///
     /// Manages operations related to hashing storage data.
     StorageHashing,
-    /// The hashing stage within the pipeline.
+    /// The account and storage hashing stages within the pipeline.
     ///
     /// Covers general data hashing operations.
     Hashing,
-    /// The Merkle stage within the pipeline.
+    /// The merkle stage within the pipeline.
     ///
     /// Handles Merkle tree-related computations and data processing.
     Merkle,
