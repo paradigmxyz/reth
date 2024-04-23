@@ -1,5 +1,6 @@
 //! Reth genesis initialization utility functions.
 
+use itertools::Itertools;
 use reth_db::{
     database::Database,
     tables,
@@ -204,8 +205,11 @@ pub fn insert_genesis_history<'a, 'b, DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
-    let account_transitions =
-        alloc.clone().map(|(addr, _)| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
+    let account_transitions = alloc
+        .clone()
+        .unique_by(|(address, _)| **address)
+        .map(|(addr, _)| (*addr, vec![0]))
+        .collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
 
     let storage_transitions = alloc
