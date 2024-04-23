@@ -294,23 +294,41 @@ impl BundleStateWithReceipts {
     }
 
     /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
+    /// files, in append-only mode. See
+    /// [`write_to_storage_with_mode`](Self::write_to_storage_with_mode).
+    pub fn write_to_storage<TX>(
+        self,
+        tx: &TX,
+        static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
+        is_value_known: OriginalValuesKnown,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut + DbTx,
+    {
+        self.write_to_storage_with_mode(tx, static_file_producer, is_value_known, true)
+    }
+
+    /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
     /// files if `static_file_producer` is `Some`. It should be none if there is any kind of
     /// pruning/filtering over the receipts.
     ///
-    /// `omit_changed_check` should be set to true of bundle has some of it data
-    /// detached, This would make some original values not known.
-    pub fn write_to_storage<TX>(
+    /// `omit_changed_check` should be set to true if bundle has some of its data detached. This
+    /// would make some original values not known.
+    ///
+    /// Writes all changes in append-only mode, if `true` passed as corresponding parameter.
+    pub fn write_to_storage_with_mode<TX>(
         self,
         tx: &TX,
         mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
+        append_only: bool,
     ) -> ProviderResult<()>
     where
         TX: DbTxMut + DbTx,
     {
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
-        StateReverts(reverts).write_to_db(tx, self.first_block)?;
+        StateReverts(reverts).write_to_db_with_mode(tx, self.first_block, append_only)?;
 
         // write receipts
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;

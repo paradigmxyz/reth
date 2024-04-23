@@ -112,7 +112,7 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
-    insert_state::<DB>(tx, capacity, alloc, 0)
+    insert_state::<DB>(tx, capacity, alloc, 0, false)
 }
 
 /// Inserts state at given block into database.
@@ -121,6 +121,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
+    append_only: bool,
 ) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
     let mut reverts_init = HashMap::with_capacity(capacity);
@@ -178,7 +179,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         block,
     );
 
-    bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
+    bundle.write_to_storage_with_mode(tx, None, OriginalValuesKnown::Yes, append_only)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -328,16 +329,18 @@ pub fn init_from_state_dump<DB: Database>(
             insert_history(
                 &provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
-                block
+                block,
             )?;
 
             let tx = provider_rw.into_tx();
             let static_file_provider = factory.static_file_provider();
             insert_genesis_header::<DB>(&tx, &static_file_provider, factory.chain_spec().clone())?;
-            insert_genesis_state::<DB>(
+            insert_state::<DB>(
                 &tx,
                 accounts.len(),
                 accounts.iter().map(|(address, account)| (address, account)),
+                block,
+                false,
             )?;
 
             // insert sync stage

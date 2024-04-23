@@ -1,6 +1,6 @@
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut},
@@ -21,13 +21,25 @@ impl From<PlainStateReverts> for StateReverts {
 }
 
 impl StateReverts {
-    /// Write reverts to database.
-    ///
-    /// Note:: Reverts will delete all wiped storage from plain state.
+    /// Write reverts to database, in append-only mode. See
+    /// [`write_to_db_with_mode`](Self::write_to_db_with_mode).
     pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
         first_block: BlockNumber,
+    ) -> Result<(), DatabaseError> {
+        self.write_to_db_with_mode(tx, first_block, true)
+    }
+
+    /// Write reverts to database. Writes all changes in append-only mode, if `true` passed as
+    /// corresponding parameter.
+    ///
+    /// Note:: Reverts will delete all wiped storage from plain state.
+    pub fn write_to_db_with_mode<TX: DbTxMut + DbTx>(
+        self,
+        tx: &TX,
+        first_block: BlockNumber,
+        append_only: bool,
     ) -> Result<(), DatabaseError> {
         // Write storage changes
         tracing::trace!(target: "provider::reverts", "Writing storage changes");
@@ -79,10 +91,17 @@ impl StateReverts {
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
             for (address, info) in account_block_reverts {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                )?;
+                if append_only {
+                    account_changeset_cursor.append_dup(
+                        block_number,
+                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                    )?;
+                } else {
+                    account_changeset_cursor.insert(
+                        block_number,
+                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                    )?;
+                }
             }
         }
 
