@@ -3,7 +3,7 @@ use num_traits::Zero;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
-use reth_exex::ExExManagerHandle;
+use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
@@ -12,9 +12,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, CanonStateNotification, Chain, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader,
-    TransactionVariant,
+    BlockReader, Chain, DatabaseProviderRW, ExecutorFactory, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
@@ -265,7 +264,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // NOTE: We can ignore the error here, since an error means that the channel is closed,
             // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(CanonStateNotification::Commit { new: chain });
+            let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
         }
 
         let time = Instant::now();
@@ -436,7 +435,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
             // NOTE: We can ignore the error here, since an error means that the channel is closed,
             // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(CanonStateNotification::Reorg {
+            let _ = self.exex_manager_handle.send(ExExNotification::ChainReorged {
                 old: Arc::new(chain),
                 new: Arc::new(Chain::default()),
             });
