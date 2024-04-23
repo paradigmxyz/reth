@@ -14,7 +14,10 @@ use reth_primitives::{
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
-    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update,
+        post_block_withdrawals_balance_increments,
+    },
 };
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
@@ -77,7 +80,6 @@ impl PendingBlockEnv {
 
         let chain_spec = client.chain_spec();
 
-        // todo: apply blockhash history state change
         let parent_beacon_block_root = if origin.is_actual_pending() {
             // apply eip-4788 pre block contract call if we got the block from the CL with the real
             // parent beacon block root
@@ -93,6 +95,7 @@ impl PendingBlockEnv {
         } else {
             None
         };
+        pre_block_blockhashes_update(&mut db, &cfg, &block_env, chain_spec.as_ref(), block_number)?;
 
         let mut receipts = Vec::new();
 
@@ -272,7 +275,7 @@ impl PendingBlockEnv {
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
 /// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
-/// and [BlockEnv]) to execute the pre block contract call.
+/// and [BlockEnv] to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
@@ -303,6 +306,40 @@ where
         initialized_block_env.timestamp.to::<u64>(),
         block_number,
         parent_beacon_block_root,
+        &mut evm_pre_block,
+    )
+    .map_err(|err| EthApiError::Internal(err.into()))
+}
+
+/// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block state transitions.
+///
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
+/// and [BlockEnv].
+///
+/// This uses [apply_blockhashes_update].
+fn pre_block_blockhashes_update<DB: Database + DatabaseCommit>(
+    db: &mut DB,
+    initialized_cfg: &CfgEnvWithHandlerCfg,
+    initialized_block_env: &BlockEnv,
+    chain_spec: &ChainSpec,
+    block_number: u64,
+) -> EthResult<()>
+where
+    DB::Error: std::fmt::Display,
+{
+    let mut evm_pre_block = revm::Evm::builder()
+        .with_db(db)
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            Default::default(),
+        ))
+        .build();
+
+    apply_blockhashes_update(
+        chain_spec,
+        initialized_block_env.timestamp.to::<u64>(),
+        block_number,
         &mut evm_pre_block,
     )
     .map_err(|err| EthApiError::Internal(err.into()))
