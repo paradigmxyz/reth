@@ -101,7 +101,17 @@ where
     // If the first slot in the ring is `U256::ZERO`, then we can assume the ring has not been
     // filled before, and this is the activation block.
     //
-    // todo: explain why
+    // Reasoning:
+    // - If `block_number <= HISTORY_SERVE_WINDOW`, then the ring will be filled with as many blocks
+    //   as possible, down to slot 0.
+    //
+    //   For example, if it is activated at block 100, then slots `0..100` will be filled.
+    //
+    // - If the fork is activated at genesis, then this will only run at block 1, which will fill
+    //   the ring with the hash of block 0 at slot 0.
+    //
+    // - If the activation block is above `HISTORY_SERVE_WINDOW`, then `0..HISTORY_SERVE_WINDOW`
+    //   will be filled.
     let is_activation_block = evm
         .db_mut()
         .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
