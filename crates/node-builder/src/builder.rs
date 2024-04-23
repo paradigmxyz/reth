@@ -661,7 +661,7 @@ where
             executor.spawn_critical("exex manager blockchain tree notifications", async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {
                     handle
-                        .send_async(notification)
+                        .send_async(notification.into())
                         .await
                         .expect("blockchain tree notification could not be sent to exex manager");
                 }
