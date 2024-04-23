@@ -1,9 +1,13 @@
 use crate::utils::{advance_chain, setup};
+use reth::primitives::BASE_MAINNET;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet};
+use reth_primitives::ChainId;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
+
+    let chain_id: ChainId = BASE_MAINNET.chain.into();
 
     let (mut nodes, _tasks, _wallet) = setup(2).await?;
 
@@ -18,7 +22,9 @@ async fn can_sync() -> eyre::Result<()> {
     // On first node, create a chain up to block number 300a
     let canonical_payload_chain = advance_chain(tip, &mut first_node, || {
         let wallet = wallet.inner.clone();
-        Box::pin(async move { TransactionTestContext::optimism_l1_block_info_tx(1, wallet).await })
+        Box::pin(async move {
+            TransactionTestContext::optimism_l1_block_info_tx(chain_id, wallet).await
+        })
     })
     .await?;
     let canonical_chain =
