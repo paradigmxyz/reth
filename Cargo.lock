@@ -7787,6 +7787,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "rollup"
+version = "0.0.0"
+dependencies = [
+ "alloy-rlp",
+ "alloy-sol-types",
+ "eyre",
+ "futures",
+ "once_cell",
+ "reth",
+ "reth-exex",
+ "reth-interfaces",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tracing",
+ "reth-trie",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "route-recognizer"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
