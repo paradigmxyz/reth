@@ -260,7 +260,7 @@ pub fn init_from_state_dump<DB: Database>(
    // let block = factory.last_block_number()?;
    // let hash = factory.block_hash(block)??;
 
-    let block = 0;
+    let block = 1;
     let hash = factory.chain_spec().genesis_hash();
 
     debug!(target: "reth::cli",
