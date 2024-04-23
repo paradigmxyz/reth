@@ -122,12 +122,25 @@ add_wrapper_struct!((U256, CompactU256));
 add_wrapper_struct!((u64, CompactU64));
 add_wrapper_struct!((ClientVersion, CompactClientVersion));
 
-
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{stage::{AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageUnitCheckpoint, StorageHashingCheckpoint}, Account, Header, PruneCheckpoint, PruneMode, PruneSegment, Receipt, ReceiptWithBloom, SealedHeader, TxEip1559, TxEip2930, TxEip4844, TxLegacy, Withdrawal, Withdrawals};
-    use crate::{codecs::{compact::{CompactClientVersion, CompactU64}, CompactU256}, models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals}};
-    
+    use crate::{
+        codecs::{
+            compact::{CompactClientVersion, CompactU64},
+            CompactU256,
+        },
+        models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
+    };
+    use reth_primitives::{
+        stage::{
+            AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint,
+            ExecutionCheckpoint, HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint,
+            StageUnitCheckpoint, StorageHashingCheckpoint,
+        },
+        Account, Header, PruneCheckpoint, PruneMode, PruneSegment, Receipt, ReceiptWithBloom,
+        SealedHeader, TxEip1559, TxEip2930, TxEip4844, TxLegacy, Withdrawal, Withdrawals,
+    };
+
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert!(Account::bitflag_encoded_bytes() == 2);
