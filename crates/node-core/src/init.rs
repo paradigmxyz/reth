@@ -156,8 +156,6 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
                 storage,
             ),
         );
-
-        trace!(target: "reth::cli", "Inserted state");
     }
     let all_reverts_init: RevertsInit = HashMap::from([(0, reverts_init)]);
 
@@ -170,6 +168,8 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
     );
 
     bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
+
+    trace!(target: "reth::cli", "Inserted state");
 
     Ok(())
 }
