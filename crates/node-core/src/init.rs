@@ -23,7 +23,7 @@ use std::{
     io::BufRead,
     sync::Arc,
 };
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Number of accounts from state dump file to insert into database at once.
 ///
@@ -274,6 +274,11 @@ pub fn init_from_state_dump<DB: Database>(
 
     // remaining lines are accounts
     while let Ok(n) = reader.read_line(&mut line) {
+        trace!(target: "reth::cli",
+            line,
+            "read line"
+        );
+        
         if accounts.len() == DEFAULT_LEN_ACCOUNTS_CHUNK || n == 0 {
             debug!(target: "reth::cli",
                 block,
