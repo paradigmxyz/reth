@@ -73,11 +73,11 @@ const HISTORY_STORAGE_ADDRESS: Address = address!("25a219378dad9b3503c8268c9ca83
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
-pub fn apply_blockhashes_update<EXT, DB: Database + DatabaseCommit>(
+pub fn apply_blockhashes_update<DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
-    evm: &mut Evm<'_, EXT, DB>,
+    db: &mut DB,
 ) -> Result<(), BlockExecutionError>
 where
     DB::Error: std::fmt::Display,
@@ -94,7 +94,7 @@ where
     let mut account = Account::from(AccountInfo::default());
 
     // Insert the state change for the slot
-    let (slot, value) = eip2935_block_hash_slot(block_number - 1, evm)
+    let (slot, value) = eip2935_block_hash_slot(block_number - 1, db)
         .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
     account.storage.insert(slot, value);
 
@@ -112,8 +112,7 @@ where
     //
     // - If the activation block is above `HISTORY_SERVE_WINDOW`, then `0..HISTORY_SERVE_WINDOW`
     //   will be filled.
-    let is_activation_block = evm
-        .db_mut()
+    let is_activation_block = db
         .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
         .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?
         .is_zero();
@@ -132,7 +131,7 @@ where
             ancestor_block_number = ancestor_block_number - 1;
 
             let (slot, value) =
-                eip2935_block_hash_slot(ancestor_block_number, evm).map_err(|err| {
+                eip2935_block_hash_slot(ancestor_block_number, db).map_err(|err| {
                     BlockValidationError::Eip2935StateTransition { message: err.to_string() }
                 })?;
             account.storage.insert(slot, value);
@@ -140,7 +139,7 @@ where
     }
 
     // Commit the state change
-    evm.context.evm.db.commit(HashMap::from([(HISTORY_STORAGE_ADDRESS, account)]));
+    db.commit(HashMap::from([(HISTORY_STORAGE_ADDRESS, account)]));
 
     Ok(())
 }
@@ -150,13 +149,13 @@ where
 ///
 /// This calculates the correct storage slot in the `BLOCKHASH` history storage address, fetches the
 /// blockhash and creates a [`StorageSlot`] with appropriate previous and new values.
-fn eip2935_block_hash_slot<EXT, DB: Database>(
+fn eip2935_block_hash_slot<DB: Database>(
     block_number: u64,
-    evm: &mut Evm<'_, EXT, DB>,
+    db: &mut DB,
 ) -> Result<(U256, StorageSlot), DB::Error> {
     let slot = U256::from(block_number).rem(U256::from(HISTORY_SERVE_WINDOW));
-    let current_hash = evm.db_mut().storage(HISTORY_STORAGE_ADDRESS, slot)?;
-    let ancestor_hash = evm.db_mut().block_hash(U256::from(block_number))?;
+    let current_hash = db.storage(HISTORY_STORAGE_ADDRESS, slot)?;
+    let ancestor_hash = db.block_hash(U256::from(block_number))?;
 
     Ok((slot, StorageSlot::new_changed(current_hash, ancestor_hash.into())))
 }

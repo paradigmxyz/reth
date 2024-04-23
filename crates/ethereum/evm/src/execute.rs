@@ -154,7 +154,7 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
-        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, &mut evm)?;
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, evm.db_mut())?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;

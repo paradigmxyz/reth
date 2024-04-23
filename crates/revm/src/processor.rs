@@ -174,7 +174,7 @@ where
     /// If Prague is not activated or the block is the genesis block, then this is a no-op, and no
     /// state changes are made.
     fn apply_blockhashes_update(&mut self, block: &Block) -> Result<(), BlockExecutionError> {
-        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, &mut self.evm)
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, self.evm.db_mut())
     }
 
     /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO

@@ -25,8 +25,7 @@ use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
 use reth_revm::state_change::{
-    apply_beacon_root_contract_call, apply_blockhashes_update,
-    post_block_withdrawals_balance_increments,
+    apply_beacon_root_contract_call, post_block_withdrawals_balance_increments,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -849,6 +848,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     })
 }
 
+// todo: do this for payloads
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
 /// This constructs a new [Evm] with the given DB, and environment
@@ -889,9 +889,7 @@ where
         attributes.parent_beacon_block_root(),
         &mut evm_pre_block,
     )
-    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
-    apply_blockhashes_update(chain_spec, attributes.timestamp(), block_number, &mut evm_pre_block)
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))
+    .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
 /// Checks if the new payload is better than the current best.
