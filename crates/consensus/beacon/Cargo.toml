@@ -45,6 +45,7 @@ schnellru.workspace = true
 # reth
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-blockchain-tree = { workspace = true, features = ["test-utils"] }

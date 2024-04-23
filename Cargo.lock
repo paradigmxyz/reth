@@ -6064,6 +6064,7 @@ dependencies = [
  "reth-blockchain-tree",
  "reth-cli-runner",
  "reth-config",
+ "reth-consensus",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
@@ -6114,12 +6115,14 @@ version = "0.2.0-beta.6"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
+ "reth-consensus",
  "reth-engine-primitives",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-rpc-types",
  "reth-stages-api",
  "reth-transaction-pool",
  "tokio",
@@ -6159,6 +6162,7 @@ dependencies = [
  "reth-beacon-consensus-core",
  "reth-blockchain-tree",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-engine-primitives",
@@ -6191,8 +6195,8 @@ dependencies = [
 name = "reth-beacon-consensus-core"
 version = "0.2.0-beta.6"
 dependencies = [
+ "reth-consensus",
  "reth-consensus-common",
- "reth-interfaces",
  "reth-primitives",
 ]
 
@@ -6206,6 +6210,7 @@ dependencies = [
  "lru",
  "metrics",
  "parking_lot 0.12.1",
+ "reth-consensus",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6275,10 +6280,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-consensus"
+version = "0.2.0-beta.6"
+dependencies = [
+ "auto_impl",
+ "reth-primitives",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-consensus-common"
 version = "0.2.0-beta.6"
 dependencies = [
  "mockall",
+ "reth-consensus",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -6405,6 +6420,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
@@ -6649,10 +6665,10 @@ dependencies = [
  "futures",
  "parking_lot 0.12.1",
  "rand 0.8.5",
+ "reth-consensus",
  "reth-eth-wire-types",
  "reth-network-api",
  "reth-primitives",
- "reth-rpc-types",
  "secp256k1 0.27.0",
  "thiserror",
  "tokio",
@@ -6781,6 +6797,7 @@ dependencies = [
  "pin-project",
  "pprof",
  "rand 0.8.5",
+ "reth-consensus",
  "reth-discv4",
  "reth-discv5",
  "reth-dns-discovery",
@@ -6875,6 +6892,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-exex",
@@ -6993,12 +7011,12 @@ dependencies = [
  "pin-project",
  "reth-beacon-consensus",
  "reth-db",
- "reth-interfaces",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-rpc-types",
  "reth-stages",
  "reth-static-file",
  "tokio",
@@ -7173,6 +7191,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-rpc-types",
  "reth-trie",
  "revm",
  "strum 0.26.2",
@@ -7422,6 +7441,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-config",
+ "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-etl",
@@ -7450,6 +7470,7 @@ dependencies = [
  "auto_impl",
  "futures-util",
  "metrics",
+ "reth-consensus",
  "reth-db",
  "reth-interfaces",
  "reth-metrics",

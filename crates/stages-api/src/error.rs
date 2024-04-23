@@ -1,5 +1,6 @@
+use reth_consensus::ConsensusError;
 use reth_interfaces::{
-    consensus, db::DatabaseError as DbError, executor, p2p::error::DownloadError, RethError,
+    db::DatabaseError as DbError, executor, p2p::error::DownloadError, RethError,
 };
 use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use reth_provider::ProviderError;
@@ -13,7 +14,7 @@ use tokio::sync::mpsc::error::SendError;
 pub enum BlockErrorKind {
     /// The block encountered a validation error.
     #[error("validation error: {0}")]
-    Validation(#[from] consensus::ConsensusError),
+    Validation(#[from] ConsensusError),
     /// The block encountered an execution error.
     #[error("execution error: {0}")]
     Execution(#[from] executor::BlockExecutionError),
@@ -49,7 +50,7 @@ pub enum StageError {
         header: Box<SealedHeader>,
         /// The error that occurred when attempting to attach the header.
         #[source]
-        error: Box<consensus::ConsensusError>,
+        error: Box<ConsensusError>,
     },
     /// The headers stage is missing sync gap.
     #[error("missing sync gap")]
