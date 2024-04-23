@@ -17,7 +17,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
-    ExecutorFactory, ProviderError,
+    ExecutorFactory, ProviderError, TreeViewer,
 };
 use std::{
     collections::{BTreeMap, HashSet},
@@ -205,4 +205,11 @@ where
         trace!(target: "blockchain_tree", "Registered subscriber for canonical state");
         self.tree.read().subscribe_canon_state()
     }
+}
+
+impl<DB, EF> TreeViewer for ShareableBlockchainTree<DB, EF>
+where
+    DB: Database + Clone,
+    EF: ExecutorFactory,
+{
 }

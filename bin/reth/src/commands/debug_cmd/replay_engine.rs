@@ -136,11 +136,10 @@ impl Command {
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
-        let blockchain_db =
-            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
 
         // Set up network
         let network_secret_path =

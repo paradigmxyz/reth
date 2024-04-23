@@ -42,13 +42,7 @@ use tokio::sync::{oneshot, watch};
 
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
-    BlockchainProvider<
-        Arc<DatabaseEnv>,
-        ShareableBlockchainTree<
-            Arc<DatabaseEnv>,
-            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory<EthEvmConfig>>,
-        >,
-    >,
+    BlockchainProvider<Arc<DatabaseEnv>>,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
     EthEngineTypes,
 >;
@@ -90,7 +84,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
             if !result.is_syncing() {
-                return Ok(result)
+                return Ok(result);
             }
         }
     }
@@ -111,7 +105,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.engine_handle.fork_choice_updated(state, None).await?;
             if !result.is_syncing() {
-                return Ok(result)
+                return Ok(result);
             }
         }
     }
@@ -422,9 +416,9 @@ where
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let tree = ShareableBlockchainTree::new(
+        let tree = Arc::new(ShareableBlockchainTree::new(
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),
-        );
+        ));
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
         let blockchain_provider =
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);

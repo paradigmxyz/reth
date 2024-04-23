@@ -173,7 +173,7 @@ impl Command {
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
         let best_block =

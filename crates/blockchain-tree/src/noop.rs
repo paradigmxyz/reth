@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateNotificationSender,
-    CanonStateNotifications, CanonStateSubscriptions,
+    CanonStateNotifications, CanonStateSubscriptions, TreeViewer,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -130,3 +130,5 @@ impl CanonStateSubscriptions for NoopBlockchainTree {
         CanonStateNotificationSender::new(1).subscribe()
     }
 }
+
+impl TreeViewer for NoopBlockchainTree {}
