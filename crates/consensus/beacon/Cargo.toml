@@ -52,6 +52,7 @@ reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-rpc-types-compat.workspace = true
+reth-rpc.workspace = true
 reth-tracing.workspace = true
 reth-revm.workspace = true
 reth-downloaders.workspace = true
@@ -68,4 +69,6 @@ optimism = [
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
     "reth-beacon-consensus-core/optimism",
+    "reth-revm/optimism",
+    "reth-rpc/optimism"
 ]

@@ -1,11 +1,11 @@
 use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
-use reth_primitives::{Address, Bytes, U256};
+use reth_primitives::{hex, Address, Bytes, U256};
 /// One of the accounts of the genesis allocations.
 pub struct Wallet {
     inner: LocalWallet,
-    nonce: u64,
+    pub nonce: u64,
     chain_id: u64,
 }
 
@@ -25,6 +25,11 @@ impl Wallet {
     /// Creates a static transfer and signs it
     pub async fn transfer_tx(&mut self) -> Bytes {
         self.tx(None).await
+    }
+
+    pub async fn optimism_l1_block_info_tx(&mut self) -> Bytes {
+        let l1_block_info = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
+        self.tx(Some(l1_block_info)).await
     }
 
     /// Creates a transaction with data and signs it
