@@ -992,6 +992,13 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     {
         for (partial_key, indices) in index_updates {
             let last_shard = self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
+
+            trace!(target: "providers::db",
+                ?partial_key,
+                ?last_shard,
+                "last shard for key"
+            );
+
             // chunk indices and insert them in shards of N size.
             let indices = last_shard.iter().chain(indices.iter());
             let chunks = indices
@@ -1000,11 +1007,11 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 .map(|chunks| chunks.copied().collect())
                 .collect::<Vec<Vec<_>>>();
 
-                trace!(target: "providers::db",
-                    ?partial_key,
-                    ?chunks,
-                    "inserting chunks of indices for key"
-                );
+            trace!(target: "providers::db",
+                ?partial_key,
+                ?chunks,
+                "inserting chunks of indices for key"
+            );
 
             let mut chunks = chunks.into_iter().peekable();
             while let Some(list) = chunks.next() {
