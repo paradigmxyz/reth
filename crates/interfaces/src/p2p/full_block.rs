@@ -36,7 +36,7 @@ impl<Client> FullBlockClient<Client> {
     /// Returns a client with Test consensus
     #[cfg(any(test, feature = "test-utils"))]
     pub fn test_client(client: Client) -> Self {
-        Self::new(client, Arc::new(crate::test_utils::TestConsensus::default()))
+        Self::new(client, Arc::new(reth_consensus::test_utils::TestConsensus::default()))
     }
 }
 
