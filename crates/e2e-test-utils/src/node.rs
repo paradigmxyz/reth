@@ -64,7 +64,7 @@ where
     pub async fn advance(
         &mut self,
         length: u64,
-        tx_generator: impl Fn() -> Pin<Box<dyn Future<Output = Bytes>>>,
+        tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
         attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes
             + Copy,
     ) -> eyre::Result<
@@ -78,8 +78,8 @@ where
             From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
-        for _ in 0..length {
-            let raw_tx = tx_generator().await;
+        for i in 0..length {
+            let raw_tx = tx_generator(i).await;
             let tx_hash = self.rpc.inject_tx(raw_tx).await?;
             let (payload, eth_attr) = self.advance_block(vec![], attributes_generator).await?;
             let block_hash = payload.block().hash();

@@ -27,7 +27,7 @@ pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskMa
 pub(crate) async fn advance_chain(
     length: usize,
     node: &mut OpNode,
-    tx_generator: impl Fn() -> Pin<Box<dyn Future<Output = Bytes>>>,
+    tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
 ) -> eyre::Result<Vec<(OptimismBuiltPayload, OptimismPayloadBuilderAttributes)>> {
     node.advance(length as u64, tx_generator, optimism_payload_attributes).await
 }

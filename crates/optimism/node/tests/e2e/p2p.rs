@@ -20,10 +20,10 @@ async fn can_sync() -> eyre::Result<()> {
     let wallet = Wallet::default();
 
     // On first node, create a chain up to block number 300a
-    let canonical_payload_chain = advance_chain(tip, &mut first_node, || {
+    let canonical_payload_chain = advance_chain(tip, &mut first_node, |nonce: u64| {
         let wallet = wallet.inner.clone();
         Box::pin(async move {
-            TransactionTestContext::optimism_l1_block_info_tx(chain_id, wallet).await
+            TransactionTestContext::optimism_l1_block_info_tx(chain_id, wallet, nonce).await
         })
     })
     .await?;
