@@ -1,17 +1,17 @@
 //! [`jsonrpsee`] transport adapter implementation for IPC.
 
-use jsonrpsee::{
-    async_client::{Client, ClientBuilder},
-    core::client::{TransportReceiverT, TransportSenderT},
-};
 use std::{
     io,
     path::{Path, PathBuf},
 };
 
+use jsonrpsee::{
+    async_client::{Client, ClientBuilder},
+    core::client::{TransportReceiverT, TransportSenderT},
+};
+
 #[cfg(unix)]
 use crate::client::unix::IpcTransportClientBuilder;
-
 #[cfg(windows)]
 use crate::client::win::IpcTransportClientBuilder;
 
@@ -78,12 +78,23 @@ pub enum IpcError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use interprocess::local_socket::{
+        traits::tokio::Listener, GenericFilePath, ListenerOptions, ToFsName,
+    };
+
     use crate::server::dummy_endpoint;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_connect() {
         let endpoint = dummy_endpoint();
+        let name = endpoint.clone().to_fs_name::<GenericFilePath>().unwrap();
+        let binding = ListenerOptions::new().name(name).create_tokio().unwrap();
+        tokio::spawn(async move {
+            let _x = binding.accept().await;
+        });
+
         let (tx, rx) = IpcTransportClientBuilder::default().build(endpoint).await.unwrap();
         let _ = IpcClientBuilder::default().build_with_tokio(tx, rx);
     }
