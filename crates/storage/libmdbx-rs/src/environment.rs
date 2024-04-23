@@ -501,7 +501,7 @@ impl<R> Default for Geometry<R> {
 ///
 /// # Arguments
 ///
-/// * `process_id` – A proceess id of the reader process.
+/// * `process_id` – A process id of the reader process.
 /// * `thread_id` – A thread id of the reader thread.
 /// * `read_txn_id` – An oldest read transaction number on which stalled.
 /// * `gap` – A lag from the last committed txn.

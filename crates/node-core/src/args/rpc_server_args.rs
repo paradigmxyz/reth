@@ -363,7 +363,7 @@ impl RpcServerArgs {
 
 impl RethRpcConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
-        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+        // By default IPC is enabled therefore it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
     }
 

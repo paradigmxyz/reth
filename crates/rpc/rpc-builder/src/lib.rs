@@ -717,7 +717,7 @@ impl RpcModuleSelection {
 
     /// Creates a new [RpcModule] based on the configured reth modules.
     ///
-    /// Note: This will always create new instance of the module handlers and is therefor only
+    /// Note: This will always create new instance of the module handlers and is therefore only
     /// recommended for launching standalone transports. If multiple transports need to be
     /// configured it's recommended to use the [RpcModuleBuilder].
     #[allow(clippy::too_many_arguments)]
