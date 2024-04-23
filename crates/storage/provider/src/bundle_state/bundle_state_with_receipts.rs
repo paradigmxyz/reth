@@ -18,6 +18,7 @@ use revm::{
     primitives::AccountInfo,
 };
 use std::collections::HashMap;
+use tracing::trace;
 
 /// Bundle state of post execution changes and reverts
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -315,6 +316,11 @@ impl BundleStateWithReceipts {
         // write receipts
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+
+        trace!(target: "provider::bundle_state",
+            receipts_len=self.receipts.len(),
+            "writing receipts to static file"
+        );
 
         for (idx, receipts) in self.receipts.into_iter().enumerate() {
             let block_number = self.first_block + idx as u64;
