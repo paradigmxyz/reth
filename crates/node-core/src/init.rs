@@ -325,13 +325,11 @@ pub fn init_from_state_dump<DB: Database>(
         }
 
         if n == 0 {
-            break
+            break;
         }
 
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
         accounts.push((address, genesis_account));
-
-        trace!("")
 
         line.clear();
     }
