@@ -13,7 +13,6 @@ use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_config::{config::PruneConfig, Config};
-use reth_consensus::Consensus;
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};

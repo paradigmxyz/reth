@@ -34,7 +34,6 @@ reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
-reth-consensus.workspace = true
 
 # ethereum
 discv5.workspace = true
