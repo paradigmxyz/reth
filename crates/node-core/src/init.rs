@@ -28,7 +28,7 @@ use tracing::{debug, trace};
 /// Number of accounts from state dump file to insert into database at once.
 ///
 /// Default is 10k accounts.
-pub const DEFAULT_LEN_ACCOUNTS_CHUNK: usize = 10_000;
+pub const DEFAULT_LEN_ACCOUNTS_CHUNK: usize = 100;
 
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
