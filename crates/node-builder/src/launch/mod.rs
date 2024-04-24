@@ -50,11 +50,16 @@ use reth_transaction_pool::TransactionPool;
 use std::{cmp::max, future::Future, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
-/// Launches a new node.
+pub mod common;
+pub use common::LaunchContext;
+
+/// A general purpose trait that launches a new node of any kind.
 ///
 /// Acts as a node factory.
 ///
 /// This is essentially the launch logic for a node.
+///
+/// See also [DefaultNodeLauncher] and [NodeBuilderWithComponents::launch_with]
 pub trait LaunchNode<Target> {
     /// The node type that is created.
     type Node;
@@ -67,37 +72,13 @@ pub trait LaunchNode<Target> {
 #[derive(Debug)]
 pub struct DefaultNodeLauncher {
     /// The task executor for the node.
-    pub task_executor: TaskExecutor,
-    /// The data directory for the node.
-    pub data_dir: ChainPath<DataDirPath>,
+    pub ctx: LaunchContext,
 }
 
 impl DefaultNodeLauncher {
     /// Create a new instance of the default node launcher.
     pub fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
-        Self { task_executor, data_dir }
-    }
-
-    /// Loads the reth config with the given datadir root
-    fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
-        let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config_path());
-
-        let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
-            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
-
-        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
-
-        // Update the config with the command line arguments
-        toml_config.peers.trusted_nodes_only = config.network.trusted_only;
-
-        if !config.network.trusted_peers.is_empty() {
-            info!(target: "reth::cli", "Adding trusted nodes");
-            config.network.trusted_peers.iter().for_each(|peer| {
-                toml_config.peers.trusted_nodes.insert(*peer);
-            });
-        }
-
-        Ok(toml_config)
+        Self { ctx: LaunchContext::new(task_executor, data_dir)}
     }
 }
 
@@ -122,21 +103,11 @@ where
         } = target;
 
         // get config from file
-        let reth_config = self.load_toml_config(&config)?;
+        let reth_config = self.ctx.load_toml_config(&config)?;
 
         let Self { task_executor, data_dir } = self;
 
-        // Raise the fd limit of the process.
-        // Does not do anything on windows.
-        fdlimit::raise_fd_limit()?;
 
-        // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
-        let _ = ThreadPoolBuilder::new()
-            .num_threads(
-                available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
-            )
-            .build_global()
-            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
 
         let provider_factory = ProviderFactory::new(
             database.clone(),
