@@ -3,7 +3,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
-/// Parameters for database configuration
+/// Parameters for datadir configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
 #[command(next_help_heading = "Datadir")]
 pub struct DatadirArgs {
