@@ -8,25 +8,6 @@ If you've got an example you'd like to see here, please feel free to open an
 issue. Otherwise if you've got an example you'd like to add, please feel free
 to make a PR!
 
-## P2P
-
-| Example                     | Description                                                       |
-| --------------------------- | ----------------------------------------------------------------- |
-| [Manual P2P](./manual-p2p)  | Illustrates how to connect and communicate with a peer            |
-| [Polygon P2P](./manual-p2p) | Illustrates how to connect and communicate with a peer on Polygon |
-
-## Network
-
-| Example                            | Description                                                  |
-| ---------------------------------- | ------------------------------------------------------------ |
-| [Standalone network](./network.rs) | Illustrates how to use the network as a standalone component |
-
-## RPC
-
-| Example                 | Description                                                                 |
-| ----------------------- | --------------------------------------------------------------------------- |
-| [DB over RPC](./rpc-db) | Illustrates how to run a standalone RPC server over a Rethdatabase instance |
-
 ## Node Builder
 
 | Example                                                       | Description                                                                                      |
@@ -40,13 +21,6 @@ to make a PR!
 | [Custom node components](./custom-node-components)            | Illustrates how to configure custom node components                                              |
 | [Custom payload builder](./custom-payload-builder)            | Illustrates how to use a custom payload builder                                                  |
 
-## Mempool
-
-| Example                                               | Description                                                                                                                |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| [Trace pending transactions](./trace-transaction-cli) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
-| [Standalone txpool](./network-txpool.rs)              | Illustrates how to use the network as a standalone component together with a transaction pool with a custom pool validator |
-
 ## ExEx
 
 | Example                            | Description                                                                       |
@@ -54,11 +28,37 @@ to make a PR!
 | [Minimal ExEx](./exex/minimal)     | Illustrates how to build a simple ExEx                                            |
 | [OP Bridge ExEx](./exex/op-bridge) | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1 |
 
+## RPC
+
+| Example                 | Description                                                                 |
+| ----------------------- | --------------------------------------------------------------------------- |
+| [DB over RPC](./rpc-db) | Illustrates how to run a standalone RPC server over a Rethdatabase instance |
+
 ## Database
 
 | Example                     | Description                                                     |
 | --------------------------- | --------------------------------------------------------------- |
 | [DB access](./db-access.rs) | Illustrates how to access Reth's database in a separate process |
+
+## Network
+
+| Example                            | Description                                                  |
+| ---------------------------------- | ------------------------------------------------------------ |
+| [Standalone network](./network.rs) | Illustrates how to use the network as a standalone component |
+
+## Mempool
+
+| Example                                               | Description                                                                                                                |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| [Trace pending transactions](./trace-transaction-cli) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
+| [Standalone txpool](./network-txpool.rs)              | Illustrates how to use the network as a standalone component together with a transaction pool with a custom pool validator |
+
+## P2P
+
+| Example                     | Description                                                       |
+| --------------------------- | ----------------------------------------------------------------- |
+| [Manual P2P](./manual-p2p)  | Illustrates how to connect and communicate with a peer            |
+| [Polygon P2P](./manual-p2p) | Illustrates how to connect and communicate with a peer on Polygon |
 
 ## Misc
 
