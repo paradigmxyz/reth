@@ -1,35 +1,34 @@
 mod db;
 mod evm;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use alloy_rlp::Decodable;
-use alloy_sol_types::{sol, SolEventInterface, SolInterface, SolType};
+use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use db::Database;
 use eyre::OptionExt;
 use once_cell::sync::Lazy;
 use reth::revm::{
-    database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, BundleState},
     processor::EVMProcessor,
     StateBuilder,
 };
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
-use reth_node_ethereum::{EthEvmConfig, EthereumNode};
+use reth_node_ethereum::EthereumNode;
 use reth_primitives::{
-    address, Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder, ForkCondition,
-    Genesis, Hardfork, Header, Log, Receipt, Receipts, SealedBlockWithSenders, TransactionSigned,
-    U256,
+    address, Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder, Genesis, Header,
+    Receipt, SealedBlockWithSenders, TransactionSigned, U256,
 };
 use reth_provider::{BlockExecutor, Chain, ProviderError};
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
-use RollupContract::{BlockHeader, RollupContractEvents};
 
-use crate::RollupContract::RollupContractCalls;
+sol!(RollupContract, "rollup_abi.json");
+use RollupContract::{RollupContractCalls, RollupContractEvents};
 
 const ROLLUP_CONTRACT_ADDRESS: Address = address!("74ae65DF20cB0e3BF8c022051d0Cdd79cc60890C");
+// TODO(alexey): Use the correct chain ID 17001
 const CHAIN_ID: u64 = 17000;
 static CHAIN_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     Arc::new(
@@ -43,8 +42,6 @@ static CHAIN_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             .build(),
     )
 });
-
-sol!(RollupContract, "rollup_abi.json");
 
 struct Rollup<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
@@ -75,9 +72,9 @@ impl<Node: FullNodeComponents> Rollup<Node> {
     fn commit(&mut self, chain: &Chain) -> eyre::Result<()> {
         let events = decode_chain_into_rollup_events(chain);
 
-        for (block, tx, log, event) in events {
+        for (_, tx, event) in events {
             match event {
-                RollupContractEvents::BlockSubmitted(event) => {
+                RollupContractEvents::BlockSubmitted(_) => {
                     let call = RollupContractCalls::abi_decode(tx.input(), true)?;
 
                     if let RollupContractCalls::submitBlock(RollupContract::submitBlockCall {
@@ -86,8 +83,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         ..
                     }) = call
                     {
-                        let (block, bundle, receipts) =
-                            submit_block(CHAIN_SPEC.clone(), &mut self.db, header, blockData)?;
+                        let (block, bundle, _) = execute_block(&mut self.db, header, blockData)?;
                         self.db.insert_block(&block, bundle)?;
 
                         info!(
@@ -137,8 +133,10 @@ impl<Node: FullNodeComponents> Rollup<Node> {
         Ok(())
     }
 
-    fn revert(&mut self, chain: &Chain) -> eyre::Result<()> {
-        todo!()
+    fn revert(&mut self, _chain: &Chain) -> eyre::Result<()> {
+        unimplemented!(
+            "reverts need to be stored in database to be able to act on host chain reverts"
+        )
     }
 }
 
@@ -146,8 +144,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
 /// Rollup contract [ROLLUP_CONTRACT_ADDRESS] and extract [RollupContractEvents].
 fn decode_chain_into_rollup_events(
     chain: &Chain,
-) -> impl Iterator<Item = (&SealedBlockWithSenders, &TransactionSigned, &Log, RollupContractEvents)>
-{
+) -> impl Iterator<Item = (&SealedBlockWithSenders, &TransactionSigned, RollupContractEvents)> {
     chain
         // Get all blocks and receipts
         .blocks_and_receipts()
@@ -167,12 +164,13 @@ fn decode_chain_into_rollup_events(
         .filter_map(|(block, tx, log)| {
             RollupContractEvents::decode_raw_log(log.topics(), &log.data.data, true)
                 .ok()
-                .map(|event| (block, tx, log, event))
+                .map(|event| (block, tx, event))
         })
 }
 
-fn submit_block(
-    chain_spec: Arc<ChainSpec>,
+/// Execute a rollup block and return (block with recovered senders)[BlockWithSenders], (bundle
+/// state)[BundleState] and list of (receipts)[Receipt].
+fn execute_block(
     db: &mut Database,
     header: RollupContract::BlockHeader,
     block_data: Bytes,
@@ -200,7 +198,7 @@ fn submit_block(
     )
     .with_bundle_update()
     .build();
-    let mut evm = EVMProcessor::new_with_state(chain_spec, state, evm::Config);
+    let mut evm = EVMProcessor::new_with_state(CHAIN_SPEC.clone(), state, evm::Config);
     let (receipts, _) = evm.execute_transactions(&block, U256::ZERO)?;
     evm.db_mut().merge_transitions(BundleRetention::PlainState);
 
@@ -228,10 +226,10 @@ fn main() -> eyre::Result<()> {
 mod tests {
     use std::str::FromStr;
 
-    use reth_primitives::{address, bytes, constants::ETH_TO_WEI, TransactionSigned, U256};
+    use reth_primitives::{address, bytes, constants::ETH_TO_WEI, U256};
     use rusqlite::Connection;
 
-    use crate::{db::Database, submit_block, RollupContract::BlockHeader, CHAIN_ID, CHAIN_SPEC};
+    use crate::{db::Database, execute_block, RollupContract::BlockHeader, CHAIN_ID};
 
     #[test]
     fn test_submit_block() -> eyre::Result<()> {
@@ -253,8 +251,7 @@ mod tests {
             gasLimit: U256::from(30000000),
             rewardAddress: address!("B01042Db06b04d3677564222010DF5Bd09C5A947"),
         };
-        let (block, bundle, receipts) = submit_block(
-            CHAIN_SPEC.clone(),
+        let (block, bundle, _) = execute_block(
             &mut database,
             block_header,
             bytes!("f878b87602f8738242680184b2d05e0084e2f4fbfa82520894df79e78bf4868b06300074ebf34002d228a908d987038d7ea4c6800080c001a018dc589d98091e8025d2e3e055a69aaf7e47317aae7e22e89da8aa958506ed8ca0714621376acfd07f9939ffba993718f71fb6d67bd9c66307769771d18e4f2337")
@@ -263,7 +260,9 @@ mod tests {
 
         println!("block: {:?}", block);
 
-        let sender = database.get_account(address!("A5F4567d8B8E8D7b2cb3c53E33B0460A1BE26Cba"))?;
+        let sender = database
+            .get_account(address!("A5F4567d8B8E8D7b2cb3c53E33B0460A1BE26Cba"))?
+            .ok_or(eyre::eyre!("sender not found"))?;
         // assert_eq!(
         //     sender.balance,
         //     U256::from(0.2 * ETH_TO_WEI as f64) - // Initial balance
@@ -272,8 +271,9 @@ mod tests {
         // );
         assert_eq!(sender.nonce, 2);
 
-        let recipient =
-            database.get_account(address!("Df79e78BF4868b06300074Ebf34002d228A908D9"))?;
+        let recipient = database
+            .get_account(address!("Df79e78BF4868b06300074Ebf34002d228A908D9"))?
+            .ok_or(eyre::eyre!("recipient not found"))?;
         assert_eq!(recipient.balance, U256::from_str("0x38d7ea4c68000")?);
 
         Ok(())

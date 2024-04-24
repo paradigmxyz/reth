@@ -1,24 +1,18 @@
 use std::{
+    ops::Deref,
     str::FromStr,
     sync::{Arc, Mutex, MutexGuard},
 };
 
 use reth::revm::db::{
-    states::{PlainStateReverts, PlainStorageChangeset, StateChangeset},
-    BundleAccount, BundleState,
+    states::{PlainStorageChangeset, StateChangeset},
+    BundleState,
 };
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     revm_primitives::{AccountInfo, Bytecode},
-    trie::AccountProof,
-    Account, Address, BlockNumber, BlockWithSenders, Bytes, Receipt, Receipts, StorageKey,
-    StorageValue, B256, U256,
+    Address, BlockWithSenders, Bytes, B256, U256,
 };
-use reth_provider::{
-    AccountReader, BlockHashReader, BundleStateWithReceipts, OriginalValuesKnown, ProviderError,
-    StateProvider, StateRootProvider,
-};
-use reth_trie::updates::TrieUpdates;
+use reth_provider::{OriginalValuesKnown, ProviderError};
 use rusqlite::Connection;
 
 pub struct Database {
@@ -94,13 +88,13 @@ impl Database {
         for PlainStorageChangeset { address, wipe_storage, storage } in storage {
             if wipe_storage {
                 tx.execute("DELETE FROM storage WHERE address = ?", (address.to_string(),))?;
-            } else {
-                for (key, value) in storage {
-                    tx.execute(
-                        "INSERT INTO storage (address, key, data) VALUES (?, ?, ?) ON CONFLICT(address, key) DO UPDATE SET data = excluded.data",
-                        (address.to_string(), key.to_string(), value.to_string()),
-                    )?;
-                }
+            }
+
+            for (key, value) in storage {
+                tx.execute(
+                    "INSERT INTO storage (address, key, data) VALUES (?, ?, ?) ON CONFLICT(address, key) DO UPDATE SET data = excluded.data",
+                    (address.to_string(), key.to_string(), value.to_string()),
+                )?;
             }
         }
 
@@ -120,16 +114,7 @@ impl Database {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
 
-        let mut account = match tx.query_row::<String, _, _>(
-            "SELECT data FROM account WHERE address = ?",
-            (address.to_string(),),
-            |row| row.get(0),
-        ) {
-            Ok(account_info) => serde_json::from_str(&account_info)?,
-            Err(rusqlite::Error::QueryReturnedNoRows) => AccountInfo::default(),
-            Err(e) => return Err(e.into()),
-        };
-
+        let mut account = get_account(&tx, address)?.unwrap_or_default();
         account.balance += value;
         account.nonce += 1;
 
@@ -146,13 +131,7 @@ impl Database {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
 
-        let account_info = tx.query_row::<String, _, _>(
-            "SELECT data FROM account WHERE address = ?",
-            (address.to_string(),),
-            |row| row.get(0),
-        )?;
-        let mut account: AccountInfo = serde_json::from_str(&account_info)?;
-
+        let mut account = get_account(&tx, address)?.ok_or(eyre::eyre!("account not found"))?;
         account.balance -= value;
 
         tx.execute(
@@ -164,13 +143,23 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_account(&mut self, address: Address) -> eyre::Result<Account> {
-        let account_info = self.connection().query_row::<String, _, _>(
-            "SELECT data FROM account WHERE address = ?",
-            (address.to_string(),),
-            |row| row.get(0),
-        )?;
-        Ok(serde_json::from_str(&account_info)?)
+    pub fn get_account(&mut self, address: Address) -> eyre::Result<Option<AccountInfo>> {
+        get_account(&self.connection(), address)
+    }
+}
+
+fn get_account<C: Deref<Target = Connection>>(
+    connection: &C,
+    address: Address,
+) -> eyre::Result<Option<AccountInfo>> {
+    match connection.deref().query_row::<String, _, _>(
+        "SELECT data FROM account WHERE address = ?",
+        (address.to_string(),),
+        |row| row.get(0),
+    ) {
+        Ok(account_info) => Ok(Some(serde_json::from_str(&account_info)?)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
     }
 }
 
