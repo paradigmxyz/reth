@@ -16,9 +16,7 @@ reth-network-api.workspace = true
 reth-net-p2p.workspace = true
 reth-consensus.workspace = true
 
-# async
-futures.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+
 
 # misc
 thiserror.workspace = true

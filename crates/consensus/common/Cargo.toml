@@ -15,13 +15,13 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
-reth-net-p2p.workspace = true
 reth-consensus.workspace=true
 
 [dev-dependencies]
 reth-interfaces.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 mockall = "0.12"
+reth-net-p2p.workspace = true
 
 [features]
 optimism = ["reth-primitives/optimism"]

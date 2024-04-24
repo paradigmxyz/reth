@@ -6125,7 +6125,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-rpc-types",
  "reth-stages-api",
  "reth-transaction-pool",
  "tokio",
@@ -6658,6 +6657,7 @@ version = "0.2.0-beta.6"
 dependencies = [
  "reth-evm",
  "reth-interfaces",
+ "reth-net-p2p",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6687,14 +6687,12 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.2.0-beta.6"
 dependencies = [
- "futures",
  "parking_lot 0.12.1",
  "reth-consensus",
  "reth-net-p2p",
  "reth-network-api",
  "reth-primitives",
  "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -7063,7 +7061,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
- "reth-rpc-types",
  "reth-stages",
  "reth-static-file",
  "tokio",
@@ -7244,7 +7241,6 @@ dependencies = [
  "reth-net-p2p",
  "reth-nippy-jar",
  "reth-primitives",
- "reth-rpc-types",
  "reth-trie",
  "revm",
  "strum 0.26.2",
