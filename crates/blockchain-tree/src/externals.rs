@@ -1,5 +1,6 @@
 //! Blockchain tree externals.
 
+use reth_consensus::Consensus;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
@@ -12,7 +13,7 @@ use std::{collections::BTreeMap, sync::Arc};
 /// A container for external components.
 ///
 /// This is a simple container for external components used throughout the blockchain tree
-/// implementation:
+/// implementation
 ///
 /// - A handle to the database
 /// - A handle to the consensus engine

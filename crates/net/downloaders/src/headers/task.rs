@@ -44,8 +44,8 @@ impl TaskDownloader {
     /// # use std::sync::Arc;
     /// # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloader;
     /// # use reth_downloaders::headers::task::TaskDownloader;
-    /// # use reth_net_p2p::consensus::Consensus;
     /// # use reth_net_p2p::headers::client::HeadersClient;
+    /// # use reth_consensus::Consensus;
     /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
     ///        client,
@@ -184,6 +184,7 @@ mod tests {
         reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header,
     };
     use reth_net_p2p::test_utils::{TestConsensus, TestHeadersClient};
+    use reth_consensus::test_utils::TestConsensus;
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]

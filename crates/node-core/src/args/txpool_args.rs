@@ -35,7 +35,7 @@ pub struct TxPoolArgs {
     pub queued_max_size: usize,
 
     /// Max number of executable transaction slots guaranteed per account
-    #[arg(long = "txpool.max-account-slots", long = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
+    #[arg(long = "txpool.max-account-slots", alias = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
     pub max_account_slots: usize,
 
     /// Price bump (in %) for the transaction pool underpriced check.

@@ -23,6 +23,7 @@ reth-etl.workspace = true
 reth-config.workspace = true
 reth-net-p2p.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-consensus.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -43,7 +44,8 @@ tempfile = { workspace = true, optional = true }
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-evm-ethereum.workspace = true
-reth-interfaces.workspace = true
+reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
 reth-revm.workspace = true
 reth-static-file.workspace = true
@@ -59,7 +61,7 @@ paste.workspace = true
 tempfile.workspace = true
 
 # Stage benchmarks
-criterion = { workspace = true, features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 
 # io
 serde_json.workspace = true

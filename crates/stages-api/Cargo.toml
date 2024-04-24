@@ -19,6 +19,7 @@ reth-interfaces.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-net-p2p.workspace = true
+reth-consensus.workspace = true
 
 # metrics
 reth-metrics.workspace = true

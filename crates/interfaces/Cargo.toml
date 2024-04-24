@@ -14,12 +14,20 @@ workspace = true
 reth-primitives.workspace = true
 reth-network-api.workspace = true
 reth-net-p2p.workspace = true
+reth-consensus.workspace = true
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 # misc
 thiserror.workspace = true
 
 [dev-dependencies]
+reth-consensus = { workspace = true, features = ["test-utils"] }
+
 parking_lot.workspace = true
 
 [features]
 optimism =[]
+

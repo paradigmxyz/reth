@@ -1,5 +1,5 @@
 [package]
-name = "reth-beacon-consensus-core"
+name = "reth-consensus"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,12 +11,11 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# reth
-reth-consensus-common.workspace = true
 reth-primitives.workspace = true
-reth-net-p2p.workspace = true
-reth-consensus.workspace = true
 
+# misc
+auto_impl.workspace = true
+thiserror.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism"]
+test-utils = []

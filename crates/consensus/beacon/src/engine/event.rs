@@ -1,6 +1,7 @@
 use crate::engine::forkchoice::ForkchoiceStatus;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_primitives::{SealedBlock, SealedHeader, B256};
+use reth_rpc_types::engine::ForkchoiceState;
 use std::{sync::Arc, time::Duration};
 
 /// Events emitted by [crate::BeaconConsensusEngine].

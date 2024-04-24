@@ -7,22 +7,25 @@ use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::config::EtlConfig;
+use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
-type DatabaseEnv = TempDatabase<DE>;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_net_p2p::{
     bodies::client::BodiesClient,
     consensus::Consensus,
     either::EitherDownloader,
     headers::client::HeadersClient,
-    sync::NoopSyncStateUpdater,
-    test_utils::{NoopFullBlockClient, TestConsensus},
 };
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
+use reth_interfaces::{
+    sync::NoopSyncStateUpdater,
+    test_utils::NoopFullBlockClient,
+};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
 use reth_provider::{
@@ -40,6 +43,8 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
+
+type DatabaseEnv = TempDatabase<DE>;
 
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,

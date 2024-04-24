@@ -20,6 +20,7 @@ reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-parallel = { workspace = true, features = ["parallel"] }
 reth-net-p2p.workspace = true
+reth-consensus.workspace = true
 
 # common
 parking_lot.workspace = true

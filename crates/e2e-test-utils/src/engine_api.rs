@@ -3,7 +3,10 @@ use jsonrpsee::http_client::HttpClient;
 use reth::{
     api::{EngineTypes, PayloadBuilderAttributes},
     providers::CanonStateNotificationStream,
-    rpc::{api::EngineApiClient, types::engine::ForkchoiceState},
+    rpc::{
+        api::EngineApiClient,
+        types::engine::{ForkchoiceState, PayloadStatusEnum},
+    },
 };
 use reth_payload_builder::PayloadId;
 use reth_primitives::B256;
@@ -30,6 +33,7 @@ impl<E: EngineTypes + 'static> EngineApiHelper<E> {
         &self,
         payload: E::BuiltPayload,
         payload_builder_attributes: E::PayloadBuilderAttributes,
+        expected_status: PayloadStatusEnum,
     ) -> eyre::Result<B256>
     where
         E::ExecutionPayloadV3: From<E::BuiltPayload> + PayloadEnvelopeExt,
@@ -45,8 +49,10 @@ impl<E: EngineTypes + 'static> EngineApiHelper<E> {
             payload_builder_attributes.parent_beacon_block_root().unwrap(),
         )
         .await?;
-        assert!(submission.is_valid(), "{}", submission);
-        Ok(submission.latest_valid_hash.unwrap())
+
+        assert!(submission.status == expected_status);
+
+        Ok(submission.latest_valid_hash.unwrap_or_default())
     }
 
     /// Sends forkchoice update to the engine api
@@ -57,6 +63,22 @@ impl<E: EngineTypes + 'static> EngineApiHelper<E> {
                 head_block_hash: hash,
                 safe_block_hash: hash,
                 finalized_block_hash: hash,
+            },
+            None,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Sends forkchoice update to the engine api with a zero finalized hash
+    pub async fn update_optimistic_forkchoice(&self, hash: B256) -> eyre::Result<()> {
+        EngineApiClient::<E>::fork_choice_updated_v2(
+            &self.engine_api_client,
+            ForkchoiceState {
+                head_block_hash: hash,
+                safe_block_hash: B256::ZERO,
+                finalized_block_hash: B256::ZERO,
             },
             None,
         )

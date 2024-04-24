@@ -5,6 +5,7 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
@@ -282,7 +283,7 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let (block_state, trie_updates) = Self::validate_and_execute(
+        let (block_state, _) = Self::validate_and_execute(
             block.clone(),
             parent_block,
             bundle_state_data,
@@ -291,7 +292,7 @@ impl AppendableChain {
             block_validation_kind,
         )?;
         // extend the state.
-        self.chain.append_block(block, block_state, trie_updates);
+        self.chain.append_block(block, block_state);
 
         Ok(())
     }

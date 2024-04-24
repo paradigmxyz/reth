@@ -57,6 +57,8 @@ reth-node-core.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-net-p2p.workspace = true
+reth-consensus.workspace = true
+
 
 # crypto
 alloy-rlp.workspace = true

@@ -21,6 +21,7 @@ use reth_stages::{
 };
 use reth_trie::StateRoot;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
+use tokio::runtime::Handle;
 
 mod constants;
 
@@ -37,12 +38,14 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
 ) {
     let (_, unwind) = range;
 
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let mut stage = stage.clone();
-        let provider = db.factory.provider_rw().unwrap();
+    // NOTE(onbjerg): This is unfortunately needed because Criterion does not support async setup
+    tokio::task::block_in_place(move || {
+        Handle::current().block_on(async move {
+            let mut stage = stage.clone();
+            let provider = db.factory.provider_rw().unwrap();
 
-        // Clear previous run
-        stage
+            // Clear previous run
+            stage
             .unwind(&provider, unwind)
             .map_err(|e| {
                 format!(
@@ -52,7 +55,8 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Arc<TempDatabase<DatabaseEnv>>>>(
             })
             .unwrap();
 
-        provider.commit().unwrap();
+            provider.commit().unwrap();
+        })
     });
 }
 

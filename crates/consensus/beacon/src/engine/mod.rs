@@ -34,7 +34,8 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;

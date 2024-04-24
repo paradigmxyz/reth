@@ -3,13 +3,13 @@ use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
+use reth_consensus::Consensus;
 use reth_net_p2p::{
     bodies::{
         client::BodiesClient,
         downloader::{BodyDownloader, BodyDownloaderResult},
         response::BlockResponse,
     },
-    consensus::Consensus,
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -604,6 +604,7 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
+    use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_net_p2p::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, B256, MAINNET};

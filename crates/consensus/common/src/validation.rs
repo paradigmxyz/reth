@@ -2,6 +2,7 @@
 
 use reth_interfaces::RethResult;
 use reth_net_p2p::consensus::ConsensusError;
+use reth_consensus::ConsensusError;
 use reth_primitives::{
     constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,

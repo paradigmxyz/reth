@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -10,7 +11,6 @@ use reth_db::{
 };
 use reth_etl::Collector;
 use reth_net_p2p::{
-    consensus::Consensus,
     headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
     provider::ProviderError,
 };
@@ -371,6 +371,7 @@ mod tests {
     mod test_runner {
         use super::*;
         use crate::test_utils::{TestRunnerError, TestStageDB};
+        use reth_consensus::test_utils::TestConsensus;
         use reth_db::{test_utils::TempDatabase, DatabaseEnv};
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,

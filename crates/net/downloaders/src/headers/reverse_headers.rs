@@ -6,8 +6,8 @@ use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
+use reth_consensus::Consensus;
 use reth_net_p2p::{
-    consensus::Consensus,
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
         client::{HeadersClient, HeadersRequest},
@@ -1223,8 +1223,8 @@ mod tests {
 
     use crate::headers::test_utils::child_header;
     use assert_matches::assert_matches;
+    use reth_consensus::test_utils::TestConsensus;
     use reth_net_p2p::test_utils::{TestConsensus, TestHeadersClient};
-
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]
     fn test_replace_number_semantics() {

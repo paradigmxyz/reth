@@ -15,6 +15,7 @@ use reth_blockchain_tree::{
 };
 use reth_cli_runner::CliContext;
 use reth_config::Config;
+use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
 use reth_net_p2p::consensus::Consensus;
 use reth_network::NetworkHandle;

@@ -13,6 +13,7 @@ use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
+use reth_consensus::Consensus;
 use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -22,7 +23,6 @@ use reth_downloaders::{
 use reth_exex::ExExManagerHandle;
 use reth_net_p2p::{
     bodies::downloader::BodyDownloader,
-    consensus::Consensus,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_node_core::init::init_genesis;

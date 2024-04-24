@@ -349,7 +349,7 @@ TxPool:
 
           [default: 20]
 
-      --txpool.max_account_slots <MAX_ACCOUNT_SLOTS>
+      --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 
           [default: 16]
@@ -387,7 +387,7 @@ Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
 
-          [default: reth/v0.2.0-beta.5/linux]
+          [default: reth/<VERSION>/<OS>]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks
@@ -517,7 +517,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
 
-          [default: /root/.cache/reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
