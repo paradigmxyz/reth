@@ -13,8 +13,8 @@ use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFa
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId,
-    PayloadStatus, TransitionConfiguration, CAPABILITIES,
+    ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    TransitionConfiguration, CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,

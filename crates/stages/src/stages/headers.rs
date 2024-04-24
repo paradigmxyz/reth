@@ -377,8 +377,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_net_p2p::test_utils::{
-            generators, generators::random_header_range, TestConsensus, TestHeaderDownloader,
-            TestHeadersClient,
+            generators, generators::random_header_range, TestHeaderDownloader, TestHeadersClient,
         };
         use reth_provider::BlockNumReader;
         use tokio::sync::watch;

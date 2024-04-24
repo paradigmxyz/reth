@@ -14,7 +14,6 @@ use reth_interfaces::{
     },
     RethResult,
 };
-use reth_net_p2p::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };

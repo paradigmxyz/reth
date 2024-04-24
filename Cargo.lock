@@ -6175,7 +6175,6 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-net-p2p",
- "reth-node-ethereum",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -6676,17 +6675,14 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.2.0-beta.6"
 dependencies = [
+ "futures",
  "parking_lot 0.12.1",
+ "reth-consensus",
  "reth-net-p2p",
  "reth-network-api",
  "reth-primitives",
- "rand 0.8.5",
- "reth-consensus",
- "reth-eth-wire-types",
- "reth-network-api",
- "reth-primitives",
- "secp256k1 0.27.0",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -6789,7 +6785,7 @@ dependencies = [
 
 [[package]]
 name = "reth-net-p2p"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
  "auto_impl",
@@ -6797,6 +6793,7 @@ dependencies = [
  "futures",
  "parking_lot 0.12.1",
  "rand 0.8.5",
+ "reth-consensus",
  "reth-primitives",
  "secp256k1 0.27.0",
  "thiserror",

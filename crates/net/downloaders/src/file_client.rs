@@ -438,7 +438,6 @@ mod tests {
     use reth_net_p2p::{
         bodies::downloader::BodyDownloader,
         headers::downloader::{HeaderDownloader, SyncTarget},
-        test_utils::TestConsensus,
     };
     use reth_provider::test_utils::create_test_provider_factory;
     use std::{mem, sync::Arc};

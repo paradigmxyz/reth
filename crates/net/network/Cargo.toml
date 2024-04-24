@@ -73,6 +73,7 @@ smallvec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-interfaces.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-consensus.workspace = true
 
 # we need to enable the test-utils feature in our own crate to use utils in
 # integration tests

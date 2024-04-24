@@ -4,6 +4,13 @@
 //!
 //! - `test-utils`: Export utilities for testing
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 /// Shared abstractions for downloader implementations.
 pub mod download;
 
@@ -30,9 +37,6 @@ pub mod error;
 
 /// Priority enum for BlockHeader and BlockBody requests
 pub mod priority;
-
-/// Consensus traits.
-pub mod consensus;
 
 /// Database error
 pub mod db;

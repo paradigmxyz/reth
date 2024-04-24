@@ -5,8 +5,7 @@ use futures_util::StreamExt;
 use reth_consensus::Consensus;
 use reth_net_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
-    consensus::Consensus,
-    error::DownloadResult
+    error::DownloadResult,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{

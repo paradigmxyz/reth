@@ -17,15 +17,10 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_net_p2p::{
-    bodies::client::BodiesClient,
-    consensus::Consensus,
-    either::EitherDownloader,
-    headers::client::HeadersClient,
+    bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient,
+    sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient,
 };
-use reth_interfaces::{
-    sync::NoopSyncStateUpdater,
-    test_utils::NoopFullBlockClient,
-};
+
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
 use reth_provider::{

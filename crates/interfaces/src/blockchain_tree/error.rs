@@ -4,8 +4,8 @@ use crate::{
     executor::{BlockExecutionError, BlockValidationError},
     RethError,
 };
-use reth_net_p2p::provider::ProviderError;
 use reth_consensus::ConsensusError;
+use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
 /// Various error cases that can occur when a block violates tree assumptions.

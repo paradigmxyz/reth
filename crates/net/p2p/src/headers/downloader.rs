@@ -1,8 +1,5 @@
 use super::error::HeadersDownloaderResult;
-use crate::{
-    consensus::Consensus,
-    error::{DownloadError, DownloadResult},
-};
+use crate::error::{DownloadError, DownloadResult};
 use futures::Stream;
 use reth_consensus::Consensus;
 use reth_primitives::{BlockHashOrNumber, SealedHeader, B256};

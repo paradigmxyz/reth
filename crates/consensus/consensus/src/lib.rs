@@ -14,13 +14,10 @@ use reth_primitives::{
 };
 use std::fmt::Debug;
 
-<<<<<<<< HEAD:crates/net/p2p/src/consensus.rs
-========
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking consensus
 pub mod test_utils;
 
->>>>>>>> main:crates/consensus/consensus/src/lib.rs
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {

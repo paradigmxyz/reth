@@ -22,10 +22,7 @@ use reth_downloaders::{
 };
 
 use reth_exex::ExExManagerHandle;
-use reth_net_p2p::{
-    bodies::client::BodiesClient, headers::client::HeadersClient,
-};
-
+use reth_net_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
