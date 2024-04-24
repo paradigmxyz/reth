@@ -8,7 +8,6 @@
 use reth_exex::ExExContext;
 use reth_network::NetworkHandle;
 use std::{future::Future, marker::PhantomData};
-
 use reth_node_api::{
     FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
 };
@@ -25,36 +24,7 @@ use crate::{
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     BuilderContext, FullNode, NodeHandle,
 };
-
-/// An abstraction over the components of a node, consisting of:
-///  - transaction pool
-///  - network
-///  - payload builder.
-pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Send + Sync + 'static {
-    /// The transaction pool of the node.
-    type Pool: TransactionPool;
-
-    /// Returns the transaction pool of the node.
-    fn pool(&self) -> &Self::Pool;
-
-    /// Returns the handle to the network
-    fn network(&self) -> &NetworkHandle;
-
-    /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<NodeTypes::Engine>;
-}
-
-/// A type that's responsible for building the components of the node.
-pub trait NodeComponentsService<Node: FullNodeTypes> {
-    /// The components for the node with the given types
-    type Components: NodeComponents<Node>;
-
-    /// Consumes the type and returns the crated components.
-    fn build_components(
-        self,
-        ctx: &BuilderContext<Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
-}
+use crate::components::{NodeComponents, NodeComponentsBuilder};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -73,7 +43,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     /// Advances the state of the node builder to the next state where all components are configured
     pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB>
     where
-        CB: NodeComponentsService<T>,
+        CB: NodeComponentsBuilder<T>,
     {
         let Self { config, adapter } = self;
 
@@ -107,7 +77,7 @@ impl<T: FullNodeTypes> NodeTypesAdapter<T> {
 
 /// Container for the node's types and the components and other internals that can be used by addons
 /// of the node.
-pub(crate) struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
+pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     pub components: C,
     pub task_executor: TaskExecutor,
     pub provider: T::Provider,
@@ -156,7 +126,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsService<T>> {
+pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> {
     /// All settings for how the node should be configured.
     config: NodeConfig,
     /// Adapter for the underlying node types and database
@@ -167,7 +137,7 @@ pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsService
     add_ons: NodeAddOns<NodeAdapter<T, CB::Components>>,
 }
 
-impl<T: FullNodeTypes, CB: NodeComponentsService<T>> NodeBuilderWithComponents<T, CB> {
+impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
@@ -229,8 +199,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsService<T>> NodeBuilderWithComponents<T
     where
         L: LaunchNode<Self>,
     {
-        // TODO preprocessing state
-        todo!()
+        launcher.launch_node(self).await
     }
 }
 

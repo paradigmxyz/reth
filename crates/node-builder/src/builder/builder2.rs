@@ -8,7 +8,7 @@ use crate::{
     hooks::NodeHooks,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    Node, NodeHandle,
+    DefaultNodeLauncher, Node, NodeHandle,
 };
 use eyre::Context;
 use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
@@ -837,7 +837,7 @@ where
         components_builder: CB,
     ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
     where
-        CB: NodeComponentsService<RethFullAdapter<DB, T>>,
+        CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
@@ -846,37 +846,30 @@ where
         }
     }
 
-    //     /// Launches a preconfigured [Node]
-    //     ///
-    //     /// This bootstraps the node internals, creates all the components with the given [Node]
-    // type     /// and launches the node.
-    //     ///
-    //     /// Returns a [NodeHandle] that can be used to interact with the node.
-    //     pub async fn launch_node<N>(
-    //         self,
-    //         node: N,
-    //     ) -> eyre::Result<
-    //         NodeHandle<
-    //             FullNodeComponentsAdapter<
-    //                 RethFullAdapter<DB, N>,
-    //                 <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-    //             >,
-    //         >,
-    //     >
-    //     where
-    //         N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>>,
-    //         N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-    //         N::NetworkBuilder: crate::components::NetworkBuilder<
-    //             RethFullAdapter<DB, N>,
-    //             <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-    //         >,
-    //         N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-    //             RethFullAdapter<DB, N>,
-    //             <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-    //         >,
-    //     {
-    //         self.node(node).launch().await
-    //     }
+    // /// Launches a preconfigured [Node]
+    // ///
+    // /// This bootstraps the node internals, creates all the components with the given [Node]
+    // ///
+    // /// Returns a [NodeHandle] that can be used to interact with the node.
+    // pub async fn launch_node<N>(
+    //     self,
+    //     node: N,
+    // ) -> eyre::Result<
+    //     NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
+    // >
+    // where
+    //     N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>>,
+    //     N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
+    //     N::NetworkBuilder: crate::components::NetworkBuilder<
+    //         RethFullAdapter<DB, N>,
+    //         <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    //     >,
+    //     N::PayloadBuilder: crate::components::PayloadServiceBuilder<
+    //         RethFullAdapter<DB, N>,
+    //         <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
+    //     >,
+    // {
+    //     self.node(node).launch().await
     // }
 }
 
@@ -884,7 +877,7 @@ impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, 
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
-    CB: NodeComponentsService<RethFullAdapter<DB, T>>,
+    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
 {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
@@ -967,25 +960,20 @@ where
         }
     }
 
-    //
-    //     /// Launches the node and returns a handle to it.
-    //     pub async fn launch(
-    //         self,
-    //     ) -> eyre::Result<
-    //         NodeHandle<
-    //             FullNodeComponentsAdapter<
-    //                 FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
-    //                 Components::Pool,
-    //             >,
-    //         >,
-    //     > { let Self { builder, task_executor, data_dir } = self;
-    //
-    //         builder.launch(task_executor, data_dir).await
-    //     }
-    //
-    //     /// Check that the builder can be launched
-    //     ///
-    //     /// This is useful when writing tests to ensure that the builder is configured correctly.
-    //     pub fn check_launch(self) -> Self {
-    //         self
+    /// Launches the node and returns a handle to it.
+    pub async fn launch(
+        self,
+    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>> {
+        let Self { builder, task_executor, data_dir } = self;
+
+        let launcher = DefaultNodeLauncher { task_executor, data_dir };
+        builder.launch_with(launcher).await
+    }
+
+    /// Check that the builder can be launched
+    ///
+    /// This is useful when writing tests to ensure that the builder is configured correctly.
+    pub fn check_launch(self) -> Self {
+        self
+    }
 }
