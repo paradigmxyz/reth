@@ -198,14 +198,14 @@ fn execute_block(
     }
 
     let block_number = u64::try_from(header.sequence)?;
+    let parent_block = db.get_block(header.sequence - U256::from(1))?;
 
     let base_fee_per_gas = if CHAIN_SPEC.fork(Hardfork::London).transitions_at_block(block_number) {
         constants::EIP1559_INITIAL_BASE_FEE
     } else {
-        let parent_block = db
-            .get_block(header.sequence - U256::from(1))?
-            .ok_or(eyre::eyre!("parent block not found"))?;
         parent_block
+            .as_ref()
+            .ok_or(eyre::eyre!("parent block not found"))?
             .header
             .next_block_base_fee(CHAIN_SPEC.base_fee_params_at_block(block_number))
             .ok_or(eyre::eyre!("failed to calculate base fee"))?
@@ -214,8 +214,10 @@ fn execute_block(
     let body = Decodable::decode(&mut block_data.as_ref())?;
     let block = Block {
         header: Header {
+            parent_hash: parent_block.map(|block| block.header.hash()).unwrap_or_default(),
             number: block_number,
             gas_limit: u64::try_from(header.gasLimit)?,
+            timestamp: u64::try_from(header.confirmBy)?,
             base_fee_per_gas: Some(base_fee_per_gas),
             ..Default::default()
         },
