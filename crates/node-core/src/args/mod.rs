@@ -52,8 +52,8 @@ mod pruning_args;
 pub use pruning_args::PruningArgs;
 
 /// DatadirArgs for configuring data storage paths
-mod datadir_arg;
-pub use datadir_arg::DatadirArgs;
+mod datadir_args;
+pub use datadir_args::DatadirArgs;
 
 pub mod utils;
 
