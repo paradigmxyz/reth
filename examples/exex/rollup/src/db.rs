@@ -50,11 +50,6 @@ impl Database {
                 data         TEXT,
                 UNIQUE (block_number, address)
             );
-            CREATE TABLE IF NOT EXISTS bytecode (
-                id   INTEGER PRIMARY KEY,
-                hash TEXT UNIQUE,
-                data TEXT
-            );
             CREATE TABLE IF NOT EXISTS storage (
                 id      INTEGER PRIMARY KEY,
                 address TEXT,
@@ -69,6 +64,11 @@ impl Database {
                 key          TEXT,
                 data         TEXT,
                 UNIQUE (block_number, address, key)
+            );
+            CREATE TABLE IF NOT EXISTS bytecode (
+                id   INTEGER PRIMARY KEY,
+                hash TEXT UNIQUE,
+                data TEXT
             );",
         )?;
         Ok(())
@@ -102,6 +102,18 @@ impl Database {
             }
         }
 
+        if reverts.accounts.len() > 1 {
+            eyre::bail!("too many blocks in account reverts");
+        }
+        for (address, account) in
+            reverts.accounts.first().ok_or(eyre::eyre!("no account reverts"))?
+        {
+            tx.execute(
+                "INSERT INTO account_revert (block_number, address, data) VALUES (?, ?, ?) ON CONFLICT(block_number, address) DO UPDATE SET data = excluded.data",
+                (block.header.number.to_string(), address.to_string(), serde_json::to_string(account)?),
+            )?;
+        }
+
         for PlainStorageChangeset { address, wipe_storage, storage } in changeset.storage {
             if wipe_storage {
                 tx.execute("DELETE FROM storage WHERE address = ?", (address.to_string(),))?;
@@ -113,25 +125,6 @@ impl Database {
                     (address.to_string(), key.to_string(), value.to_string()),
                 )?;
             }
-        }
-
-        for (hash, bytecode) in changeset.contracts {
-            tx.execute(
-                "INSERT INTO bytecode (hash, data) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING",
-                (hash.to_string(), bytecode.bytes().to_string()),
-            )?;
-        }
-
-        if reverts.accounts.len() > 1 {
-            eyre::bail!("too many blocks in account reverts");
-        }
-        for (address, account) in
-            reverts.accounts.first().ok_or(eyre::eyre!("no account reverts"))?
-        {
-            tx.execute(
-                "INSERT INTO account_revert (block_number, address, data) VALUES (?, ?, ?) ON CONFLICT(block_number, address) DO UPDATE SET data = excluded.data",
-                (block.header.number.to_string(), address.to_string(), serde_json::to_string(account)?),
-            )?;
         }
 
         if reverts.storage.len() > 1 {
@@ -152,6 +145,26 @@ impl Database {
                 )?;
             }
         }
+
+        for (hash, bytecode) in changeset.contracts {
+            tx.execute(
+                "INSERT INTO bytecode (hash, data) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING",
+                (hash.to_string(), bytecode.bytes().to_string()),
+            )?;
+        }
+
+        tx.commit()?;
+
+        Ok(())
+    }
+
+    #[allow(unreachable_code)]
+    pub fn revert_block(&mut self, number: u64) -> eyre::Result<()> {
+        let mut connection = self.connection();
+        let tx = connection.transaction()?;
+
+        tx.execute("DELETE FROM block WHERE number = ?", (number.to_string(),))?;
+        unimplemented!("revert accounts, storages, reverts and bytecodes");
 
         tx.commit()?;
 

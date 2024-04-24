@@ -151,10 +151,77 @@ impl<Node: FullNodeComponents> Rollup<Node> {
         Ok(())
     }
 
-    fn revert(&mut self, _chain: &Chain) -> eyre::Result<()> {
-        unimplemented!(
-            "reverts need to be stored in database to be able to act on host chain reverts"
-        )
+    fn revert(&mut self, chain: &Chain) -> eyre::Result<()> {
+        let events = decode_chain_into_rollup_events(chain);
+
+        for (_, tx, event) in events {
+            match event {
+                RollupContractEvents::BlockSubmitted(_) => {
+                    let call = RollupContractCalls::abi_decode(tx.input(), true)?;
+
+                    if let RollupContractCalls::submitBlock(RollupContract::submitBlockCall {
+                        header,
+                        ..
+                    }) = call
+                    {
+                        let block_number = u64::try_from(header.sequence)?;
+                        self.db.revert_block(block_number)?;
+                        info!(
+                            chain_id = %header.rollupChainId,
+                            sequence = %header.sequence,
+                            "Block reverted"
+                        );
+                    }
+                }
+                RollupContractEvents::Enter(RollupContract::Enter {
+                    token,
+                    rollupRecipient,
+                    amount,
+                }) => {
+                    if token != Address::ZERO {
+                        error!(tx_hash = %tx.hash, "Only ETH deposits are supported");
+                        continue
+                    }
+
+                    self.db.upsert_account(rollupRecipient, |account| {
+                        let mut account = account.ok_or(eyre::eyre!("account not found"))?;
+                        account.balance -= amount;
+                        Ok(account)
+                    })?;
+
+                    info!(
+                        %amount,
+                        recipient = %rollupRecipient,
+                        "Deposit reverted",
+                    );
+                }
+                RollupContractEvents::ExitFilled(RollupContract::ExitFilled {
+                    token,
+                    hostRecipient,
+                    amount,
+                }) => {
+                    if token != Address::ZERO {
+                        error!(tx_hash = %tx.hash, "Only ETH withdrawals are supported");
+                        continue
+                    }
+
+                    self.db.upsert_account(hostRecipient, |account| {
+                        let mut account = account.ok_or(eyre::eyre!("account not found"))?;
+                        account.balance += amount;
+                        Ok(account)
+                    })?;
+
+                    info!(
+                        %amount,
+                        recipient = %hostRecipient,
+                        "Withdrawal reverted",
+                    );
+                }
+                _ => (),
+            }
+        }
+
+        Ok(())
     }
 }
 
