@@ -81,10 +81,10 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    fn evm<'a, DB: Database + 'a, EXT>(&self, db: DB, ext: EXT) -> Evm<'a, EXT, DB> {
+    type DefaultExternalContext = ();
+    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext, DB> {
         EvmBuilder::default()
             .with_db(db)
-            .with_external_context(ext)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .build()

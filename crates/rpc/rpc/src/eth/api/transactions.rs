@@ -552,7 +552,7 @@ where
         DB: Database,
         <DB as Database>::Error: Into<EthApiError>,
     {
-        let mut evm = self.inner.evm_config.evm_with_env(db, env, ());
+        let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let res = evm.transact()?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env))
@@ -608,7 +608,7 @@ where
     {
         let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
 
-        let mut evm = self.inner.evm_config.evm_with_env(db, env, ());
+        let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let mut index = 0;
         for tx in transactions.into_iter() {
             if tx.hash() == target_tx_hash {
