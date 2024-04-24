@@ -17,6 +17,8 @@ to make a PR!
 
 ## Network
 
+| Example                            | Description                                                  |
+| ---------------------------------- | ------------------------------------------------------------ |
 | [Standalone network](./network.rs) | Illustrates how to use the network as a standalone component |
 
 ## RPC
