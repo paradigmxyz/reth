@@ -61,13 +61,7 @@ use reth_transaction_pool::{PoolConfig, TransactionPool};
 use std::{cmp::max, str::FromStr, sync::Arc, thread::available_parallelism};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
-use super::states::*;
-
-/// The builtin provider type of the reth node.
-// Note: we need to hardcode this because custom components might depend on it in associated types.
-type RethFullProviderType<DB> = BlockchainProvider<DB>;
-
-type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>;
+use super::{states::*, *};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
@@ -211,30 +205,30 @@ impl<DB> NodeBuilder<DB> {
         NodeBuilder { config: self.config, database }
     }
 
-    // /// Preconfigure the builder with the context to launch the node.
-    // ///
-    // /// This provides the task executor and the data directory for the node.
-    // pub fn with_launch_context(
-    //     self,
-    //     task_executor: TaskExecutor,
-    //     data_dir: ChainPath<DataDirPath>,
-    // ) -> WithLaunchContext<DB, InitState> {
-    //     WithLaunchContext { builder: self, task_executor, data_dir }
-    // }
-    //
-    // /// Creates an _ephemeral_ preconfigured node for testing purposes.
-    // pub fn testing_node(
-    //     self,
-    //     task_executor: TaskExecutor,
-    // ) -> WithLaunchContext<Arc<TempDatabase<DatabaseEnv>>, InitState> {
-    //     let db = create_test_rw_db();
-    //     let db_path_str = db.path().to_str().expect("Path is not valid unicode");
-    //     let path =
-    //         MaybePlatformPath::<DataDirPath>::from_str(db_path_str).expect("Path is not valid");
-    //     let data_dir = path.unwrap_or_chain_default(self.config.chain.chain);
-    //
-    //     WithLaunchContext { builder: self.with_database(db), task_executor, data_dir }
-    // }
+    /// Preconfigure the builder with the context to launch the node.
+    ///
+    /// This provides the task executor and the data directory for the node.
+    pub fn with_launch_context(
+        self,
+        task_executor: TaskExecutor,
+        data_dir: ChainPath<DataDirPath>,
+    ) -> WithLaunchContext<NodeBuilder<DB>> {
+        WithLaunchContext { builder: self, task_executor, data_dir }
+    }
+
+    /// Creates an _ephemeral_ preconfigured node for testing purposes.
+    pub fn testing_node(
+        self,
+        task_executor: TaskExecutor,
+    ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
+        let db = create_test_rw_db();
+        let db_path_str = db.path().to_str().expect("Path is not valid unicode");
+        let path =
+            MaybePlatformPath::<DataDirPath>::from_str(db_path_str).expect("Path is not valid");
+        let data_dir = path.unwrap_or_chain_default(self.config.chain.chain);
+
+        WithLaunchContext { builder: self.with_database(db), task_executor, data_dir }
+    }
 }
 
 impl<DB> NodeBuilder<DB>
@@ -242,10 +236,7 @@ where
     DB: Database + Unpin + Clone + 'static,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(
-        self,
-        types: T,
-    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>>
+    pub fn with_types<T>(self, types: T) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
         T: NodeTypes,
     {
@@ -788,9 +779,7 @@ where
     pub fn with_types<T>(
         self,
         types: T,
-    ) -> WithLaunchContext<
-        NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>>,
-    >
+    ) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
         T: NodeTypes,
     {
@@ -837,8 +826,7 @@ where
     // }
 }
 
-impl<T, DB>
-    WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>>>
+impl<T, DB> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
@@ -847,11 +835,9 @@ where
     pub fn with_components<CB>(
         self,
         components_builder: CB,
-    ) -> WithLaunchContext<
-        NodeBuilderWithComponents<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>, CB>,
-    >
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
     where
-        CB: NodeComponentsService<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>>,
+        CB: NodeComponentsService<RethFullAdapter<DB, T>>,
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
@@ -894,21 +880,16 @@ where
     // }
 }
 
-impl<T, DB, CB>
-    WithLaunchContext<
-        NodeBuilderWithComponents<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>, CB>,
-    >
+impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
-    CB: NodeComponentsService<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>>,
+    CB: NodeComponentsService<RethFullAdapter<DB, T>>,
 {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
-        F: Fn(
-                NodeAdapter<FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>, CB::Components>,
-            ) -> eyre::Result<()>
+        F: Fn(NodeAdapter<RethFullAdapter<DB, T>, CB::Components>) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -922,14 +903,7 @@ where
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: Fn(
-                FullNode<
-                    NodeAdapter<
-                        FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>,
-                        CB::Components,
-                    >,
-                >,
-            ) -> eyre::Result<()>
+        F: Fn(FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -944,13 +918,7 @@ where
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: Fn(
-                RpcContext<
-                    '_,
-                    NodeAdapter<
-                        FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>,
-                        CB::Components,
-                    >,
-                >,
+                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
             + Send
@@ -967,13 +935,7 @@ where
     pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
         F: Fn(
-                RpcContext<
-                    '_,
-                    NodeAdapter<
-                        FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>,
-                        CB::Components,
-                    >,
-                >,
+                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
             ) -> eyre::Result<()>
             + Send
             + 'static,
@@ -992,14 +954,7 @@ where
     /// The ExEx ID must be unique.
     pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: Fn(
-                ExExContext<
-                    NodeAdapter<
-                        FullNodeTypesAdapter<T, DB, RethFullProviderType<DB>>,
-                        CB::Components,
-                    >,
-                >,
-            ) -> R
+        F: Fn(ExExContext<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> R
             + Send
             + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
@@ -1034,208 +989,3 @@ where
     //     pub fn check_launch(self) -> Self {
     //         self
 }
-
-//
-// /// Captures the necessary context for building the components of the node.
-// pub struct BuilderContext<Node: FullNodeTypes> {
-//     /// The current head of the blockchain at launch.
-//     head: Head,
-//     /// The configured provider to interact with the blockchain.
-//     provider: Node::Provider,
-//     /// The executor of the node.
-//     executor: TaskExecutor,
-//     /// The data dir of the node.
-//     data_dir: ChainPath<DataDirPath>,
-//     /// The config of the node
-//     config: NodeConfig,
-//     /// loaded config
-//     reth_config: reth_config::Config,
-//     /// EVM config of the node
-//     evm_config: Node::Evm,
-// }
-//
-// impl<Node: FullNodeTypes> BuilderContext<Node> {
-//     /// Create a new instance of [BuilderContext]
-//     pub fn new(
-//         head: Head,
-//         provider: Node::Provider,
-//         executor: TaskExecutor,
-//         data_dir: ChainPath<DataDirPath>,
-//         config: NodeConfig,
-//         reth_config: reth_config::Config,
-//         evm_config: Node::Evm,
-//     ) -> Self {
-//         Self { head, provider, executor, data_dir, config, reth_config, evm_config }
-//     }
-//
-//     /// Returns the configured provider to interact with the blockchain.
-//     pub fn provider(&self) -> &Node::Provider {
-//         &self.provider
-//     }
-//
-//     /// Returns the configured evm.
-//     pub fn evm_config(&self) -> &Node::Evm {
-//         &self.evm_config
-//     }
-//
-//     /// Returns the current head of the blockchain at launch.
-//     pub fn head(&self) -> Head {
-//         self.head
-//     }
-//
-//     /// Returns the config of the node.
-//     pub fn config(&self) -> &NodeConfig {
-//         &self.config
-//     }
-//
-//     /// Returns the data dir of the node.
-//     ///
-//     /// This gives access to all relevant files and directories of the node's datadir.
-//     pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
-//         &self.data_dir
-//     }
-//
-//     /// Returns the executor of the node.
-//     ///
-//     /// This can be used to execute async tasks or functions during the setup.
-//     pub fn task_executor(&self) -> &TaskExecutor {
-//         &self.executor
-//     }
-//
-//     /// Returns the chain spec of the node.
-//     pub fn chain_spec(&self) -> Arc<ChainSpec> {
-//         self.provider().chain_spec()
-//     }
-//
-//     /// Returns the transaction pool config of the node.
-//     pub fn pool_config(&self) -> PoolConfig {
-//         self.config().txpool.pool_config()
-//     }
-//
-//     /// Loads `MAINNET_KZG_TRUSTED_SETUP`.
-//     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-//         Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
-//     }
-//
-//     /// Returns the config for payload building.
-//     pub fn payload_builder_config(&self) -> impl PayloadBuilderConfig {
-//         self.config.builder.clone()
-//     }
-//
-//     /// Returns the default network config for the node.
-//     pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
-//         self.config.network_config(
-//             &self.reth_config,
-//             self.provider.clone(),
-//             self.executor.clone(),
-//             self.head,
-//             self.data_dir(),
-//         )
-//     }
-//
-//     /// Creates the [NetworkBuilder] for the node.
-//     pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
-//         self.config
-//             .build_network(
-//                 &self.reth_config,
-//                 self.provider.clone(),
-//                 self.executor.clone(),
-//                 self.head,
-//                 self.data_dir(),
-//             )
-//             .await
-//     }
-//
-//     /// Convenience function to start the network.
-//     ///
-//     /// Spawns the configured network and associated tasks and returns the [NetworkHandle]
-// connected     /// to that network.
-//     pub fn start_network<Pool>(
-//         &self,
-//         builder: NetworkBuilder<Node::Provider, (), ()>,
-//         pool: Pool,
-//     ) -> NetworkHandle
-//     where
-//         Pool: TransactionPool + Unpin + 'static,
-//     {
-//         let (handle, network, txpool, eth) = builder
-//             .transactions(pool, Default::default())
-//             .request_handler(self.provider().clone())
-//             .split_with_handle();
-//
-//         self.executor.spawn_critical("p2p txpool", txpool);
-//         self.executor.spawn_critical("p2p eth request handler", eth);
-//
-//         let default_peers_path = self.data_dir().known_peers_path();
-//         let known_peers_file = self.config.network.persistent_peers_file(default_peers_path);
-//         self.executor.spawn_critical_with_graceful_shutdown_signal(
-//             "p2p network task",
-//             |shutdown| {
-//                 network.run_until_graceful_shutdown(shutdown, |network| {
-//                     write_peers_to_file(network, known_peers_file)
-//                 })
-//             },
-//         );
-//
-//         handle
-//     }
-// }
-//
-// impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("BuilderContext")
-//             .field("head", &self.head)
-//             .field("provider", &std::any::type_name::<Node::Provider>())
-//             .field("executor", &self.executor)
-//             .field("data_dir", &self.data_dir)
-//             .field("config", &self.config)
-//             .finish()
-//     }
-// }
-//
-// /// The initial state of the node builder process.
-// #[derive(Debug, Default)]
-// #[non_exhaustive]
-// pub struct InitState;
-//
-// /// The state after all types of the node have been configured.
-// pub struct TypesState<Types, DB>
-// where
-//     DB: Database + Clone + 'static,
-//     Types: NodeTypes,
-// {
-//     adapter: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
-// }
-//
-// /// The state of the node builder process after the node's components have been configured.
-// ///
-// /// With this state all types and components of the node are known and the node can be launched.
-// ///
-// /// Additionally, this state captures additional hooks that are called at specific points in the
-// /// node's launch lifecycle.
-// pub struct ComponentsState<Types, Components, FullNode: FullNodeComponents> {
-//     /// The types of the node.
-//     types: Types,
-//     /// Type that builds the components of the node.
-//     components_builder: Components,
-//     /// Additional NodeHooks that are called at specific points in the node's launch lifecycle.
-//     hooks: NodeHooks<FullNode>,
-//     /// Additional RPC hooks.
-//     rpc: RpcHooks<FullNode>,
-//     /// The ExExs (execution extensions) of the node.
-//     exexs: Vec<(String, Box<dyn BoxedLaunchExEx<FullNode>>)>,
-// }
-//
-// impl<Types, Components, FullNode: FullNodeComponents> std::fmt::Debug
-//     for ComponentsState<Types, Components, FullNode>
-// {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("ComponentsState")
-//             .field("types", &std::any::type_name::<Types>())
-//             .field("components_builder", &std::any::type_name::<Components>())
-//             .field("hooks", &self.hooks)
-//             .field("rpc", &self.rpc)
-//             .field("exexs", &self.exexs.len())
-//             .finish()
-//     }
-// }

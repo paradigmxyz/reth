@@ -67,9 +67,9 @@ mod builder2;
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-type RethFullProviderType<DB> = BlockchainProvider<DB>;
+pub type RethFullProviderType<DB> = BlockchainProvider<DB>;
 
-type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>;
+pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
