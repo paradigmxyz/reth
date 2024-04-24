@@ -88,7 +88,7 @@ pub enum EngineApiError {
     #[error(transparent)]
     EngineObjectValidationError(#[from] EngineObjectValidationError),
     /// Any other error
-    #[error("0")]
+    #[error("{0}")]
     Other(Box<dyn ToRpcError>),
 }
 
