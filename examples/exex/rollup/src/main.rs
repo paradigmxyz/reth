@@ -198,8 +198,13 @@ fn execute_block(
     }
 
     let block_number = u64::try_from(header.sequence)?;
-    let parent_block = db.get_block(header.sequence - U256::from(1))?;
+    let parent_block = if !header.sequence.is_zero() {
+        db.get_block(header.sequence - U256::from(1))?
+    } else {
+        None
+    };
 
+    // Calculate base fee per gas for EIP-1559 transactions
     let base_fee_per_gas = if CHAIN_SPEC.fork(Hardfork::London).transitions_at_block(block_number) {
         constants::EIP1559_INITIAL_BASE_FEE
     } else {
@@ -211,22 +216,28 @@ fn execute_block(
             .ok_or(eyre::eyre!("failed to calculate base fee"))?
     };
 
-    let body = Decodable::decode(&mut block_data.as_ref())?;
-    let block = Block {
-        header: Header {
-            parent_hash: parent_block.map(|block| block.header.hash()).unwrap_or_default(),
-            number: block_number,
-            gas_limit: u64::try_from(header.gasLimit)?,
-            timestamp: u64::try_from(header.confirmBy)?,
-            base_fee_per_gas: Some(base_fee_per_gas),
-            ..Default::default()
-        },
-        body,
+    // Construct header
+    let header = Header {
+        parent_hash: parent_block.map(|block| block.header.hash()).unwrap_or_default(),
+        number: block_number,
+        gas_limit: u64::try_from(header.gasLimit)?,
+        timestamp: u64::try_from(header.confirmBy)?,
+        base_fee_per_gas: Some(base_fee_per_gas),
         ..Default::default()
-    }
-    .with_recovered_senders()
-    .ok_or_eyre("failed to recover senders")?;
+    };
 
+    // Decode block data and filter only transactions with the correct chain ID
+    let body = Vec::<TransactionSigned>::decode(&mut block_data.as_ref())?
+        .into_iter()
+        .filter(|tx| tx.chain_id() == Some(CHAIN_ID))
+        .collect();
+
+    // Construct block and recover senders
+    let block = Block { header, body, ..Default::default() }
+        .with_recovered_senders()
+        .ok_or_eyre("failed to recover senders")?;
+
+    // Execute block
     let state = StateBuilder::new_with_database(
         Box::new(db) as Box<dyn reth::revm::Database<Error = ProviderError> + Send>
     )
