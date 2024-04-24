@@ -111,14 +111,7 @@ where
                                 tx_hash: Some(tx_hash),
                                 tx_index: Some(index),
                             }),
-                        )
-                        .map_err(|err| {
-                            results.push(TraceResult::Error {
-                                error: err.to_string(),
-                                tx_hash: Some(tx_hash),
-                            });
-                            err
-                        })?;
+                        )?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
