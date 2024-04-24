@@ -95,7 +95,6 @@ where
                 }
             }
 
-            // todo: Clea up all blobs avail logic
             // todo: update error for transcations
             // todo: CL connectivty logic
             while let Poll::Ready(Some(notification)) = this.events.poll_next_unpin(cx) {
@@ -112,25 +111,24 @@ where
                         .collect();
 
                     //returns
-                    let sidecars = match this
+                    match this
                         .pool
-                        .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash).collect())
+                        .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect())
                     {
-                        Ok(blobs) => blobs,
-                        Err(err) => {
+                        Ok(blobs) => {
+                            for ((tx, _), blob) in txs.iter().zip(blobs.iter()) {
+                                match BlobTransaction::try_from_signed(tx.clone(), blob.clone()) {
+                                    Ok(blob_transaction) => actions_to_queue.push(blob_transaction),
+                                    Err(err) => {
+                                        all_blobs_available = false;
+                                    }
+                                }
+                            }
+                        }
+                        Err(_err) => {
                             all_blobs_available = false;
-                            return Poll::Ready(Some(Err(SideCarError::TransactionPoolError(err))))
                         }
                     };
-
-                    for ((tx, _), sidecar) in txs.iter().zip(sidecars.iter()) {
-                        match BlobTransaction::try_from_signed(tx.clone(), sidecar.clone()) {
-                            Ok(blob_transaction) => actions_to_queue.push(blob_transaction),
-                            Err((transaction, sidecar)) => {
-                                todo!()
-                            }
-                        };
-                    }
 
                     if all_blobs_available {
                         this.queued_actions.extend(actions_to_queue);
