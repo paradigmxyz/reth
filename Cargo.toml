@@ -70,6 +70,7 @@ members = [
     "crates/transaction-pool/",
     "crates/trie/",
     "crates/trie-parallel/",
+    "crates/optimism/op-beacon-core",
     "examples/",
     "examples/additional-rpc-namespace-in-cli/",
     "examples/beacon-api-sse/",
