@@ -3,7 +3,9 @@ use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType};
 use reth_node_optimism::{OptimismBuiltPayload, OptimismNode, OptimismPayloadBuilderAttributes};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{Address, ChainSpecBuilder, Genesis, B256, BASE_MAINNET};
+use tokio::sync::Mutex;
 use std::{future::Future, pin::Pin, sync::Arc};
+use reth_e2e_test_utils::transaction::TransactionTestContext;
 
 /// Optimism Node Helper type
 pub(crate) type OpNode = NodeHelperType<OptimismNode>;
@@ -27,9 +29,17 @@ pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskMa
 pub(crate) async fn advance_chain(
     length: usize,
     node: &mut OpNode,
-    tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
+    wallet: Arc<Mutex<Wallet>>
 ) -> eyre::Result<Vec<(OptimismBuiltPayload, OptimismPayloadBuilderAttributes)>> {
-    node.advance(length as u64, tx_generator, optimism_payload_attributes).await
+    node.advance(length as u64, |_| {
+        let wallet = wallet.clone();
+        Box::pin(async move {
+            let mut wallet = wallet.lock().await;
+            let tx_fut = TransactionTestContext::optimism_l1_block_info_tx(wallet.chain_id, wallet.inner.clone(), wallet.inner_nonce);
+            wallet.inner_nonce += 1;
+            tx_fut.await
+        })
+    }, optimism_payload_attributes).await
 }
 
 /// Helper function to create a new eth payload attributes

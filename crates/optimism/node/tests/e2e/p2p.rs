@@ -1,13 +1,15 @@
+use std::sync::Arc;
 use crate::utils::{advance_chain, setup};
 use reth::primitives::BASE_MAINNET;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet};
 use reth_primitives::ChainId;
+use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, exec, wallet) = setup(3).await?;
+    let (mut nodes, _tasks, wallet) = setup(3).await?;
     let wallet = Arc::new(Mutex::new(wallet));
 
     let mut third_node = nodes.pop().unwrap();
@@ -31,7 +33,7 @@ async fn can_sync() -> eyre::Result<()> {
     third_node.wait_block(tip as u64, canonical_chain[tip_index], true).await?;
 
     //  On second node, create a side chain: 298b ->  299b -> 300b
-    wallet.lock().await.nonce -= 3;
+    wallet.lock().await.inner_nonce -= 3;
     second_node.payload.timestamp = first_node.payload.timestamp - 3; // TODO: probably want to make it node agnostic
     let side_payload_chain = advance_chain(3, &mut second_node, wallet.clone()).await?;
     let side_chain = side_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
