@@ -6,7 +6,6 @@ use crate::{
         utils::{chain_help, chain_spec_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, DiscoveryArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
@@ -39,16 +38,6 @@ pub struct Command {
         value_parser = chain_spec_value_parser
     )]
     chain: Arc<ChainSpec>,
-
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
 
     /// Configure data storage locations
     #[command(flatten)]
@@ -109,8 +98,10 @@ impl Command {
         let noop_db = Arc::new(create_db(tempdir.into_path(), self.db.database_args())?);
 
         // add network name to data dir
-        let data_dir =
-            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir = self
+            .datadir_args
+            .datadir
+            .unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();

@@ -5,7 +5,7 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, DatadirArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
+    core::cli::runner::CliContext,
 };
 use alloy_rlp::Decodable;
 use clap::Parser;
@@ -53,16 +53,6 @@ use tracing::*;
 /// The script will then parse the block and attempt to build a similar one.
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// Configure data storage locations
     #[command(flatten)]
     datadir_args: DatadirArgs,
@@ -118,7 +108,8 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir
+            self.datadir_args
+                .datadir
                 .unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone())
                 .static_files_path(),
         )?;
@@ -153,8 +144,10 @@ impl Command {
     /// Execute `debug in-memory-merkle` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir =
-            self.datadir.unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir = self
+            .datadir_args
+            .datadir
+            .unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
         let db_path = data_dir.db_path();
         fs::create_dir_all(&db_path)?;
 
