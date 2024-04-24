@@ -1,8 +1,6 @@
 //! Testing support for headers related interfaces.
 
-use reth_primitives::{
-    Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, WithPeerId, U256,
-};
+use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, WithPeerId};
 
 use std::{
     fmt,

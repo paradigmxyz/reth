@@ -713,8 +713,8 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
-    use reth_net_p2p::test_utils::generators::random_block;
     use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_net_p2p::test_utils::generators::random_block;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;

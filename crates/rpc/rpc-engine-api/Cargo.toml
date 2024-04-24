@@ -48,8 +48,6 @@ reth-interfaces.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 
-alloy-rlp.workspace = true
-
 assert_matches.workspace = true
 reth-net-p2p = {workspace = true, features =["test-utils"]}
 
