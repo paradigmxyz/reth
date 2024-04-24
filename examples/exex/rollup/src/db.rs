@@ -5,14 +5,14 @@ use std::{
 };
 
 use reth::revm::db::{
-    states::{PlainStorageChangeset, StateChangeset},
+    states::{PlainStorageChangeset, PlainStorageRevert},
     BundleState,
 };
 use reth_primitives::{
     revm_primitives::{AccountInfo, Bytecode},
     Address, Bytes, SealedBlockWithSenders, B256, U256,
 };
-use reth_provider::{OriginalValuesKnown, ProviderError};
+use reth_provider::{bundle_state::StorageRevertsIter, OriginalValuesKnown, ProviderError};
 use rusqlite::Connection;
 
 pub struct Database {
@@ -43,6 +43,13 @@ impl Database {
                 address TEXT UNIQUE,
                 data    TEXT
             );
+            CREATE TABLE IF NOT EXISTS account_revert (
+                id           INTEGER PRIMARY KEY,
+                block_number TEXT,
+                address      TEXT,
+                data         TEXT,
+                UNIQUE (block_number, address)
+            );
             CREATE TABLE IF NOT EXISTS bytecode (
                 id   INTEGER PRIMARY KEY,
                 hash TEXT UNIQUE,
@@ -54,6 +61,14 @@ impl Database {
                 key     TEXT,
                 data    TEXT,
                 UNIQUE (address, key)
+            );
+            CREATE TABLE IF NOT EXISTS storage_revert (
+                id           INTEGER PRIMARY KEY,
+                block_number TEXT,
+                address      TEXT,
+                key          TEXT,
+                data         TEXT,
+                UNIQUE (block_number, address, key)
             );",
         )?;
         Ok(())
@@ -74,10 +89,9 @@ impl Database {
             (block.header.number.to_string(), serde_json::to_string(block)?),
         )?;
 
-        let StateChangeset { accounts, storage, contracts } =
-            bundle.into_plain_state(OriginalValuesKnown::Yes);
+        let (changeset, reverts) = bundle.into_plain_state_and_reverts(OriginalValuesKnown::Yes);
 
-        for (address, account) in accounts {
+        for (address, account) in changeset.accounts {
             if let Some(account) = account {
                 tx.execute(
                     "INSERT INTO account (address, data) VALUES (?, ?) ON CONFLICT(address) DO UPDATE SET data = excluded.data",
@@ -88,7 +102,7 @@ impl Database {
             }
         }
 
-        for PlainStorageChangeset { address, wipe_storage, storage } in storage {
+        for PlainStorageChangeset { address, wipe_storage, storage } in changeset.storage {
             if wipe_storage {
                 tx.execute("DELETE FROM storage WHERE address = ?", (address.to_string(),))?;
             }
@@ -101,11 +115,36 @@ impl Database {
             }
         }
 
-        for (hash, bytecode) in contracts {
+        for (hash, bytecode) in changeset.contracts {
             tx.execute(
                 "INSERT INTO bytecode (hash, data) VALUES (?, ?) ON CONFLICT(hash) DO UPDATE SET data = excluded.data",
                 (hash.to_string(), bytecode.bytes().to_string()),
             )?;
+        }
+
+        for (address, account) in
+            reverts.accounts.first().ok_or(eyre::eyre!("no account reverts"))?
+        {
+            tx.execute(
+                "INSERT INTO account_revert (block_number, address, data) VALUES (?, ?, ?) ON CONFLICT(block_number, address) DO UPDATE SET data = excluded.data",
+                (block.header.number.to_string(), address.to_string(), serde_json::to_string(account)?),
+            )?;
+        }
+
+        for storage_reverts in reverts.storage {
+            for PlainStorageRevert { address, wiped, storage_revert } in storage_reverts {
+                let storage = storage_revert
+                    .into_iter()
+                    .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
+                    .collect::<Vec<_>>();
+                let wiped_storage = if wiped { get_storages(&tx, address)? } else { Vec::new() };
+                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
+                    tx.execute(
+                    "INSERT INTO storage_revert (block_number, address, key, data) VALUES (?, ?, ?, ?) ON CONFLICT(block_number, address, key) DO UPDATE SET data = excluded.data",
+                    (block.header.number.to_string(), address.to_string(), key.to_string(), value.to_string()),
+                )?;
+                }
+            }
         }
 
         tx.commit()?;
@@ -169,6 +208,28 @@ fn get_account<C: Deref<Target = Connection>>(
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Get all storages for the provided address using the database connection. Connection can be
+/// either [rusqlite::Transaction] or [rusqlite::Connection].
+fn get_storages<C: Deref<Target = Connection>>(
+    connection: &C,
+    address: Address,
+) -> eyre::Result<Vec<(B256, U256)>> {
+    connection
+        .prepare("SELECT key, data FROM storage WHERE address = ?")?
+        .query((address.to_string(),))?
+        .mapped(|row| {
+            Ok((
+                B256::from_str(row.get_ref(0)?.as_str()?),
+                U256::from_str(row.get_ref(1)?.as_str()?),
+            ))
+        })
+        .map(|result| {
+            let (key, data) = result?;
+            Ok((key?, data?))
+        })
+        .collect()
 }
 
 impl reth::revm::Database for Database {
