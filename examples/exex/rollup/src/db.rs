@@ -279,7 +279,9 @@ impl reth::revm::Database for Database {
         );
         match block_hash {
             Ok(data) => Ok(B256::from_str(&data).unwrap()),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(B256::default()),
+            // No special handling for `QueryReturnedNoRows` is needed, because revm does block
+            // number bound checks on its own.
+            // See https://github.com/bluealloy/revm/blob/1ca3d39f6a9e9778f8eb0fcb74fe529345a531b4/crates/interpreter/src/instructions/host.rs#L106-L123.
             Err(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
