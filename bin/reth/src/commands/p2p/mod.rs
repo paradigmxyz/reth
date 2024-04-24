@@ -41,7 +41,7 @@ pub struct Command {
 
     /// Configure data storage locations
     #[command(flatten)]
-    datadir_args: DatadirArgs,
+    datadir: DatadirArgs,
 
     /// Secret key to use for this node.
     ///
@@ -98,10 +98,7 @@ impl Command {
         let noop_db = Arc::new(create_db(tempdir.into_path(), self.db.database_args())?);
 
         // add network name to data dir
-        let data_dir = self
-            .datadir_args
-            .datadir
-            .unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();

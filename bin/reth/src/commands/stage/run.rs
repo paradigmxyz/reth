@@ -41,7 +41,7 @@ pub struct Command {
 
     /// Configure data storage locations
     #[command(flatten)]
-    datadir_args: DatadirArgs,
+    datadir: DatadirArgs,
 
     /// The chain this node is running.
     ///
@@ -120,10 +120,7 @@ impl Command {
         let _ = fdlimit::raise_fd_limit();
 
         // add network name to data dir
-        let data_dir = self
-            .datadir_args
-            .datadir
-            .unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();

@@ -35,7 +35,7 @@ mod tui;
 pub struct Command {
     /// Configure data storage locations
     #[command(flatten)]
-    datadir_args: DatadirArgs,
+    datadir: DatadirArgs,
 
     /// The chain this node is running.
     ///
@@ -101,10 +101,7 @@ impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self
-            .datadir_args
-            .datadir
-            .unwrap_or_chain_default(self.chain.chain, self.datadir_args.clone());
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let db_path = data_dir.db_path();
         let db_args = self.db.database_args();
         let static_files_path = data_dir.static_files_path();
@@ -202,6 +199,6 @@ mod tests {
     fn parse_stats_globals() {
         let path = format!("../{}", SUPPORTED_CHAINS[0]);
         let cmd = Command::try_parse_from(["reth", "stats", "--datadir", &path]).unwrap();
-        assert_eq!(cmd.datadir_args.datadir.as_ref(), Some(Path::new(&path)));
+        assert_eq!(cmd.datadir.resolve_datadir(cmd.chain.chain).as_ref(), Path::new(&path));
     }
 }

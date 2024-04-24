@@ -1,9 +1,9 @@
 //! clap [Args](clap::Args) for datadir config
 
+use crate::dirs::{ChainPath, DataDirPath, MaybePlatformPath};
 use clap::Args;
+use reth_primitives::Chain;
 use std::path::PathBuf;
-
-use crate::dirs::{DataDirPath, MaybePlatformPath};
 
 /// Parameters for datadir configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
@@ -17,11 +17,19 @@ pub struct DatadirArgs {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    pub datadir: MaybePlatformPath<DataDirPath>,
+    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The absolute path to store static files in.
-    #[arg(long = "datadir.static_files", help_heading = "Datadir", value_name = "PATH")]
-    pub static_files_path: Option<PathBuf>,
+    #[arg(long = "datadir.static_files", verbatim_doc_comment, value_name = "PATH")]
+    pub(crate) static_files_path: Option<PathBuf>,
+}
+
+impl DatadirArgs {
+    /// Resolves the final datadir path.
+    pub fn resolve_datadir(self, chain: Chain) -> ChainPath<DataDirPath> {
+        let datadir = self.datadir.clone();
+        datadir.unwrap_or_chain_default(chain, self)
+    }
 }
 
 #[cfg(test)]
