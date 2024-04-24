@@ -21,20 +21,27 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
-        EvmBuilder::default().with_db(db).build()
+    ///
+    /// This also allows providing an "external context" used in EVM handlers. If the EVM does not
+    /// need an external context, `()` should be provided.
+    fn evm<'a, DB: Database + 'a, EXT>(&self, db: DB, ext: EXT) -> Evm<'a, EXT, DB> {
+        EvmBuilder::default().with_db(db).with_external_context(ext).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
     ///
+    /// This also allows providing an "external context" used in EVM handlers. If the EVM does not
+    /// need an external context, `()` should be provided.
+    ///
     /// This will preserve any handler modifications
-    fn evm_with_env<'a, DB: Database + 'a>(
+    fn evm_with_env<'a, DB: Database + 'a, EXT>(
         &self,
         db: DB,
         env: EnvWithHandlerCfg,
-    ) -> Evm<'a, (), DB> {
-        let mut evm = self.evm(db);
+        ext: EXT,
+    ) -> Evm<'a, EXT, DB> {
+        let mut evm = self.evm(db, ext);
         evm.modify_spec_id(env.spec_id());
         evm.context.evm.env = env.env;
         evm

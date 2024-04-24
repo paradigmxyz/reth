@@ -356,7 +356,7 @@ where
                 );
                 self.executor.execute_pre_and_transactions(block, evm)?
             } else {
-                let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+                let evm = self.executor.evm_config.evm_with_env(&mut self.state, env, ());
 
                 self.executor.execute_pre_and_transactions(block, evm)?
             }

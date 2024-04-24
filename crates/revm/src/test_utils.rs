@@ -159,9 +159,13 @@ impl ConfigureEvmEnv for TestEvmConfig {
 
 impl ConfigureEvm for TestEvmConfig {
     #[cfg(feature = "optimism")]
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
+    fn evm<'a, DB: Database + 'a, EXT>(&self, db: DB, ext: EXT) -> Evm<'a, EXT, DB> {
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
-        EvmBuilder::default().with_db(db).with_handler_cfg(handler_cfg).build()
+        EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(ext)
+            .with_handler_cfg(handler_cfg)
+            .build()
     }
 
     #[cfg(feature = "optimism")]

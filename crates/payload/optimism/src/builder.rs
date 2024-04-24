@@ -337,7 +337,7 @@ where
             tx_env_with_recovered(&sequencer_tx),
         );
 
-        let mut evm = evm_config.evm_with_env(&mut db, env);
+        let mut evm = evm_config.evm_with_env(&mut db, env, ());
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -419,7 +419,7 @@ where
             );
 
             // Configure the environment for the block.
-            let mut evm = evm_config.evm_with_env(&mut db, env);
+            let mut evm = evm_config.evm_with_env(&mut db, env, ());
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
