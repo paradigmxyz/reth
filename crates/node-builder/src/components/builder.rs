@@ -4,7 +4,6 @@ use crate::{
     components::{Components, NetworkBuilder, NodeComponents, PayloadServiceBuilder, PoolBuilder},
     BuilderContext, FullNodeTypes,
 };
-use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
 
 /// A generic, customizable [`NodeComponentsBuilder`].

@@ -27,7 +27,7 @@ mod pool;
 ///  - payload builder.
 pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Send + Sync + 'static {
     /// The transaction pool of the node.
-    type Pool: TransactionPool;
+    type Pool: TransactionPool + Unpin;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
@@ -55,7 +55,7 @@ pub struct Components<Node: FullNodeTypes, Pool> {
 impl<Node, Pool> NodeComponents<Node> for Components<Node, Pool>
 where
     Node: FullNodeTypes,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Unpin + 'static,
 {
     type Pool = Pool;
 
