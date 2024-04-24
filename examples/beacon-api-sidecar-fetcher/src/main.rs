@@ -5,16 +5,18 @@
 
 use std::{
     collections::VecDeque,
+    net::{IpAddr, Ipv4Addr},
     pin::Pin,
     task::{Context, Poll},
 };
 
+use clap::Parser;
 use thiserror::Error;
 
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::{alloy_primitives::TxHash, BlobTransactionSidecar, BlockHash, BlockNumber},
+    primitives::BlobTransaction,
     providers::CanonStateNotification,
     rpc::types::engine::BlobsBundleV1,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
@@ -52,16 +54,6 @@ pub enum SideCarError {
     #[error("{0} Error: {1}")]
     UnknownError(u16, String),
 }
-
-#[derive(Debug, Clone)]
-pub struct MinedSidecar {
-    tx_hash: TxHash,
-    block_hash: BlockHash,
-    block_number: BlockNumber,
-    sidecar: BlobTransactionSidecar,
-}
-
-#[derive(Debug)]
 pub struct MinedSidecarStream<St, P>
 where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
@@ -70,9 +62,9 @@ where
     pool: P,
     client: reqwest::Client,
     pending_requests:
-        FuturesUnordered<Pin<Box<dyn Future<Output = Result<Vec<MinedSidecar>, SideCarError>>>>>, /* TODO make vec */
-    queued_actions: VecDeque<MinedSidecar>, /* Buffer for
-                                             * ready items */
+        FuturesUnordered<Pin<Box<dyn Future<Output = Result<Vec<BlobTransaction>, SideCarError>>>>>, /* TODO make vec */
+    queued_actions: VecDeque<BlobTransaction>, /* Buffer for
+                                                * ready items */
 }
 
 impl<St, P> Stream for MinedSidecarStream<St, P>
@@ -80,78 +72,70 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
-    type Item = Result<MinedSidecar, SideCarError>;
+    type Item = Result<BlobTransaction, SideCarError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this: &mut MinedSidecarStream<St, P> = self.get_mut();
-
-        // return any buffered result
         if let Some(mined_sidecar) = this.queued_actions.pop_front() {
             return Poll::Ready(Some(Ok(mined_sidecar)));
         }
 
-        // Check if any pending reqwests are ready and append to buffer
-        while let Poll::Ready(Some(pending_result)) = this.pending_requests.poll_next_unpin(cx) {
-            match pending_result {
-                Ok(mined_sidecars) => {
-                    for sidecar in mined_sidecars {
-                        this.queued_actions.push_back(sidecar);
-                    }
-
-                    // Try returning the next available sidecar if any
-                    if let Some(sidecar) = this.queued_actions.pop_front() {
-                        return Poll::Ready(Some(Ok(sidecar)));
-                    }
-                }
-                Err(err) => return Poll::Ready(Some(Err(err))),
-            }
-        }
-
+        // return any buffered result
         loop {
-            match this.events.poll_next_unpin(cx) {
-                Poll::Ready(Some(notification)) => {
+            // Check if any pending reqwests are ready and append to buffer
+            while let Poll::Ready(Some(pending_result)) = this.pending_requests.poll_next_unpin(cx)
+            {
+                match pending_result {
+                    Ok(mined_sidecars) => {
+                        for sidecar in mined_sidecars {
+                            this.queued_actions.push_back(sidecar);
+                        }
+                    }
+                    Err(err) => return Poll::Ready(Some(Err(err))),
+                }
+            }
+
+            // todo: Clea up all blobs avail logic
+            // todo: update error for transcations
+            // todo: CL connectivty logic
+            while let Poll::Ready(Some(notification)) = this.events.poll_next_unpin(cx) {
+                {
                     let notification_clone = notification.clone();
                     let mut all_blobs_available = true;
-                    let mut actions_to_queue: Vec<MinedSidecar> = Vec::new();
+                    let mut actions_to_queue: Vec<BlobTransaction> = Vec::new();
 
                     let txs: Vec<_> = notification
                         .tip()
                         .transactions()
                         .filter(|tx| tx.is_eip4844())
-                        .map(|tx| {
-                            // Clone minimal data necessary for later processing
-                            (tx.hash, tx.blob_versioned_hashes().unwrap().len())
-                        })
+                        .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
                         .collect();
 
-                    for (tx_hash, _) in &txs {
-                        match this.pool.get_blob(*tx_hash) {
-                            Ok(Some(blob)) => {
-                                actions_to_queue.push(MinedSidecar {
-                                    tx_hash: *tx_hash,
-                                    block_hash: notification.tip().block.hash(),
-                                    block_number: notification.tip().block.number,
-                                    sidecar: blob,
-                                });
-                            }
-                            Ok(None) => {
-                                all_blobs_available = false;
-                                break;
-                            }
-                            Err(err) => {
-                                return Poll::Ready(Some(Err(SideCarError::TransactionPoolError(
-                                    err,
-                                ))))
-                            }
+                    //returns
+                    let sidecars = match this
+                        .pool
+                        .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash).collect())
+                    {
+                        Ok(blobs) => blobs,
+                        Err(err) => {
+                            all_blobs_available = false;
+                            return Poll::Ready(Some(Err(SideCarError::TransactionPoolError(err))))
                         }
+                    };
+
+                    for ((tx, _), sidecar) in txs.iter().zip(sidecars.iter()) {
+                        match BlobTransaction::try_from_signed(tx.clone(), sidecar.clone()) {
+                            Ok(blob_transaction) => actions_to_queue.push(blob_transaction),
+                            Err((transaction, sidecar)) => {
+                                todo!()
+                            }
+                        };
                     }
 
                     if all_blobs_available {
                         this.queued_actions.extend(actions_to_queue);
                     } else {
                         let client_clone = this.client.clone();
-                        let block_hash = notification.tip().block.hash();
-                        let block_number = notification.tip().block.number;
 
                         let url = format!(
                             "http://{}/eth/v1/beacon/blob_sidecars/{}",
@@ -206,16 +190,16 @@ where
                                     }
                                 };
 
-                            let sidecars: Vec<MinedSidecar> = txs
+                            let sidecars: Vec<BlobTransaction> = txs
                                 .iter()
-                                .map(|(tx_hash, blob_len)| {
-                                    // Reuse txs without moving it
+                                .map(|(tx, blob_len)| {
                                     let sidecar = blobs_bundle.pop_sidecar(*blob_len);
-                                    MinedSidecar {
-                                        tx_hash: *tx_hash,
-                                        block_hash,
-                                        block_number,
-                                        sidecar: sidecar.into(),
+                                    match BlobTransaction::try_from_signed(
+                                        tx.clone(),
+                                        sidecar.into(),
+                                    ) {
+                                        Ok(blob_transaction) => blob_transaction,
+                                        Err((transaction, sidecar)) => todo!(),
                                     }
                                 })
                                 .collect();
@@ -227,8 +211,6 @@ where
                         this.pending_requests.push(query);
                     }
                 }
-                Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => continue,
             }
         }
     }
