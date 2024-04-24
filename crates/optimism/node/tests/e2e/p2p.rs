@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use crate::utils::{advance_chain, setup};
 use reth::primitives::BASE_MAINNET;
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet};
 use reth_primitives::ChainId;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[tokio::test]
@@ -42,7 +42,6 @@ async fn can_sync() -> eyre::Result<()> {
     assert!(side_chain[2] != canonical_chain[tip_index]);
     third_node.engine_api.update_optimistic_forkchoice(dbg!(side_chain[2])).await?;
     third_node.wait_block(side_payload_chain[2].0.block().number, side_chain[2], true).await?;
-
 
     Ok(())
 }
