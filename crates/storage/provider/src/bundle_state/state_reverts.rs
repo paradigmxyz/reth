@@ -32,7 +32,13 @@ impl StateReverts {
     }
 
     /// Write reverts to database. Writes all changes in append-only mode, if `true` passed as
-    /// corresponding parameter.
+    /// corresponding parameter. For inserting a sorted, complete set of keys
+    ///
+    /// Panics if `true` is passed to append-only parameter but keys already exist in respective
+    /// table.
+    ///
+    /// Will cause undefined behaviour if new entries aren't sorted w.r.t. existing entries in
+    /// table.
     ///
     /// Note:: Reverts will delete all wiped storage from plain state.
     pub fn write_to_db_with_mode<TX: DbTxMut + DbTx>(

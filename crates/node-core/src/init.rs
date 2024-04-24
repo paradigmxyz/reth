@@ -26,10 +26,19 @@ use std::{
 };
 use tracing::{debug, trace};
 
-/// Number of accounts from state dump file to insert into database at once.
+/// Default soft limit for number of bytes to read from state dump file, before inserting into
+/// database.
 ///
-/// Default is 10k accounts.
-pub const DEFAULT_LEN_ACCOUNTS_CHUNK: usize = 10_000;
+/// Default is 1 GB.
+pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
+
+/// Approximate number of accounts per 1 GB of state dump file. One account is approximately 3.5 KB
+///
+/// Approximate is 285 228 accounts.
+//
+// (14.05 GB OP mainnet state dump at Bedrock block / 4 007 565 accounts in file > 3.5 KB per
+// account)
+pub const AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP: usize = 285_228;
 
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
@@ -287,7 +296,8 @@ pub fn init_from_state_dump<DB: Database>(
     );
 
     let mut total_inserted_accounts = 0;
-    let mut accounts = Vec::with_capacity(DEFAULT_LEN_ACCOUNTS_CHUNK);
+    let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
+    let mut chunk_total_byte_len = 0;
     let mut line = String::new();
 
     // first line can be state root, then it can be used for verifying against computed state root
@@ -312,14 +322,21 @@ pub fn init_from_state_dump<DB: Database>(
 
     // remaining lines are accounts
     while let Ok(n) = reader.read_line(&mut line) {
-        if accounts.len() == DEFAULT_LEN_ACCOUNTS_CHUNK || n == 0 {
+        chunk_total_byte_len += n;
+        if DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK <= chunk_total_byte_len || n == 0 {
+            // acc
             total_inserted_accounts += accounts.len();
+
             debug!(target: "reth::cli",
-                block,
+                chunk_total_byte_len,
                 parsed_new_accounts=accounts.len(),
                 total_inserted_accounts,
                 "Writing accounts to db"
             );
+
+            // reset
+            chunk_total_byte_len = 0;
+
             // use transaction to insert genesis header
             let provider_rw = factory.provider_rw()?;
             insert_genesis_hashes(
