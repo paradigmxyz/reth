@@ -122,9 +122,19 @@ impl StateFetcher {
     /// prioritizing those with the lowest timeout/latency.
     /// Once a peer has been yielded, it will be moved to the end of the map
     fn next_peer(&mut self) -> Option<PeerId> {
+        self.next_peer_with_predicate(|_, _| true)
+    }
+
+    /// Returns the _next_ idle peer that's ready to accept a request,
+    /// prioritizing those with the lowest timeout/latency, alongside a passed predicate.
+    /// Once a peer has been yielded, it will be moved to the end of the map
+    fn next_peer_with_predicate<P>(&mut self, predicate: P) -> Option<PeerId>
+    where
+        P: Fn(&&PeerId, &&Peer) -> bool,
+    {
         self.peers
             .iter()
-            .filter(|(_, peer)| peer.state.is_idle())
+            .filter(|(id, peer)| peer.state.is_idle() && predicate(id, peer))
             .min_by_key(|(_, peer)| peer.timeout())
             .map(|(id, _)| *id)
     }
@@ -236,24 +246,42 @@ impl StateFetcher {
         let is_error = res.is_err();
         let maybe_reputation_change = res.reputation_change_err();
 
-        let resp = self.inflight_headers_requests.remove(&peer_id);
+        let request = self.inflight_headers_requests.remove(&peer_id);
 
-        let is_likely_bad_response = resp
+        let is_likely_bad_response = request
             .as_ref()
             .map(|r| res.is_likely_bad_headers_response(&r.request))
             .unwrap_or_default();
 
-        if let Some(resp) = resp {
-            // delegate the response
-            let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
-        }
-
+        let mut send_follow_up = !is_error && !is_likely_bad_response;
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // If the peer is still ready to accept new requests, we try to send a followup
             // request immediately.
-            if peer.state.on_request_finished() && !is_error && !is_likely_bad_response {
-                return self.followup_request(peer_id)
+            send_follow_up &= peer.state.on_request_finished();
+        }
+
+        if let Some(request) = request {
+            if res.as_ref().is_ok_and(|res| res.is_empty()) {
+                // This peer does not have the information we requested, make sure we try another
+                // peer if possible
+                if let Some(new_peer_id) = self.next_peer_with_predicate(|id, _| id != &&peer_id) {
+                    let request = self.prepare_block_request(
+                        new_peer_id,
+                        DownloadRequest::GetBlockHeaders {
+                            request: request.request,
+                            response: request.response,
+                            priority: Priority::Normal,
+                        },
+                    );
+                    return Some(BlockResponseOutcome::Request(new_peer_id, request))
+                }
             }
+            // delegate the response
+            let _ = request.response.send(res.map(|h| (peer_id, h).into()));
+        }
+
+        if send_follow_up {
+            return self.followup_request(peer_id)
         }
 
         // if the response was an `Err` worth reporting the peer for then we return a `BadResponse`
@@ -268,13 +296,32 @@ impl StateFetcher {
         peer_id: PeerId,
         res: RequestResult<Vec<BlockBody>>,
     ) -> Option<BlockResponseOutcome> {
-        if let Some(resp) = self.inflight_bodies_requests.remove(&peer_id) {
-            let _ = resp.response.send(res.map(|b| (peer_id, b).into()));
-        }
+        let mut send_follow_up = res.is_ok();
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            if peer.state.on_request_finished() {
-                return self.followup_request(peer_id)
+            send_follow_up &= peer.state.on_request_finished();
+        }
+
+        if let Some(request) = self.inflight_bodies_requests.remove(&peer_id) {
+            if res.as_ref().is_ok_and(|res| res.is_empty()) {
+                // This peer does not have the information we requested, make sure we try another
+                // peer if possible
+                if let Some(new_peer_id) = self.next_peer_with_predicate(|id, _| id != &&peer_id) {
+                    let request = self.prepare_block_request(
+                        new_peer_id,
+                        DownloadRequest::GetBlockBodies {
+                            request: request.request,
+                            response: request.response,
+                            priority: Priority::Normal,
+                        },
+                    );
+                    return Some(BlockResponseOutcome::Request(new_peer_id, request))
+                }
             }
+            let _ = request.response.send(res.map(|b| (peer_id, b).into()));
+        }
+
+        if send_follow_up {
+            return self.followup_request(peer_id)
         }
         None
     }
