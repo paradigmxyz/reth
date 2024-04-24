@@ -399,7 +399,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             unique_senders = self.highest_nonces.len();
             non_local_senders -= unique_removed;
 
-            // we can re-use the temp array
+            // we can reuse the temp array
             removed.clear();
 
             // loop through the highest nonces set, removing transactions until we reach the limit

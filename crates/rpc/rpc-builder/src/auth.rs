@@ -161,7 +161,7 @@ pub struct AuthServerConfig {
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder<Identity, Identity>,
     /// Configs for IPC server
-    pub(crate) ipc_server_config: Option<IpcServerBuilder>,
+    pub(crate) ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// IPC endpoint
     pub(crate) ipc_endpoint: Option<String>,
 }
@@ -223,7 +223,7 @@ pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerBuilder<Identity, Identity>>,
-    ipc_server_config: Option<IpcServerBuilder>,
+    ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     ipc_endpoint: Option<String>,
 }
 
@@ -289,7 +289,7 @@ impl AuthServerConfigBuilder {
     /// Configures the IPC server
     ///
     /// Note: this always configures an [EthSubscriptionIdProvider]
-    pub fn with_ipc_config(mut self, config: IpcServerBuilder) -> Self {
+    pub fn with_ipc_config(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }

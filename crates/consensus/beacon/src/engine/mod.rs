@@ -14,7 +14,6 @@ use reth_interfaces::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
     executor::BlockValidationError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     provider::ProviderResult,
@@ -31,7 +30,8 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;

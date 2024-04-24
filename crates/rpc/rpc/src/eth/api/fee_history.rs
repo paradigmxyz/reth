@@ -374,7 +374,7 @@ impl FeeHistoryEntry {
             self.gas_used as u128,
             self.gas_limit as u128,
             self.base_fee_per_gas as u128,
-            chain_spec.base_fee_params(self.timestamp),
+            chain_spec.base_fee_params_at_timestamp(self.timestamp),
         ) as u64
     }
 

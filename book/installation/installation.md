@@ -8,6 +8,11 @@ There are three core methods to obtain Reth:
 * [Docker images](./docker.md)
 * [Building from source.](./source.md)
 
+> **Note**
+> 
+> If you have Docker installed, we recommend using the [Docker Compose](./docker.md#using-docker-compose) configuration
+> that will get you Reth, Lighthouse (Consensus Client), Prometheus and Grafana running and syncing with just one command.
+
 ## Hardware Requirements
 
 The hardware requirements for running Reth depend on the node configuration and can change over time as the network grows or new features are implemented.

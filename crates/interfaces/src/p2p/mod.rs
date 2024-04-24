@@ -14,7 +14,7 @@ pub mod full_block;
 /// of a Linear and a Parallel downloader generic over the [`Consensus`] and
 /// [`HeadersClient`].
 ///
-/// [`Consensus`]: crate::consensus::Consensus
+/// [`Consensus`]: reth_consensus::Consensus
 /// [`HeadersClient`]: crate::p2p::headers::client::HeadersClient
 pub mod headers;
 

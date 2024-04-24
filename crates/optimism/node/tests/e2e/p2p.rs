@@ -1,6 +1,7 @@
-use crate::utils::{advance_chain, node, setup};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use crate::utils::{advance_chain, setup};
+use reth::primitives::BASE_MAINNET;
+use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet};
+use reth_primitives::ChainId;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
