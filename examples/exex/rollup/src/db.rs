@@ -20,6 +20,7 @@ pub struct Database {
 }
 
 impl Database {
+    /// Create new database with the provided connection.
     pub fn new(connection: Connection) -> eyre::Result<Self> {
         let database = Self { connection: Arc::new(Mutex::new(connection)) };
         database.create_tables()?;
@@ -58,6 +59,8 @@ impl Database {
         Ok(())
     }
 
+    /// Insert block with bundle into the database.
+    /// Populates the block, account, storage, and bytecode tables.
     pub fn insert_block_with_bundle(
         &mut self,
         block: &SealedBlockWithSenders,
@@ -110,6 +113,7 @@ impl Database {
         Ok(())
     }
 
+    /// Get block by number.
     pub fn get_block(&mut self, number: U256) -> eyre::Result<Option<SealedBlockWithSenders>> {
         let block = self.connection().query_row::<String, _, _>(
             "SELECT data FROM block WHERE number = ?",
@@ -123,6 +127,8 @@ impl Database {
         }
     }
 
+    /// Insert new account if it does not exist, update otherwise. The provided closure is called
+    /// with the current account, if it exists.
     pub fn upsert_account(
         &mut self,
         address: Address,
@@ -142,11 +148,14 @@ impl Database {
         Ok(())
     }
 
+    /// Get account by address.
     pub fn get_account(&mut self, address: Address) -> eyre::Result<Option<AccountInfo>> {
         get_account(&self.connection(), address)
     }
 }
 
+/// Get account by address using the database connection. Connection can be either
+/// [rusqlite::Transaction] or [rusqlite::Connection].
 fn get_account<C: Deref<Target = Connection>>(
     connection: &C,
     address: Address,
@@ -166,16 +175,7 @@ impl reth::revm::Database for Database {
     type Error = ProviderError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let account_info = self.connection().query_row::<String, _, _>(
-            "SELECT data FROM account WHERE address = ?",
-            (address.to_string(),),
-            |row| row.get(0),
-        );
-        match account_info {
-            Ok(data) => Ok(Some(serde_json::from_str(&data).unwrap())),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(_) => Err(ProviderError::UnsupportedProvider),
-        }
+        self.get_account(address).map_err(|_| ProviderError::UnsupportedProvider)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
