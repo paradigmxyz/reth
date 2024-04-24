@@ -404,8 +404,6 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
 
     let tx = provider.tx_ref();
     let (root, updates) = StateRootComputer::from_tx(tx)
-        .with_intermediate_state(None)
-        .with_no_threshold()
         .root_with_updates()?;
     updates.flush(tx)?;
 
