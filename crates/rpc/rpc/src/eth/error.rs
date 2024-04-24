@@ -115,7 +115,7 @@ pub enum EthApiError {
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
     /// Any other error
-    #[error("0")]
+    #[error("{0}")]
     Other(Box<dyn ToRpcError>),
 }
 
