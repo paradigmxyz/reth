@@ -259,6 +259,13 @@ pub enum ConsensusError {
     HeaderValidationError(#[from] HeaderValidationError),
 }
 
+impl ConsensusError {
+    /// Returns `true` if the error is a state root error.
+    pub fn is_state_root_error(&self) -> bool {
+        matches!(self, ConsensusError::BodyStateRootDiff(_))
+    }
+}
+
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
 #[derive(thiserror::Error, Debug)]
 #[error("Consensus error: {0}, Invalid header: {1:?}")]
