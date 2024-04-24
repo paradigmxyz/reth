@@ -334,7 +334,12 @@ impl BundleStateWithReceipts {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
-        for (idx, receipts) in self.receipts.into_iter().enumerate() {
+        // ATTENTION: Any potential future refactor or change to how this loop works should keep in
+        // mind that the static file producer must always call `increment_block` even if the block
+        // has no receipts. Keeping track of the exact block range of the segment is needed for
+        // consistency, querying and file range segmentation.
+        let blocks = self.receipts.into_iter().enumerate();
+        for (idx, receipts) in blocks {
             let block_number = self.first_block + idx as u64;
             let first_tx_index = bodies_cursor
                 .seek_exact(block_number)?
