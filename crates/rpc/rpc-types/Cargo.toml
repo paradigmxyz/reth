@@ -33,7 +33,7 @@ jsonrpsee-types = { workspace = true, optional = true }
 url = "2.3"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
-# secp256k1.workspace = true
+secp256k1.workspace = true
 
 # arbitrary
 arbitrary = { workspace = true, features = ["derive"], optional = true }
