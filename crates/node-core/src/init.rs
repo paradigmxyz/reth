@@ -410,12 +410,12 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                trace!(target: "reth::cli", "Flushing trie updates");
+                trace!(target: "reth::cli", last_account_key = %state.last_account_key, updates_len = updates.len(), "Flushing trie updates");
                 intermediate_state = Some(*state);
                 updates.flush(tx)?;
             }
             StateRootProgress::Complete(root, _, updates) => {
-                trace!(target: "reth::cli", "State root has been computed");
+                trace!(target: "reth::cli", updates_len = updates.len(), "State root has been computed");
                 updates.flush(tx)?;
                 break root
             }
