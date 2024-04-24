@@ -5,6 +5,7 @@ use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError
 use reth_engine_primitives::EngineObjectValidationError;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{B256, U256};
+use reth_rpc_types::ToRpcError;
 use thiserror::Error;
 
 /// The Engine API result type
@@ -88,9 +89,18 @@ pub enum EngineApiError {
     EngineObjectValidationError(#[from] EngineObjectValidationError),
     /// If the optimism feature flag is enabled, the payload attributes must have a present
     /// gas limit for the forkchoice updated method.
-    #[cfg(feature = "optimism")]
-    #[error("Missing gas limit in payload attributes")]
-    MissingGasLimitInPayloadAttributes,
+    // #[cfg(feature = "optimism")]
+    // #[error("Missing gas limit in payload attributes")]
+    // MissingGasLimitInPayloadAttributes,
+    #[error("0")]
+    Other(Box<dyn ToRpcError>),
+}
+
+impl EngineApiError {
+    /// crates a new [EngineApiError::Other] variant.
+    pub fn other<E: ToRpcError>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
 }
 
 /// Helper type to represent the `error` field in the error response:
@@ -188,15 +198,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     )
                 }
             },
-            // Optimism errors
-            #[cfg(feature = "optimism")]
-            EngineApiError::MissingGasLimitInPayloadAttributes => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    INVALID_PARAMS_CODE,
-                    INVALID_PARAMS_MSG,
-                    Some(ErrorData::new(error)),
-                )
-            }
             // Any other server error
             EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
@@ -206,6 +207,14 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
+            EngineApiError::Other(err) => {
+                err.to_rpc_error()
+                // jsonrpsee_types::error::ErrorObject::owned(
+                //     INVALID_PARAMS_CODE,
+                //     INVALID_PARAMS_MSG,
+                //     Some(ErrorData::new(error)),
+                // )
+            }
         }
     }
 }
