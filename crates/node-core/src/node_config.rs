@@ -270,7 +270,7 @@ impl NodeConfig {
     /// necessary
     pub async fn max_block<Provider, Client>(
         &self,
-        network_client: &Client,
+        network_client: Client,
         provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
