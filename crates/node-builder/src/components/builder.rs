@@ -4,6 +4,7 @@ use crate::{
     components::{Components, NetworkBuilder, NodeComponents, PayloadServiceBuilder, PoolBuilder},
     BuilderContext, FullNodeTypes,
 };
+use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
 
 /// A generic, customizable [`NodeComponentsBuilder`].
@@ -181,19 +182,19 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
 
-// impl<Node, F, Fut, Pool> NodeComponentsBuilder<Node> for F
-// where
-//     Node: FullNodeTypes,
-//     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-//     Fut: Future<Output = eyre::Result<Self::Components>> + Send,
-//     Pool: TransactionPool + Unpin + 'static,
-// {
-//     type Components = Components<Node, Pool>;
-//
-//     fn build_components(
-//         self,
-//         ctx: &BuilderContext<Node>,
-//     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send {
-//         self(ctx)
-//     }
-// }
+impl<Node, F, Fut, Pool> NodeComponentsBuilder<Node> for F
+where
+    Node: FullNodeTypes,
+    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, Pool>>> + Send,
+    Pool: TransactionPool + Unpin + 'static,
+{
+    type Components = Components<Node, Pool>;
+
+    fn build_components(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> impl Future<Output = eyre::Result<Self::Components>> + Send {
+        self(ctx)
+    }
+}
