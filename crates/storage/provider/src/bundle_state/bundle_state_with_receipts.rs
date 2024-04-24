@@ -294,9 +294,8 @@ impl BundleStateWithReceipts {
     }
 
     /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
-    /// files, when BundleStateWithReceipts] contains all values that will ever be written to the
-    /// given keys. See
-    /// [`write_to_storage_with_mode`](Self::write_to_storage_with_mode).
+    /// files, when [BundleStateWithReceipts] contains all values that will be written to the given
+    /// keys. See [`write_to_storage_with_mode`](Self::write_to_storage_with_mode).
     pub fn write_to_storage<TX>(
         self,
         tx: &TX,
@@ -317,8 +316,8 @@ impl BundleStateWithReceipts {
     /// would make some original values not known.
     ///
     /// Performance gains are made if can be guaranteed that [BundleStateWithReceipts] contains all
-    /// data that will ever be written to the respective keys. For chunked writes to same keys,
-    /// pass false to 'exhaustive_data_for_keys' parameter.
+    /// data that will be written to the respective keys. For chunked writes to same keys, pass
+    /// `false` to 'exhaustive_data_for_keys' parameter.
     pub fn write_to_storage_with_mode<TX>(
         self,
         tx: &TX,
