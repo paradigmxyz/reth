@@ -18,7 +18,7 @@ use reth_provider::{
     DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
     ProviderFactory,
 };
-use reth_trie::StateRoot as StateRootComputer;
+use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -403,8 +403,24 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
     trace!(target: "reth::cli", "Computing state root");
 
     let tx = provider.tx_ref();
-    let (root, updates) = StateRootComputer::from_tx(tx).root_with_updates()?;
-    updates.flush(tx)?;
+    let mut intermediate_state: Option<IntermediateStateRootState> = None;
+    let root = loop {
+        match StateRootComputer::from_tx(tx)
+            .with_intermediate_state(intermediate_state)
+            .root_with_progress()?
+        {
+            StateRootProgress::Progress(state, _, updates) => {
+                trace!(target: "reth::cli", "Flushing trie updates");
+                intermediate_state = Some(*state);
+                updates.flush(tx)?;
+            }
+            StateRootProgress::Complete(root, _, updates) => {
+                trace!(target: "reth::cli", "State root has been computed");
+                updates.flush(tx)?;
+                break root
+            }
+        }
+    };
 
     Ok(StateRoot { root })
 }
