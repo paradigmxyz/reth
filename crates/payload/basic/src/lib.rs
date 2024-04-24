@@ -410,7 +410,6 @@ where
                         BuildOutcome::Better { payload, cached_reads } => {
                             this.cached_reads = Some(cached_reads);
                             debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
-                            let payload = payload;
                             this.best_payload = Some(payload);
                         }
                         BuildOutcome::Aborted { fees, cached_reads } => {

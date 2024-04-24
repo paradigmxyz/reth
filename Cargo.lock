@@ -155,6 +155,7 @@ dependencies = [
  "c-kzg",
  "serde",
  "sha2 0.10.8",
+ "thiserror",
 ]
 
 [[package]]
@@ -185,6 +186,7 @@ dependencies = [
  "alloy-serde",
  "arbitrary",
  "c-kzg",
+ "derive_more",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "once_cell",
@@ -6643,6 +6645,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-evm-optimism"
+version = "0.2.0-beta.6"
+dependencies = [
+ "reth-evm",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "revm-primitives",
+ "tracing",
+]
+
+[[package]]
 name = "reth-exex"
 version = "0.2.0-beta.6"
 dependencies = [
@@ -7049,6 +7064,7 @@ dependencies = [
  "reth-db",
  "reth-e2e-test-utils",
  "reth-evm",
+ "reth-evm-optimism",
  "reth-interfaces",
  "reth-network",
  "reth-node-api",

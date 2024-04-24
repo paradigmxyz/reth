@@ -33,5 +33,5 @@ alloy-signer.workspace = true
 alloy-signer-wallet = { workspace = true, features = ["mnemonic"] }
 alloy-rpc-types.workspace = true
 alloy-network.workspace = true
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["kzg"] }
 tracing.workspace = true
