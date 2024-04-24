@@ -21,22 +21,20 @@ use reth_primitives::{
     Genesis, Hardfork, Header, Receipt, SealedBlockWithSenders, TransactionSigned, U256,
 };
 use reth_provider::{BlockExecutor, Chain, ProviderError};
-use reth_tracing::tracing::info;
+use reth_tracing::tracing::{error, info};
 use rusqlite::Connection;
 
 sol!(RollupContract, "rollup_abi.json");
 use RollupContract::{RollupContractCalls, RollupContractEvents};
 
 const ROLLUP_CONTRACT_ADDRESS: Address = address!("74ae65DF20cB0e3BF8c022051d0Cdd79cc60890C");
+const ROLLUP_SUBMITTER_ADDRESS: Address = address!("B01042Db06b04d3677564222010DF5Bd09C5A947");
 const CHAIN_ID: u64 = 17001;
 static CHAIN_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     Arc::new(
         ChainSpecBuilder::default()
             .chain(CHAIN_ID.into())
-            .genesis(Genesis::clique_genesis(
-                CHAIN_ID,
-                address!("B01042Db06b04d3677564222010DF5Bd09C5A947"),
-            ))
+            .genesis(Genesis::clique_genesis(CHAIN_ID, ROLLUP_SUBMITTER_ADDRESS))
             .london_activated()
             .build(),
     )
@@ -82,11 +80,25 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         ..
                     }) = call
                     {
-                        let (block, bundle, _) = execute_block(&mut self.db, header, blockData)?;
-                        let block = block.seal_slow();
-                        self.db.insert_block_with_bundle(&block, bundle)?;
-
-                        info!(transactions = block.body.len(), "Block submission");
+                        match execute_block(&mut self.db, &header, blockData) {
+                            Ok((block, bundle, _)) => {
+                                let block = block.seal_slow();
+                                self.db.insert_block_with_bundle(&block, bundle)?;
+                                info!(
+                                    transactions = block.body.len(),
+                                    "Block submitted, executed and inserted into database"
+                                );
+                            }
+                            Err(err) => {
+                                error!(
+                                    %err,
+                                    tx_hash = %tx.hash,
+                                    chain_id = %header.rollupChainId,
+                                    sequence = %header.sequence,
+                                    "Failed to execute block"
+                                );
+                            }
+                        }
                     }
                 }
                 RollupContractEvents::Enter(RollupContract::Enter {
@@ -95,7 +107,8 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     amount,
                 }) => {
                     if token != Address::ZERO {
-                        eyre::bail!("Only ETH deposits are supported")
+                        error!(tx_hash = %tx.hash, "Only ETH deposits are supported");
+                        continue
                     }
 
                     self.db.upsert_account(rollupRecipient, |account| {
@@ -116,7 +129,8 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     amount,
                 }) => {
                     if token != Address::ZERO {
-                        eyre::bail!("Only ETH withdrawals are supported")
+                        error!(tx_hash = %tx.hash, "Only ETH withdrawals are supported");
+                        continue
                     }
 
                     self.db.upsert_account(hostRecipient, |account| {
@@ -177,7 +191,7 @@ fn decode_chain_into_rollup_events(
 /// state)[BundleState] and list of (receipts)[Receipt].
 fn execute_block(
     db: &mut Database,
-    header: RollupContract::BlockHeader,
+    header: &RollupContract::BlockHeader,
     block_data: Bytes,
 ) -> eyre::Result<(BlockWithSenders, BundleState, Vec<Receipt>)> {
     if header.rollupChainId != U256::from(CHAIN_ID) {
@@ -254,7 +268,10 @@ mod tests {
     use rusqlite::Connection;
     use secp256k1::{KeyPair, Secp256k1};
 
-    use crate::{db::Database, execute_block, RollupContract::BlockHeader, CHAIN_ID};
+    use crate::{
+        db::Database, execute_block, RollupContract::BlockHeader, CHAIN_ID,
+        ROLLUP_SUBMITTER_ADDRESS,
+    };
 
     #[test]
     fn test_execute_block() -> eyre::Result<()> {
@@ -296,12 +313,12 @@ mod tests {
             sequence: U256::ZERO,
             confirmBy: U256::from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs()),
             gasLimit: U256::from(30_000_000),
-            rewardAddress: address!("B01042Db06b04d3677564222010DF5Bd09C5A947"),
+            rewardAddress: ROLLUP_SUBMITTER_ADDRESS,
         };
         let block_data = alloy_rlp::encode(vec![signed_tx.envelope_encoded()]);
 
         // Execute block and insert into database
-        let (block, bundle, _) = execute_block(&mut database, block_header, block_data.into())?;
+        let (block, bundle, _) = execute_block(&mut database, &block_header, block_data.into())?;
         let block = block.seal_slow();
         database.insert_block_with_bundle(&block, bundle)?;
 
