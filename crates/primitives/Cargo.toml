@@ -30,7 +30,11 @@ alloy-eips.workspace = true
 enr = { workspace = true, features = ["rust-secp256k1"] }
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "recovery", "rand"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "recovery",
+    "rand",
+] }
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
@@ -89,8 +93,12 @@ anyhow = "1.0.75"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 criterion.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
-secp256k1.workspace = true
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
+# secp256k1.workspace = true
 
 [features]
 default = ["c-kzg", "zstd-codec"]
@@ -106,12 +114,16 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
-    "zstd-codec"
+    "zstd-codec",
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
-zstd-codec = [
-    "dep:zstd"
+c-kzg = [
+    "dep:c-kzg",
+    "revm/c-kzg",
+    "revm-primitives/c-kzg",
+    "dep:sha2",
+    "dep:tempfile",
 ]
+zstd-codec = ["dep:zstd"]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
