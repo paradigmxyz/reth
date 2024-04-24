@@ -188,7 +188,7 @@ where
             // The unwrap is safe since we checked earlier that we got at least 1 header.
             let last_header = headers.last().expect("is present");
             base_fee_per_gas.push(
-                self.provider().chain_spec().base_fee_params(last_header.timestamp).next_block_base_fee(
+                self.provider().chain_spec().base_fee_params_at_timestamp(last_header.timestamp).next_block_base_fee(
                     last_header.gas_used as u128,
                     last_header.gas_limit as u128,
                     last_header.base_fee_per_gas.unwrap_or_default() as u128,

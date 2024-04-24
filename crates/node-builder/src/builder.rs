@@ -13,14 +13,16 @@ use crate::{
 use eyre::Context;
 use futures::{future, future::Either, stream, stream_select, Future, StreamExt};
 use rayon::ThreadPoolBuilder;
+use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine,
+    BeaconConsensus, BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -61,11 +63,9 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 /// The builtin provider type of the reth node.
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-type RethFullProviderType<DB, Evm> =
-    BlockchainProvider<DB, ShareableBlockchainTree<DB, EvmProcessorFactory<Evm>>>;
+type RethFullProviderType<DB> = BlockchainProvider<DB>;
 
-type RethFullAdapter<DB, N> =
-    FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>;
+type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
@@ -276,7 +276,7 @@ where
         >,
     >
     where
-        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>>,
         N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
         N::NetworkBuilder: crate::components::NetworkBuilder<
             RethFullAdapter<DB, N>,
@@ -306,15 +306,14 @@ where
             Types,
             Components,
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Components::Pool,
             >,
         >,
     >
     where
-        Components: NodeComponentsBuilder<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-        >,
+        Components:
+            NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
     {
         NodeBuilder {
             config: self.config,
@@ -337,7 +336,7 @@ impl<DB, Types, Components>
             Types,
             Components,
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Components::Pool,
             >,
         >,
@@ -345,9 +344,7 @@ impl<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     Types: NodeTypes,
-    Components: NodeComponentsBuilder<
-        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-    >,
+    Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
 {
     /// Apply a function to the components builder.
     pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
@@ -369,7 +366,7 @@ where
     where
         F: Fn(
                 FullNodeComponentsAdapter<
-                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                     Components::Pool,
                 >,
             ) -> eyre::Result<()>
@@ -386,7 +383,7 @@ where
         F: Fn(
                 FullNode<
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -405,7 +402,7 @@ where
                 RpcContext<
                     '_,
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -425,7 +422,7 @@ where
                 RpcContext<
                     '_,
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -447,7 +444,7 @@ where
         F: Fn(
                 ExExContext<
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -474,7 +471,7 @@ where
     ) -> eyre::Result<
         NodeHandle<
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Components::Pool,
             >,
         >,
@@ -524,7 +521,12 @@ where
 
         info!(target: "reth::cli", "\n{}", config.chain.display_hardforks());
 
-        let consensus = config.consensus();
+        // setup the consensus instance
+        let consensus: Arc<dyn Consensus> = if config.dev.dev {
+            Arc::new(AutoSealConsensus::new(Arc::clone(&config.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&config.chain)))
+        };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
@@ -549,7 +551,7 @@ where
         .with_sync_metrics_tx(sync_metrics_tx.clone());
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
         debug!(target: "reth::cli", "configured blockchain tree");
 
         // fetch the head block from the database
@@ -655,7 +657,7 @@ where
             executor.spawn_critical("exex manager blockchain tree notifications", async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {
                     handle
-                        .send_async(notification)
+                        .send_async(notification.into())
                         .await
                         .expect("blockchain tree notification could not be sent to exex manager");
                 }
@@ -721,7 +723,17 @@ where
                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
 
-            let mining_mode = config.mining_mode(transaction_pool.pending_transactions_listener());
+            // install auto-seal
+            let pending_transactions_listener = transaction_pool.pending_transactions_listener();
+
+            let mining_mode = if let Some(interval) = config.dev.block_time {
+                MiningMode::interval(interval)
+            } else if let Some(max_transactions) = config.dev.block_max_transactions {
+                MiningMode::instant(max_transactions, pending_transactions_listener)
+            } else {
+                info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
+                MiningMode::instant(1, pending_transactions_listener)
+            };
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
                 Arc::clone(&config.chain),
@@ -978,7 +990,7 @@ where
         >,
     >
     where
-        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>>,
         N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
         N::NetworkBuilder: crate::components::NetworkBuilder<
             RethFullAdapter<DB, N>,
@@ -1015,7 +1027,7 @@ where
         >,
     >
     where
-        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB, <N as NodeTypes>::Evm>>>,
+        N: Node<FullNodeTypesAdapter<N, DB, RethFullProviderType<DB>>>,
         N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
         N::NetworkBuilder: crate::components::NetworkBuilder<
             RethFullAdapter<DB, N>,
@@ -1048,15 +1060,14 @@ where
             Types,
             Components,
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Components::Pool,
             >,
         >,
     >
     where
-        Components: NodeComponentsBuilder<
-            FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-        >,
+        Components:
+            NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
@@ -1073,7 +1084,7 @@ impl<DB, Types, Components>
             Types,
             Components,
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Components::Pool,
             >,
         >,
@@ -1081,9 +1092,7 @@ impl<DB, Types, Components>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     Types: NodeTypes,
-    Components: NodeComponentsBuilder<
-        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
-    >,
+    Components: NodeComponentsBuilder<FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>>,
 {
     /// Apply a function to the components builder.
     pub fn map_components(self, f: impl FnOnce(Components) -> Components) -> Self {
@@ -1099,7 +1108,7 @@ where
     where
         F: Fn(
                 FullNodeComponentsAdapter<
-                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                    FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                     Components::Pool,
                 >,
             ) -> eyre::Result<()>
@@ -1116,7 +1125,7 @@ where
         F: Fn(
                 FullNode<
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -1135,7 +1144,7 @@ where
                 RpcContext<
                     '_,
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -1155,7 +1164,7 @@ where
                 RpcContext<
                     '_,
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -1173,7 +1182,7 @@ where
         F: Fn(
                 ExExContext<
                     FullNodeComponentsAdapter<
-                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                        FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                         Components::Pool,
                     >,
                 >,
@@ -1193,7 +1202,7 @@ where
     ) -> eyre::Result<
         NodeHandle<
             FullNodeComponentsAdapter<
-                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+                FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
                 Components::Pool,
             >,
         >,
@@ -1374,13 +1383,12 @@ impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
 pub struct InitState;
 
 /// The state after all types of the node have been configured.
-#[derive(Debug)]
 pub struct TypesState<Types, DB>
 where
     DB: Database + Clone + 'static,
     Types: NodeTypes,
 {
-    adapter: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB, Types::Evm>>,
+    adapter: FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>,
 }
 
 /// The state of the node builder process after the node's components have been configured.

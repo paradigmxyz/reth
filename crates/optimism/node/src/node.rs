@@ -3,9 +3,10 @@
 use crate::{
     args::RollupArgs,
     txpool::{OpTransactionPool, OpTransactionValidator},
-    OptimismEngineTypes, OptimismEvmConfig,
+    OptimismEngineTypes,
 };
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_evm_optimism::OptimismEvmConfig;
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
