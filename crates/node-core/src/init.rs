@@ -7,7 +7,7 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
+    stage::{StageCheckpoint, StageId},
     Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
     StorageEntry, B256, U256,
 };
@@ -16,9 +16,9 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
     DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, StatsReader,
+    ProviderFactory,
 };
-use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use reth_trie::StateRoot as StateRootComputer;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -403,8 +403,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
     trace!(target: "reth::cli", "Computing state root");
 
     let tx = provider.tx_ref();
-    let (root, updates) = StateRootComputer::from_tx(tx)
-        .root_with_updates()?;
+    let (root, updates) = StateRootComputer::from_tx(tx).root_with_updates()?;
     updates.flush(tx)?;
 
     Ok(StateRoot { root })
