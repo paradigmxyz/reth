@@ -294,7 +294,8 @@ impl BundleStateWithReceipts {
     }
 
     /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
-    /// files, in append-only mode. See
+    /// files, when BundleStateWithReceipts] contains all values that will ever be written to the
+    /// given keys. See
     /// [`write_to_storage_with_mode`](Self::write_to_storage_with_mode).
     pub fn write_to_storage<TX>(
         self,
@@ -315,20 +316,26 @@ impl BundleStateWithReceipts {
     /// `omit_changed_check` should be set to true if bundle has some of its data detached. This
     /// would make some original values not known.
     ///
-    /// Writes all changes in append-only mode, if `true` passed as corresponding parameter.
+    /// Performance gains are made if can be guaranteed that [BundleStateWithReceipts] contains all
+    /// data that will ever be written to the respective keys. For chunked writes to same keys,
+    /// pass false to 'exhaustive_data_for_keys' parameter.
     pub fn write_to_storage_with_mode<TX>(
         self,
         tx: &TX,
         mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
-        append_only: bool,
+        exhaustive_data_for_keys: bool,
     ) -> ProviderResult<()>
     where
         TX: DbTxMut + DbTx,
     {
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
-        StateReverts(reverts).write_to_db_with_mode(tx, self.first_block, append_only)?;
+        StateReverts(reverts).write_to_db_with_mode(
+            tx,
+            self.first_block,
+            exhaustive_data_for_keys,
+        )?;
 
         // write receipts
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;

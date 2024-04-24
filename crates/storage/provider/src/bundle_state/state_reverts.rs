@@ -21,8 +21,8 @@ impl From<PlainStateReverts> for StateReverts {
 }
 
 impl StateReverts {
-    /// Write reverts to database, in append-only mode. See
-    /// [`write_to_db_with_mode`](Self::write_to_db_with_mode).
+    /// Write reverts to database, when [`StateReverts`] contains all values that will ever be
+    /// inserted for any given key. See [`write_to_db_with_mode`](Self::write_to_db_with_mode).
     pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
@@ -31,21 +31,18 @@ impl StateReverts {
         self.write_to_db_with_mode(tx, first_block, true)
     }
 
-    /// Write reverts to database. Writes all changes in append-only mode, if `true` passed as
-    /// corresponding parameter. For inserting a sorted, complete set of keys
+    /// Write reverts to database.
     ///
-    /// Panics if `true` is passed to append-only parameter but keys already exist in respective
-    /// table.
-    ///
-    /// Will cause undefined behaviour if new entries aren't sorted w.r.t. existing entries in
-    /// table.
+    /// Passing `true` to to 'exhaustive_data_for_keys' parameter, will bring performance gains,
+    /// but will panic if values to insert are not sorted w.r.t. values that are already written to
+    /// disk for any given key.
     ///
     /// Note:: Reverts will delete all wiped storage from plain state.
     pub fn write_to_db_with_mode<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
         first_block: BlockNumber,
-        append_only: bool,
+        exhaustive_data_for_keys: bool,
     ) -> Result<(), DatabaseError> {
         // Write storage changes
         tracing::trace!(target: "provider::reverts", "Writing storage changes");
@@ -84,12 +81,7 @@ impl StateReverts {
 
                 tracing::trace!(target: "provider::reverts", ?address, ?storage, "Writing storage reverts");
                 for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    if append_only {
-                        storage_changeset_cursor
-                            .append_dup(storage_id, StorageEntry { key, value })?;
-                    } else {
-                        storage_changeset_cursor.upsert(storage_id, StorageEntry { key, value })?;
-                    }
+                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
                 }
             }
         }
@@ -102,16 +94,20 @@ impl StateReverts {
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
             for (address, info) in account_block_reverts {
-                if append_only {
+                if exhaustive_data_for_keys {
                     account_changeset_cursor.append_dup(
                         block_number,
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },
                     )?;
                 } else {
-                    account_changeset_cursor.upsert(
-                        block_number,
-                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                    )?;
+                    if let Some(db_entry) =
+                        account_changeset_cursor.seek_by_key_subkey(block_number, address)?
+                    {
+                        account_changeset_cursor.append_dup(
+                            block_number,
+                            AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                        )?;
+                    }
                 }
             }
         }
