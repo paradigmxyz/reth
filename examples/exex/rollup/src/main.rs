@@ -1,5 +1,4 @@
 mod db;
-mod evm;
 
 use std::sync::Arc;
 
@@ -15,7 +14,7 @@ use reth::revm::{
 };
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
-use reth_node_ethereum::EthereumNode;
+use reth_node_ethereum::{EthEvmConfig, EthereumNode};
 use reth_primitives::{
     address, constants, Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder,
     Genesis, Hardfork, Header, Receipt, SealedBlockWithSenders, TransactionSigned, U256,
@@ -231,7 +230,7 @@ fn execute_block(
     )
     .with_bundle_update()
     .build();
-    let mut evm = EVMProcessor::new_with_state(CHAIN_SPEC.clone(), state, evm::Config);
+    let mut evm = EVMProcessor::new_with_state(CHAIN_SPEC.clone(), state, EthEvmConfig::default());
     let (receipts, _) = evm.execute_transactions(&block, U256::ZERO)?;
     evm.db_mut().merge_transitions(BundleRetention::PlainState);
 
