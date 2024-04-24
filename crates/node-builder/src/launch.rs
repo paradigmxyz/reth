@@ -511,7 +511,6 @@ ReadyTransaction");
         config.adjust_instance_ports();
 
         // Start RPC servers
-
         let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(
             node_adapter.clone(),
             engine_api,
