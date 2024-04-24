@@ -17,8 +17,8 @@ use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{
-    address, Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder, Genesis, Header,
-    Receipt, SealedBlockWithSenders, TransactionSigned, U256,
+    address, constants, Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder,
+    Genesis, Hardfork, Header, Receipt, SealedBlockWithSenders, TransactionSigned, U256,
 };
 use reth_provider::{BlockExecutor, Chain, ProviderError};
 use reth_tracing::tracing::info;
@@ -28,8 +28,7 @@ sol!(RollupContract, "rollup_abi.json");
 use RollupContract::{RollupContractCalls, RollupContractEvents};
 
 const ROLLUP_CONTRACT_ADDRESS: Address = address!("74ae65DF20cB0e3BF8c022051d0Cdd79cc60890C");
-// TODO(alexey): Use the correct chain ID 17001
-const CHAIN_ID: u64 = 17000;
+const CHAIN_ID: u64 = 17001;
 static CHAIN_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     Arc::new(
         ChainSpecBuilder::default()
@@ -84,12 +83,10 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     }) = call
                     {
                         let (block, bundle, _) = execute_block(&mut self.db, header, blockData)?;
-                        self.db.insert_block(&block, bundle)?;
+                        let block = block.seal_slow();
+                        self.db.insert_block_with_bundle(&block, bundle)?;
 
-                        info!(
-                            transactions = %block.body.len(),
-                            "Block submission",
-                        );
+                        info!(transactions = block.body.len(), "Block submission");
                     }
                 }
                 RollupContractEvents::Enter(RollupContract::Enter {
@@ -189,10 +186,25 @@ fn execute_block(
 
     let body: Vec<TransactionSigned> = Decodable::decode(&mut block_data.as_ref())?;
 
+    let block_number = u64::try_from(header.sequence)?;
+
+    let base_fee_per_gas = if CHAIN_SPEC.fork(Hardfork::London).transitions_at_block(block_number) {
+        constants::EIP1559_INITIAL_BASE_FEE
+    } else {
+        let parent_block = db
+            .get_block(header.sequence - U256::from(1))?
+            .ok_or(eyre::eyre!("parent block not found"))?;
+        parent_block
+            .header
+            .next_block_base_fee(CHAIN_SPEC.base_fee_params_at_block(block_number))
+            .ok_or(eyre::eyre!("failed to calculate base fee"))?
+    };
+
     let block = Block {
         header: Header {
-            number: u64::try_from(header.sequence)?,
+            number: block_number,
             gas_limit: u64::try_from(header.gasLimit)?,
+            base_fee_per_gas: Some(base_fee_per_gas),
             ..Default::default()
         },
         body,
@@ -232,60 +244,85 @@ fn main() -> eyre::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    use reth_primitives::{address, bytes, constants::ETH_TO_WEI, U256};
+    use reth_interfaces::test_utils::generators::{self, sign_tx_with_key_pair};
+    use reth_primitives::{
+        address, constants::ETH_TO_WEI, public_key_to_address, revm_primitives::AccountInfo,
+        Transaction, TransactionKind, TxEip1559, U256,
+    };
     use rusqlite::Connection;
+    use secp256k1::{KeyPair, Secp256k1};
 
     use crate::{db::Database, execute_block, RollupContract::BlockHeader, CHAIN_ID};
 
     #[test]
-    fn test_submit_block() -> eyre::Result<()> {
+    fn test_execute_block() -> eyre::Result<()> {
         reth_tracing::init_test_tracing();
 
         let mut database = Database::new(Connection::open_in_memory()?)?;
 
-        // https://holesky.etherscan.io/tx/0x8fef47881e7297bb6d6af9eceb30b9b4e6480f32514ede8aacca4531f0e7a51e
-        database.upsert_account(
-            address!("A5F4567d8B8E8D7b2cb3c53E33B0460A1BE26Cba"),
-            |account| {
-                let mut account = account.unwrap_or_default();
-                account.balance += U256::from(0.2 * ETH_TO_WEI as f64);
-                account.nonce += 1;
-                Ok(account)
-            },
-        )?;
+        // Create key pair
+        let secp = Secp256k1::new();
+        let key_pair = KeyPair::new(&secp, &mut generators::rng());
+        let sender_address = public_key_to_address(key_pair.public_key());
 
-        // https://holesky.etherscan.io/tx/0xabf8cccfbcb9beb00ea8020d86660f28e51aed40cc8916a1ae7455749a187974
+        let recipient_address = address!("Df79e78BF4868b06300074Ebf34002d228A908D9");
+
+        // Deposit some ETH to the sender and insert it into database
+        let sender = database.upsert_account(sender_address, |account| {
+            if account.is_some() {
+                eyre::bail!("account already exists")
+            }
+            Ok(AccountInfo { balance: U256::from(ETH_TO_WEI), nonce: 1, ..Default::default() })
+        })?;
+
+        // Construct and sign transaction
+        let tx = Transaction::Eip1559(TxEip1559 {
+            chain_id: CHAIN_ID,
+            nonce: sender.nonce,
+            gas_limit: 21000,
+            max_fee_per_gas: 1_500_000_013,
+            max_priority_fee_per_gas: 1_500_000_000,
+            to: TransactionKind::Call(recipient_address),
+            value: U256::from(0.1 * ETH_TO_WEI as f64),
+            ..Default::default()
+        });
+        let signed_tx = sign_tx_with_key_pair(key_pair, tx.clone());
+
+        // Construct block header and data
         let block_header = BlockHeader {
             rollupChainId: U256::from(CHAIN_ID),
             sequence: U256::ZERO,
-            confirmBy: U256::from(1713561648),
-            gasLimit: U256::from(30000000),
+            confirmBy: U256::from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs()),
+            gasLimit: U256::from(30_000_000),
             rewardAddress: address!("B01042Db06b04d3677564222010DF5Bd09C5A947"),
         };
-        let (block, bundle, _) = execute_block(
-            &mut database,
-            block_header,
-            bytes!("f878b87602f8738242680184b2d05e0084e2f4fbfa82520894df79e78bf4868b06300074ebf34002d228a908d987038d7ea4c6800080c001a018dc589d98091e8025d2e3e055a69aaf7e47317aae7e22e89da8aa958506ed8ca0714621376acfd07f9939ffba993718f71fb6d67bd9c66307769771d18e4f2337")
-        )?;
-        database.insert_block(&block, bundle)?;
+        let block_data = alloy_rlp::encode(vec![signed_tx.envelope_encoded()]);
 
-        let sender = database
-            .get_account(address!("A5F4567d8B8E8D7b2cb3c53E33B0460A1BE26Cba"))?
-            .ok_or(eyre::eyre!("sender not found"))?;
-        // assert_eq!(
-        //     sender.balance,
-        //     U256::from(0.2 * ETH_TO_WEI as f64) - // Initial balance
-        //         U256::from_str("0x38d7ea4c68000")? - // Transfer value
-        //         // Gas fee
-        // );
+        // Execute block and insert into database
+        let (block, bundle, _) = execute_block(&mut database, block_header, block_data.into())?;
+        let block = block.seal_slow();
+        database.insert_block_with_bundle(&block, bundle)?;
+
+        // Verify new balances and nonces
+        let sender =
+            database.get_account(sender_address)?.ok_or(eyre::eyre!("sender not found"))?;
+        assert_eq!(
+            sender.balance,
+            // Initial balance
+            U256::from(ETH_TO_WEI) -
+            // Transfer value
+            U256::from(0.1 * ETH_TO_WEI as f64) -
+            // Gas fee
+            U256::from(tx.gas_limit()) * U256::from(tx.effective_gas_price(block.base_fee_per_gas))
+        );
         assert_eq!(sender.nonce, 2);
 
-        let recipient = database
-            .get_account(address!("Df79e78BF4868b06300074Ebf34002d228A908D9"))?
-            .ok_or(eyre::eyre!("recipient not found"))?;
-        assert_eq!(recipient.balance, U256::from_str("0x38d7ea4c68000")?);
+        let recipient =
+            database.get_account(recipient_address)?.ok_or(eyre::eyre!("recipient not found"))?;
+        assert_eq!(recipient.balance, U256::from(0.1 * ETH_TO_WEI as f64));
+        assert_eq!(recipient.nonce, 0);
 
         Ok(())
     }

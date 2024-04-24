@@ -10,7 +10,7 @@ use reth::revm::db::{
 };
 use reth_primitives::{
     revm_primitives::{AccountInfo, Bytecode},
-    Address, BlockWithSenders, Bytes, B256, U256,
+    Address, Bytes, SealedBlockWithSenders, B256, U256,
 };
 use reth_provider::{OriginalValuesKnown, ProviderError};
 use rusqlite::Connection;
@@ -32,7 +32,12 @@ impl Database {
 
     fn create_tables(&self) -> eyre::Result<()> {
         self.connection().execute_batch(
-            "CREATE TABLE IF NOT EXISTS account (
+            "CREATE TABLE IF NOT EXISTS block (
+                id     INTEGER PRIMARY KEY,
+                number TEXT UNIQUE,
+                data   TEXT
+            );
+            CREATE TABLE IF NOT EXISTS account (
                 id      INTEGER PRIMARY KEY,
                 address TEXT UNIQUE,
                 data    TEXT
@@ -48,27 +53,22 @@ impl Database {
                 key     TEXT,
                 data    TEXT,
                 UNIQUE (address, key)
-            );
-            CREATE TABLE IF NOT EXISTS block (
-                id     INTEGER PRIMARY KEY,
-                number TEXT UNIQUE,
-                hash   TEXT
             );",
         )?;
         Ok(())
     }
 
-    pub fn insert_block(
+    pub fn insert_block_with_bundle(
         &mut self,
-        block: &BlockWithSenders,
+        block: &SealedBlockWithSenders,
         bundle: BundleState,
     ) -> eyre::Result<()> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
 
         tx.execute(
-            "INSERT INTO block (number, hash) VALUES (?, ?)",
-            (block.header.number.to_string(), block.hash_slow().to_string()),
+            "INSERT INTO block (number, data) VALUES (?, ?)",
+            (block.header.number.to_string(), serde_json::to_string(block)?),
         )?;
 
         let StateChangeset { accounts, storage, contracts } =
@@ -110,11 +110,24 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_block(&mut self, number: U256) -> eyre::Result<Option<SealedBlockWithSenders>> {
+        let block = self.connection().query_row::<String, _, _>(
+            "SELECT data FROM block WHERE number = ?",
+            (number.to_string(),),
+            |row| row.get(0),
+        );
+        match block {
+            Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn upsert_account(
         &mut self,
         address: Address,
         f: impl FnOnce(Option<AccountInfo>) -> eyre::Result<AccountInfo>,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<AccountInfo> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
 
@@ -126,7 +139,7 @@ impl Database {
         )?;
         tx.commit()?;
 
-        Ok(())
+        Ok(account)
     }
 
     pub fn get_account(&mut self, address: Address) -> eyre::Result<Option<AccountInfo>> {
