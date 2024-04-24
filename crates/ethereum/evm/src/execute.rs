@@ -463,7 +463,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EthEvmConfig;
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},

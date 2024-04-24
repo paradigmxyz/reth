@@ -363,7 +363,7 @@ impl RpcServerArgs {
 
 impl RethRpcConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
-        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+        // By default IPC is enabled therefore it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
     }
 
@@ -437,7 +437,7 @@ impl RethRpcConfig for RpcServerArgs {
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
     }
 
-    fn ipc_server_builder(&self) -> IpcServerBuilder {
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity> {
         IpcServerBuilder::default()
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())

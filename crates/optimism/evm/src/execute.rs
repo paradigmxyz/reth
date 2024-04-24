@@ -8,10 +8,10 @@ use reth_evm::{
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
-use reth_interfaces::executor::{
-    BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
+use reth_interfaces::{
+    executor::{BlockExecutionError, BlockValidationError, OptimismBlockExecutionError},
+    provider::ProviderError,
 };
-use reth_net_p2p::provider::ProviderError;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom, Bytes, ChainSpec,
     GotExpected, Hardfork, Header, PruneModes, Receipt, ReceiptWithBloom, Receipts, TxType,
@@ -182,14 +182,14 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
                 return Err(BlockExecutionError::OptimismBlockExecution(
                     OptimismBlockExecutionError::BlobTransactionRejected,
-                ))
+                ));
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -261,7 +261,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into())
+            .into());
         }
 
         Ok((receipts, cumulative_gas_used))
@@ -378,7 +378,7 @@ where
                 block.timestamp,
             ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error);
             };
         }
 
@@ -541,10 +541,10 @@ mod tests {
         b256, Account, Address, Block, ChainSpecBuilder, Signature, StorageKey, StorageValue,
         Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
-    use reth_revm::database::StateProviderDatabase;
-    use revm::L1_BLOCK_CONTRACT;
+    use reth_revm::{database::StateProviderDatabase, L1_BLOCK_CONTRACT};
     use std::{collections::HashMap, str::FromStr};
 
+    use crate::OptimismEvmConfig;
     use reth_revm::test_utils::StateProviderTest;
 
     fn create_op_state_provider() -> StateProviderTest {

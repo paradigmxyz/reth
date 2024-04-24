@@ -52,6 +52,7 @@ members = [
     "crates/node-ethereum/",
     "crates/node-builder/",
     "crates/optimism/node/",
+    "crates/optimism/evm/",
     "crates/node-core/",
     "crates/node/api/",
     "crates/stages/",
@@ -86,7 +87,7 @@ members = [
     "examples/custom-inspector/",
     "examples/exex/minimal/",
     "examples/exex/op-bridge/",
-    "testing/ef-tests/"
+    "testing/ef-tests/",
 ]
 default-members = ["bin/reth"]
 
@@ -221,6 +222,7 @@ reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-node-core = { path = "crates/node-core" }
 reth-node-api = { path = "crates/node/api" }
 reth-downloaders = { path = "crates/net/downloaders" }
