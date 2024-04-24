@@ -1,7 +1,4 @@
-use crate::{
-    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    core::cli::runner::CliContext,
-};
+use crate::args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS};
 use clap::Parser;
 use reth_cli_runner::CliContext;
 use reth_db::{

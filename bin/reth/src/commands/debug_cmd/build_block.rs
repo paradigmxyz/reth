@@ -1,11 +1,8 @@
 //! Command for debugging block building.
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs,
-    },
-    core::cli::runner::CliContext,
+use crate::args::{
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs, DatadirArgs,
 };
 use alloy_rlp::Decodable;
 use clap::Parser;

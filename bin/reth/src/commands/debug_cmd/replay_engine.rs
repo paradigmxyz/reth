@@ -1,10 +1,7 @@
-use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs, NetworkArgs,
-    },
-    core::cli::runner::CliContext,
+use crate::args::{
+    get_secret_key,
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs, DatadirArgs, NetworkArgs,
 };
 use clap::Parser;
 use eyre::Context;

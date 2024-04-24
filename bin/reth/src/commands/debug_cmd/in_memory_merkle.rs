@@ -6,7 +6,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, DatadirArgs, NetworkArgs,
     },
-    core::cli::runner::CliContext,
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
