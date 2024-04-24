@@ -27,7 +27,8 @@ alloy-trie = { workspace = true, features = ["serde"] }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
-enr = { workspace = true, features = ["rust-secp256k1"] }
+# enr = { workspace = true, features = ["rust-secp256k1"] }
+enr = { workspace = true, features = [] }
 
 # crypto
 secp256k1 = { workspace = true, features = [
