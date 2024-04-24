@@ -101,7 +101,11 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         eyre::bail!("Only ETH deposits are supported")
                     }
 
-                    self.db.increment_balance(rollupRecipient, amount)?;
+                    self.db.upsert_account(rollupRecipient, |account| {
+                        let mut account = account.unwrap_or_default();
+                        account.balance += amount;
+                        Ok(account)
+                    })?;
 
                     info!(
                         %amount,
@@ -118,7 +122,11 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         eyre::bail!("Only ETH withdrawals are supported")
                     }
 
-                    self.db.decrement_balance(hostRecipient, amount)?;
+                    self.db.upsert_account(hostRecipient, |account| {
+                        let mut account = account.ok_or(eyre::eyre!("account not found"))?;
+                        account.balance -= amount;
+                        Ok(account)
+                    })?;
 
                     info!(
                         %amount,
@@ -238,9 +246,14 @@ mod tests {
         let mut database = Database::new(Connection::open_in_memory()?)?;
 
         // https://holesky.etherscan.io/tx/0x8fef47881e7297bb6d6af9eceb30b9b4e6480f32514ede8aacca4531f0e7a51e
-        database.increment_balance(
+        database.upsert_account(
             address!("A5F4567d8B8E8D7b2cb3c53E33B0460A1BE26Cba"),
-            U256::from(0.2 * ETH_TO_WEI as f64),
+            |account| {
+                let mut account = account.unwrap_or_default();
+                account.balance += U256::from(0.2 * ETH_TO_WEI as f64);
+                account.nonce += 1;
+                Ok(account)
+            },
         )?;
 
         // https://holesky.etherscan.io/tx/0xabf8cccfbcb9beb00ea8020d86660f28e51aed40cc8916a1ae7455749a187974
@@ -257,8 +270,6 @@ mod tests {
             bytes!("f878b87602f8738242680184b2d05e0084e2f4fbfa82520894df79e78bf4868b06300074ebf34002d228a908d987038d7ea4c6800080c001a018dc589d98091e8025d2e3e055a69aaf7e47317aae7e22e89da8aa958506ed8ca0714621376acfd07f9939ffba993718f71fb6d67bd9c66307769771d18e4f2337")
         )?;
         database.insert_block(&block, bundle)?;
-
-        println!("block: {:?}", block);
 
         let sender = database
             .get_account(address!("A5F4567d8B8E8D7b2cb3c53E33B0460A1BE26Cba"))?

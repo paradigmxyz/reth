@@ -110,30 +110,16 @@ impl Database {
         Ok(())
     }
 
-    pub fn increment_balance(&mut self, address: Address, value: U256) -> eyre::Result<()> {
+    pub fn upsert_account(
+        &mut self,
+        address: Address,
+        f: impl FnOnce(Option<AccountInfo>) -> eyre::Result<AccountInfo>,
+    ) -> eyre::Result<()> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
 
-        let mut account = get_account(&tx, address)?.unwrap_or_default();
-        account.balance += value;
-        account.nonce += 1;
-
-        tx.execute(
-            "INSERT INTO account (address, data) VALUES (?, ?) ON CONFLICT(address) DO UPDATE SET data = excluded.data",
-            (address.to_string(), serde_json::to_string(&account)?),
-        )?;
-        tx.commit()?;
-
-        Ok(())
-    }
-
-    pub fn decrement_balance(&mut self, address: Address, value: U256) -> eyre::Result<()> {
-        let mut connection = self.connection();
-        let tx = connection.transaction()?;
-
-        let mut account = get_account(&tx, address)?.ok_or(eyre::eyre!("account not found"))?;
-        account.balance -= value;
-
+        let account = get_account(&tx, address)?;
+        let account = f(account)?;
         tx.execute(
             "INSERT INTO account (address, data) VALUES (?, ?) ON CONFLICT(address) DO UPDATE SET data = excluded.data",
             (address.to_string(), serde_json::to_string(&account)?),
