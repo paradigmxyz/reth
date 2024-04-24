@@ -159,7 +159,7 @@ impl ConfigureEvmEnv for TestEvmConfig {
 }
 
 impl ConfigureEvm for TestEvmConfig {
-    type DefaultExternalContext = ();
+    type DefaultExternalContext<'a> = ();
 
     fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
         #[cfg(feature = "optimism")]

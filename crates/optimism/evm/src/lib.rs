@@ -61,9 +61,9 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
 }
 
 impl ConfigureEvm for OptimismEvmConfig {
-    type DefaultExternalContext = ();
+    type DefaultExternalContext<'a> = ();
 
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext, DB> {
+    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
         EvmBuilder::default().with_db(db).optimism().build()
     }
 
@@ -85,7 +85,7 @@ impl ConfigureEvm for OptimismEvmConfig {
 mod tests {
     use super::*;
     use reth_primitives::revm_primitives::{BlockEnv, CfgEnv};
-    use revm::primitives::SpecId;
+    use revm_primitives::SpecId;
 
     #[test]
     #[ignore]

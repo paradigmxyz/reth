@@ -17,14 +17,14 @@ pub mod execute;
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Associated type for the default external context that should be configured for the EVM.
-    type DefaultExternalContext;
+    type DefaultExternalContext<'a>;
 
     /// Returns new EVM with the given database
     ///
     /// This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext, DB>;
+    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext<'a>, DB>;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
@@ -34,7 +34,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         &self,
         db: DB,
         env: EnvWithHandlerCfg,
-    ) -> Evm<'a, Self::DefaultExternalContext, DB> {
+    ) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
         let mut evm = self.evm(db);
         evm.modify_spec_id(env.spec_id());
         evm.context.evm.env = env.env;
