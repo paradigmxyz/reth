@@ -87,17 +87,13 @@ pub enum EngineApiError {
     /// The payload or attributes are known to be malformed before processing.
     #[error(transparent)]
     EngineObjectValidationError(#[from] EngineObjectValidationError),
-    /// If the optimism feature flag is enabled, the payload attributes must have a present
-    /// gas limit for the forkchoice updated method.
-    // #[cfg(feature = "optimism")]
-    // #[error("Missing gas limit in payload attributes")]
-    // MissingGasLimitInPayloadAttributes,
+    /// Any other error
     #[error("0")]
     Other(Box<dyn ToRpcError>),
 }
 
 impl EngineApiError {
-    /// crates a new [EngineApiError::Other] variant.
+    /// Crates a new [EngineApiError::Other] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -207,14 +203,7 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
-            EngineApiError::Other(err) => {
-                err.to_rpc_error()
-                // jsonrpsee_types::error::ErrorObject::owned(
-                //     INVALID_PARAMS_CODE,
-                //     INVALID_PARAMS_MSG,
-                //     Some(ErrorData::new(error)),
-                // )
-            }
+            EngineApiError::Other(err) => err.to_rpc_error(),
         }
     }
 }
