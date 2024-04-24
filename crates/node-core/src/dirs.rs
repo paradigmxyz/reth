@@ -10,7 +10,7 @@ use std::{
 };
 
 /// Constructs a string to be used as a path for configuration and db paths.
-pub fn config_path_prefix(chain: &Chain) -> String {
+pub fn config_path_prefix(chain: Chain) -> String {
     chain.to_string()
 }
 
@@ -157,12 +157,12 @@ impl<D> PlatformPath<D> {
     /// Converts the path to a `ChainPath` with the given `Chain`.
     pub fn with_chain(&self, chain: Chain, datadir_args: DatadirArgs) -> ChainPath<D> {
         // extract chain name
-        let platform_path = self.platform_path_from_chain(&chain);
+        let platform_path = self.platform_path_from_chain(chain);
 
         ChainPath::new(platform_path, chain, datadir_args)
     }
 
-    fn platform_path_from_chain(&self, chain: &Chain) -> PlatformPath<D> {
+    fn platform_path_from_chain(&self, chain: Chain) -> PlatformPath<D> {
         let chain_name = config_path_prefix(chain);
         let path = self.0.join(chain_name);
         PlatformPath::<D>(path, std::marker::PhantomData)
@@ -188,7 +188,7 @@ impl<D: XdgPath> MaybePlatformPath<D> {
         ChainPath(
             self.0
                 .clone()
-                .unwrap_or_else(|| PlatformPath::default().platform_path_from_chain(&chain)),
+                .unwrap_or_else(|| PlatformPath::default().platform_path_from_chain(chain)),
             chain,
             datadir_args,
         )
