@@ -155,6 +155,7 @@ dependencies = [
  "c-kzg",
  "serde",
  "sha2 0.10.8",
+ "thiserror",
 ]
 
 [[package]]
@@ -185,6 +186,7 @@ dependencies = [
  "alloy-serde",
  "arbitrary",
  "c-kzg",
+ "derive_more",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "once_cell",
