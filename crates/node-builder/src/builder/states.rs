@@ -7,7 +7,6 @@
 
 use reth_exex::ExExContext;
 use reth_network::NetworkHandle;
-use std::{future::Future, marker::PhantomData};
 use reth_node_api::{
     FullNodeComponents, FullNodeComponentsAdapter, FullNodeTypes, FullNodeTypesAdapter, NodeTypes,
 };
@@ -15,16 +14,17 @@ use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
+use std::{future::Future, marker::PhantomData};
 
 use crate::{
     builder::RethFullProviderType,
+    components::{NodeComponents, NodeComponentsBuilder},
     exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     launch::LaunchNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     BuilderContext, FullNode, NodeHandle,
 };
-use crate::components::{NodeComponents, NodeComponentsBuilder};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -78,8 +78,11 @@ impl<T: FullNodeTypes> NodeTypesAdapter<T> {
 /// Container for the node's types and the components and other internals that can be used by addons
 /// of the node.
 pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
+    /// The components of the node.
     pub components: C,
+    /// The task executor for the node.
     pub task_executor: TaskExecutor,
+    /// The provider of the node.
     pub provider: T::Provider,
 }
 

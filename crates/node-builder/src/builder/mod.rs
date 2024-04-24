@@ -79,9 +79,9 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 // ///
 // /// ## Order
 // ///
-// /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
-// /// example) and then proceeds to configure the core static types of the node: [NodeTypes], these
-// /// include the node's primitive types and the node's engine types.
+// /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments
+// for /// example) and then proceeds to configure the core static types of the node: [NodeTypes],
+// these /// include the node's primitive types and the node's engine types.
 // ///
 // /// Next all stateful components of the node are configured, these include the
 // /// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and all the
@@ -96,9 +96,9 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 // /// On launch the builder returns a fully type aware [NodeHandle] that has access to all the
 // /// configured components and can interact with the node.
 // ///
-// /// There are convenience functions for networks that come with a preset of types and components via
-// /// the [Node] trait, see `reth_node_ethereum::EthereumNode` or `reth_node_optimism::OptimismNode`.
-// ///
+// /// There are convenience functions for networks that come with a preset of types and components
+// via /// the [Node] trait, see `reth_node_ethereum::EthereumNode` or
+// `reth_node_optimism::OptimismNode`. ///
 // /// The [NodeBuilder::node] function configures the node's types and components in one step.
 // ///
 // /// ## Components
@@ -111,16 +111,16 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 // /// type that is configured first.
 // ///
 // /// All builder traits are generic over the node types and are invoked with the [BuilderContext]
-// /// that gives access to internals of the that are needed to configure the components. This include
-// /// the original config, chain spec, the database provider and the task executor,
+// /// that gives access to internals of the that are needed to configure the components. This
+// include /// the original config, chain spec, the database provider and the task executor,
 // ///
 // /// ## Hooks
 // ///
 // /// Once all the components are configured, the builder can be used to set hooks that are run at
-// /// specific points in the node's lifecycle. This way custom services can be spawned before the node
-// /// is launched [NodeBuilder::on_component_initialized], or once the rpc server(s) are launched
-// /// [NodeBuilder::on_rpc_started]. The [NodeBuilder::extend_rpc_modules] can be used to inject
-// /// custom rpc modules into the rpc server before it is launched. See also [RpcContext]
+// /// specific points in the node's lifecycle. This way custom services can be spawned before the
+// node /// is launched [NodeBuilder::on_component_initialized], or once the rpc server(s) are
+// launched /// [NodeBuilder::on_rpc_started]. The [NodeBuilder::extend_rpc_modules] can be used to
+// inject /// custom rpc modules into the rpc server before it is launched. See also [RpcContext]
 // /// All hooks accept a closure that is then invoked at the appropriate time in the node's launch
 // /// process.
 // ///
@@ -129,16 +129,16 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 // /// The [NodeBuilder] is intended to sit behind a CLI that provides the necessary [NodeConfig]
 // /// input: [NodeBuilder::new]
 // ///
-// /// From there the builder is configured with the node's types, components, and hooks, then launched
-// /// with the [NodeBuilder::launch] method. On launch all the builtin internals, such as the
-// /// `Database` and its providers [BlockchainProvider] are initialized before the configured
+// /// From there the builder is configured with the node's types, components, and hooks, then
+// launched /// with the [NodeBuilder::launch] method. On launch all the builtin internals, such as
+// the /// `Database` and its providers [BlockchainProvider] are initialized before the configured
 // /// [NodeComponentsBuilder] is invoked with the [BuilderContext] to create the transaction pool,
-// /// network, and payload builder components. When the RPC is configured, the corresponding hooks are
-// /// invoked to allow for custom rpc modules to be injected into the rpc server:
+// /// network, and payload builder components. When the RPC is configured, the corresponding hooks
+// are /// invoked to allow for custom rpc modules to be injected into the rpc server:
 // /// [NodeBuilder::extend_rpc_modules]
 // ///
-// /// Finally all components are created and all services are launched and a [NodeHandle] is returned
-// /// that can be used to interact with the node: [FullNode]
+// /// Finally all components are created and all services are launched and a [NodeHandle] is
+// returned /// that can be used to interact with the node: [FullNode]
 // ///
 // /// The following diagram shows the flow of the node builder from CLI to a launched node.
 // ///
@@ -147,21 +147,21 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 // /// ## Internals
 // ///
 // /// The node builder is fully type safe, it uses the [NodeTypes] trait to enforce that all
-// /// components are configured with the correct types. However the database types and with that the
-// /// provider trait implementations are currently created by the builder itself during the launch
-// /// process, hence the database type is not part of the [NodeTypes] trait and the node's components,
-// /// that depend on the database, are configured separately. In order to have a nice trait that
-// /// encapsulates the entire node the [FullNodeComponents] trait was introduced. This trait has
-// /// convenient associated types for all the components of the node. After [NodeBuilder::launch] the
-// /// [NodeHandle] contains an instance of [FullNode] that implements the [FullNodeComponents] trait
-// /// and has access to all the components of the node. Internally the node builder uses several
-// /// generic adapter types that are then map to traits with associated types for ease of use.
-// ///
+// /// components are configured with the correct types. However the database types and with that
+// the /// provider trait implementations are currently created by the builder itself during the
+// launch /// process, hence the database type is not part of the [NodeTypes] trait and the node's
+// components, /// that depend on the database, are configured separately. In order to have a nice
+// trait that /// encapsulates the entire node the [FullNodeComponents] trait was introduced. This
+// trait has /// convenient associated types for all the components of the node. After
+// [NodeBuilder::launch] the /// [NodeHandle] contains an instance of [FullNode] that implements the
+// [FullNodeComponents] trait /// and has access to all the components of the node. Internally the
+// node builder uses several /// generic adapter types that are then map to traits with associated
+// types for ease of use. ///
 // /// ### Limitations
 // ///
 // /// Currently the launch process is limited to ethereum nodes and requires all the components
-// /// specified above. It also expect beacon consensus with the ethereum engine API that is configured
-// /// by the builder itself during launch. This might change in the future.
+// /// specified above. It also expect beacon consensus with the ethereum engine API that is
+// configured /// by the builder itself during launch. This might change in the future.
 // ///
 // /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 // pub struct NodeBuilder<DB, State> {
@@ -180,8 +180,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //     }
 //
 //     /// Loads the reth config with the given datadir root
-//     fn load_config(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<reth_config::Config> {
-//         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
+//     fn load_config(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<reth_config::Config>
+// {         let config_path = self.config.config.clone().unwrap_or_else(|| data_dir.config_path());
 //
 //         let mut config = confy::load_path::<reth_config::Config>(&config_path)
 //             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
@@ -479,9 +479,7 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //                 Components::Pool,
 //             >,
 //         >,
-//     > {
-//         // get config from file
-//         let reth_config = self.load_config(&data_dir)?;
+//     > { // get config from file let reth_config = self.load_config(&data_dir)?;
 //
 //         let Self {
 //             config,
@@ -519,7 +517,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //             )
 //             .await?;
 //
-//         debug!(target: "reth::cli", chain=%config.chain.chain, genesis=?config.chain.genesis_hash(), "Initializing genesis");
+//         debug!(target: "reth::cli", chain=%config.chain.chain,
+// genesis=?config.chain.genesis_hash(), "Initializing genesis");
 //
 //         let genesis_hash = init_genesis(provider_factory.clone())?;
 //
@@ -663,8 +662,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //                     handle
 //                         .send_async(notification.into())
 //                         .await
-//                         .expect("blockchain tree notification could not be sent to exex manager");
-//                 }
+//                         .expect("blockchain tree notification could not be sent to exex
+// manager");                 }
 //             });
 //
 //             info!(target: "reth::cli", "ExEx Manager started");
@@ -714,8 +713,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //
 //         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
 //         if reth_config.stages.etl.dir.is_none() {
-//             reth_config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
-//         }
+//             reth_config.stages.etl.dir =
+// Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));         }
 //
 //         // Configure the pipeline
 //         let pipeline_exex_handle =
@@ -724,8 +723,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //             info!(target: "reth::cli", "Starting Reth in dev mode");
 //
 //             for (idx, (address, alloc)) in config.chain.genesis.alloc.iter().enumerate() {
-//                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
-//             }
+//                 info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx,
+// address.to_string(), format_ether(alloc.balance));             }
 //
 //             // install auto-seal
 //             let pending_transactions_listener = transaction_pool.pending_transactions_listener();
@@ -735,8 +734,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //             } else if let Some(max_transactions) = config.dev.block_max_transactions {
 //                 MiningMode::instant(max_transactions, pending_transactions_listener)
 //             } else {
-//                 info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
-//                 MiningMode::instant(1, pending_transactions_listener)
+//                 info!(target: "reth::cli", "No mining mode specified, defaulting to
+// ReadyTransaction");                 MiningMode::instant(1, pending_transactions_listener)
 //             };
 //
 //             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
@@ -813,8 +812,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //         info!(target: "reth::cli", ?prune_config, "Pruner initialized");
 //
 //         // Configure the consensus engine
-//         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
-//             client,
+//         let (beacon_consensus_engine, beacon_engine_handle) =
+// BeaconConsensusEngine::with_channel(             client,
 //             pipeline,
 //             blockchain_db.clone(),
 //             Box::new(executor.clone()),
@@ -847,8 +846,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //         );
 //         executor.spawn_critical(
 //             "events task",
-//             node::handle_events(Some(network.clone()), Some(head.number), events, database.clone()),
-//         );
+//             node::handle_events(Some(network.clone()), Some(head.number), events,
+// database.clone()),         );
 //
 //         let engine_api = EngineApi::new(
 //             blockchain_db.clone(),
@@ -932,8 +931,8 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //
 // /// A [NodeBuilder] with it's launch context already configured.
 // ///
-// /// This exposes the same methods as [NodeBuilder] but with the launch context already configured,
-// /// See [WithLaunchContext::launch]
+// /// This exposes the same methods as [NodeBuilder] but with the launch context already
+// configured, /// See [WithLaunchContext::launch]
 // pub struct WithLaunchContext<DB, State> {
 //     builder: NodeBuilder<DB, State>,
 //     task_executor: TaskExecutor,
@@ -1210,8 +1209,7 @@ pub type RethFullAdapter<DB, N> = FullNodeTypesAdapter<N, DB, RethFullProviderTy
 //                 Components::Pool,
 //             >,
 //         >,
-//     > {
-//         let Self { builder, task_executor, data_dir } = self;
+//     > { let Self { builder, task_executor, data_dir } = self;
 //
 //         builder.launch(task_executor, data_dir).await
 //     }

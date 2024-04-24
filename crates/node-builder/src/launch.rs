@@ -1,7 +1,7 @@
 //! Abstraction for launching a node.
 
 use crate::{
-    builder::NodeAdapter, NodeBuilderWithComponents, NodeHandle,
+    builder::NodeAdapter, components::NodeComponentsBuilder, NodeBuilderWithComponents, NodeHandle,
     RethFullAdapter,
 };
 use reth_db::{
@@ -12,7 +12,6 @@ use reth_node_api::{FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_tasks::TaskExecutor;
 use std::future::Future;
-use crate::components::NodeComponentsBuilder;
 
 /// Launches a new node.
 ///
