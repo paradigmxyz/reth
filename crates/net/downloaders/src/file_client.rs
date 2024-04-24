@@ -179,12 +179,6 @@ impl FileClient {
         self.headers.get(&self.max_block()?).map(|h| h.clone().seal_slow())
     }
 
-    /// Clones and returns the lowest header of this client has or `None` if empty. Seals header
-    /// before returning.
-    pub fn start_header(&self) -> Option<SealedHeader> {
-        self.headers.get(&self.min_block()?).map(|h| h.clone().seal_slow())
-    }
-
     /// Returns true if all blocks are canonical (no gaps)
     pub fn has_canonical_blocks(&self) -> bool {
         if self.headers.is_empty() {
