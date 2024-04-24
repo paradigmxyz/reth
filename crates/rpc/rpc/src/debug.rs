@@ -101,17 +101,16 @@ where
                         env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
                         handler_cfg: cfg.handler_cfg,
                     };
-                    let (result, state_changes) = this
-                        .trace_transaction(
-                            opts.clone(),
-                            env,
-                            &mut db,
-                            Some(TransactionContext {
-                                block_hash,
-                                tx_hash: Some(tx_hash),
-                                tx_index: Some(index),
-                            }),
-                        )?;
+                    let (result, state_changes) = this.trace_transaction(
+                        opts.clone(),
+                        env,
+                        &mut db,
+                        Some(TransactionContext {
+                            block_hash,
+                            tx_hash: Some(tx_hash),
+                            tx_index: Some(index),
+                        }),
+                    )?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
