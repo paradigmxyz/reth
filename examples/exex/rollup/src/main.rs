@@ -198,8 +198,6 @@ fn execute_block(
         eyre::bail!("Invalid rollup chain ID")
     }
 
-    let body: Vec<TransactionSigned> = Decodable::decode(&mut block_data.as_ref())?;
-
     let block_number = u64::try_from(header.sequence)?;
 
     let base_fee_per_gas = if CHAIN_SPEC.fork(Hardfork::London).transitions_at_block(block_number) {
@@ -214,6 +212,7 @@ fn execute_block(
             .ok_or(eyre::eyre!("failed to calculate base fee"))?
     };
 
+    let body = Decodable::decode(&mut block_data.as_ref())?;
     let block = Block {
         header: Header {
             number: block_number,
@@ -287,12 +286,18 @@ mod tests {
         let recipient_address = address!("Df79e78BF4868b06300074Ebf34002d228A908D9");
 
         // Deposit some ETH to the sender and insert it into database
-        let sender = database.upsert_account(sender_address, |account| {
+        let sender =
+            AccountInfo { balance: U256::from(ETH_TO_WEI), nonce: 1, ..Default::default() };
+        database.upsert_account(sender_address, |account| {
             if account.is_some() {
                 eyre::bail!("account already exists")
             }
-            Ok(AccountInfo { balance: U256::from(ETH_TO_WEI), nonce: 1, ..Default::default() })
+            Ok(sender.clone())
         })?;
+
+        // Ensure that recipient does not exist
+        let recipient = database.get_account(recipient_address)?;
+        assert!(recipient.is_none());
 
         // Construct and sign transaction
         let tx = Transaction::Eip1559(TxEip1559 {
@@ -322,24 +327,25 @@ mod tests {
         let block = block.seal_slow();
         database.insert_block_with_bundle(&block, bundle)?;
 
-        // Verify new balances and nonces
-        let sender =
+        // Verify new sender balances and nonces
+        let sender_new =
             database.get_account(sender_address)?.ok_or(eyre::eyre!("sender not found"))?;
         assert_eq!(
-            sender.balance,
+            sender_new.balance,
             // Initial balance
-            U256::from(ETH_TO_WEI) -
+            sender.balance -
             // Transfer value
-            U256::from(0.1 * ETH_TO_WEI as f64) -
+            tx.value() -
             // Gas fee
             U256::from(tx.gas_limit()) * U256::from(tx.effective_gas_price(block.base_fee_per_gas))
         );
-        assert_eq!(sender.nonce, 2);
+        assert_eq!(sender_new.nonce, 2);
 
-        let recipient =
+        // Verify new recipient balances and nonces
+        let recipient_new =
             database.get_account(recipient_address)?.ok_or(eyre::eyre!("recipient not found"))?;
-        assert_eq!(recipient.balance, U256::from(0.1 * ETH_TO_WEI as f64));
-        assert_eq!(recipient.nonce, 0);
+        assert_eq!(recipient_new.balance, tx.value());
+        assert_eq!(recipient_new.nonce, 0);
 
         Ok(())
     }

@@ -127,7 +127,7 @@ impl Database {
         &mut self,
         address: Address,
         f: impl FnOnce(Option<AccountInfo>) -> eyre::Result<AccountInfo>,
-    ) -> eyre::Result<AccountInfo> {
+    ) -> eyre::Result<()> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
 
@@ -139,7 +139,7 @@ impl Database {
         )?;
         tx.commit()?;
 
-        Ok(account)
+        Ok(())
     }
 
     pub fn get_account(&mut self, address: Address) -> eyre::Result<Option<AccountInfo>> {
