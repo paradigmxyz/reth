@@ -78,7 +78,12 @@ impl StateReverts {
 
                 tracing::trace!(target: "provider::reverts", ?address, ?storage, "Writing storage reverts");
                 for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
+                    if append_only {
+                        storage_changeset_cursor
+                            .append_dup(storage_id, StorageEntry { key, value })?;
+                    } else {
+                        storage_changeset_cursor.upsert(storage_id, StorageEntry { key, value })?;
+                    }
                 }
             }
         }
