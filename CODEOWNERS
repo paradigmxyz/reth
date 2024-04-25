@@ -21,4 +21,5 @@ crates/tasks                @mattsse
 crates/tracing              @onbjerg
 crates/transaction-pool/    @mattsse
 crates/trie                 @rkrasiuk
+crates/trie-parallel        @rkrasiuk
 .github/                    @onbjerg @gakonst @DaniPopes
