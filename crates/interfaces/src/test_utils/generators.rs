@@ -4,8 +4,7 @@ use rand::{
 };
 use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, B256,
-    U256,
+    SealedHeader, StorageEntry, Transaction, TransactionSigned, TxKind, TxLegacy, B256, U256,
 };
 use secp256k1::{KeyPair, Secp256k1};
 use std::{
@@ -79,7 +78,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         nonce: rng.gen::<u16>().into(),
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
-        to: TransactionKind::Call(rng.gen()),
+        to: TxKind::Call(rng.gen()),
         value: U256::from(rng.gen::<u16>()),
         input: Bytes::default(),
     })
@@ -395,7 +394,7 @@ mod tests {
             chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
-            to: TransactionKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
+            to: TxKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
             value: U256::from(0_u64),
             input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
             max_fee_per_gas: 0x4a817c800,
@@ -427,7 +426,7 @@ mod tests {
             nonce: 9,
             gas_price: 20 * 10_u128.pow(9),
             gas_limit: 21000,
-            to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+            to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
             value: U256::from(10_u128.pow(18)),
             input: Bytes::default(),
         });

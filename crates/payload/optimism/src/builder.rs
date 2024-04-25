@@ -250,13 +250,15 @@ where
     } = config;
 
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
+
     let mut cumulative_gas_used = 0;
     let block_gas_limit: u64 = attributes
         .gas_limit
         .unwrap_or_else(|| initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX));
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
-    let mut executed_txs = Vec::new();
+    let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
+
     let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
         base_fee,
         initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
@@ -288,11 +290,12 @@ where
         attributes.payload_attributes.timestamp,
         &mut db,
     )
-    .map_err(|_| {
+    .map_err(|err| {
+        warn!(target: "payload_builder", %err, "missing create2 deployer, skipping block.");
         PayloadBuilderError::other(OptimismPayloadBuilderError::ForceCreate2DeployerFail)
     })?;
 
-    let mut receipts = Vec::new();
+    let mut receipts = Vec::with_capacity(attributes.transactions.len());
     for sequencer_tx in &attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
         if cancel.is_cancelled() {
@@ -300,7 +303,7 @@ where
         }
 
         // A sequencer's block should never contain blob transactions.
-        if matches!(sequencer_tx.tx_type(), TxType::Eip4844) {
+        if sequencer_tx.is_eip4844() {
             return Err(PayloadBuilderError::other(
                 OptimismPayloadBuilderError::BlobTransactionRejected,
             ))
@@ -398,11 +401,9 @@ where
                 continue
             }
 
-            // A sequencer's block should never contain blob transactions.
-            if pool_tx.tx_type() == TxType::Eip4844 as u8 {
-                return Err(PayloadBuilderError::other(
-                    OptimismPayloadBuilderError::BlobTransactionRejected,
-                ))
+            // A sequencer's block should never contain blob or deposit transactions from the pool.
+            if pool_tx.is_eip4844() || pool_tx.tx_type() == TxType::Deposit as u8 {
+                best_txs.mark_invalid(&pool_tx)
             }
 
             // check if the job was cancelled, if so we can exit early
