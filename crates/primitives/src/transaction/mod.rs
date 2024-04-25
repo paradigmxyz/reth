@@ -1742,7 +1742,7 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
                         TxType::Legacy => {
                             // Calculate the new v value based on the EIP-155 formula:
                             // v = {0,1} + CHAIN_ID * 2 + 35
-                            (signature.v -
+                            !(signature.v -
                                 U256::from(if let Some(chain_id) = transaction.chain_id() {
                                     // If CHAIN_ID is available, calculate the new v value
                                     // accordingly
@@ -1751,12 +1751,9 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
                                     // If CHAIN_ID is not available, set v = {0,1} + 27
                                     27
                                 }))
-                            .try_into()
-                            .map_err(|_| ConversionError::InvalidSignature)?
+                            .is_zero()
                         }
-                        _ => {
-                            signature.v.try_into().map_err(|_| ConversionError::InvalidSignature)?
-                        }
+                        _ => !signature.v.is_zero(),
                     }
                 },
             },
