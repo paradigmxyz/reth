@@ -8,8 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_primitives::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
 use reth_consensus::ConsensusError;
+use reth_primitives::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
 
 /// Collection of consensus validation methods.
 pub mod validation;

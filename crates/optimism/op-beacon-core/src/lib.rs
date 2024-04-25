@@ -9,10 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_consensus::{Consensus, ConsensusError};
-use reth_consensus_common::{validation, validate_header_extradata};
+use reth_consensus_common::{validate_header_extradata, validation};
 use reth_primitives::{
-    Chain, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 /// Ethereum beacon consensus
