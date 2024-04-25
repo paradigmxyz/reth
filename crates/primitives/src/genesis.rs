@@ -9,7 +9,7 @@ pub use allocator::GenesisAllocator;
 
 #[cfg(any(test, feature = "test-utils"))]
 mod allocator {
-    use crate::{public_key_to_address, Address, Bytes, B256, U256};
+    use crate::{public_key_bytes_to_address, Address, Bytes, B256, U256};
     use alloy_genesis::GenesisAccount;
     use secp256k1::{
         rand::{thread_rng, RngCore},
@@ -76,7 +76,7 @@ mod allocator {
         pub fn new_funded_account(&mut self, balance: U256) -> (KeyPair, Address) {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
-            let address = public_key_to_address(pair.public_key());
+            let address = public_key_bytes_to_address(&pair.public_key().serialize_uncompressed());
 
             self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
 
@@ -93,7 +93,7 @@ mod allocator {
         ) -> (KeyPair, Address) {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
-            let address = public_key_to_address(pair.public_key());
+            let address = public_key_bytes_to_address(&pair.public_key().serialize_uncompressed());
 
             self.alloc.insert(
                 address,
@@ -113,7 +113,7 @@ mod allocator {
         ) -> (KeyPair, Address) {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
-            let address = public_key_to_address(pair.public_key());
+            let address = public_key_bytes_to_address(&pair.public_key().serialize_uncompressed());
 
             self.alloc.insert(
                 address,
@@ -133,7 +133,7 @@ mod allocator {
         ) -> (KeyPair, Address) {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
-            let address = public_key_to_address(pair.public_key());
+            let address = public_key_bytes_to_address(&pair.public_key().serialize_uncompressed());
 
             self.alloc.insert(
                 address,
@@ -149,7 +149,7 @@ mod allocator {
         pub fn new_account_with_code(&mut self, code: Bytes) -> (KeyPair, Address) {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
-            let address = public_key_to_address(pair.public_key());
+            let address = public_key_bytes_to_address(&pair.public_key().serialize_uncompressed());
 
             self.alloc.insert(address, GenesisAccount::default().with_code(Some(code)));
 
@@ -170,7 +170,7 @@ mod allocator {
         pub fn add_account(&mut self, account: GenesisAccount) -> Address {
             let secp = Secp256k1::new();
             let pair = KeyPair::new(&secp, &mut self.rng);
-            let address = public_key_to_address(pair.public_key());
+            let address = public_key_bytes_to_address(&pair.public_key().serialize_uncompressed());
 
             self.alloc.insert(address, account);
 

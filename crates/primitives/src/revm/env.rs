@@ -80,7 +80,7 @@ pub enum CliqueSignerRecoveryError {
     InvalidExtraData,
     /// Recovery failed.
     #[error("Invalid signature: {0}")]
-    InvalidSignature(#[from] secp256k1::Error),
+    InvalidSignature(#[from] crate::transaction::util::secp256k1::Error),
 }
 
 /// Recover the account from signed header per clique consensus rules.

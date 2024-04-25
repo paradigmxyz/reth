@@ -33,6 +33,7 @@ mod header;
 mod integer_list;
 mod log;
 mod net;
+#[cfg(feature = "peer")]
 mod peer;
 pub mod proofs;
 mod prune;
@@ -77,6 +78,7 @@ pub use net::{
     NodeRecordParseError, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,
 };
+#[cfg(feature = "peer")]
 pub use peer::{id2pk, pk2id, AnyNode, PeerId, WithPeerId};
 pub use prune::{
     PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneModes, PruneProgress,
@@ -94,8 +96,12 @@ pub use transaction::{
     PooledTransactionsElementEcRecovered,
 };
 
+// #[cfg(feature = "peer")]
+pub use transaction::util::secp256k1::{
+    public_key_bytes_to_address, public_key_to_address, recover_signer_unchecked, sign_message,
+};
+
 pub use transaction::{
-    util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     AccessList, AccessListItem, IntoRecoveredTransaction, InvalidTransactionError, Signature,
     Transaction, TransactionKind, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844,

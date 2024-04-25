@@ -7122,6 +7122,7 @@ dependencies = [
  "enr",
  "hash-db",
  "itertools 0.12.1",
+ "k256",
  "modular-bitfield",
  "nybbles",
  "once_cell",

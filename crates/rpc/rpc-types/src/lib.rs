@@ -12,6 +12,7 @@
 pub mod beacon;
 mod eth;
 mod mev;
+#[cfg(feature = "net")]
 mod net;
 mod peer;
 pub mod relay;
@@ -41,6 +42,7 @@ pub use eth::{
 };
 
 pub use mev::*;
+#[cfg(feature = "net")]
 pub use net::*;
 pub use peer::*;
 pub use rpc::*;

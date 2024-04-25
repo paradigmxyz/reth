@@ -22,7 +22,10 @@ alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
 ethereum_ssz_derive = { version = "0.5", optional = true }
 ethereum_ssz = { version = "0.5", optional = true }
 alloy-genesis.workspace = true
-enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
+enr = { workspace = true, features = [
+    "serde",
+    "rust-secp256k1",
+], optional = true }
 
 # misc
 thiserror.workspace = true
@@ -41,7 +44,8 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
 [features]
-default = ["jsonrpsee-types"]
+default = ["jsonrpsee-types", "net"]
+net = ["dep:enr"]
 arbitrary = [
     "dep:arbitrary",
     "dep:proptest-derive",

@@ -384,7 +384,7 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{hex, public_key_to_address, AccessList, Signature, TxEip1559};
+    use reth_primitives::{hex, public_key_bytes_to_address, AccessList, Signature, TxEip1559};
     use std::str::FromStr;
 
     #[test]
@@ -414,7 +414,8 @@ mod tests {
             let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
             let recovered = signed.recover_signer().unwrap();
 
-            let expected = public_key_to_address(key_pair.public_key());
+            let expected =
+                public_key_bytes_to_address(&key_pair.public_key().serialize_uncompressed());
             assert_eq!(recovered, expected);
         }
     }

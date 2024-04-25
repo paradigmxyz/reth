@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-codecs.workspace = true
 reth-ethereum-forks.workspace = true
-reth-rpc-types.workspace = true
+reth-rpc-types = { workspace = true, default-features = false }
 revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
@@ -28,14 +28,16 @@ nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
 # enr = { workspace = true, features = ["rust-secp256k1"] }
-enr = { workspace = true, features = [] }
+enr = { workspace = true, features = [], optional = true }
 
 # crypto
 secp256k1 = { workspace = true, features = [
     "global-context",
     "recovery",
     "rand",
-] }
+], optional = true }
+k256 = { version = "0.13.3", features = ["ecdsa"] }
+
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
@@ -99,10 +101,9 @@ pprof = { workspace = true, features = [
     "frame-pointer",
     "criterion",
 ] }
-# secp256k1.workspace = true
 
 [features]
-default = ["c-kzg", "zstd-codec"]
+default = ["c-kzg", "zstd-codec", "peer"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "revm-primitives/arbitrary",
@@ -133,6 +134,7 @@ optimism = [
     "revm/optimism",
 ]
 test-utils = ["dep:plain_hasher", "dep:hash-db"]
+peer = ["dep:enr", "dep:secp256k1"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

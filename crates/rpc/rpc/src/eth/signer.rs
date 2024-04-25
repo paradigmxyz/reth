@@ -63,7 +63,8 @@ impl DevSigner {
         for _ in 0..num {
             let (sk, pk) = secp256k1::generate_keypair(&mut rand::thread_rng());
 
-            let address = reth_primitives::public_key_to_address(pk);
+            let address =
+                reth_primitives::public_key_bytes_to_address(&pk.serialize_uncompressed());
             let addresses = vec![address];
             let accounts = HashMap::from([(address, sk)]);
             signers.push(Box::new(DevSigner { addresses, accounts }) as Box<dyn EthSigner>);
