@@ -57,7 +57,7 @@ pub fn to_primitive_transaction(
     })
 }
 
-/// Transforms a [reth_rpc_types::TransactionKind] into a [reth_primitives::TransactionKind]
+/// Transforms a [reth_rpc_types::TransactionKind] into a [reth_primitives::TxKind]
 pub fn to_primitive_transaction_kind(
     kind: reth_rpc_types::TransactionKind,
 ) -> reth_primitives::TxKind {
