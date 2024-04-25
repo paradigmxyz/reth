@@ -32,6 +32,7 @@ reth-network-api.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
+reth-trie.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
 
@@ -71,7 +72,11 @@ hyper.workspace = true
 tracing.workspace = true
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # async
 futures.workspace = true
