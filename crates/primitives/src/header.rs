@@ -777,9 +777,8 @@ impl SealedHeader {
 
         // timestamp in past check
         #[cfg(feature = "optimism")]
-        if !chain_spec.is_optimism_mainnet() ||
-            chain_spec.is_bedrock_active_at_block(self.header.number) &&
-                self.header.is_timestamp_in_past(parent.timestamp)
+        if chain_spec.is_bedrock_active_at_block(self.header.number) &&
+            self.header.is_timestamp_in_past(parent.timestamp)
         {
             return Err(HeaderValidationError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,
