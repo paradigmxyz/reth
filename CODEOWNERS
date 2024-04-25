@@ -1,16 +1,14 @@
 *                           @gakonst
 bin/                        @onbjerg
 crates/blockchain-tree      @rakita @rkrasiuk
-crates/consensus/auto-seal  @mattsse
-crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
+crates/consensus            @rkrasiuk @mattsse @Rjected
 crates/exex                 @onbjerg @shekhirin
 crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
 crates/payload/             @mattsse @Rjected
 crates/prune                @shekhirin @joshieDo
-crates/revm/src/            @rakita
-crates/revm/                @mattsse
+crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected
 crates/rpc/rpc-types        @mattsse @Rjected @Evalir
 crates/rpc/rpc-types-compat @mattsse @Rjected @Evalir
