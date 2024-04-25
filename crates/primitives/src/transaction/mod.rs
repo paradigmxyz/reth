@@ -1726,12 +1726,26 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
 
+        let transaction: Transaction = tx.try_into()?;
+
         TransactionSigned::from_transaction_and_signature(
-            tx.try_into()?,
+            transaction.clone(),
             Signature {
                 r: signature.r,
                 s: signature.s,
-                odd_y_parity: signature.y_parity.ok_or(ConversionError::MissingYParity)?.0,
+                odd_y_parity: match transaction.clone().tx_type() {
+                    TxType::Legacy => {
+                        signature.v -
+                            U256::from(if let Some(chain_id) = transaction.chain_id() {
+                                chain_id.saturating_mul(2).saturating_add(35)
+                            } else {
+                                27
+                            })
+                    }
+                    _ => signature.v,
+                }
+                .try_into()
+                .map_err(|_| ConversionError::InvalidSignature)?,
             },
         )
         .try_into_ecrecovered()
