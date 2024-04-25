@@ -244,7 +244,7 @@ reth-network-api = { path = "crates/net/network-api" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }
-reth-primitives = { path = "crates/primitives" }
+reth-primitives = { path = "crates/primitives", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune" }
 reth-revm = { path = "crates/revm" }
@@ -253,7 +253,7 @@ reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
-reth-rpc-types = { path = "crates/rpc/rpc-types" }
+reth-rpc-types = { path = "crates/rpc/rpc-types", default-features = false }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages" }
 reth-stages-api = { path = "crates/stages-api" }
