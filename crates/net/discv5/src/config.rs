@@ -19,7 +19,7 @@ use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, network_
 const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
 
 /// Builds a [`Config`].
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ConfigBuilder {
     /// Config used by [`discv5::Discv5`]. Contains the discovery listen socket.
     discv5_config: Option<discv5::Config>,
@@ -180,7 +180,7 @@ impl ConfigBuilder {
 }
 
 /// Config used to bootstrap [`discv5::Discv5`].
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
@@ -235,7 +235,7 @@ impl Config {
 
 /// A boot node can be added either as a string in either 'enode' URL scheme or serialized from
 /// [`Enr`](discv5::Enr) type.
-#[derive(Debug, PartialEq, Eq, Hash, Display)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum BootNode {
     /// An unsigned node record.
     #[display(fmt = "{_0}")]

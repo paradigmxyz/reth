@@ -252,8 +252,8 @@ impl DiscoveryArgs {
         }
 
         if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
-            network_config_builder = network_config_builder.disable_discv4_discovery();
-            network_config_builder = network_config_builder.enable_discv5_discovery();
+            network_config_builder =
+                network_config_builder.disable_discv4_discovery().discovery_v5(Default::default());
         }
 
         network_config_builder
