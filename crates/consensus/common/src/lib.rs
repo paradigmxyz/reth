@@ -8,23 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_consensus::ConsensusError;
-use reth_primitives::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header};
-
 /// Collection of consensus validation methods.
 pub mod validation;
 
 /// Various calculation methods (e.g. block rewards)
 pub mod calc;
-
-/// Validates the header's extradata according to the beacon consensus rules.
-///
-/// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
-/// This must be 32 bytes or fewer; formally Hx.
-pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
-    if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
-    } else {
-        Ok(())
-    }
-}

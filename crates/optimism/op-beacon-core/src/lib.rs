@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_consensus::{Consensus, ConsensusError};
-use reth_consensus_common::{validate_header_extradata, validation};
+use reth_consensus_common::{validation, validation::validate_header_extradata};
 use reth_primitives::{
     Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
@@ -27,9 +27,6 @@ impl OptimismBeaconConsensus {
     /// Create a new instance of [OptimismBeaconConsensus]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         assert!(chain_spec.is_optimism(), "optimism consensus only valid for optimism chains");
-        if !chain_spec.is_optimism() {
-            panic!("Given chain spec is not optimism")
-        }
         Self { chain_spec }
     }
 }
