@@ -361,11 +361,6 @@ pub fn init_from_state_dump<DB: Database>(
                 false,
             )?;
 
-            // insert sync stage
-            for stage in StageId::ALL.iter() {
-                tx.put::<tables::StageCheckpoints>(stage.to_string(), StageCheckpoint::new(block))?;
-            }
-
             accounts.clear();
         }
 
