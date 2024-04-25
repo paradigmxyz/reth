@@ -7,6 +7,9 @@ crates/exex                 @onbjerg @shekhirin
 crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
+crates/node-builder/        @mattsse @Rjected @onbjerg
+crates/node-core/           @mattsse @Rjected @onbjerg
+crates/node-ethereum/       @mattsse @Rjected
 crates/payload/             @mattsse @Rjected
 crates/prune                @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
