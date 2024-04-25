@@ -2,6 +2,9 @@ use reth_primitives::{fs, B256};
 use std::io;
 use thiserror::Error;
 
+/// EVM compiler result.
+pub type EvmCompilerResult<T> = Result<T, EvmCompilerError>;
+
 /// EVM compiler error.
 #[derive(Debug, Error)]
 pub enum EvmCompilerError {
@@ -27,6 +30,3 @@ pub enum EvmCompilerError {
     #[error("failed to compile contract with hash {_0}: {_1}")]
     Compile(B256, #[source] revm_jit::Error),
 }
-
-/// EVM compiler result.
-pub type EvmCompilerResult<T> = Result<T, EvmCompilerError>;

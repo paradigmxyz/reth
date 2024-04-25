@@ -54,6 +54,8 @@ reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
 
+reth-evm-compiler = { workspace = true, optional = true }
+
 # crypto
 alloy-rlp.workspace = true
 
@@ -140,6 +142,8 @@ optimism = [
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
+
+compiler = ["dep:reth-evm-compiler"]
 
 [[bin]]
 name = "reth"

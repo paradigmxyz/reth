@@ -4498,7 +4498,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.5",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6354,6 +6354,7 @@ dependencies = [
  "reth-discv4",
  "reth-downloaders",
  "reth-ethereum-payload-builder",
+ "reth-evm-compiler",
  "reth-exex",
  "reth-interfaces",
  "reth-network",
@@ -6922,7 +6923,7 @@ dependencies = [
 
 [[package]]
 name = "reth-evm-compiler"
-version = "0.2.0-beta.5"
+version = "0.2.0-beta.6"
 dependencies = [
  "confy",
  "indexmap 2.2.6",
@@ -6960,7 +6961,6 @@ name = "reth-evm-optimism"
 version = "0.2.0-beta.6"
 dependencies = [
  "reth-evm",
- "reth-evm-compiler",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -8070,6 +8070,7 @@ version = "0.1.0"
 name = "revm-jit-builtins"
 version = "0.1.0"
 dependencies = [
+ "paste",
  "revm-interpreter",
  "revm-jit-backend",
  "revm-jit-context",

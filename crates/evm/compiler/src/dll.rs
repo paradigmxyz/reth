@@ -1,6 +1,6 @@
 use libloading::{Library, Symbol};
 use reth_primitives::B256;
-use revm_jit::{debug_time, EvmCompilerFn};
+use revm_jit::{debug_time, trace_time, EvmCompilerFn};
 use std::{
     collections::{hash_map::Entry, HashMap},
     path::Path,
@@ -20,11 +20,15 @@ pub struct EvmCompilerDll {
 
 impl EvmCompilerDll {
     /// Open a DLL at the given path.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the DLL is a valid EVM compiler DLL.
     pub unsafe fn open(path: &Path) -> Result<Self, libloading::Error> {
-        debug_time!("dlopen", || Self::dlopen(path))
+        debug_time!("dlopen", || Self::open_inner(path))
     }
 
-    unsafe fn dlopen(filename: &Path) -> Result<Self, libloading::Error> {
+    unsafe fn open_inner(filename: &Path) -> Result<Self, libloading::Error> {
         Library::new(filename).map(|lib| Self { lib, cache: HashMap::new() })
     }
 
@@ -34,11 +38,10 @@ impl EvmCompilerDll {
         &mut self,
         hash: B256,
     ) -> Result<Option<Symbol<'_, EvmCompilerFn>>, libloading::Error> {
-        debug_time!("dlsym", || self.get_function_inner(hash))
+        trace_time!("dlsym", || self.get_function_inner(hash))
     }
 
     #[inline]
-    #[allow(clippy::missing_transmute_annotations)]
     fn get_function_inner(
         &mut self,
         hash: B256,

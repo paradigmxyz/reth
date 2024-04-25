@@ -6,8 +6,7 @@ use revm::primitives::SpecId;
 use revm_jit::{debug_time, llvm, EvmCompiler, EvmLlvmBackend, Linker};
 use serde::{Deserialize, Serialize};
 use std::{
-    fmt,
-    io::{self, Write},
+    fmt, io,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU8, Ordering},
@@ -19,6 +18,7 @@ use std::{
 
 // TODO: Invalidate metadata if the compiler dependency version changes.
 
+const BG_INTERVAL: Duration = Duration::from_secs(5);
 const OBJ_NAME: &str = if cfg!(windows) { "object.obj" } else { "object.o" };
 
 /// List of contracts to compile.
@@ -124,7 +124,7 @@ impl EvmParCompiler {
     pub fn new(out_dir: PathBuf) -> EvmCompilerResult<Self> {
         fs::create_dir_all(&out_dir)?;
         let evm_versions = EvmVersions::enabled();
-        for evm_version in EvmVersions::enabled() {
+        for evm_version in evm_versions {
             fs::create_dir_all(&out_dir.join(format!("{evm_version:?}")))?;
         }
         let metadata_path = out_dir.join("meta.json");
@@ -182,6 +182,8 @@ impl EvmParCompiler {
 
     /// Adds the given contracts to the compiler. Won't overwrite existing contracts.
     pub fn add_contracts<'a>(&mut self, contracts: impl IntoIterator<Item = &'a CompilerContract>) {
+        let contracts = contracts.into_iter();
+        debug!("adding {:?} contracts", contracts.size_hint());
         for contract in contracts {
             let hash = keccak256(&contract.bytecode);
             let contract = self.metadata.contract_or_insert(hash, contract);
@@ -213,11 +215,11 @@ impl EvmParCompiler {
             self.with_bg_tasks(total, |tx| {
                 to_compile
                     .par_iter()
-                    .map(|(evm_version, hash, contract)| {
+                    .map(|&(evm_version, hash, contract)| {
                         let start = Instant::now();
-                        self.compile_one(*evm_version, hash, &contract.contract)?;
+                        self.compile_one(evm_version, hash, &contract.contract)?;
                         let elapsed = start.elapsed();
-                        let _ = tx.send(BgNotification::CompiledOne(elapsed));
+                        let _ = tx.send(BgNotification::CompiledOne(*hash, elapsed));
                         Ok(())
                     })
                     .collect::<EvmCompilerResult<()>>()
@@ -320,12 +322,7 @@ impl EvmParCompiler {
             .map_err(compile_error)?;
 
         let object_file_path = contract_dir.join(OBJ_NAME);
-        {
-            let writer = std::fs::File::create(object_file_path)?;
-            let mut writer = io::BufWriter::new(writer);
-            compiler.write_object(&mut writer).map_err(compile_error)?;
-            writer.flush()?;
-        }
+        compiler.write_object_to_file(&object_file_path).map_err(compile_error)?;
 
         let state = self.metadata.state(hash, evm_version);
         debug_assert_eq!(state.get(), ContractState::ToCompile);
@@ -347,28 +344,56 @@ impl EvmParCompiler {
 
         thread::scope(|scope| -> EvmCompilerResult<()> {
             let builder = thread::Builder::new().name("evm-compiler-bg-tasks".into());
-            // TODO: Make this not save every single notification, but capped at an interval.
             let bg = builder.spawn_scoped(scope, move || -> EvmCompilerResult<()> {
                 let mut n = 0;
                 let max_n = total.ilog10() as usize + 1;
-                while let Ok(notification) = rx.recv() {
-                    match notification {
-                        BgNotification::CompiledOne(elapsed) => {
+
+                let mut last_save = Instant::now();
+                let mut save = || {
+                    if last_save.elapsed() >= BG_INTERVAL {
+                        let r = self.save();
+                        last_save = Instant::now();
+                        r
+                    } else {
+                        Ok(())
+                    }
+                };
+
+                let mut durations = Vec::new();
+
+                let start = Instant::now();
+                loop {
+                    match rx.recv_timeout(BG_INTERVAL) {
+                        Ok(BgNotification::CompiledOne(hash, elapsed)) => {
+                            durations.push(elapsed);
                             n += 1;
-                            info!("compiled a contract in {elapsed:?} ({n: >max_n$}/{total})");
-                            self.save()?;
+                            info!("({n: >max_n$}/{total}) compiled contract {hash} in {elapsed:?}");
+                            save()?;
                             if n == total {
                                 break;
                             }
                         }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => save()?,
                     }
                 }
+                let elapsed = start.elapsed();
+
+                let mean = durations.iter().sum::<Duration>() / durations.len() as u32;
+                durations.sort_unstable();
+                let median = if durations.len() % 2 == 0 {
+                    (durations[durations.len() / 2 - 1] + durations[durations.len() / 2]) / 2
+                } else {
+                    durations[durations.len() / 2]
+                };
+                info!("compiled {n} contracts in {elapsed:?} (μ: {mean:?}, ~: {median:?})");
+
                 Ok(())
             })?;
 
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(tx)));
-            resume_panic(res, "panic during contract compilation")?;
             resume_panic(bg.join(), "panic in background thread")?;
+            resume_panic(res, "panic during contract compilation")?;
             Ok(())
         })
     }
@@ -387,7 +412,7 @@ impl Drop for EvmParCompiler {
 }
 
 enum BgNotification {
-    CompiledOne(Duration),
+    CompiledOne(B256, Duration),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -429,6 +454,7 @@ impl Metadata {
     }
 
     #[must_use]
+    #[instrument(level = "trace", skip(self, contract))]
     fn contract_or_insert(
         &mut self,
         hash: B256,
@@ -436,11 +462,13 @@ impl Metadata {
     ) -> &mut MetadataContract {
         match self.contracts.entry(hash) {
             Entry::Occupied(e) => {
+                trace!("updating");
                 let c = e.into_mut();
                 c.update(contract);
                 c
             }
             Entry::Vacant(e) => {
+                trace!("inserting");
                 e.insert(MetadataContract::new(contract.clone(), self.spec_id_count))
             }
         }
@@ -723,7 +751,7 @@ mod tests {
         // for (_, _, c, _) in compiler.metadata.all_contracts() {
         //     c.state(SpecId::CANCUN).set(ContractState::None);
         // }
-        compiler.save().unwrap();
+        // compiler.save().unwrap();
         compiler.background_tasks = true;
         compiler.force_link = true;
         let all = compiler.run_to_end(&contracts).unwrap();
@@ -731,19 +759,19 @@ mod tests {
         let dll_path = root.join(dll_filename(&format!("{spec_id:?}")));
         let mut dll = unsafe { crate::EvmCompilerDll::open(&dll_path) }.unwrap();
 
-        let mut interpreter =
-            revm::interpreter::Interpreter::new(Default::default(), u64::MAX, false);
-        let mut host = revm::interpreter::DummyHost::default();
         let hashes = all.iter().filter(|(v, _)| *v == spec_id).map(|(_, x)| x);
         for hash in hashes {
             let contract = compiler.metadata.contract(hash);
             let state = contract.state(spec_id);
             assert_eq!(state.get(), ContractState::Linked);
             let function = dll.get_function(*hash).unwrap().unwrap();
-            eprintln!("{function:?}");
-            let t = Instant::now();
+
+            let mut interpreter =
+                revm::interpreter::Interpreter::new(Default::default(), u64::MAX, false);
+            let mut host = revm::interpreter::DummyHost::default();
+            // let t = Instant::now();
             let _r = unsafe { function.call_with_interpreter(&mut interpreter, &mut host) };
-            eprintln!("{:?} - {:?}", t.elapsed(), interpreter.instruction_result);
+            // eprintln!("{:?} - {:?}", t.elapsed(), interpreter.instruction_result);
         }
     }
 
