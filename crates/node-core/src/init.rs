@@ -332,7 +332,7 @@ pub fn init_from_state_dump<DB: Database>(
             // acc
             total_inserted_accounts += accounts.len();
 
-            debug!(target: "reth::cli",
+            info!(target: "reth::cli",
                 chunk_total_byte_len,
                 parsed_new_accounts=accounts.len(),
                 total_inserted_accounts,
