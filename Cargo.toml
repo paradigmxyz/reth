@@ -270,7 +270,7 @@ reth-node-events = { path = "crates/node/events" }
 # RATAN: Determine if we need to remove secp256k1 from revm.
 revm = { version = "8.0.0", features = [
     "std",
-    "secp256k1",
+    # "secp256k1",
 ], default-features = false }
 revm-primitives = { version = "3.1.0", features = [
     "std",
