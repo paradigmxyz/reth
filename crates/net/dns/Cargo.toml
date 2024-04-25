@@ -17,7 +17,6 @@ reth-primitives.workspace = true
 reth-net-common.workspace = true
 
 # ethereum
-alloy-rlp.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr.workspace = true
 
@@ -39,8 +38,10 @@ serde = { workspace = true, optional = true }
 serde_with = { version = "3.3.0", optional = true }
 
 [dev-dependencies]
+alloy-rlp.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 reth-tracing.workspace = true
+rand.workspace = true
 
 [features]
 default = ["serde"]

@@ -6394,6 +6394,7 @@ dependencies = [
  "enr",
  "linked_hash_set",
  "parking_lot 0.12.1",
+ "rand 0.8.5",
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
