@@ -57,12 +57,10 @@ pub fn to_primitive_transaction(
     })
 }
 
-/// Transforms a [reth_rpc_types::TransactionKind] into a [reth_primitives::TxKind]
-pub fn to_primitive_transaction_kind(
-    kind: reth_rpc_types::TransactionKind,
-) -> reth_primitives::TxKind {
+/// Transforms a [alloy_primitives::TxKind] into a [reth_primitives::TxKind]
+pub fn to_primitive_transaction_kind(kind: alloy_primitives::TxKind) -> reth_primitives::TxKind {
     match kind {
-        reth_rpc_types::TransactionKind::Call(to) => reth_primitives::TxKind::Call(to),
-        reth_rpc_types::TransactionKind::Create => reth_primitives::TxKind::Create,
+        alloy_primitives::TxKind::Call(to) => reth_primitives::TxKind::Call(to),
+        alloy_primitives::TxKind::Create => reth_primitives::TxKind::Create,
     }
 }
