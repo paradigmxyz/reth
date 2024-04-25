@@ -33,7 +33,6 @@ impl StateReverts {
         tracing::trace!(target: "provider::reverts", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
-        let should_append_storage = storage_changeset_cursor.last()?.map_or(true, |(key, _)| key.block_number() < first_block);
         for (block_index, mut storage_changes) in self.0.storage.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
 
@@ -56,7 +55,7 @@ impl StateReverts {
                 // See [StorageWipe::Primary] for more details.
                 let mut wiped_storage = Vec::new();
                 if wiped {
-                    tracing::trace!(target: "provider::reverts", %address, "Wiping storage");
+                    tracing::trace!(target: "provider::reverts", ?address, "Wiping storage");
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         wiped_storage.push((entry.key, entry.value));
                         while let Some(entry) = storages_cursor.next_dup_val()? {
@@ -65,23 +64,9 @@ impl StateReverts {
                     }
                 }
 
-                tracing::trace!(target: "provider::reverts", %address, ?storage, "Writing storage reverts");
+                tracing::trace!(target: "provider::reverts", ?address, ?storage, "Writing storage reverts");
                 for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    if should_append_storage {
-                        storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
-                    } else {
-                        if let Some(entry) = storage_changeset_cursor.seek_by_key_subkey(storage_id, key)? {
-                            if entry.key == key {
-                                tracing::warn!(target: "provider::reverts", ?storage_id, ?entry, "Overwriting storage changeset entry");
-                                storage_changeset_cursor.delete_current()?;
-                            }
-                        }
-
-                        // TODO: fix this comment
-                        // upsert on dupsort tables will append to subkey. see implementation of
-                        // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
-                        storage_changeset_cursor.upsert(storage_id, StorageEntry { key, value })?;
-                    }
+                    storage_changeset_cursor.append_dup(storage_id, StorageEntry { key, value })?;
                 }
             }
         }
@@ -89,7 +74,12 @@ impl StateReverts {
         // Write account changes
         tracing::trace!(target: "provider::reverts", "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-        let should_append_accounts = account_changeset_cursor.last()?.map_or(true, |(block_number, _)| block_number < first_block);
+
+        // append entries if key is new
+        let should_append_accounts =
+            account_changeset_cursor.last()?.map_or(true, |(block_number, _)| {
+                block_number < first_block || block_number == first_block && block_number == 0
+            });
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             // Sort accounts by address.
@@ -102,14 +92,6 @@ impl StateReverts {
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },
                     )?;
                 } else {
-                    if let Some(entry) = account_changeset_cursor.seek_by_key_subkey(block_number, address)? {
-                        if entry.address == address {
-                            tracing::warn!(target: "provider::reverts", block_number, ?entry, "Overwriting account changeset entry");
-                            account_changeset_cursor.delete_current()?;
-                        }
-                    }
-
-                    // TODO: fix this comment
                     // upsert on dupsort tables will append to subkey. see implementation of
                     // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
                     account_changeset_cursor.upsert(
