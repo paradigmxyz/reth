@@ -13,6 +13,7 @@ use reth_primitives::{
     Address, Bytes, SealedBlockWithSenders, B256, U256,
 };
 use reth_provider::{bundle_state::StorageRevertsIter, OriginalValuesKnown, ProviderError};
+use reth_tracing::tracing::error;
 use rusqlite::Connection;
 
 pub struct Database {
@@ -255,7 +256,10 @@ impl reth::revm::Database for Database {
     type Error = ProviderError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.get_account(address).map_err(|_| ProviderError::UnsupportedProvider)
+        self.get_account(address).map_err(|err| {
+            error!(%err, %address, "Failed to get account by address");
+            ProviderError::UnsupportedProvider
+        })
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -267,20 +271,26 @@ impl reth::revm::Database for Database {
         match bytecode {
             Ok(data) => Ok(Bytecode::new_raw(Bytes::from_str(&data).unwrap())),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Bytecode::default()),
-            Err(_) => Err(ProviderError::UnsupportedProvider),
+            Err(err) => {
+                error!(%err, %code_hash, "Failed to get bytecode by hash");
+                Err(ProviderError::UnsupportedProvider)
+            }
         }
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         let storage = self.connection().query_row::<String, _, _>(
-            "SELECT data FROM storage WHERE address = ? AND index = ?",
+            "SELECT data FROM storage WHERE address = ? AND key = ?",
             (address.to_string(), index.to_string()),
             |row| row.get(0),
         );
         match storage {
             Ok(data) => Ok(U256::from_str(&data).unwrap()),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(U256::ZERO),
-            Err(_) => Err(ProviderError::UnsupportedProvider),
+            Err(err) => {
+                error!(%err, %address, %index, "Failed to get storage by address and index");
+                Err(ProviderError::UnsupportedProvider)
+            }
         }
     }
 
@@ -295,7 +305,10 @@ impl reth::revm::Database for Database {
             // No special handling for `QueryReturnedNoRows` is needed, because revm does block
             // number bound checks on its own.
             // See https://github.com/bluealloy/revm/blob/1ca3d39f6a9e9778f8eb0fcb74fe529345a531b4/crates/interpreter/src/instructions/host.rs#L106-L123.
-            Err(_) => Err(ProviderError::UnsupportedProvider),
+            Err(err) => {
+                error!(%err, %number, "Failed to get block hash by number");
+                Err(ProviderError::UnsupportedProvider)
+            }
         }
     }
 }
