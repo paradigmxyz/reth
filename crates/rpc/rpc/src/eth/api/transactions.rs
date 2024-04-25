@@ -15,9 +15,10 @@ use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
+    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered,
+    TxKind::{Call, Create},
+    B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
