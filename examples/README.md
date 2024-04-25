@@ -50,7 +50,7 @@ to make a PR!
 
 | Example                                              | Description                                                                                                                |
 |------------------------------------------------------| -------------------------------------------------------------------------------------------------------------------------- |
-| [Trace pending transactions](./trace-transaction-cli) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
+| [Trace pending transactions](./txpool-tracing) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
 | [Standalone txpool](./network-txpool)     | Illustrates how to use the network as a standalone component together with a transaction pool with a custom pool validator |
 
 ## P2P
