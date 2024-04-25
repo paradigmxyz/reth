@@ -16,23 +16,23 @@ async fn can_sync() -> eyre::Result<()> {
     let mut second_node = nodes.pop().unwrap();
     let mut first_node = nodes.pop().unwrap();
 
-    let tip: usize = 300;
+    let tip: usize = 90;
     let tip_index: usize = tip - 1;
 
-    // On first node, create a chain up to block number 300a
+    // On first node, create a chain up to block number 90a
     let canonical_payload_chain = advance_chain(tip, &mut first_node, wallet.clone()).await?;
     let canonical_chain =
         canonical_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
 
-    // On second node, sync optimistically up to block number 297a
+    // On second node, sync optimistically up to block number 87a
     second_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index - 3]).await?;
     second_node.wait_block(tip as u64 - 3, canonical_chain[tip_index - 3], true).await?;
 
-    // On third node, sync optimistically up to block number 300a
+    // On third node, sync optimistically up to block number 90a
     third_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index]).await?;
     third_node.wait_block(tip as u64, canonical_chain[tip_index], true).await?;
 
-    //  On second node, create a side chain: 298b ->  299b -> 300b
+    //  On second node, create a side chain: 88b ->  89b -> 90b
     wallet.lock().await.inner_nonce -= 3;
     second_node.payload.timestamp = first_node.payload.timestamp - 3; // TODO: probably want to make it node agnostic
     let side_payload_chain = advance_chain(3, &mut second_node, wallet.clone()).await?;
