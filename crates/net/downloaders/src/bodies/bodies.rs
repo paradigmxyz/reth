@@ -354,6 +354,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         if this.is_terminated() {
+            this.download_range = RangeInclusive::new(1, 0);
             return Poll::Ready(None);
         }
         // Submit new requests and poll any in progress
