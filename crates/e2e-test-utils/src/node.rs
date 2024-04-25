@@ -187,7 +187,7 @@ where
     /// Asserts that a new block has been added to the blockchain
     /// and the tx has been included in the block.
     ///
-    /// Does NOT work for for pipeline since there's no stream notification!
+    /// Does NOT work for pipeline since there's no stream notification!
     pub async fn assert_new_block(
         &mut self,
         tip_tx_hash: B256,
