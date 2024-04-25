@@ -22,7 +22,7 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_primitives::{pk2id, Bytes, ForkId, NodeRecord};
+use reth_primitives::{pk2id, ForkId, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -392,8 +392,6 @@ pub enum DnsDiscoveryEvent {
 
 /// Converts an [Enr] into a [NodeRecord]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
-    use alloy_rlp::Decodable;
-
     let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
         tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
@@ -402,7 +400,7 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
     }
     .into_ipv4_mapped();
 
-    let fork_id = enr.get_decodable::<ForkId>(b"eth").ok();
+    let fork_id = enr.get_decodable::<ForkId>(b"eth").transpose().ok()?;
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
