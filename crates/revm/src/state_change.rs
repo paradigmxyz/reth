@@ -55,9 +55,11 @@ pub fn post_block_balance_increments(
     balance_increments
 }
 
-// todo: temporary move over of constants from revm until we've migrated to the latest version
-const HISTORY_SERVE_WINDOW: usize = 8192;
-const HISTORY_STORAGE_ADDRESS: Address = address!("25a219378dad9b3503c8268c9ca836a52427a4fb");
+/// todo: temporary move over of constants from revm until we've migrated to the latest version
+pub const HISTORY_SERVE_WINDOW: usize = 8192;
+
+/// todo: temporary move over of constants from revm until we've migrated to the latest version
+pub const HISTORY_STORAGE_ADDRESS: Address = address!("25a219378dad9b3503c8268c9ca836a52427a4fb");
 
 /// Applies the pre-block state change outlined in [EIP-2935] to store historical blockhashes in a
 /// system contract.
@@ -92,6 +94,11 @@ where
     // account internally as `Loaded`, which is required, since we want the EVM to retrieve storage
     // values from the DB when `BLOCKHASH` is invoked.
     let mut account = Account::from(AccountInfo::default());
+
+    // We load the `HISTORY_STORAGE_ADDRESS` account because REVM expects this to be loaded in order
+    // to access any storage, which we will do below.
+    db.basic(HISTORY_STORAGE_ADDRESS)
+        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
 
     // Insert the state change for the slot
     let (slot, value) = eip2935_block_hash_slot(block_number - 1, db)
@@ -138,7 +145,8 @@ where
         }
     }
 
-    // Commit the state change
+    // Mark the account as touched and commit the state change
+    account.mark_touch();
     db.commit(HashMap::from([(HISTORY_STORAGE_ADDRESS, account)]));
 
     Ok(())
