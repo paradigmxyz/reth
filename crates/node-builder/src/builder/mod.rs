@@ -449,7 +449,7 @@ where
     ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>> {
         let Self { builder, task_executor, data_dir } = self;
 
-        let launcher = DefaultNodeLauncher { task_executor, data_dir };
+        let launcher = DefaultNodeLauncher::new(task_executor, data_dir);
         builder.launch_with(launcher).await
     }
 
