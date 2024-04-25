@@ -25,7 +25,7 @@ use std::{
     ops::DerefMut,
     sync::Arc,
 };
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
 /// database.
@@ -59,16 +59,15 @@ pub enum InitDatabaseError {
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
-    /// State root missing from state dump.
-    #[error("state root missing")]
-    SateRootMissing,
     /// Computed state root doesn't match state root in state dump file.
-    #[error("state root mismatch, state dump: {state_dump}, computed: {computed}")]
+    #[error(
+        "state root mismatch, state dump: {expected_state_root}, computed: {computed_state_root}"
+    )]
     SateRootMismatch {
         /// Expected state root.
-        state_dump: B256,
+        expected_state_root: B256,
         /// Actual state root.
-        computed: B256,
+        computed_state_root: B256,
     },
 }
 
@@ -316,8 +315,7 @@ pub fn init_from_state_dump<DB: Database>(
 
     // first line can be state root, then it can be used for verifying against computed state root
     reader.read_line(&mut line)?;
-    let expected_state_root =
-        serde_json::from_str::<StateRoot>(&line).ok_or(InitDatabaseError::StateRootMissing)?.root;
+    let expected_state_root = serde_json::from_str::<StateRoot>(&line)?.root;
 
     trace!(target: "reth::cli",
         root=%expected_state_root,
@@ -387,10 +385,7 @@ pub fn init_from_state_dump<DB: Database>(
             "Computed state root does not match state root in state dump"
         );
 
-        return Err(InitDatabaseError::SateRootMismatch {
-            state_dump: expected_state_root,
-            computed: computed_state_root.root,
-        })
+        Err(InitDatabaseError::SateRootMismatch { expected_state_root, computed_state_root })?
     } else {
         info!(target: "reth::cli",
             ?computed_state_root,
