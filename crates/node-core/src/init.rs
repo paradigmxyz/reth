@@ -18,13 +18,15 @@ use reth_provider::{
     DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
     ProviderFactory,
 };
+use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     io::BufRead,
+    ops::DerefMut,
     sync::Arc,
 };
-use tracing::{debug, trace};
+use tracing::{debug, error, trace, warn};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
 /// database.
@@ -302,7 +304,7 @@ pub fn init_from_state_dump<DB: Database>(
 
     // first line can be state root, then it can be used for verifying against computed state root
     reader.read_line(&mut line)?;
-    let _state_root = match serde_json::from_str::<StateRoot>(&line) {
+    let expected_state_root = match serde_json::from_str::<StateRoot>(&line) {
         Ok(root) => {
             trace!(target: "reth::cli",
                 root=%root.root,
@@ -321,6 +323,7 @@ pub fn init_from_state_dump<DB: Database>(
     line.clear();
 
     // remaining lines are accounts
+    let mut provider_rw = factory.provider_rw()?;
     while let Ok(n) = reader.read_line(&mut line) {
         chunk_total_byte_len += n;
         if DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK <= chunk_total_byte_len || n == 0 {
@@ -338,7 +341,6 @@ pub fn init_from_state_dump<DB: Database>(
             chunk_total_byte_len = 0;
 
             // use transaction to insert genesis header
-            let provider_rw = factory.provider_rw()?;
             insert_genesis_hashes(
                 &provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
@@ -350,10 +352,9 @@ pub fn init_from_state_dump<DB: Database>(
             )?;
 
             // block is already written to static files
-            let tx = provider_rw.into_tx();
-
+            let tx = provider_rw.deref_mut().tx_mut();
             insert_state::<DB>(
-                &tx,
+                tx,
                 accounts.len(),
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
@@ -365,7 +366,6 @@ pub fn init_from_state_dump<DB: Database>(
                 tx.put::<tables::StageCheckpoints>(stage.to_string(), StageCheckpoint::new(block))?;
             }
 
-            tx.commit()?;
             accounts.clear();
         }
 
@@ -379,10 +379,53 @@ pub fn init_from_state_dump<DB: Database>(
         line.clear();
     }
 
+    // compute and compare state root
+    //
+    // note: we compute it even if we have nothing to compare to because we set the stage
+    // checkpoints further up.
+    let computed_state_root = compute_state_root(&provider_rw)?;
+    if let Some(expected_state_root) = expected_state_root {
+        if computed_state_root != expected_state_root {
+            error!(target: "reth::cli", ?computed_state_root, ?expected_state_root, "Computed state root does not match state root in state dump");
+            eyre::bail!("Computed state root differs from state root in state dump. Got {:?}, expected {:?}", computed_state_root, expected_state_root);
+        }
+    } else {
+        warn!(target: "reth::cli", "No state root found in file, skipping verification.");
+    }
+    provider_rw.commit()?;
+
     Ok(hash)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Computes the state root (from scratch) based on the accounts and storages present in the
+/// database.
+fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::Result<StateRoot> {
+    trace!(target: "reth::cli", "Computing state root");
+
+    let tx = provider.tx_ref();
+    let mut intermediate_state: Option<IntermediateStateRootState> = None;
+    let root = loop {
+        match StateRootComputer::from_tx(tx)
+            .with_intermediate_state(intermediate_state)
+            .root_with_progress()?
+        {
+            StateRootProgress::Progress(state, _, updates) => {
+                trace!(target: "reth::cli", last_account_key = %state.last_account_key, updates_len = updates.len(), "Flushing trie updates");
+                intermediate_state = Some(*state);
+                updates.flush(tx)?;
+            }
+            StateRootProgress::Complete(root, _, updates) => {
+                trace!(target: "reth::cli", updates_len = updates.len(), "State root has been computed");
+                updates.flush(tx)?;
+                break root
+            }
+        }
+    };
+
+    Ok(StateRoot { root })
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct StateRoot {
     root: B256,
 }
