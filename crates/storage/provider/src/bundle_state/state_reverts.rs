@@ -93,26 +93,20 @@ impl StateReverts {
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
 
-            let mut account_block_reverts_iter = account_block_reverts.into_iter();
-
-            if !exhaustive_data_for_keys {
-                if let Some((address, info)) = account_block_reverts_iter.next() {
-                    // upsert on dup sort tables will seek and then append.
-                    //
-                    // upsert on dupsort table will **not** overwrite the existing value for the
-                    // `block-number` key
+            for (address, info) in account_block_reverts {
+                if exhaustive_data_for_keys {
+                    account_changeset_cursor.append_dup(
+                        block_number,
+                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                    )?;
+                } else {
+                    // upsert on dupsort tables will append to subkey. see implementation of
+                    // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
                     account_changeset_cursor.upsert(
                         block_number,
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },
                     )?;
                 }
-            }
-
-            for (address, info) in account_block_reverts_iter {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                )?;
             }
         }
 
