@@ -142,8 +142,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
     tx: &<DB as Database>::TXMut,
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
-    block: u64,
-    append_only: bool,
+    block: u64
 ) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
     let mut reverts_init = HashMap::with_capacity(capacity);
@@ -201,7 +200,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         block,
     );
 
-    bundle.write_to_storage_with_mode(tx, None, OriginalValuesKnown::Yes, append_only)?;
+    bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
