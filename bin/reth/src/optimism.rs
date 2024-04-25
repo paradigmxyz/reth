@@ -3,10 +3,7 @@
 use clap::Parser;
 use reth::cli::Cli;
 use reth_node_builder::NodeHandle;
-use reth_node_optimism::{
-    args::RollupArgs, rpc::SequencerClient, OptimismEngineTypes, OptimismNode,
-};
-use reth_provider::BlockReaderIdExt;
+use reth_node_optimism::{args::RollupArgs, rpc::SequencerClient, OptimismNode};
 use std::sync::Arc;
 
 // We use jemalloc for performance reasons
@@ -27,7 +24,7 @@ fn main() {
     }
 
     if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
-        let NodeHandle { node, node_exit_future } = builder
+        let NodeHandle { node: _node, node_exit_future } = builder
             .node(OptimismNode::new(rollup_args.clone()))
             .extend_rpc_modules(move |ctx| {
                 // register sequencer tx forwarder

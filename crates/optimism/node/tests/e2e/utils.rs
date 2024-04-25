@@ -1,9 +1,9 @@
-use reth::{primitives::Bytes, rpc::types::engine::PayloadAttributes, tasks::TaskManager};
+use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
 use reth_node_optimism::{OptimismBuiltPayload, OptimismNode, OptimismPayloadBuilderAttributes};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::{Address, ChainSpecBuilder, Genesis, B256, BASE_MAINNET};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
@@ -25,6 +25,7 @@ pub(crate) async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskMa
     .await
 }
 
+/// Advance the chain with sequential payloads returning them in the end.
 pub(crate) async fn advance_chain(
     length: usize,
     node: &mut OpNode,

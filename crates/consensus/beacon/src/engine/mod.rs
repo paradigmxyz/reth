@@ -1611,10 +1611,11 @@ where
             })?
             .ok_or_else(|| ProviderError::HeaderNotFound(max_block.into()))?;
             self.blockchain.set_canonical_head(max_header);
-            self.blockchain.connect_buffered_blocks_to_canonical_hashes_and_finalize(max_block)?;
         }
 
         if sync_target_state.finalized_block_hash.is_zero() {
+            self.blockchain.update_block_hashes_and_remove_chains()?;
+            self.blockchain.connect_buffered_blocks_to_canonical_hashes()?;
             // We are on a optimistic syncing process, better to wait for the next FCU to handle
             return Ok(())
         }

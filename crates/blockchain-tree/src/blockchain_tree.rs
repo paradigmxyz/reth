@@ -18,7 +18,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, U256,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
@@ -319,6 +319,10 @@ where
         block_validation_kind: BlockValidationKind,
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         debug_assert!(self.validate_block(&block).is_ok(), "Block must be validated");
+
+        if self.is_block_hash_canonical(&block.hash())? {
+            return Ok(BlockStatus::Valid(BlockAttachment::Canonical))
+        }
 
         let parent = block.parent_num_hash();
 
@@ -804,6 +808,16 @@ where
     ) -> RethResult<()> {
         self.finalize_block(last_finalized_block);
 
+        let last_canonical_hashes = self.update_block_hashes()?;
+
+        self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
+
+        Ok(())
+    }
+
+    /// Update all block hashes. iterate over present and new list of canonical hashes and compare
+    /// them. Remove all mismatches, disconnect them and removes all chains.
+    pub fn update_block_hashes(&mut self) -> RethResult<BTreeMap<BlockNumber, B256>> {
         let last_canonical_hashes = self
             .externals
             .fetch_latest_canonical_hashes(self.config.num_of_canonical_hashes() as usize)?;
@@ -818,9 +832,7 @@ where
             }
         }
 
-        self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
-
-        Ok(())
+        Ok(last_canonical_hashes)
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -1207,6 +1219,19 @@ where
         &mut self,
         revert_until: BlockNumber,
     ) -> Result<Option<Chain>, CanonicalError> {
+        if self
+            .externals
+            .provider_factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .unwrap_or_default() >
+            revert_until
+        {
+            return Err(CanonicalError::CanonicalRevert(
+                "Cannot revert from static files.".to_string(),
+            ));
+        }
+
         // read data that is needed for new sidechain
         let provider_rw = self.externals.provider_factory.provider_rw()?;
 

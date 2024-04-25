@@ -82,6 +82,15 @@ where
         res
     }
 
+    fn update_block_hashes_and_remove_chains(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        let mut tree = self.tree.write();
+        let res = tree.update_block_hashes();
+        tree.update_chains_metrics();
+        res
+    }
+
     fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
         trace!(target: "blockchain_tree", "Connecting buffered blocks to canonical hashes");
         let mut tree = self.tree.write();
