@@ -1,7 +1,7 @@
 use auto_impl::auto_impl;
-use reth_db::models::BlockNumberAddress;
+use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_interfaces::provider::ProviderResult;
-use reth_primitives::{Address, BlockNumber, B256};
+use reth_primitives::{Address, BlockNumber, StorageEntry, B256};
 use std::{
     collections::BTreeMap,
     ops::{Range, RangeInclusive},
@@ -15,7 +15,7 @@ pub trait HistoryWriter: Send + Sync {
     /// Returns number of changesets walked.
     fn unwind_account_history_indices(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        changesets: impl IntoIterator<Item = (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<usize>;
 
     /// Insert account change index to database. Used inside AccountHistoryIndex stage
@@ -29,7 +29,7 @@ pub trait HistoryWriter: Send + Sync {
     /// Returns number of changesets walked.
     fn unwind_storage_history_indices(
         &self,
-        range: Range<BlockNumberAddress>,
+        changesets: impl IntoIterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<usize>;
 
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage

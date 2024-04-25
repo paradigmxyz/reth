@@ -1,5 +1,5 @@
 use auto_impl::auto_impl;
-use reth_db::models::BlockNumberAddress;
+use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber, StorageEntry, B256};
 use std::{
@@ -17,7 +17,7 @@ pub trait HashingWriter: Send + Sync {
     /// Set of hashed keys of updated accounts.
     fn unwind_account_hashing(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        changesets: impl IntoIterator<Item = (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
     /// Inserts all accounts into [reth_db::tables::AccountsHistory] table.
@@ -37,7 +37,7 @@ pub trait HashingWriter: Send + Sync {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing(
         &self,
-        range: Range<BlockNumberAddress>,
+        changesets: impl IntoIterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
 
     /// Iterates over storages and inserts them to hashing table.
