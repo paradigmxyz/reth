@@ -280,12 +280,12 @@ impl Future for ExExManager {
 
             // it is a logic error for this to ever underflow since the manager manages the
             // notification IDs
-            let notification_id = exex
+            let notification_index = exex
                 .next_notification_id
                 .checked_sub(self.min_id)
                 .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = self.buffer.get(notification_id) {
-                debug!(exex.id, notification_id, "sent notification to exex");
+            if let Some(notification) = self.buffer.get(notification_index) {
+                debug!(exex.id, notification_id = exex.next_notification_id, "sent notification to exex");
                 if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
                     // the channel was closed, which is irrecoverable for the manager
                     return Poll::Ready(Err(err.into()))
