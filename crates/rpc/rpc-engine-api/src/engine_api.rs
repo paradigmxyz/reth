@@ -46,7 +46,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
     task_spawner: Box<dyn TaskSpawner>,
     /// The latency and response type metrics for engine api calls
     metrics: EngineApiMetrics,
-    ///For identification of the consensus client 
+    /// Identification of the execution client used by the consensus client
     client: ClientVersionV1,
 }
 
@@ -692,13 +692,14 @@ where
         self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
-    // handler for `engine_getClientVersionV1`
-    // see also <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md>
+    /// Handler for `engine_getClientVersionV1`
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md>
     async fn get_client_version_v1(&self, client:ClientVersionV1) -> RpcResult<Vec<ClientVersionV1>> {
         trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
         let start = Instant::now();
         let res = EngineApi::get_client_version_v1(self, client).await;
-        // self.inner.metrics.new_payload_v1.record(start.elapsed());
+        
         Ok(res?)
     }
 
