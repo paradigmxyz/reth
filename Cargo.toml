@@ -71,17 +71,18 @@ members = [
     "crates/trie/",
     "crates/trie-parallel/",
     "examples/",
-    "examples/additional-rpc-namespace-in-cli/",
+    "examples/node-custom-rpc/",
     "examples/beacon-api-sse/",
-    "examples/cli-extension-event-hooks/",
+    "examples/node-event-hooks/",
     "examples/custom-evm/",
-    "examples/custom-node/",
+    "examples/custom-engine-types/",
     "examples/custom-node-components/",
     "examples/custom-dev-node/",
     "examples/custom-payload-builder/",
     "examples/manual-p2p/",
+    "examples/network-txpool/",
     "examples/rpc-db/",
-    "examples/trace-transaction-cli/",
+    "examples/txpool-tracing/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
     "examples/exex/minimal/",
@@ -271,18 +272,13 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-node-events = { path = "crates/node/events" }
 
 # revm
-revm = { version = "8.0.0", features = [
-    "std",
-    "secp256k1",
-], default-features = false }
-revm-primitives = { version = "3.1.0", features = [
-    "std",
-], default-features = false }
+revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "dc614ee" }
 
 # eth
 alloy-chains = "0.1.15"
-alloy-primitives = "0.7.0"
+alloy-primitives = "0.7.1"
 alloy-dyn-abi = "0.7.0"
 alloy-sol-types = "0.7.0"
 alloy-rlp = "0.3.4"
@@ -358,7 +354,7 @@ http = "0.2.8"
 http-body = "0.4.5"
 
 # p2p
-discv5 = { git = "https://github.com/sigp/discv5", rev = "04ac004" }
+discv5 = "0.6.0"
 igd-next = "0.14.3"
 
 # rpc
@@ -367,11 +363,12 @@ jsonrpsee-core = "0.22"
 jsonrpsee-types = "0.22"
 
 # crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = [
+secp256k1 = { version = "0.28", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
-enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
+# TODO: Remove `k256` feature: https://github.com/sigp/enr/pull/74
+enr = { version = "0.12.0", default-features = false, features = ["k256", "rust-secp256k1"] }
 
 # for eip-4844
 c-kzg = "1.0.0"

@@ -2,10 +2,8 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
-use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rlp::{Buf, BufMut, Decodable, Encodable, Error as RlpError, EMPTY_STRING_CODE};
+use alloy_primitives::{Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
-use serde::{Deserialize, Serialize};
 
 /// Container type for various Ethereum transaction requests
 ///
@@ -36,7 +34,7 @@ pub struct LegacyTransactionRequest {
     /// The gas limit for the transaction
     pub gas_limit: U256,
     /// The kind of transaction (e.g., Call, Create)
-    pub kind: TransactionKind,
+    pub kind: TxKind,
     /// The value of the transaction
     pub value: U256,
     /// The input data for the transaction
@@ -57,7 +55,7 @@ pub struct EIP2930TransactionRequest {
     /// The gas limit for the transaction
     pub gas_limit: U256,
     /// The kind of transaction (e.g., Call, Create)
-    pub kind: TransactionKind,
+    pub kind: TxKind,
     /// The value of the transaction
     pub value: U256,
     /// The input data for the transaction
@@ -80,7 +78,7 @@ pub struct EIP1559TransactionRequest {
     /// The gas limit for the transaction
     pub gas_limit: U256,
     /// The kind of transaction (e.g., Call, Create)
-    pub kind: TransactionKind,
+    pub kind: TxKind,
     /// The value of the transaction
     pub value: U256,
     /// The input data for the transaction
@@ -103,7 +101,7 @@ pub struct EIP4844TransactionRequest {
     /// The gas limit for the transaction
     pub gas_limit: U256,
     /// The kind of transaction (e.g., Call, Create)
-    pub kind: TransactionKind,
+    pub kind: TxKind,
     /// The value of the transaction
     pub value: U256,
     /// The input data for the transaction
@@ -116,82 +114,4 @@ pub struct EIP4844TransactionRequest {
     pub blob_versioned_hashes: Vec<B256>,
     /// Sidecar information for the transaction
     pub sidecar: BlobTransactionSidecar,
-}
-
-/// Represents the `to` field of a transaction request
-///
-/// This determines what kind of transaction this is
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum TransactionKind {
-    /// Transaction will call this address or transfer funds to this address
-    Call(Address),
-    /// No `to` field set, this transaction will create a contract
-    Create,
-}
-
-// == impl TransactionKind ==
-
-impl TransactionKind {
-    /// If this transaction is a call this returns the address of the callee
-    pub fn as_call(&self) -> Option<&Address> {
-        match self {
-            TransactionKind::Call(to) => Some(to),
-            TransactionKind::Create => None,
-        }
-    }
-}
-
-impl Encodable for TransactionKind {
-    /// This encodes the `to` field of a transaction request.
-    /// If the [TransactionKind] is a [TransactionKind::Call] it will encode the inner address:
-    /// `rlp(address)`
-    ///
-    /// If the [TransactionKind] is a [TransactionKind::Create] it will encode an empty list:
-    /// `rlp([])`, which is also
-    fn encode(&self, out: &mut dyn BufMut) {
-        match self {
-            TransactionKind::Call(to) => to.encode(out),
-            TransactionKind::Create => [].encode(out),
-        }
-    }
-    fn length(&self) -> usize {
-        match self {
-            TransactionKind::Call(to) => to.length(),
-            TransactionKind::Create => [].length(),
-        }
-    }
-}
-
-impl Decodable for TransactionKind {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if let Some(&first) = buf.first() {
-            if first == EMPTY_STRING_CODE {
-                buf.advance(1);
-                Ok(TransactionKind::Create)
-            } else {
-                let addr = <Address as Decodable>::decode(buf)?;
-                Ok(TransactionKind::Call(addr))
-            }
-        } else {
-            Err(RlpError::InputTooShort)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn raw_kind_encoding_sanity() {
-        // check the 0x80 encoding for Create
-        let mut buf = Vec::new();
-        TransactionKind::Create.encode(&mut buf);
-        assert_eq!(buf, vec![0x80]);
-
-        // check decoding
-        let buf = [0x80];
-        let decoded = TransactionKind::decode(&mut &buf[..]).unwrap();
-        assert_eq!(decoded, TransactionKind::Create);
-    }
 }

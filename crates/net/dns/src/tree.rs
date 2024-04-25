@@ -22,7 +22,7 @@ use crate::error::{
     ParseEntryResult,
 };
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
-use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
+use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey, Error as EnrError};
 use reth_primitives::{hex, Bytes};
 use secp256k1::SecretKey;
 #[cfg(feature = "serde")]

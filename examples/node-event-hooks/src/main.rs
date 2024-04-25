@@ -4,7 +4,7 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run -p cli-extension-event-hooks -- node
+//! cargo run -p node-event-hooks -- node
 //! ```
 //!
 //! This launch the regular reth node and also print:

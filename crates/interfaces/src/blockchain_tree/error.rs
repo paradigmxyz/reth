@@ -18,7 +18,7 @@ pub enum BlockchainTreeError {
         last_finalized: BlockNumber,
     },
     /// Thrown if no side chain could be found for the block.
-    #[error("blockChainId can't be found in BlockchainTree with internal index {chain_id}")]
+    #[error("chainId can't be found in BlockchainTree with internal index {chain_id}")]
     BlockSideChainIdConsistency {
         /// The internal identifier for the side chain.
         chain_id: u64,

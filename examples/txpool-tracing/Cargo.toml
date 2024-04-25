@@ -1,5 +1,5 @@
 [package]
-name = "trace-transaction-cli"
+name = "txpool-tracing"
 version = "0.0.0"
 publish = false
 edition.workspace = true
