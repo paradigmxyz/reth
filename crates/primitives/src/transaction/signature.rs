@@ -33,7 +33,7 @@ impl Signature {
     /// signature.
     #[cfg(feature = "optimism")]
     pub const fn optimism_deposit_tx_signature() -> Self {
-        Self::default()
+        Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
     }
 }
 
