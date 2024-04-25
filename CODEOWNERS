@@ -10,8 +10,6 @@ crates/payload/             @mattsse @Rjected
 crates/prune                @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected
-crates/rpc/rpc-types        @mattsse @Rjected @Evalir
-crates/rpc/rpc-types-compat @mattsse @Rjected @Evalir
 crates/stages/              @onbjerg @rkrasiuk @shekhirin
 crates/stages-api/          @onbjerg @rkrasiuk @shekhirin
 crates/static-file          @joshieDo @shekhirin
