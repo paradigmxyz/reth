@@ -4868,7 +4868,6 @@ name = "network-txpool"
 version = "0.0.0"
 dependencies = [
  "eyre",
- "reth",
  "reth-network",
  "reth-provider",
  "reth-transaction-pool",
