@@ -70,7 +70,7 @@ async fn can_restore_blob_tx_on_reorg() -> eyre::Result<()> {
     // submit normal payload
     node.engine_api.submit_payload(payload, attributes, PayloadStatusEnum::Valid, vec![]).await?;
 
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;

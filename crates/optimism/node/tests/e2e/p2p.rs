@@ -16,7 +16,6 @@ use tokio::sync::Mutex;
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-
     let chain_id: ChainId = BASE_MAINNET.chain.into();
 
     let tasks = TaskManager::current();

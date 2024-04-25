@@ -144,7 +144,6 @@ where
 // Type aliases
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
-
 type Adapter<N> = NodeAdapter<
     RethFullAdapter<TmpDB, N>,
     <<N as Node<TmpNodeAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<

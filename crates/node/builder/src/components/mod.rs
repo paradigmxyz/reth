@@ -29,7 +29,7 @@ mod pool;
 ///  - transaction pool
 ///  - network
 ///  - payload builder.
-pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Send + Sync + 'static {
+pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Send + Sync + Unpin + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool + Unpin;
 
