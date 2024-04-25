@@ -3,19 +3,6 @@
 version = 3
 
 [[package]]
-name = "additional-rpc-namespace-in-cli"
-version = "0.0.0"
-dependencies = [
- "clap",
- "eyre",
- "jsonrpsee",
- "reth",
- "reth-node-ethereum",
- "reth-transaction-pool",
- "tokio",
-]
-
-[[package]]
 name = "addr2line"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -262,9 +249,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99bbad0a6b588ef4aec1b5ddbbfdacd9ef04e00b979617765b03174318ee1f3a"
+checksum = "50c715249705afa1e32be79dabfd35e2ef0f1cc02ad2cf48c9d1e20026ee637b"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -1429,12 +1416,13 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.0.83"
+version = "1.0.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1174fb0b6ec23863f8b971027804a42614e347eafb0a95bf0b12cdae21fc4d0"
+checksum = "d32a725bc159af97c3e629873bb9f88fb8cf8a4867175f76dc987815ea07c83b"
 dependencies = [
  "jobserver",
  "libc",
+ "once_cell",
 ]
 
 [[package]]
@@ -1563,14 +1551,6 @@ name = "clap_lex"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
-
-[[package]]
-name = "cli-extension-event-hooks"
-version = "0.0.0"
-dependencies = [
- "reth",
- "reth-node-ethereum",
-]
 
 [[package]]
 name = "coins-bip32"
@@ -2010,6 +1990,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-engine-types"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-ethereum-payload-builder",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc-types",
+ "reth-tracing",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "custom-evm"
 version = "0.0.0"
 dependencies = [
@@ -2031,26 +2031,6 @@ dependencies = [
  "futures-util",
  "reth",
  "reth-node-ethereum",
-]
-
-[[package]]
-name = "custom-node"
-version = "0.0.0"
-dependencies = [
- "eyre",
- "reth",
- "reth-basic-payload-builder",
- "reth-ethereum-payload-builder",
- "reth-node-api",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-payload-builder",
- "reth-primitives",
- "reth-rpc-types",
- "reth-tracing",
- "serde",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -2755,6 +2735,42 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
+name = "exex-minimal"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-tracing",
+ "tokio",
+]
+
+[[package]]
+name = "exex-op-bridge"
+version = "0.0.0"
+dependencies = [
+ "alloy-sol-types",
+ "eyre",
+ "futures",
+ "itertools 0.12.1",
+ "reth",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tracing",
+ "rusqlite",
  "tokio",
 ]
 
@@ -4739,22 +4755,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minimal"
-version = "0.0.0"
-dependencies = [
- "eyre",
- "futures",
- "reth",
- "reth-exex",
- "reth-node-api",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-primitives",
- "reth-tracing",
- "tokio",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4907,6 +4907,27 @@ dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
  "libc",
+]
+
+[[package]]
+name = "node-custom-rpc"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "jsonrpsee",
+ "reth",
+ "reth-node-ethereum",
+ "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
+name = "node-event-hooks"
+version = "0.0.0"
+dependencies = [
+ "reth",
+ "reth-node-ethereum",
 ]
 
 [[package]]
@@ -5096,26 +5117,6 @@ name = "oorandom"
 version = "11.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
-
-[[package]]
-name = "op-bridge"
-version = "0.0.0"
-dependencies = [
- "alloy-sol-types",
- "eyre",
- "futures",
- "itertools 0.12.1",
- "reth",
- "reth-exex",
- "reth-node-api",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-primitives",
- "reth-provider",
- "reth-tracing",
- "rusqlite",
- "tokio",
-]
 
 [[package]]
 name = "opaque-debug"
@@ -7181,7 +7182,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "c-kzg",
- "cfg-if",
  "clap",
  "criterion",
  "derive_more",
@@ -8959,18 +8959,18 @@ checksum = "a38c90d48152c236a3ab59271da4f4ae63d678c5d7ad6b7714d7cb9760be5e4b"
 
 [[package]]
 name = "thiserror"
-version = "1.0.59"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0126ad08bff79f29fc3ae6a55cc72352056dfff61e3ff8bb7129476d44b23aa"
+checksum = "03468839009160513471e86a034bb2c5c0e4baae3b43f79ffc55c4a5427b3297"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.59"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1cd413b5d558b4c5bf3680e324a6fa5014e7b7c067a51e69dbdf47eb7148b66"
+checksum = "c61f3ba182994efc43764a46c018c347bc492c79f024e705f46567b418f6d4f7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9304,16 +9304,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6bc1c9ce2b5135ac7f93c72918fc37feb872bdc6a5533a8b85eb4b86bfdae52"
 
 [[package]]
-name = "trace-transaction-cli"
-version = "0.0.0"
-dependencies = [
- "clap",
- "futures-util",
- "reth",
- "reth-node-ethereum",
-]
-
-[[package]]
 name = "tracing"
 version = "0.1.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9555,6 +9545,16 @@ dependencies = [
  "serde_json",
  "termcolor",
  "toml",
+]
+
+[[package]]
+name = "txpool-tracing"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "futures-util",
+ "reth",
+ "reth-node-ethereum",
 ]
 
 [[package]]

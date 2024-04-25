@@ -3,9 +3,10 @@
 use jsonrpsee::types::ErrorObject;
 use reqwest::Client;
 use reth_rpc::eth::{
-    error::{EthApiError, EthResult, ToRpcError},
+    error::{EthApiError, EthResult},
     traits::RawTransactionForwarder,
 };
+use reth_rpc_types::ToRpcError;
 use std::sync::{atomic::AtomicUsize, Arc};
 
 /// Error type when interacting with the Sequencer

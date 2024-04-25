@@ -6,8 +6,8 @@ use reth::{
 };
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
-    components::{NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
-    FullNodeComponentsAdapter, FullNodeTypesAdapter,
+    components::{Components, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
+    FullNodeTypesAdapter, NodeAdapter,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
@@ -59,7 +59,7 @@ where
     };
 
     // Create nodes and peer them
-    let mut nodes: Vec<NodeHelperType<N>> = Vec::with_capacity(num_nodes);
+    let mut nodes: Vec<NodeTestContext<_>> = Vec::with_capacity(num_nodes);
 
     for idx in 0..num_nodes {
         let mut node_config = NodeConfig::test()
@@ -110,4 +110,4 @@ type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB
 
 /// Type alias for a type of NodeHelper
 pub type NodeHelperType<N> =
-    NodeTestContext<FullNodeComponentsAdapter<TmpNodeAdapter<N>, TmpPool<N>>>;
+    NodeTestContext<NodeAdapter<TmpNodeAdapter<N>, Components<TmpNodeAdapter<N>, TmpPool<N>>>>;
