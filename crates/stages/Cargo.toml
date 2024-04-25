@@ -23,6 +23,7 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-etl.workspace = true
 reth-config.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-consensus.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -44,6 +45,7 @@ reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-evm-ethereum.workspace = true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
 reth-revm.workspace = true
 reth-static-file.workspace = true

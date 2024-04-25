@@ -5,13 +5,13 @@ use crate::{
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
     provider::RootMismatch,
     RethResult,
@@ -1259,8 +1259,8 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
+    use reth_consensus::test_utils::TestConsensus;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
-    use reth_interfaces::test_utils::TestConsensus;
     use reth_node_ethereum::EthEvmConfig;
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::proofs::calculate_receipt_root;

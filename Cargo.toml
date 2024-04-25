@@ -8,6 +8,7 @@ members = [
     "crates/consensus/beacon/",
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
+    "crates/consensus/consensus/",
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/etl/",
@@ -50,6 +51,7 @@ members = [
     "crates/node-ethereum/",
     "crates/node-builder/",
     "crates/optimism/node/",
+    "crates/optimism/evm/",
     "crates/node-core/",
     "crates/node/api/",
     "crates/stages/",
@@ -207,6 +209,7 @@ reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
+reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
 reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
@@ -218,6 +221,7 @@ reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-node-core = { path = "crates/node-core" }
 reth-node-api = { path = "crates/node/api" }
 reth-downloaders = { path = "crates/net/downloaders" }

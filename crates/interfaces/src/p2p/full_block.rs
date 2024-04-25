@@ -1,13 +1,11 @@
 use super::headers::client::HeadersRequest;
-use crate::{
-    consensus::{Consensus, ConsensusError},
-    p2p::{
-        bodies::client::{BodiesClient, SingleBodyRequest},
-        error::PeerRequestResult,
-        headers::client::{HeadersClient, SingleHeaderRequest},
-    },
+use crate::p2p::{
+    bodies::client::{BodiesClient, SingleBodyRequest},
+    error::PeerRequestResult,
+    headers::client::{HeadersClient, SingleHeaderRequest},
 };
 use futures::Stream;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_primitives::{
     BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
 };
@@ -38,7 +36,7 @@ impl<Client> FullBlockClient<Client> {
     /// Returns a client with Test consensus
     #[cfg(any(test, feature = "test-utils"))]
     pub fn test_client(client: Client) -> Self {
-        Self::new(client, Arc::new(crate::test_utils::TestConsensus::default()))
+        Self::new(client, Arc::new(reth_consensus::test_utils::TestConsensus::default()))
     }
 }
 

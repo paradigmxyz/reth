@@ -1,10 +1,21 @@
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
+//! EVM config for vanilla optimism.
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(feature = "optimism")]
+
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
 };
-use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
 mod execute;
 pub use execute::*;
@@ -72,7 +83,7 @@ impl ConfigureEvm for OptimismEvmConfig {
 mod tests {
     use super::*;
     use reth_primitives::revm_primitives::{BlockEnv, CfgEnv};
-    use revm::primitives::SpecId;
+    use reth_revm::primitives::SpecId;
 
     #[test]
     #[ignore]
