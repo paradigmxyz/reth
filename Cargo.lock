@@ -3,19 +3,6 @@
 version = 3
 
 [[package]]
-name = "additional-rpc-namespace-in-cli"
-version = "0.0.0"
-dependencies = [
- "clap",
- "eyre",
- "jsonrpsee",
- "reth",
- "reth-node-ethereum",
- "reth-transaction-pool",
- "tokio",
-]
-
-[[package]]
 name = "addr2line"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1565,14 +1552,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
-name = "cli-extension-event-hooks"
-version = "0.0.0"
-dependencies = [
- "reth",
- "reth-node-ethereum",
-]
-
-[[package]]
 name = "coins-bip32"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2010,6 +1989,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-engine-types"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-ethereum-payload-builder",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-rpc-types",
+ "reth-tracing",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "custom-evm"
 version = "0.0.0"
 dependencies = [
@@ -2031,26 +2030,6 @@ dependencies = [
  "futures-util",
  "reth",
  "reth-node-ethereum",
-]
-
-[[package]]
-name = "custom-node"
-version = "0.0.0"
-dependencies = [
- "eyre",
- "reth",
- "reth-basic-payload-builder",
- "reth-ethereum-payload-builder",
- "reth-node-api",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-payload-builder",
- "reth-primitives",
- "reth-rpc-types",
- "reth-tracing",
- "serde",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -4902,6 +4881,27 @@ dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
  "libc",
+]
+
+[[package]]
+name = "node-custom-rpc"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "jsonrpsee",
+ "reth",
+ "reth-node-ethereum",
+ "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
+name = "node-event-hooks"
+version = "0.0.0"
+dependencies = [
+ "reth",
+ "reth-node-ethereum",
 ]
 
 [[package]]
@@ -9278,16 +9278,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6bc1c9ce2b5135ac7f93c72918fc37feb872bdc6a5533a8b85eb4b86bfdae52"
 
 [[package]]
-name = "trace-transaction-cli"
-version = "0.0.0"
-dependencies = [
- "clap",
- "futures-util",
- "reth",
- "reth-node-ethereum",
-]
-
-[[package]]
 name = "tracing"
 version = "0.1.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9529,6 +9519,16 @@ dependencies = [
  "serde_json",
  "termcolor",
  "toml",
+]
+
+[[package]]
+name = "txpool-tracing"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "futures-util",
+ "reth",
+ "reth-node-ethereum",
 ]
 
 [[package]]
