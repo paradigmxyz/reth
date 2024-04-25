@@ -206,7 +206,6 @@ impl ImportCommand {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn build_import_pipeline<DB, C>(
         &self,
         config: &Config,
