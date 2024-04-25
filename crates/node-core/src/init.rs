@@ -25,7 +25,7 @@ use std::{
     ops::DerefMut,
     sync::Arc,
 };
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
 /// database.
@@ -380,8 +380,17 @@ pub fn init_from_state_dump<DB: Database>(
     let computed_state_root = compute_state_root(&provider_rw)?;
     if let Some(expected_state_root) = expected_state_root {
         if computed_state_root != expected_state_root {
-            error!(target: "reth::cli", ?computed_state_root, ?expected_state_root, "Computed state root does not match state root in state dump");
+            error!(target: "reth::cli",
+                ?computed_state_root,
+                ?expected_state_root,
+                "Computed state root does not match state root in state dump"
+            );
             eyre::bail!("Computed state root differs from state root in state dump. Got {:?}, expected {:?}", computed_state_root, expected_state_root);
+        } else {
+            info!(target: "reth::cli",
+                ?computed_state_root,
+                
+            "Computed state root matches state root in state dump");
         }
     } else {
         warn!(target: "reth::cli", "No state root found in file, skipping verification.");
