@@ -1,20 +1,28 @@
 //! Helper types that can be used by launchers.
 
+use std::{cmp::max, sync::Arc, thread::available_parallelism};
+
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use reth_config::PruneConfig;
+use tokio::sync::mpsc::Receiver;
+
+use reth_auto_seal_consensus::MiningMode;
+use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
+use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
+    init::{init_genesis, InitDatabaseError},
     node_config::NodeConfig,
 };
-use reth_primitives::{Chain, ChainSpec, Head, B256};
+use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, PruneModes, B256};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_prune::PrunerBuilder;
 use reth_rpc::JwtSecret;
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{error, info};
-use std::{cmp::max, sync::Arc, thread::available_parallelism};
 
 /// Reusable setup for launching a node.
 ///
@@ -71,6 +79,12 @@ impl LaunchContext {
         }
 
         Ok(toml_config)
+    }
+
+    /// Convenience function to [Self::configure_globals]
+    pub fn with_configured_globals(self) -> Self {
+        self.configure_globals();
+        self
     }
 
     /// Configure global settings this includes:
@@ -155,6 +169,31 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
     }
 }
 impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
+    /// Adjust certain settings in the config to make sure they are set correctly
+    ///
+    /// This includes:
+    /// - Making sure the ETL dir is set to the datadir
+    /// - RPC settings are adjusted to the correct port
+    pub fn with_adjusted_configs(self) -> Self {
+        self.ensure_etl_datadir().with_adjusted_rpc_instance_ports()
+    }
+
+    /// Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
+    pub fn ensure_etl_datadir(mut self) -> Self {
+        if self.toml_config_mut().stages.etl.dir.is_none() {
+            self.toml_config_mut().stages.etl.dir =
+                Some(EtlConfig::from_datadir(&self.data_dir().data_dir_path()))
+        }
+
+        self
+    }
+
+    /// Change rpc port numbers based on the instance number.
+    pub fn with_adjusted_rpc_instance_ports(mut self) -> Self {
+        self.node_config_mut().adjust_instance_ports();
+        self
+    }
+
     /// Returns the attached [NodeConfig].
     pub const fn node_config(&self) -> &NodeConfig {
         &self.left().config
@@ -196,8 +235,20 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Returns the configured [PruneConfig]
-    pub fn prune_config(&self) -> eyre::Result<Option<PruneConfig>> {
-        Ok(self.node_config().prune_config()?.or_else(|| self.toml_config().prune.clone()))
+    pub fn prune_config(&self) -> Option<PruneConfig> {
+        self.node_config().prune_config().or_else(|| self.toml_config().prune.clone())
+    }
+
+    /// Returns the configured [PruneModes]
+    pub fn prune_modes(&self) -> Option<PruneModes> {
+        self.prune_config().map(|config| config.segments)
+    }
+
+    /// Returns an initialized [PrunerBuilder] based on the configured [PruneConfig]
+    pub fn pruner_builder(&self) -> PrunerBuilder {
+        PrunerBuilder::new(self.prune_config().unwrap_or_default())
+            .prune_delete_limit(self.chain_spec().prune_delete_limit)
+            .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
     /// Returns the initial pipeline target, based on whether or not the node is running in
@@ -215,6 +266,17 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         let default_jwt_path = self.data_dir().jwt_path();
         let secret = self.node_config().rpc.auth_jwt_secret(default_jwt_path)?;
         Ok(secret)
+    }
+
+    /// Returns the [MiningMode] intended for --dev mode.
+    pub fn dev_mining_mode(&self, pending_transactions_listener: Receiver<B256>) -> MiningMode {
+        if let Some(interval) = self.node_config().dev.block_time {
+            MiningMode::interval(interval)
+        } else if let Some(max_transactions) = self.node_config().dev.block_max_transactions {
+            MiningMode::instant(max_transactions, pending_transactions_listener)
+        } else {
+            MiningMode::instant(1, pending_transactions_listener)
+        }
     }
 }
 
@@ -265,6 +327,29 @@ where
     /// Returns the static file provider to interact with the static files.
     pub fn static_file_provider(&self) -> StaticFileProvider {
         self.right().static_file_provider()
+    }
+
+    /// Creates a new [StaticFileProducer] with the attached database.
+    pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
+        StaticFileProducer::new(
+            self.provider_factory().clone(),
+            self.static_file_provider(),
+            self.prune_modes().unwrap_or_default(),
+        )
+    }
+
+    /// Write the genesis block and state if it has not already been written
+    pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
+        init_genesis(self.provider_factory().clone())
+    }
+
+    /// Returns the max block that the node should run to, looking it up from the network if
+    /// necessary
+    pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
+    where
+        C: HeadersClient,
+    {
+        self.node_config().max_block(client, self.provider_factory().clone()).await
     }
 
     /// Starts the prometheus endpoint.

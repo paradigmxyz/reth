@@ -45,6 +45,15 @@ impl MiningMode {
         MiningMode::FixedBlockTime(FixedBlockTimeMiner::new(duration))
     }
 
+    /// Returns the kind of mining mode this is
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            MiningMode::None => "None",
+            MiningMode::Auto(_) => "Auto",
+            MiningMode::FixedBlockTime(_) => "FixedBlockTime",
+        }
+    }
+
     /// polls the Pool and returns those transactions that should be put in a block, if any.
     pub(crate) fn poll<Pool>(
         &mut self,
