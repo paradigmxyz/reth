@@ -74,19 +74,25 @@ impl StateReverts {
         // Write account changes
         tracing::trace!(target: "provider::reverts", "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-
-        // append entries if key is new
-        let should_append_accounts =
-            account_changeset_cursor.last()?.map_or(true, |(block_number, _)| {
-                block_number < first_block || block_number == first_block && block_number == 0
-            });
+        let last_account_changeset = account_changeset_cursor.last()?;
+        let mut should_append_accounts = None;
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
 
+            if should_append_accounts.is_none() {
+                if let Some(first_account_revert) = account_block_reverts.first() {
+                    should_append_accounts =
+                        Some(last_account_changeset.as_ref().map_or(true, |last_entry| {
+                            last_entry.0 <= block_number &&
+                                last_entry.1.address < first_account_revert.0
+                        }));
+                }
+            }
+
             for (address, info) in account_block_reverts {
-                if should_append_accounts {
+                if should_append_accounts.unwrap_or_default() {
                     account_changeset_cursor.append_dup(
                         block_number,
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },
