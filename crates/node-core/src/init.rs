@@ -41,6 +41,9 @@ pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
 // account)
 pub const AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP: usize = 285_228;
 
+/// Soft limit for the number of flushed updates after which to log progress summary.
+const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
+
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum InitDatabaseError {
@@ -416,6 +419,15 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 trace!(target: "reth::cli", last_account_key = %state.last_account_key, updates_len = updates.len(), "Flushing trie updates");
                 intermediate_state = Some(*state);
                 updates.flush(tx)?;
+
+                total_updates += updates_len;
+
+                if total_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
+                    info!(target: "reth::cli",
+                        total_updates,
+                        "Flushing trie updates"
+                    );
+                }
             }
             StateRootProgress::Complete(root, _, updates) => {
                 trace!(target: "reth::cli", updates_len = updates.len(), "State root has been computed");
