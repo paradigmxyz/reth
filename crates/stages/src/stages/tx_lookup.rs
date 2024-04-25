@@ -169,10 +169,10 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                             if e.table_name == <tables::RawTable<tables::TransactionHashNumbers> as reth_db::table::Table>::NAME && e.info.code == reth_db::mdbx::Error::KeyExist.to_err_code() {
 
                                 debug!(target: "sync::stages::transaction_lookup",
-                                    hash=?RawKey::<TxHash>::from_vec(e.key.clone()),
+                                    hash=reth_primitives::hex::encode(&e.key),
                                     ?block_range,
                                     chain=%provider.chain_spec().chain,
-                                    "nonce replayed for below bedrock block"
+                                    "tx nonce replayed in below bedrock block"
                                 );
 
                                 continue
