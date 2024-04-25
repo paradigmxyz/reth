@@ -1733,7 +1733,7 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
             Signature {
                 r: signature.r,
                 s: signature.s,
-                odd_y_parity: match transaction.clone().tx_type() {
+                odd_y_parity: match transaction.tx_type() {
                     TxType::Legacy => {
                         signature.v -
                             U256::from(if let Some(chain_id) = transaction.chain_id() {
