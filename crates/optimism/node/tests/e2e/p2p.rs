@@ -1,4 +1,5 @@
 use crate::utils::{advance_chain, setup};
+use reth_rpc_types::engine::PayloadStatusEnum;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -21,7 +22,7 @@ async fn can_sync() -> eyre::Result<()> {
     let canonical_chain =
         canonical_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
 
-    // On second node, sync optimistically up to block number 87a
+    // On second node, sync optimistically up to block number 89a
     second_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index - 1]).await?;
     second_node.wait_block(tip as u64 - 1, canonical_chain[tip_index - 1], true).await?;
 
@@ -31,19 +32,39 @@ async fn can_sync() -> eyre::Result<()> {
 
     let reorg_depth = 1usize;
 
-    //  On second node, create a side chain: 88b ->  89b -> 90b
+    //  On second node, create a side chain: 89a -> 90b
     wallet.lock().await.inner_nonce -= reorg_depth as u64;
     second_node.payload.timestamp = first_node.payload.timestamp - reorg_depth as u64; // TODO: probably want to make it node agnostic
     let side_payload_chain = advance_chain(reorg_depth, &mut second_node, wallet.clone()).await?;
     let side_chain = side_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
 
-    // On third node, cause a re-org
-    assert!(side_chain[reorg_depth - 1] != canonical_chain[tip_index]);
-    third_node.engine_api.update_optimistic_forkchoice(dbg!(side_chain[reorg_depth - 1])).await?;
+    // // On third node, cause a re-org, block won't be handled
+    // assert!(side_chain[reorg_depth - 1] != canonical_chain[tip_index]);
+    // third_node.engine_api.update_optimistic_forkchoice(side_chain[reorg_depth - 1]).await?;
+    // third_node.wait_unwind(89).await?;
+
+    // It will create a fork chain
+    let _ = third_node
+        .engine_api
+        .submit_payload(
+            side_payload_chain[0].0.clone(),
+            side_payload_chain[0].1.clone(),
+            PayloadStatusEnum::Valid,
+            Default::default(),
+        )
+        .await;
+
+    // It will issue a pipeline reorg
+    third_node
+        .engine_api
+        .update_forkchoice(side_chain[reorg_depth - 1], side_chain[reorg_depth - 1])
+        .await?;
+
+    // Make sure we have the updated block
     third_node
         .wait_block(
-            side_payload_chain[reorg_depth - 1].0.block().number,
-            side_chain[reorg_depth - 1],
+            side_payload_chain[0].0.block().number,
+            side_payload_chain[0].0.block().hash(),
             true,
         )
         .await?;

@@ -22,8 +22,9 @@ use reth_interfaces::{
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{
-    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, B256,
+    constants::EPOCH_SLOTS,
+    stage::{PipelineTarget, StageId},
+    BlockNumHash, BlockNumber, Head, Header, SealedBlock, SealedHeader, B256,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
@@ -320,7 +321,7 @@ where
         };
 
         if let Some(target) = maybe_pipeline_target {
-            this.sync.set_pipeline_sync_target(target);
+            this.sync.set_pipeline_sync_target(target.into());
         }
 
         Ok((this, handle))
@@ -1012,6 +1013,10 @@ where
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
             }
+            CanonicalError::OptimisticCanonicalRevert(block_number) => {
+                self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(*block_number));
+                return PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            }
             _ => {
                 warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
                 // TODO(mattsse) better error handling before attempting to sync (FCU could be
@@ -1042,7 +1047,7 @@ where
         if self.pipeline_run_threshold == 0 {
             // use the pipeline to sync to the target
             trace!(target: "consensus::engine", %target, "Triggering pipeline run to sync missing ancestors of the new head");
-            self.sync.set_pipeline_sync_target(target);
+            self.sync.set_pipeline_sync_target(target.into());
         } else {
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
@@ -1124,6 +1129,11 @@ where
                             {
                                 return if error.is_fatal() {
                                     error!(target: "consensus::engine", %error, "Encountered fatal error");
+                                    Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
+                                } else if let Some(block_number) = error.is_optimistic_revert() {
+                                    self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(
+                                        block_number,
+                                    ));
                                     Err(BeaconOnNewPayloadError::Internal(Box::new(error)))
                                 } else {
                                     // If we could not make the sync target block canonical, we
@@ -1398,6 +1408,9 @@ where
                                     error,
                                     hash
                                 )
+                            } else if let Some(block_number) = error.is_optimistic_revert() {
+                                self.sync
+                                    .set_pipeline_sync_target(PipelineTarget::Unwind(block_number));
                             }
                         }
                     }
@@ -1448,7 +1461,7 @@ where
         ) {
             // we don't have the block yet and the distance exceeds the allowed
             // threshold
-            self.sync.set_pipeline_sync_target(target);
+            self.sync.set_pipeline_sync_target(target.into());
             // we can exit early here because the pipeline will take care of syncing
             return
         }
@@ -1532,6 +1545,8 @@ where
                         // TODO: do not ignore this
                         let _ = self.blockchain.make_canonical(*target_hash.as_ref());
                     }
+                } else if let Some(block_number) = err.is_optimistic_revert() {
+                    self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(block_number));
                 }
 
                 Err((target.head_block_hash, err))
@@ -1675,7 +1690,7 @@ where
         // the tree update from executing too many blocks and blocking.
         if let Some(target) = pipeline_target {
             // run the pipeline to the target since the distance is sufficient
-            self.sync.set_pipeline_sync_target(target);
+            self.sync.set_pipeline_sync_target(target.into());
         } else if let Some(number) =
             self.blockchain.block_number(sync_target_state.finalized_block_hash)?
         {
@@ -1687,7 +1702,7 @@ where
         } else {
             // We don't have the finalized block in the database, so we need to
             // trigger another pipeline run.
-            self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash);
+            self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash.into());
         }
 
         Ok(())

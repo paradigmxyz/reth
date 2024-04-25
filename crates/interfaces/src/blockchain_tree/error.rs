@@ -67,6 +67,9 @@ pub enum CanonicalError {
     /// Error indicating a transaction failed to commit during execution.
     #[error("transaction error on commit: {0}")]
     CanonicalCommit(String),
+    /// Error indicating that a previous optimistic sync target was re-orged
+    #[error("transaction error on revert: {0}")]
+    OptimisticCanonicalRevert(BlockNumber),
 }
 
 impl CanonicalError {
@@ -82,6 +85,15 @@ impl CanonicalError {
             self,
             CanonicalError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. })
         )
+    }
+
+    /// Returns `Some(BlockNumber)` if the underlying error matches
+    /// [CanonicalError::OptimisticCanonicalRevert].
+    pub fn is_optimistic_revert(&self) -> Option<BlockNumber> {
+        match self {
+            CanonicalError::OptimisticCanonicalRevert(block_number) => Some(*block_number),
+            _ => None,
+        }
     }
 }
 
@@ -317,7 +329,8 @@ impl InsertBlockErrorKind {
             InsertBlockErrorKind::Canonical(err) => match err {
                 CanonicalError::BlockchainTree(_) |
                 CanonicalError::CanonicalCommit(_) |
-                CanonicalError::CanonicalRevert(_) => false,
+                CanonicalError::CanonicalRevert(_) |
+                CanonicalError::OptimisticCanonicalRevert(_) => false,
                 CanonicalError::Validation(_) => true,
                 CanonicalError::Provider(_) => false,
             },

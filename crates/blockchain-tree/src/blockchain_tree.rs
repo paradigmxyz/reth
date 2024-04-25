@@ -1227,9 +1227,7 @@ where
             .unwrap_or_default() >
             revert_until
         {
-            return Err(CanonicalError::CanonicalRevert(
-                "Cannot revert from static files.".to_string(),
-            ));
+            return Err(CanonicalError::OptimisticCanonicalRevert(revert_until))
         }
 
         // read data that is needed for new sidechain

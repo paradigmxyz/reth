@@ -14,6 +14,7 @@ use reth::{
 };
 use reth_node_builder::NodeTypes;
 use reth_primitives::{stage::StageId, BlockHash, BlockNumber, Bytes, B256};
+use reth_provider::BlockNumReader;
 use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
 
@@ -179,6 +180,16 @@ where
                 if wait_finish_checkpoint {
                     panic!("Finish checkpoint matches, but could not fetch block.");
                 }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if self.inner.provider.best_block_number()? == number {
+                break
             }
         }
         Ok(())
