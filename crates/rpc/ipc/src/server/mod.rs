@@ -378,6 +378,7 @@ where
         };
 
         let max_response_body_size = self.inner.max_response_body_size as usize;
+        let max_request_body_size = self.inner.max_request_body_size as usize;
         let rpc_service = self.rpc_middleware.service(RpcService::new(
             self.inner.methods.clone(),
             max_response_body_size,
@@ -392,7 +393,14 @@ where
         // work to a separate task takes the pressure off the connection so all concurrent responses
         // are also serialized concurrently and the connection can focus on read+write
         let f = tokio::task::spawn(async move {
-            ipc::call_with_service(request, rpc_service, max_response_body_size, conn).await
+            ipc::call_with_service(
+                request,
+                rpc_service,
+                max_response_body_size,
+                max_request_body_size,
+                conn,
+            )
+            .await
         });
 
         Box::pin(async move { f.await.map_err(|err| err.into()) })
@@ -780,7 +788,11 @@ mod tests {
     use crate::client::IpcClientBuilder;
     use futures::future::{select, Either};
     use jsonrpsee::{
-        core::client::{ClientT, Subscription, SubscriptionClientT},
+        core::{
+            client,
+            client::{ClientT, Error, Subscription, SubscriptionClientT},
+            params::BatchRequestBuilder,
+        },
         rpc_params,
         types::Request,
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
@@ -832,6 +844,43 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1));
             let _ = tx.send(c);
         }
+    }
+
+    #[tokio::test]
+    async fn can_set_the_max_response_body_size() {
+        let endpoint = dummy_endpoint();
+        let server = Builder::default().max_response_body_size(100).build(&endpoint);
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _| "a".repeat(101)).unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let response: Result<String, Error> = client.request("anything", rpc_params![]).await;
+        assert!(response.unwrap_err().to_string().contains("Exceeded max limit of"));
+    }
+
+    #[tokio::test]
+    async fn can_set_the_max_request_body_size() {
+        let endpoint = dummy_endpoint();
+        let server = Builder::default().max_request_body_size(100).build(&endpoint);
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _| "succeed").unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let response: Result<String, Error> =
+            client.request("anything", rpc_params!["a".repeat(101)]).await;
+        assert!(response.is_err());
+
+        let mut batch_request_builder = BatchRequestBuilder::new();
+        let _ = batch_request_builder.insert("anything", rpc_params!["a".repeat(10)]);
+        let _ = batch_request_builder.insert("anything", rpc_params!["a".repeat(10)]);
+        let _ = batch_request_builder.insert("anything", rpc_params!["a".repeat(10)]);
+        let response: Result<client::BatchResponse<'_, String>, Error> =
+            client.batch_request(batch_request_builder).await;
+        assert!(response.is_err());
     }
 
     #[tokio::test]
