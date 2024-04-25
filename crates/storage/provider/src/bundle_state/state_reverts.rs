@@ -109,12 +109,10 @@ impl StateReverts {
             }
 
             for (address, info) in account_block_reverts_iter {
-                if exhaustive_data_for_keys {
-                    account_changeset_cursor.append_dup(
-                        block_number,
-                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                    )?;
-                }
+                account_changeset_cursor.append_dup(
+                    block_number,
+                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                )?;
             }
         }
 
