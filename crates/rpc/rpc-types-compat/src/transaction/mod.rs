@@ -2,8 +2,8 @@
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 
 use reth_primitives::{
-    BlockNumber, Transaction as PrimitiveTransaction, TransactionKind as PrimitiveTransactionKind,
-    TransactionSignedEcRecovered, TxType, B256,
+    BlockNumber, Transaction as PrimitiveTransaction, TransactionSignedEcRecovered,
+    TxKind as PrimitiveTransactionKind, TxType, B256,
 };
 #[cfg(feature = "optimism")]
 use reth_rpc_types::optimism::OptimismTransactionFields;
