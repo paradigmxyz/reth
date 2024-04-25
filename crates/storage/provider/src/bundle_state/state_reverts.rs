@@ -6,8 +6,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::db::DatabaseError;
-use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
-use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
+use reth_primitives::{
+    revm::compat::into_reth_acc, Address, BlockNumber, StorageEntry, B256, U256,
+};
+use revm::{
+    db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot},
+    primitives::AccountInfo,
+};
 use std::iter::Peekable;
 
 /// Revert of the state.
@@ -74,42 +79,87 @@ impl StateReverts {
         // Write account changes
         tracing::trace!(target: "provider::reverts", "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-        let last_account_changeset = account_changeset_cursor.last()?;
-        let mut should_append_accounts = None;
-        for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
+
+        let mut account_block_reverts_iter = self.0.accounts.into_iter().enumerate();
+
+        // get reverts for first key
+        let Some((block_index, mut first_account_block_reverts)) =
+            account_block_reverts_iter.next()
+        else {
+            return Ok(())
+        };
+
+        // get (key, subkey) of first entry
+        let (first_block_number, first_address) = {
+            let block_number = first_block + block_index as BlockNumber;
+
+            let Some(first_account_revert) = first_account_block_reverts.first() else {
+                return Ok(())
+            };
+
+            let address = first_account_revert.0;
+
+            (block_number, address)
+        };
+
+        // Sort accounts by address.
+        first_account_block_reverts.par_sort_by_key(|a| a.0);
+
+        // if entries are sequential wrt entries already in database, entries can be appended
+        // for perf gains
+        let should_append_accounts =
+            account_changeset_cursor.last()?.as_ref().map_or(true, |last_entry| {
+                last_entry.0 <= first_block_number && last_entry.1.address < first_address
+            });
+
+        insert_accounts_sorted_by_address::<TX>(
+            &mut account_changeset_cursor,
+            first_block_number,
+            first_account_block_reverts.into_iter(),
+            should_append_accounts,
+        )?;
+
+        // insert reverts for remaining keys, if any
+        for (block_index, mut account_block_reverts) in account_block_reverts_iter {
             let block_number = first_block + block_index as BlockNumber;
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
 
-            if should_append_accounts.is_none() {
-                if let Some(first_account_revert) = account_block_reverts.first() {
-                    should_append_accounts =
-                        Some(last_account_changeset.as_ref().map_or(true, |last_entry| {
-                            last_entry.0 <= block_number &&
-                                last_entry.1.address < first_account_revert.0
-                        }));
-                }
-            }
-
-            for (address, info) in account_block_reverts {
-                if should_append_accounts.unwrap_or_default() {
-                    account_changeset_cursor.append_dup(
-                        block_number,
-                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                    )?;
-                } else {
-                    // upsert on dupsort tables will append to subkey. see implementation of
-                    // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
-                    account_changeset_cursor.upsert(
-                        block_number,
-                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                    )?;
-                }
-            }
+            insert_accounts_sorted_by_address::<TX>(
+                &mut account_changeset_cursor,
+                block_number,
+                account_block_reverts.into_iter(),
+                should_append_accounts,
+            )?;
         }
 
         Ok(())
     }
+}
+
+/// Inserts accounts into [`AccountChangeSets`](tables::AccountChangeSets) sorted by subkey
+/// [`Address`].
+fn insert_accounts_sorted_by_address<TX: DbTxMut>(
+    account_changeset_cursor: &mut <TX as DbTxMut>::DupCursorMut<tables::AccountChangeSets>,
+    block_number: u64,
+    account_block_reverts: impl Iterator<Item = (Address, Option<AccountInfo>)>,
+    append_only: bool,
+) -> Result<(), DatabaseError> {
+    for (address, info) in account_block_reverts {
+        if append_only {
+            account_changeset_cursor.append_dup(
+                block_number,
+                AccountBeforeTx { address, info: info.map(into_reth_acc) },
+            )?;
+        } else {
+            // upsert on dupsort tables will append to subkey. see implementation of
+            // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
+            account_changeset_cursor
+                .upsert(block_number, AccountBeforeTx { address, info: info.map(into_reth_acc) })?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Iterator over storage reverts.
