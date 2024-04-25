@@ -95,7 +95,7 @@ impl StateReverts {
 
             let mut account_block_reverts_iter = account_block_reverts.into_iter();
 
-            if exhaustive_data_for_keys {
+            if !exhaustive_data_for_keys {
                 if let Some((address, info)) = account_block_reverts_iter.next() {
                     // upsert on dup sort tables will seek and then append.
                     //
