@@ -9,7 +9,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (mut nodes, _tasks, _) = setup(1, custom_chain(), true).await?;
+    let (mut nodes, _tasks) = setup(1, custom_chain(), true).await?;
 
     assert_chain_advances(nodes.pop().unwrap()).await;
     Ok(())

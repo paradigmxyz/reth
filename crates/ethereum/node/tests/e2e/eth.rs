@@ -4,9 +4,7 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
-use reth_e2e_test_utils::{
-    node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
-};
+use reth_e2e_test_utils::{node::NodeTestContext, setup, wallet::Wallet};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 use std::sync::Arc;
@@ -15,7 +13,7 @@ use std::sync::Arc;
 async fn can_run_eth_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, _wallet) = setup::<EthereumNode>(
+    let (mut nodes, _tasks) = setup::<EthereumNode>(
         1,
         Arc::new(
             ChainSpecBuilder::default()
@@ -30,7 +28,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 
     let mut node = nodes.pop().unwrap();
     let wallet = Wallet::default();
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let raw_tx = wallet.tx_gen.eip1559().await;
 
     // make the node advance
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
@@ -78,7 +76,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 
     // Configure wallet from test mnemonic and create dummy transfer tx
     let wallet = Wallet::default();
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let raw_tx = wallet.tx_gen.eip1559().await;
 
     // make the node advance
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;

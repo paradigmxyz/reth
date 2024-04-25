@@ -1,34 +1,63 @@
+use crate::transaction::TransactionTestContext;
 use alloy_signer::Signer;
 use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
+use reth_primitives::{ChainId, MAINNET};
 
-/// One of the accounts of the genesis allocations.
-pub struct Wallet {
-    pub inner: LocalWallet,
-    pub inner_nonce: u64,
-    pub chain_id: u64,
+/// Default test mnemonic used by the accounts in the test genesis allocations
+const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
+
+/// Wallet generator that can generate wallets from a given phrase, chain id and amount
+#[derive(Clone, Debug)]
+pub struct WalletGenerator {
+    chain_id: u64,
     amount: usize,
-    derivation_path: Option<String>,
+    phrase: String,
+    derivation_path: String,
 }
 
-impl Wallet {
-    /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
+impl WalletGenerator {
+    /// Creates a new wallet generator defaulting to MAINNET specs
     pub fn new(amount: usize) -> Self {
-        let inner = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC).build().unwrap();
-        Self { inner, chain_id: 1, amount, derivation_path: None, inner_nonce: 0 }
+        Self {
+            chain_id: 1,
+            amount,
+            phrase: TEST_MNEMONIC.to_string(),
+            derivation_path: "m/44'/60'/0'/0/".to_string(),
+        }
     }
 
-    /// Sets chain id
-    pub fn with_chain_id(mut self, chain_id: u64) -> Self {
-        self.chain_id = chain_id;
+    /// Sets the mnemonic phrase that will be used to generate the wallets
+    pub fn phrase(mut self, phrase: impl Into<String>) -> Self {
+        self.phrase = phrase.into();
+        self
+    }
+
+    /// Sets the chain id that will be used to generate the wallets
+    pub fn chain_id(mut self, chain_id: impl Into<u64>) -> Self {
+        self.chain_id = chain_id.into();
+        self
+    }
+
+    /// Sets the derivation path that will be used to generate the wallets, following the BIP44
+    /// <https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki>
+    pub fn derivation_path(mut self, derivation_path: impl Into<String>) -> Self {
+        let mut path = derivation_path.into();
+        if !path.ends_with('/') {
+            path.push('/');
+        }
+        self.derivation_path = path;
         self
     }
 
     fn get_derivation_path(&self) -> &str {
-        self.derivation_path.as_deref().unwrap_or("m/44'/60'/0'/0/")
+        &self.derivation_path
     }
+}
 
-    pub fn gen(&self) -> Vec<LocalWallet> {
-        let builder = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC);
+impl WalletGenerator {
+    /// Generates wallets from a previously set phrase, chain id and amount
+    pub fn gen(&self) -> Vec<Wallet> {
+        let builder = MnemonicBuilder::<English>::default().phrase(self.phrase.as_str());
 
         // use the derivation path
         let derivation_path = self.get_derivation_path();
@@ -37,17 +66,39 @@ impl Wallet {
         for idx in 0..self.amount {
             let builder =
                 builder.clone().derivation_path(&format!("{derivation_path}{idx}")).unwrap();
-            let wallet = builder.build().unwrap().with_chain_id(Some(self.chain_id));
+            let inner = builder.build().unwrap().with_chain_id(Some(self.chain_id));
+            let wallet = Wallet::new(inner, self.chain_id);
             wallets.push(wallet)
         }
         wallets
     }
 }
+/// Helper struct that wraps interaction to a local wallet and a transaction generator
+pub struct Wallet {
+    inner: LocalWallet,
+    pub tx_gen: TransactionTestContext,
+    pub nonce: u64,
+}
 
-const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
+impl Wallet {
+    /// Create a new wallet with a given chain id
+    pub fn new(inner: LocalWallet, chain_id: u64) -> Self {
+        let tx_gen = TransactionTestContext::new(chain_id, inner.clone());
+        Self { inner, tx_gen, nonce: 0 }
+    }
+    /// Get the address of the wallet
+    pub fn address(&self) -> String {
+        self.inner.address().to_string()
+    }
+}
 
+/// As deafult we use the test mnemonic and mainnet specs.
 impl Default for Wallet {
     fn default() -> Self {
-        Wallet::new(1)
+        let builder = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC);
+        let inner = builder.build().unwrap();
+        let chain_id: ChainId = MAINNET.chain.into();
+        let tx_gen = TransactionTestContext::new(chain_id, inner.clone());
+        Self { inner, tx_gen, nonce: 0 }
     }
 }

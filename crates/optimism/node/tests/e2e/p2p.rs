@@ -2,15 +2,21 @@ use crate::utils::{advance_chain, setup};
 use reth::blockchain_tree::error::BlockchainTreeError;
 use reth_rpc_types::engine::PayloadStatusEnum;
 use std::sync::Arc;
+
+use crate::utils::{advance_chain, setup};
+use reth::primitives::BASE_MAINNET;
+use reth_e2e_test_utils::wallet::WalletGenerator;
+use reth_interfaces::blockchain_tree::error::BlockchainTreeError;
+use reth_primitives::ChainId;
+use reth_rpc_types::engine::PayloadStatusEnum;
 use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, wallet) = setup(3).await?;
-    let wallet = Arc::new(Mutex::new(wallet));
-
+    let (mut nodes, _tasks) = setup(3).await?;
+    let chain_id: ChainId = BASE_MAINNET.chain.into();
     let third_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
     let mut first_node = nodes.pop().unwrap();
@@ -19,8 +25,12 @@ async fn can_sync() -> eyre::Result<()> {
     let tip_index: usize = tip - 1;
     let reorg_depth = 2;
 
-    // On first node, create a chain up to block number 90a
+    let wallet = WalletGenerator::new(1).chain_id(chain_id).gen().pop().unwrap();
+    let wallet = Arc::new(Mutex::new(wallet));
+
+    // On first node, create a chain up to block number 300a
     let canonical_payload_chain = advance_chain(tip, &mut first_node, wallet.clone()).await?;
+
     let canonical_chain =
         canonical_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
 
@@ -38,7 +48,7 @@ async fn can_sync() -> eyre::Result<()> {
     third_node.wait_block(tip as u64, canonical_chain[tip_index], true).await?;
 
     //  On second node, create a side chain: 88a -> 89b -> 90b
-    wallet.lock().await.inner_nonce -= reorg_depth as u64;
+    wallet.lock().await.nonce -= reorg_depth as u64;
     second_node.payload.timestamp = first_node.payload.timestamp - reorg_depth as u64; // TODO: probably want to make it node agnostic
     let side_payload_chain = advance_chain(reorg_depth, &mut second_node, wallet.clone()).await?;
     let side_chain = side_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();

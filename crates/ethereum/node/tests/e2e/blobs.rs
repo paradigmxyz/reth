@@ -7,7 +7,7 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_e2e_test_utils::{
-    node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
+    node::NodeTestContext, transaction::TransactionTestContext, wallet::WalletGenerator,
 };
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{b256, ChainSpecBuilder, Genesis, MAINNET};
@@ -16,7 +16,7 @@ use reth_transaction_pool::TransactionPool;
 use crate::utils::eth_payload_attributes;
 
 #[tokio::test]
-async fn can_handle_blobs() -> eyre::Result<()> {
+async fn can_restore_blob_tx_on_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -41,12 +41,12 @@ async fn can_handle_blobs() -> eyre::Result<()> {
 
     let mut node = NodeTestContext::new(node).await?;
 
-    let wallets = Wallet::new(2).gen();
+    let wallets = WalletGenerator::new(2).gen();
     let blob_wallet = wallets.first().unwrap();
     let second_wallet = wallets.last().unwrap();
 
     // inject normal tx
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, second_wallet.clone()).await;
+    let raw_tx = second_wallet.tx_gen.eip1559().await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
     // build payload with normal tx
     let (payload, attributes) = node.new_payload(eth_payload_attributes).await?;
@@ -55,7 +55,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     node.inner.pool.remove_transactions(vec![tx_hash]);
 
     // build blob tx
-    let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, blob_wallet.clone()).await?;
+    let blob_tx = blob_wallet.tx_gen.eip4844().await?;
 
     // inject blob tx to the pool
     let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;

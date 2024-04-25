@@ -12,7 +12,6 @@ use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
 use std::sync::Arc;
 use tracing::{span, Level};
-use wallet::Wallet;
 
 /// Wrapper type to create test nodes
 pub mod node;
@@ -42,7 +41,7 @@ pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<ChainSpec>,
     is_dev: bool,
-) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
+) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager)>
 where
     N: Default + Node<TmpNodeAdapter<N>>,
 {
@@ -93,7 +92,7 @@ where
         nodes.push(node);
     }
 
-    Ok((nodes, tasks, Wallet::default().with_chain_id(chain_spec.chain().into())))
+    Ok((nodes, tasks))
 }
 
 // Type aliases

@@ -1,5 +1,5 @@
 use crate::utils::eth_payload_attributes;
-use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
+use reth_e2e_test_utils::{setup, wallet::Wallet};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, MAINNET};
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 async fn can_sync() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks, wallet) = setup::<EthereumNode>(
+    let (mut nodes, _tasks) = setup::<EthereumNode>(
         2,
         Arc::new(
             ChainSpecBuilder::default()
@@ -21,7 +21,9 @@ async fn can_sync() -> eyre::Result<()> {
     )
     .await?;
 
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let wallet = Wallet::default();
+    let raw_tx = wallet.tx_gen.eip1559().await;
+
     let mut second_node = nodes.pop().unwrap();
     let mut first_node = nodes.pop().unwrap();
 

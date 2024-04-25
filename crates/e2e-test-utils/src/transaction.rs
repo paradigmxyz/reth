@@ -1,69 +1,96 @@
 use alloy_consensus::{
-    BlobTransactionSidecar, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope,
+    BlobTransactionSidecar, SidecarBuilder, SimpleCoder, TxEip1559, TxEip4844, TxEip4844Variant,
+    TxEip4844WithSidecar, TxEnvelope,
 };
 use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
-use alloy_rpc_types::{TransactionInput, TransactionRequest};
+use alloy_rpc_types::TransactionRequest;
 use alloy_signer_wallet::LocalWallet;
 use eyre::Ok;
-use reth_primitives::{hex, Address, Bytes, U256};
+use reth_primitives::{
+    alloy_primitives::TxKind, constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, hex, Address, Bytes,
+    B256, U256,
+};
 
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, B256};
-
-pub struct TransactionTestContext;
+#[derive(Clone)]
+pub struct TransactionTestContext {
+    chain_id: u64,
+    wallet: LocalWallet,
+}
 
 impl TransactionTestContext {
-    /// Creates a static transfer and signs it, returning bytes
-    pub async fn transfer_tx(chain_id: u64, wallet: LocalWallet) -> TxEnvelope {
-        let tx = tx(chain_id, None, 0);
-        Self::sign_tx(wallet, tx).await
+    pub fn new(chain_id: u64, wallet: LocalWallet) -> Self {
+        Self { chain_id, wallet }
     }
 
-    /// Creates a static transfer and signs it, returning bytes
-    pub async fn transfer_tx_bytes(chain_id: u64, wallet: LocalWallet) -> Bytes {
-        let signed = Self::transfer_tx(chain_id, wallet).await;
-        signed.encoded_2718().into()
+    pub async fn eip1559(&self) -> Bytes {
+        let tx = TxEip1559 {
+            chain_id: self.chain_id,
+            nonce: 0,
+            gas_limit: 21_000,
+            to: TxKind::Call(Address::ZERO),
+            max_priority_fee_per_gas: 20e9 as u128,
+            max_fee_per_gas: 20e9 as u128,
+            value: U256::from(1),
+            ..Default::default()
+        };
+        let mut tx_request: TransactionRequest = tx.into();
+        tx_request.access_list = None;
+        self.sign_and_encode(tx_request).await.unwrap()
     }
 
-    /// Creates a tx with blob sidecar and sign it
-    pub async fn tx_with_blobs(chain_id: u64, wallet: LocalWallet) -> eyre::Result<TxEnvelope> {
-        let mut tx = tx(chain_id, None, 0);
-
-        let mut builder = SidecarBuilder::<SimpleCoder>::new();
-        builder.ingest(b"dummy blob");
-        let sidecar: BlobTransactionSidecar = builder.build()?;
-
-        tx.set_blob_sidecar(sidecar);
-        tx.set_max_fee_per_blob_gas(15e9 as u128);
-
-        let signed = Self::sign_tx(wallet, tx).await;
-        Ok(signed)
+    pub async fn eip4844(&self) -> eyre::Result<Bytes> {
+        let tx = self.dummy_eip4844(0);
+        let tx_request: TransactionRequest = tx.into();
+        self.sign_and_encode(tx_request).await
     }
 
-    /// Signs an arbitrary TransactionRequest using the provided wallet
-    pub async fn sign_tx(wallet: LocalWallet, tx: TransactionRequest) -> TxEnvelope {
-        let signer = EthereumSigner::from(wallet);
-        tx.build(&signer).await.unwrap()
+    pub async fn optimism_block_info(&self, nonce: u64) -> Bytes {
+        let data = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
+
+        let tx = TxEip1559 {
+            chain_id: self.chain_id,
+            nonce,
+            gas_limit: 210_000,
+            to: TxKind::Call(Address::ZERO),
+            max_priority_fee_per_gas: 20e9 as u128,
+            max_fee_per_gas: 20e9 as u128,
+            value: U256::from(1),
+            input: data,
+            ..Default::default()
+        };
+        let mut tx_req: TransactionRequest = tx.into();
+        tx_req.access_list = None;
+        self.sign_and_encode(tx_req).await.unwrap()
     }
 
-    /// Creates a tx with blob sidecar and sign it, returning bytes
-    pub async fn tx_with_blobs_bytes(chain_id: u64, wallet: LocalWallet) -> eyre::Result<Bytes> {
-        let signed = Self::tx_with_blobs(chain_id, wallet).await?;
-
+    async fn sign_and_encode(&self, tx: TransactionRequest) -> eyre::Result<Bytes> {
+        let signer = EthereumSigner::from(self.wallet.clone());
+        let signed = tx.build(&signer).await?;
         Ok(signed.encoded_2718().into())
     }
 
-    pub async fn optimism_l1_block_info_tx(
-        chain_id: u64,
-        wallet: LocalWallet,
-        nonce: u64,
-    ) -> Bytes {
-        let l1_block_info = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
-        let tx = tx(chain_id, Some(l1_block_info), nonce);
-        let signer = EthereumSigner::from(wallet);
-        tx.build(&signer).await.unwrap().encoded_2718().into()
+    fn dummy_eip4844(&self, nonce: u64) -> TxEip4844WithSidecar {
+        let tx = TxEip4844 {
+            chain_id: self.chain_id,
+            nonce,
+            max_priority_fee_per_gas: 20e9 as u128,
+            max_fee_per_gas: 20e9 as u128,
+            gas_limit: 21_000,
+            to: Default::default(),
+            value: U256::from(1),
+            access_list: Default::default(),
+            blob_versioned_hashes: vec![Default::default()],
+            max_fee_per_blob_gas: 1,
+            input: Default::default(),
+        };
+
+        let mut builder = SidecarBuilder::<SimpleCoder>::new();
+        builder.ingest(b"dummy blob");
+        let sidecar: BlobTransactionSidecar = builder.build().unwrap();
+
+        TxEip4844WithSidecar { tx, sidecar }
     }
 
-    /// Validates the sidecar of a given tx envelope and returns the versioned hashes
     pub fn validate_sidecar(tx: TxEnvelope) -> Vec<B256> {
         let proof_setting = MAINNET_KZG_TRUSTED_SETUP.clone();
 
@@ -77,20 +104,5 @@ impl TransactionTestContext {
             },
             _ => panic!("Expected Eip4844 transaction"),
         }
-    }
-}
-
-/// Creates a type 2 transaction
-fn tx(chain_id: u64, data: Option<Bytes>, nonce: u64) -> TransactionRequest {
-    TransactionRequest {
-        nonce: Some(nonce),
-        value: Some(U256::from(100)),
-        to: Some(reth_primitives::TxKind::Call(Address::random())),
-        gas: Some(210000),
-        max_fee_per_gas: Some(20e9 as u128),
-        max_priority_fee_per_gas: Some(20e9 as u128),
-        chain_id: Some(chain_id),
-        input: TransactionInput { input: None, data },
-        ..Default::default()
     }
 }
