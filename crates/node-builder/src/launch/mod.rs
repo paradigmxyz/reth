@@ -95,6 +95,7 @@ where
             config,
         } = target;
 
+        // setup the launch context
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
@@ -104,16 +105,18 @@ where
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory()?;
-
-        info!(target: "reth::cli", "Database opened");
-
-        ctx.start_prometheus_endpoint().await?;
-
-        debug!(target: "reth::cli", chain=%ctx.chain_id(), genesis=?ctx.genesis_hash(), "Initializing genesis");
-        ctx.init_genesis()?;
-
-        info!(target: "reth::cli", "\n{}", ctx.chain_spec().display_hardforks());
+            .with_provider_factory()?
+            .inspect(|_| {
+                info!(target: "reth::cli", "Database opened");
+            })
+            .with_prometheus().await?
+            .inspect(|this| {
+                debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
+            })
+            .with_genesis()?
+            .inspect(|this| {
+                info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
+            });
 
         // setup the consensus instance
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
