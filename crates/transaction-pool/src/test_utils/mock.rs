@@ -16,8 +16,8 @@ use reth_primitives::{
     transaction::TryFromRecoveredTransactionError,
     AccessList, Address, BlobTransactionSidecar, Bytes, FromRecoveredPooledTransaction,
     IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
-    TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TryFromRecoveredTransaction,
-    TxEip1559, TxEip2930, TxEip4844, TxHash, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
+    TransactionSigned, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip1559,
+    TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
     EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -105,7 +105,7 @@ pub enum MockTransaction {
         /// The gas limit for the transaction.
         gas_limit: u64,
         /// The transaction's destination.
-        to: TransactionKind,
+        to: TxKind,
         /// The value of the transaction.
         value: U256,
         /// The transaction input data.
@@ -128,7 +128,7 @@ pub enum MockTransaction {
         /// The gas limit for the transaction.
         gas_limit: u64,
         /// The transaction's destination.
-        to: TransactionKind,
+        to: TxKind,
         /// The value of the transaction.
         value: U256,
         /// The access list associated with the transaction.
@@ -155,7 +155,7 @@ pub enum MockTransaction {
         /// The gas limit for the transaction.
         gas_limit: u64,
         /// The transaction's destination.
-        to: TransactionKind,
+        to: TxKind,
         /// The value of the transaction.
         value: U256,
         /// The access list associated with the transaction.
@@ -176,7 +176,7 @@ pub enum MockTransaction {
         /// The transaction nonce.
         nonce: u64,
         /// The transaction's destination.
-        to: TransactionKind,
+        to: TxKind,
         /// The gas limit for the transaction.
         gas_limit: u64,
         /// The transaction input data.
@@ -213,7 +213,7 @@ impl MockTransaction {
             nonce: 0,
             gas_price: 0,
             gas_limit: 0,
-            to: TransactionKind::Call(Address::random()),
+            to: TxKind::Call(Address::random()),
             value: Default::default(),
             input: Default::default(),
             size: Default::default(),
@@ -229,7 +229,7 @@ impl MockTransaction {
             max_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
             max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
             gas_limit: 0,
-            to: TransactionKind::Call(Address::random()),
+            to: TxKind::Call(Address::random()),
             value: Default::default(),
             input: Bytes::new(),
             accesslist: Default::default(),
@@ -247,7 +247,7 @@ impl MockTransaction {
             max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
             max_fee_per_blob_gas: DATA_GAS_PER_BLOB as u128,
             gas_limit: 0,
-            to: TransactionKind::Call(Address::random()),
+            to: TxKind::Call(Address::random()),
             value: Default::default(),
             input: Bytes::new(),
             accesslist: Default::default(),
@@ -272,7 +272,7 @@ impl MockTransaction {
             hash: B256::random(),
             sender: Address::random(),
             nonce: 0,
-            to: TransactionKind::Call(Address::random()),
+            to: TxKind::Call(Address::random()),
             gas_limit: 0,
             input: Bytes::new(),
             value: Default::default(),
@@ -671,7 +671,7 @@ impl PoolTransaction for MockTransaction {
     }
 
     /// Returns the transaction kind associated with the transaction.
-    fn kind(&self) -> &TransactionKind {
+    fn kind(&self) -> &TxKind {
         match self {
             MockTransaction::Legacy { to, .. } |
             MockTransaction::Eip1559 { to, .. } |

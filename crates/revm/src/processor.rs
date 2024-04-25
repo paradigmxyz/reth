@@ -466,7 +466,7 @@ mod tests {
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
         keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction,
-        TransactionKind, TxEip1559, MAINNET,
+        TxEip1559, TxKind, MAINNET,
     };
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
@@ -855,7 +855,7 @@ mod tests {
                 chain_id,
                 nonce: 1,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(Address::ZERO),
+                to: TxKind::Call(Address::ZERO),
                 max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                 ..Default::default()
             }),

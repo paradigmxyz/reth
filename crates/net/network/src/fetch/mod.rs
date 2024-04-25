@@ -135,11 +135,13 @@ impl StateFetcher {
         let mut best_peer = idle.next()?;
 
         for maybe_better in idle {
+            // replace best peer if our current best peer sent us a bad response last time
             if best_peer.1.last_response_likely_bad && !maybe_better.1.last_response_likely_bad {
                 best_peer = maybe_better;
                 continue
             }
 
+            // replace best peer if this peer has better rtt
             if maybe_better.1.timeout() < best_peer.1.timeout() &&
                 !maybe_better.1.last_response_likely_bad
             {

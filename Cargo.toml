@@ -71,17 +71,17 @@ members = [
     "crates/trie/",
     "crates/trie-parallel/",
     "examples/",
-    "examples/additional-rpc-namespace-in-cli/",
+    "examples/node-custom-rpc/",
     "examples/beacon-api-sse/",
-    "examples/cli-extension-event-hooks/",
+    "examples/node-event-hooks/",
     "examples/custom-evm/",
-    "examples/custom-node/",
+    "examples/custom-engine-types/",
     "examples/custom-node-components/",
     "examples/custom-dev-node/",
     "examples/custom-payload-builder/",
     "examples/manual-p2p/",
     "examples/rpc-db/",
-    "examples/trace-transaction-cli/",
+    "examples/txpool-tracing/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
     "examples/exex/minimal/",
@@ -282,7 +282,7 @@ revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev =
 
 # eth
 alloy-chains = "0.1.15"
-alloy-primitives = "0.7.0"
+alloy-primitives = "0.7.1"
 alloy-dyn-abi = "0.7.0"
 alloy-sol-types = "0.7.0"
 alloy-rlp = "0.3.4"

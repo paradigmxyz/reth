@@ -51,7 +51,6 @@ tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
 zstd = { version = "0.13", features = ["experimental"], optional = true }
 roaring = "0.10.2"
-cfg-if = "1.0.0"
 
 # `test-utils` feature
 hash-db = { version = "~0.15", optional = true }

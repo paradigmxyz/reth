@@ -12,8 +12,8 @@ use reth_network::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{
-    Block, BlockBody, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
-    TransactionSigned, TxEip2930, U256,
+    Block, BlockBody, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionSigned,
+    TxEip2930, TxKind, U256,
 };
 use reth_provider::test_utils::MockEthProvider;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
         nonce: rng.gen(),
         gas_price: rng.gen(),
         gas_limit: rng.gen(),
-        to: TransactionKind::Create,
+        to: TxKind::Create,
         value: U256::from(rng.gen::<u128>()),
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
