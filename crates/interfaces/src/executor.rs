@@ -153,4 +153,9 @@ impl BlockExecutionError {
     pub fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
     }
+
+    /// Returns `true` if the error is a state root error.
+    pub fn is_state_root_error(&self) -> bool {
+        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
+    }
 }

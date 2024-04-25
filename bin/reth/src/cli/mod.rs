@@ -14,7 +14,7 @@ use crate::{
 use clap::{value_parser, Parser, Subcommand};
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_node_builder::{InitState, WithLaunchContext};
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -130,7 +130,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// ````
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir

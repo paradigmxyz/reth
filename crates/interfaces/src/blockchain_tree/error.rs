@@ -243,6 +243,36 @@ impl InsertBlockErrorKind {
         matches!(self, InsertBlockErrorKind::Consensus(_))
     }
 
+    /// Returns true if this error is a state root error
+    pub fn is_state_root_error(&self) -> bool {
+        // we need to get the state root errors inside of the different variant branches
+        match self {
+            InsertBlockErrorKind::Execution(err) => {
+                matches!(
+                    err,
+                    BlockExecutionError::Validation(BlockValidationError::StateRoot { .. })
+                )
+            }
+            InsertBlockErrorKind::Canonical(err) => {
+                matches!(
+                    err,
+                    CanonicalError::Validation(BlockValidationError::StateRoot { .. }) |
+                        CanonicalError::Provider(
+                            ProviderError::StateRootMismatch(_) |
+                                ProviderError::UnwindStateRootMismatch(_)
+                        )
+                )
+            }
+            InsertBlockErrorKind::Provider(err) => {
+                matches!(
+                    err,
+                    ProviderError::StateRootMismatch(_) | ProviderError::UnwindStateRootMismatch(_)
+                )
+            }
+            _ => false,
+        }
+    }
+
     /// Returns true if the error is caused by an invalid block
     ///
     /// This is intended to be used to determine if the block should be marked as invalid.
