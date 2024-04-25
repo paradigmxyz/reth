@@ -77,7 +77,7 @@ impl Discovery {
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
         // setup discv4
-        let local_enr = NodeRecord::from_secret_key(discovery_v4_addr, &sk);
+        let local_enr = NodeRecord::from_secret_key(discovery_v4_addr, &sk.secret_bytes().into());
         let discv4_future = async {
             let Some(disc_config) = discv4_config else { return Ok((None, None, None)) };
             let (discv4, mut discv4_service) =

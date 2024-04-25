@@ -99,8 +99,6 @@ pprof = { workspace = true, features = [
     "frame-pointer",
     "criterion",
 ] }
-# secp256k1.workspace = true
-# k256.workspace = true
 
 [features]
 default = ["c-kzg", "zstd-codec"]

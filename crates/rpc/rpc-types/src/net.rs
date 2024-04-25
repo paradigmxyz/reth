@@ -1,8 +1,9 @@
 use crate::{pk_to_id, PeerId};
+use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use alloy_rpc_types::admin::EthProtocolInfo;
-use enr::Enr;
-use secp256k1::{SecretKey, SECP256K1};
+// use enr::Enr;
+// use secp256k1::SecretKey;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
@@ -54,9 +55,22 @@ pub struct NodeRecord {
 
 impl NodeRecord {
     /// Derive the [`NodeRecord`] from the secret key and addr
-    pub fn from_secret_key(addr: SocketAddr, sk: &SecretKey) -> Self {
-        let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, sk);
+    #[cfg(feature = "secp256k1")]
+    pub fn from_secret_key(addr: SocketAddr, sk: &B256) -> Self {
+        use secp256k1::{SecretKey, SECP256K1};
+        let sk = SecretKey::from_slice(sk.as_slice()).expect("invalid secret key");
+        let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, &sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
+        Self::new(addr, id)
+    }
+
+    /// Derive the [`NodeRecord`] from the secret key and addr
+    #[cfg(not(feature = "secp256k1"))]
+    pub fn from_secret_key(addr: SocketAddr, sk: &B256) -> Self {
+        use k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
+        let sk = SecretKey::from_bytes(sk.as_slice().into()).expect("invalid secret key");
+        let pk = sk.public_key();
+        let id = PeerId::from_slice(&pk.to_encoded_point(/* compress = */ false).as_bytes());
         Self::new(addr, id)
     }
 
@@ -180,28 +194,28 @@ impl FromStr for NodeRecord {
     }
 }
 
-impl TryFrom<&Enr<SecretKey>> for NodeRecord {
-    type Error = NodeRecordParseError;
+// impl TryFrom<&Enr<SecretKey>> for NodeRecord {
+//     type Error = NodeRecordParseError;
 
-    fn try_from(enr: &Enr<SecretKey>) -> Result<Self, Self::Error> {
-        let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
-        else {
-            return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
-        };
+//     fn try_from(enr: &Enr<SecretKey>) -> Result<Self, Self::Error> {
+//         let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
+//         else {
+//             return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
+//         };
 
-        let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
-        };
+//         let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
+//             return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
+//         };
 
-        let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
-        };
+//         let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
+//             return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
+//         };
 
-        let id = pk_to_id(&enr.public_key());
+//         let id = pk_to_id(&enr.public_key().serialize_uncompressed());
 
-        Ok(NodeRecord { address, tcp_port, udp_port, id }.into_ipv4_mapped())
-    }
-}
+//         Ok(NodeRecord { address, tcp_port, udp_port, id }.into_ipv4_mapped())
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

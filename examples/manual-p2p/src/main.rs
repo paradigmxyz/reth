@@ -31,7 +31,8 @@ pub static MAINNET_BOOT_NODES: Lazy<Vec<NodeRecord>> = Lazy::new(mainnet_nodes);
 async fn main() -> eyre::Result<()> {
     // Setup configs related to this 'node' by creating a new random
     let our_key = rng_secret_key();
-    let our_enr = NodeRecord::from_secret_key(DEFAULT_DISCOVERY_ADDRESS, &our_key);
+    let our_enr =
+        NodeRecord::from_secret_key(DEFAULT_DISCOVERY_ADDRESS, &our_key.secret_bytes().into());
 
     // Setup discovery v4 protocol to find peers to talk to
     let mut discv4_cfg = Discv4ConfigBuilder::default();

@@ -233,7 +233,7 @@ impl Discv5 {
             );
 
             // backwards compatible enr
-            let bc_enr = NodeRecord::from_secret_key(socket, sk);
+            let bc_enr = NodeRecord::from_secret_key(socket, &sk.secret_bytes().into());
 
             (enr, bc_enr, ip_mode, chain)
         };
