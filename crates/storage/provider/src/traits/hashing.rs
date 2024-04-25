@@ -4,7 +4,7 @@ use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber, StorageEntry, B256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    ops::{Range, RangeInclusive},
+    ops::RangeInclusive,
 };
 
 /// Hashing Writer

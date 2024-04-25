@@ -2,10 +2,7 @@ use auto_impl::auto_impl;
 use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{Address, BlockNumber, StorageEntry, B256};
-use std::{
-    collections::BTreeMap,
-    ops::{Range, RangeInclusive},
-};
+use std::{collections::BTreeMap, ops::RangeInclusive};
 
 /// History Writer
 #[auto_impl(&, Arc, Box)]
