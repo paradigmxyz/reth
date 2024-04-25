@@ -4,7 +4,7 @@ use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber, StorageEntry, B256};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    ops::RangeInclusive,
+    ops::{RangeBounds, RangeInclusive},
 };
 
 /// Hashing Writer
@@ -15,9 +15,19 @@ pub trait HashingWriter: Send + Sync {
     /// # Returns
     ///
     /// Set of hashed keys of updated accounts.
-    fn unwind_account_hashing(
+    fn unwind_account_hashing<'a>(
         &self,
-        changesets: impl IntoIterator<Item = (BlockNumber, AccountBeforeTx)>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
+    ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
+
+    /// Unwind and clear account hashing in a given block range.
+    ///
+    /// # Returns
+    ///
+    /// Set of hashed keys of updated accounts.
+    fn unwind_account_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
     /// Inserts all accounts into [reth_db::tables::AccountsHistory] table.
@@ -37,7 +47,17 @@ pub trait HashingWriter: Send + Sync {
     /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
     fn unwind_storage_hashing(
         &self,
-        changesets: impl IntoIterator<Item = (BlockNumberAddress, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
+    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
+
+    /// Unwind and clear storage hashing in a given block range.
+    ///
+    /// # Returns
+    ///
+    /// Mapping of hashed keys of updated accounts to their respective updated hashed slots.
+    fn unwind_storage_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumberAddress>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>>;
 
     /// Iterates over storages and inserts them to hashing table.

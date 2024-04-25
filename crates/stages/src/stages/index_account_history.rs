@@ -139,7 +139,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_account_history_indices(range)?;
+        provider.unwind_account_history_indices_range(range)?;
 
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })

@@ -2051,9 +2051,9 @@ impl<TX: DbTx> StorageReader for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
-    fn unwind_account_hashing(
+    fn unwind_account_hashing<'a>(
         &self,
-        changesets: impl IntoIterator<Item = (BlockNumber, AccountBeforeTx)>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         // Aggregate all block changesets and make a list of accounts that have been changed.
         // Note that collecting and then reversing the order is necessary to ensure that the
@@ -2079,6 +2079,18 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
         Ok(hashed_accounts)
     }
 
+    fn unwind_account_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_account_hashing(changesets.iter())
+    }
+
     fn insert_account_for_hashing(
         &self,
         changesets: impl IntoIterator<Item = (Address, Option<Account>)>,
@@ -2098,7 +2110,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 
     fn unwind_storage_hashing(
         &self,
-        changesets: impl IntoIterator<Item = (BlockNumberAddress, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
         // Aggregate all block changesets and make list of accounts that have been changed.
         let mut hashed_storages = changesets
@@ -2128,6 +2140,18 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
             }
         }
         Ok(hashed_storage_keys)
+    }
+
+    fn unwind_storage_hashing_range(
+        &self,
+        range: impl RangeBounds<BlockNumberAddress>,
+    ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::StorageChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_storage_hashing(changesets.into_iter())
     }
 
     fn insert_storage_for_hashing(
@@ -2251,13 +2275,13 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
-    fn unwind_account_history_indices(
+    fn unwind_account_history_indices<'a>(
         &self,
-        changesets: impl IntoIterator<Item = (BlockNumber, AccountBeforeTx)>,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<usize> {
         let mut last_indices = changesets
             .into_iter()
-            .map(|(index, account)| (account.address, index))
+            .map(|(index, account)| (account.address, *index))
             .collect::<Vec<_>>();
         last_indices.sort_by_key(|(a, _)| *a);
 
@@ -2285,6 +2309,18 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
         Ok(changesets)
     }
 
+    fn unwind_account_history_indices_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<usize> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::AccountChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_account_history_indices(changesets.iter())
+    }
+
     fn insert_account_history_index(
         &self,
         account_transitions: BTreeMap<Address, Vec<u64>>,
@@ -2297,7 +2333,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
 
     fn unwind_storage_history_indices(
         &self,
-        changesets: impl IntoIterator<Item = (BlockNumberAddress, StorageEntry)>,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<usize> {
         let mut storage_changesets = changesets
             .into_iter()
@@ -2329,6 +2365,18 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
 
         let changesets = storage_changesets.len();
         Ok(changesets)
+    }
+
+    fn unwind_storage_history_indices_range(
+        &self,
+        range: impl RangeBounds<BlockNumberAddress>,
+    ) -> ProviderResult<usize> {
+        let changesets = self
+            .tx
+            .cursor_read::<tables::StorageChangeSets>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        self.unwind_storage_history_indices(changesets.into_iter())
     }
 
     fn insert_storage_history_index(
@@ -2374,7 +2422,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                 .collect::<Result<Vec<_>, _>>()?;
 
             // Unwind account hashes. Add changed accounts to account prefix set.
-            let hashed_addresses = self.unwind_account_hashing(changed_accounts.clone())?;
+            let hashed_addresses = self.unwind_account_hashing(changed_accounts.iter())?;
             let mut account_prefix_set = PrefixSetMut::with_capacity(hashed_addresses.len());
             let mut destroyed_accounts = HashSet::default();
             for (hashed_address, account) in hashed_addresses {
@@ -2385,7 +2433,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
 
             // Unwind account history indices.
-            self.unwind_account_history_indices(changed_accounts)?;
+            self.unwind_account_history_indices(changed_accounts.iter())?;
 
             let storage_range = BlockNumberAddress::range(range.clone());
             let changed_storages = self
@@ -2397,7 +2445,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
             // sets.
             let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
-            let storage_entries = self.unwind_storage_hashing(changed_storages.clone())?;
+            let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
             for (hashed_address, hashed_slots) in storage_entries {
                 account_prefix_set.insert(Nibbles::unpack(hashed_address));
                 let mut storage_prefix_set = PrefixSetMut::with_capacity(hashed_slots.len());
@@ -2408,7 +2456,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
             }
 
             // Unwind storage history indices.
-            self.unwind_storage_history_indices(changed_storages)?;
+            self.unwind_storage_history_indices(changed_storages.iter().copied())?;
 
             // Calculate the reverted merkle root.
             // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
