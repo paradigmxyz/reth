@@ -149,7 +149,10 @@ where
 
     let data = request.into_bytes();
     if data.len() > max_request_body_size {
-        return Some(batch_response_error(Id::Null, reject_too_big_request(max_request_body_size as u32)));
+        return Some(batch_response_error(
+            Id::Null,
+            reject_too_big_request(max_request_body_size as u32),
+        ));
     }
 
     // Single request or notification
