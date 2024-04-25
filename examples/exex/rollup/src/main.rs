@@ -7,20 +7,26 @@ use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use db::Database;
 use eyre::OptionExt;
 use once_cell::sync::Lazy;
-use reth::revm::{
-    db::{states::bundle_state::BundleRetention, BundleState},
-    processor::EVMProcessor,
-    StateBuilder,
+use reth::{
+    payload::error::PayloadBuilderError,
+    revm::{
+        db::{states::bundle_state::BundleRetention, BundleState},
+        DatabaseCommit, StateBuilder,
+    },
 };
 use reth_exex::{ExExContext, ExExEvent};
-use reth_node_api::FullNodeComponents;
+use reth_interfaces::executor::BlockValidationError;
+use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeComponents};
 use reth_node_ethereum::{EthEvmConfig, EthereumNode};
 use reth_primitives::{
-    address, constants, Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder,
-    Genesis, Hardfork, Header, Receipt, SealedBlockWithSenders, TransactionSigned, U256,
+    address, constants,
+    revm::env::fill_tx_env,
+    revm_primitives::{CfgEnvWithHandlerCfg, EVMError, ResultAndState},
+    Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder, Genesis, Hardfork,
+    Header, Receipt, SealedBlockWithSenders, TransactionSigned, U256,
 };
-use reth_provider::{BlockExecutor, Chain, ProviderError};
-use reth_tracing::tracing::{error, info};
+use reth_provider::{Chain, ProviderError};
+use reth_tracing::tracing::{debug, error, info};
 use rusqlite::Connection;
 
 sol!(RollupContract, "rollup_abi.json");
@@ -34,7 +40,7 @@ static CHAIN_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ChainSpecBuilder::default()
             .chain(CHAIN_ID.into())
             .genesis(Genesis::clique_genesis(CHAIN_ID, ROLLUP_SUBMITTER_ADDRESS))
-            .london_activated()
+            .shanghai_activated()
             .build(),
     )
 });
@@ -293,16 +299,15 @@ fn execute_block(
         ..Default::default()
     };
 
-    // Decode block data and filter only transactions with the correct chain ID
-    let body = Vec::<TransactionSigned>::decode(&mut block_data.as_ref())?
+    // Decode block data, filter only transactions with the correct chain ID and recover senders
+    let transactions = Vec::<TransactionSigned>::decode(&mut block_data.as_ref())?
         .into_iter()
         .filter(|tx| tx.chain_id() == Some(CHAIN_ID))
-        .collect();
-
-    // Construct block and recover senders
-    let block = Block { header, body, ..Default::default() }
-        .with_recovered_senders()
-        .ok_or_eyre("failed to recover senders")?;
+        .map(|tx| {
+            let sender = tx.recover_signer().ok_or(eyre::eyre!("failed to recover signer"))?;
+            Ok((tx, sender))
+        })
+        .collect::<eyre::Result<Vec<(TransactionSigned, Address)>>>()?;
 
     // Execute block
     let state = StateBuilder::new_with_database(
@@ -310,9 +315,88 @@ fn execute_block(
     )
     .with_bundle_update()
     .build();
-    let mut evm = EVMProcessor::new_with_state(CHAIN_SPEC.clone(), state, EthEvmConfig::default());
-    let (receipts, _) = evm.execute_transactions(&block, U256::ZERO)?;
-    evm.db_mut().merge_transitions(BundleRetention::PlainState);
+    let mut evm = EthEvmConfig::default().evm(state);
+
+    // Set state clear flag.
+    evm.db_mut().set_state_clear_flag(
+        CHAIN_SPEC.fork(Hardfork::SpuriousDragon).active_at_block(header.number),
+    );
+
+    let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(evm.cfg().clone(), evm.spec_id());
+    EthEvmConfig::fill_cfg_and_block_env(
+        &mut cfg,
+        evm.block_mut(),
+        &CHAIN_SPEC,
+        &header,
+        U256::ZERO,
+    );
+    *evm.cfg_mut() = cfg.cfg_env;
+
+    let mut receipts = Vec::with_capacity(transactions.len());
+    let mut executed_txs = Vec::new();
+    if !transactions.is_empty() {
+        let mut cumulative_gas_used = 0;
+        for (transaction, sender) in transactions {
+            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = header.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                // TODO(alexey): what to do here?
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                }
+                .into())
+            }
+            // Execute transaction.
+            // Fill revm structure.
+            fill_tx_env(evm.tx_mut(), &transaction, sender);
+
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(result) => result,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            // if the transaction is invalid, we can skip it
+                            debug!(%err, ?transaction, "Skipping invalid transaction");
+                            continue
+                        }
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            return Err(PayloadBuilderError::EvmExecutionError(err).into())
+                        }
+                    }
+                }
+            };
+
+            debug!(?transaction, ?result, ?state, "Executed transaction");
+
+            evm.db_mut().commit(state);
+
+            // append gas used
+            cumulative_gas_used += result.gas_used();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.into_logs().into_iter().map(Into::into).collect(),
+                ..Default::default()
+            });
+
+            // append transaction to the list of executed transactions
+            executed_txs.push(transaction);
+        }
+
+        evm.db_mut().merge_transitions(BundleRetention::Reverts);
+    }
+
+    // Construct block and recover senders
+    let block = Block { header, body: executed_txs, ..Default::default() }
+        .with_recovered_senders()
+        .ok_or_eyre("failed to recover senders")?;
 
     let bundle = evm.db_mut().take_bundle();
 
