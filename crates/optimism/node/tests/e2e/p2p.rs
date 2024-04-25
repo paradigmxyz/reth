@@ -38,11 +38,6 @@ async fn can_sync() -> eyre::Result<()> {
     let side_payload_chain = advance_chain(reorg_depth, &mut second_node, wallet.clone()).await?;
     let side_chain = side_payload_chain.iter().map(|p| p.0.block().hash()).collect::<Vec<_>>();
 
-    // // On third node, cause a re-org, block won't be handled
-    // assert!(side_chain[reorg_depth - 1] != canonical_chain[tip_index]);
-    // third_node.engine_api.update_optimistic_forkchoice(side_chain[reorg_depth - 1]).await?;
-    // third_node.wait_unwind(89).await?;
-
     // It will create a fork chain
     let _ = third_node
         .engine_api
