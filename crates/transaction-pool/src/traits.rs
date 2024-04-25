@@ -13,9 +13,9 @@ use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
     IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip4844, TxHash, B256,
-    EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
+    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
+    TryFromRecoveredTransaction, TxEip4844, TxHash, TxKind, B256, EIP1559_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -811,14 +811,14 @@ pub trait PoolTransaction:
     /// otherwise returns the gas price.
     fn priority_fee_or_price(&self) -> u128;
 
-    /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
-    /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> &TransactionKind;
+    /// Returns the transaction's [`TxKind`], which is the address of the recipient or
+    /// [`TxKind::Create`] if the transaction is a contract creation.
+    fn kind(&self) -> &TxKind;
 
-    /// Returns the recipient of the transaction if it is not a [TransactionKind::Create]
+    /// Returns the recipient of the transaction if it is not a [TxKind::Create]
     /// transaction.
     fn to(&self) -> Option<Address> {
-        (*self.kind()).to()
+        (*self.kind()).to().copied()
     }
 
     /// Returns the input data of this transaction.
@@ -1056,9 +1056,9 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.priority_fee_or_price()
     }
 
-    /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
-    /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> &TransactionKind {
+    /// Returns the transaction's [`TxKind`], which is the address of the recipient or
+    /// [`TxKind::Create`] if the transaction is a contract creation.
+    fn kind(&self) -> &TxKind {
         self.transaction.kind()
     }
 

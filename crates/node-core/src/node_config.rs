@@ -270,7 +270,7 @@ impl NodeConfig {
     /// necessary
     pub async fn max_block<Provider, Client>(
         &self,
-        network_client: &Client,
+        network_client: Client,
         provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
@@ -425,6 +425,7 @@ impl NodeConfig {
         Client: HeadersClient,
     {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
+        let mut fetch_failures = 0;
         loop {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
@@ -432,7 +433,10 @@ impl NodeConfig {
                     return Ok(tip_header);
                 }
                 Err(error) => {
-                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                    fetch_failures += 1;
+                    if fetch_failures % 20 == 0 {
+                        error!(target: "reth::cli", ?fetch_failures, %error, "Failed to fetch the tip. Retrying...");
+                    }
                 }
             }
         }
