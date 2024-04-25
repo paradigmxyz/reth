@@ -7,8 +7,9 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
-    StaticFileSegment, StorageEntry, B256, U256,
+    stage::{StageCheckpoint, StageId},
+    Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
+    StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
@@ -398,6 +399,7 @@ pub fn init_from_state_dump<DB: Database>(
     } else {
         warn!(target: "reth::cli", "No state root found in file, skipping verification.");
     }
+
     provider_rw.commit()?;
 
     Ok(hash)
@@ -410,34 +412,53 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
 
     let tx = provider.tx_ref();
     let mut intermediate_state: Option<IntermediateStateRootState> = None;
-    let root = loop {
+    let mut total_flushed_updates = 0;
+
+    loop {
         match StateRootComputer::from_tx(tx)
             .with_intermediate_state(intermediate_state)
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                trace!(target: "reth::cli", last_account_key = %state.last_account_key, updates_len = updates.len(), "Flushing trie updates");
+                let updates_len = updates.len();
+
+                trace!(target: "reth::cli",
+                    last_account_key = %state.last_account_key,
+                    updates_len,
+                    total_flushed_updates,
+                    "Flushing trie updates"
+                );
+
                 intermediate_state = Some(*state);
                 updates.flush(tx)?;
 
-                total_updates += updates_len;
+                total_flushed_updates += updates_len;
 
-                if total_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
+                if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
                     info!(target: "reth::cli",
-                        total_updates,
+                        total_flushed_updates,
                         "Flushing trie updates"
                     );
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                trace!(target: "reth::cli", updates_len = updates.len(), "State root has been computed");
+                let updates_len = updates.len();
+
                 updates.flush(tx)?;
-                break root
+
+                total_flushed_updates += updates_len;
+
+                trace!(target: "reth::cli",
+                    %root,
+                    updates_len = updates_len,
+                    total_flushed_updates,
+                    "State root has been computed"
+                );
+
+                return Ok(StateRoot { root })
             }
         }
-    };
-
-    Ok(StateRoot { root })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
