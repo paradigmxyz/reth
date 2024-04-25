@@ -2354,7 +2354,7 @@ mod tests {
             genesis::{Genesis, GenesisAllocator},
             Hardfork, U256,
         };
-        use reth_provider::test_utils::blocks::BlockChainTestData;
+        use reth_provider::test_utils::blocks::BlockchainTestData;
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
@@ -2569,7 +2569,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_pre_merge() {
-            let data = BlockChainTestData::default();
+            let data = BlockchainTestData::default();
             let mut block1 = data.blocks[0].0.block.clone();
             block1
                 .header
