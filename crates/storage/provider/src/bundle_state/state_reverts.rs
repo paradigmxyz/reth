@@ -33,9 +33,8 @@ impl StateReverts {
         tracing::trace!(target: "provider::reverts", "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
-        let should_append_storage = storage_changeset_cursor
-            .last()?
-            .map_or(true, |(key, _)| key.block_number() < first_block);
+        let last_storage_changeset = storage_changeset_cursor.last()?;
+        let mut should_append_storage = None;
         for (block_index, mut storage_changes) in self.0.storage.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
 
@@ -68,8 +67,21 @@ impl StateReverts {
                 }
 
                 tracing::trace!(target: "provider::reverts", %address, ?storage, "Writing storage reverts");
-                for (key, value) in StorageRevertsIter::new(storage, wiped_storage) {
-                    if should_append_storage {
+                let mut storage_reverts_iter =
+                    StorageRevertsIter::new(storage, wiped_storage).peekable();
+
+                if should_append_storage.is_none() {
+                    if let Some(first_storage_revert) = storage_reverts_iter.peek() {
+                        should_append_storage =
+                            Some(last_storage_changeset.as_ref().map_or(true, |last_entry| {
+                                last_entry.0 <= storage_id &&
+                                    last_entry.1.key < first_storage_revert.0
+                            }));
+                    }
+                }
+
+                for (key, value) in storage_reverts_iter {
+                    if should_append_storage.unwrap_or_default() {
                         storage_changeset_cursor
                             .append_dup(storage_id, StorageEntry { key, value })?;
                     } else {
@@ -91,16 +103,25 @@ impl StateReverts {
         // Write account changes
         tracing::trace!(target: "provider::reverts", "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
-        let should_append_accounts = account_changeset_cursor
-            .last()?
-            .map_or(true, |(block_number, _)| block_number < first_block);
+        let last_account_changeset = account_changeset_cursor.last()?;
+        let mut should_append_accounts = None;
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
 
+            if should_append_accounts.is_none() {
+                if let Some(first_account_revert) = account_block_reverts.first() {
+                    should_append_accounts =
+                        Some(last_account_changeset.as_ref().map_or(true, |last_entry| {
+                            last_entry.0 <= block_number &&
+                                last_entry.1.address < first_account_revert.0
+                        }));
+                }
+            }
+
             for (address, info) in account_block_reverts {
-                if should_append_accounts {
+                if should_append_accounts.unwrap_or_default() {
                     account_changeset_cursor.append_dup(
                         block_number,
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },
