@@ -1,0 +1,14 @@
+[package]
+name = "network-txpool"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+reth-network.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true

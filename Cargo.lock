@@ -4864,6 +4864,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "network-txpool"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth",
+ "reth-network",
+ "reth-provider",
+ "reth-transaction-pool",
+ "tokio",
+]
+
+[[package]]
 name = "nibble_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

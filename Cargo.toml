@@ -80,6 +80,7 @@ members = [
     "examples/custom-dev-node/",
     "examples/custom-payload-builder/",
     "examples/manual-p2p/",
+    "examples/network-txpool/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "examples/polygon-p2p/",
