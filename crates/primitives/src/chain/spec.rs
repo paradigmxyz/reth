@@ -267,13 +267,13 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../../res/genesis/optimism.json"))
             .expect("Can't deserialize Optimism Mainnet genesis json"),
         genesis_hash: Some(b256!(
-            "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
+            "438335a20d98863a4c0c97999eb2481921ccd28553eac6f913af7c12aec04108"
         )),
         fork_timestamps: ForkTimestamps::default()
-            .shanghai(1699981200)
-            .canyon(1699981200)
-            .cancun(1707238800)
-            .ecotone(1707238800),
+            .shanghai(1704992401)
+            .canyon(1704992401)
+            .cancun(1710374401)
+            .ecotone(1710374401),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: BTreeMap::from([
             (Hardfork::Frontier, ForkCondition::Block(0)),
@@ -286,12 +286,12 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Istanbul, ForkCondition::Block(0)),
             (Hardfork::MuirGlacier, ForkCondition::Block(0)),
             (Hardfork::Berlin, ForkCondition::Block(3950000)),
-            (Hardfork::London, ForkCondition::Block(3950000)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(3950000)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(3950000)),
+            (Hardfork::London, ForkCondition::Block(105235063)),
+            (Hardfork::ArrowGlacier, ForkCondition::Block(105235063)),
+            (Hardfork::GrayGlacier, ForkCondition::Block(105235063)),
             (
                 Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(3950000), total_difficulty: U256::from(0) },
+                ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::from(0) },
             ),
             (Hardfork::Bedrock, ForkCondition::Block(105235063)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
