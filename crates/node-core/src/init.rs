@@ -7,9 +7,8 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
-    StorageEntry, B256, U256,
+    stage::StageId, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
+    StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
