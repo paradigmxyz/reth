@@ -1,8 +1,8 @@
 use futures::Future;
-use reth_exex::ExExContext;
+use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
-use reth_provider::CanonStateNotification;
+use reth_tracing::tracing::info;
 
 /// The initialization logic of the ExEx is just an async function.
 ///
@@ -16,22 +16,25 @@ async fn exex_init<Node: FullNodeComponents>(
 
 /// An ExEx is just a future, which means you can implement all of it in an async function!
 ///
-/// This ExEx just prints out whenever a state transition happens, either a new chain segment being
-/// added, or a chain segment being re-orged.
+/// This ExEx just prints out whenever either a new chain of blocks being added, or a chain of
+/// blocks being re-orged. After processing the chain, emits an [ExExEvent::FinishedHeight] event.
 async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
-            CanonStateNotification::Commit { new } => {
-                println!("Received commit: {:?}", new.first().number..=new.tip().number);
+            ExExNotification::ChainCommitted { new } => {
+                info!(committed_chain = ?new.range(), "Received commit");
             }
-            CanonStateNotification::Reorg { old, new } => {
-                println!(
-                    "Received reorg: {:?} -> {:?}",
-                    old.first().number..=old.tip().number,
-                    new.first().number..=new.tip().number
-                );
+            ExExNotification::ChainReorged { old, new } => {
+                info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+            }
+            ExExNotification::ChainReverted { old } => {
+                info!(reverted_chain = ?old.range(), "Received revert");
             }
         };
+
+        if let Some(committed_chain) = notification.committed_chain() {
+            ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+        }
     }
     Ok(())
 }

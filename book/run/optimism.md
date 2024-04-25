@@ -73,7 +73,7 @@ First, ensure that your L1 archival node is running and synced to tip. Then, sta
 ```sh
 op-reth node \
     --chain base \
-    --rollup.sequencer-http https://sequencer.base.org \
+    --rollup.sequencer-http https://mainnet-sequencer.base.org \
     --http \
     --ws \
     --authrpc.port 9551 \

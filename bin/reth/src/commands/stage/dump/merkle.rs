@@ -3,6 +3,7 @@ use crate::utils::DbTool;
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
+use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, PruneModes};
@@ -95,6 +96,7 @@ async fn unwind_and_copy<DB: Database>(
         },
         MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
         PruneModes::all(),
+        ExExManagerHandle::empty(),
     );
 
     exec_stage.unwind(
@@ -136,7 +138,7 @@ async fn unwind_and_copy<DB: Database>(
     Ok(())
 }
 
-/// Try to re-execute the stage straightaway
+/// Try to re-execute the stage straight away
 async fn dry_run<DB: Database>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,

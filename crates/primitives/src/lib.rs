@@ -97,10 +97,10 @@ pub use transaction::{
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     AccessList, AccessListItem, IntoRecoveredTransaction, InvalidTransactionError, Signature,
-    Transaction, TransactionKind, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    Transaction, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844,
     TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID, OP_RETH_MAINNET_BELOW_BEDROCK,
+    LEGACY_TX_TYPE_ID,
 };
 
 pub use withdrawal::{Withdrawal, Withdrawals};
@@ -113,7 +113,7 @@ pub use alloy_primitives::{
     eip191_hash_message, hex, hex_literal, keccak256, ruint,
     utils::format_ether,
     Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    StorageValue, TxHash, TxIndex, TxKind, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpMap};

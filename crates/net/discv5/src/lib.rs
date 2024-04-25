@@ -22,6 +22,7 @@ use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
+use rand::{Rng, RngCore};
 use reth_primitives::{bytes::Bytes, ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
@@ -32,6 +33,7 @@ pub mod enr;
 pub mod error;
 pub mod filter;
 pub mod metrics;
+pub mod network_key;
 
 pub use discv5::{self, IpMode};
 
@@ -39,11 +41,13 @@ pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
+
 use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
-/// Default number of times to do pulse lookup queries, at bootstrap (5 second intervals).
+/// Default number of times to do pulse lookup queries, at bootstrap (pulse intervals, defaulting
+/// to 5 seconds).
 ///
-/// Default is 200 seconds.
+/// Default is 100 counts.
 pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 
 /// Default duration of look up interval, for pulse look ups at bootstrap.
@@ -51,8 +55,17 @@ pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
 /// Default is 5 seconds.
 pub const DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL: u64 = 5;
 
-/// The max log2 distance, is equivalent to the index of the last bit in a discv5 node id.
-const MAX_LOG2_DISTANCE: usize = 255;
+/// Max kbucket index is 255.
+///
+/// This is the max log2distance for 32 byte [`NodeId`](discv5::enr::NodeId) - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+pub const MAX_KBUCKET_INDEX: usize = 255;
+
+/// Default lowest kbucket index to attempt filling, in periodic look up query to populate kbuckets.
+///
+/// The peer at the 0th kbucket index is at log2distance 1 from the local node ID. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
+///
+/// Default is 0th index.
+pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = 0;
 
 /// Transparent wrapper around [`discv5::Discv5`].
 #[derive(Clone)]
@@ -61,8 +74,8 @@ pub struct Discv5 {
     discv5: Arc<discv5::Discv5>,
     /// [`IpMode`] of the the node.
     ip_mode: IpMode,
-    /// Key used in kv-pair to ID chain.
-    fork_id_key: &'static [u8],
+    /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
+    fork_key: &'static [u8],
     /// Filter applied to a discovered peers before passing it up to app.
     discovered_peer_filter: MustNotIncludeKeys,
     /// Metrics for underlying [`discv5::Discv5`] node and filtered discovered peers.
@@ -155,82 +168,21 @@ impl Discv5 {
         //
         // 1. make local enr from listen config
         //
+        let (enr, bc_enr, fork_key, ip_mode) = Self::build_local_enr(sk, &discv5_config);
+
+        trace!(target: "net::discv5",
+            ?enr,
+            "local ENR"
+        );
+
+        //
+        // 2. start discv5
+        //
         let Config {
-            discv5_config,
-            bootstrap_nodes,
-            fork,
-            tcp_port,
-            other_enr_data,
-            lookup_interval,
-            discovered_peer_filter,
+            discv5_config, bootstrap_nodes, lookup_interval, discovered_peer_filter, ..
         } = discv5_config;
 
-        let (enr, bc_enr, ip_mode, fork_id_key) = {
-            let mut builder = discv5::enr::Enr::builder();
-
-            let (ip_mode, socket) = match discv5_config.listen_config {
-                ListenConfig::Ipv4 { ip, port } => {
-                    if ip != Ipv4Addr::UNSPECIFIED {
-                        builder.ip4(ip);
-                    }
-                    builder.udp4(port);
-                    builder.tcp4(tcp_port);
-
-                    (IpMode::Ip4, (ip, port).into())
-                }
-                ListenConfig::Ipv6 { ip, port } => {
-                    if ip != Ipv6Addr::UNSPECIFIED {
-                        builder.ip6(ip);
-                    }
-                    builder.udp6(port);
-                    builder.tcp6(tcp_port);
-
-                    (IpMode::Ip6, (ip, port).into())
-                }
-                ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
-                    if ipv4 != Ipv4Addr::UNSPECIFIED {
-                        builder.ip4(ipv4);
-                    }
-                    builder.udp4(ipv4_port);
-                    builder.tcp4(tcp_port);
-
-                    if ipv6 != Ipv6Addr::UNSPECIFIED {
-                        builder.ip6(ipv6);
-                    }
-                    builder.udp6(ipv6_port);
-
-                    (IpMode::DualStack, (ipv6, ipv6_port).into())
-                }
-            };
-
-            // add fork id
-            let (chain, fork_id) = fork;
-            builder.add_value_rlp(chain, alloy_rlp::encode(fork_id).into());
-
-            // add other data
-            for (key, value) in other_enr_data {
-                builder.add_value_rlp(key, alloy_rlp::encode(value).into());
-            }
-
-            // enr v4 not to get confused with discv4, independent versioning enr and
-            // discovery
-            let enr = builder.build(sk).expect("should build enr v4");
-            let EnrCombinedKeyWrapper(enr) = enr.into();
-
-            trace!(target: "net::discv5",
-                ?enr,
-                "local ENR"
-            );
-
-            // backwards compatible enr
-            let bc_enr = NodeRecord::from_secret_key(socket, sk);
-
-            (enr, bc_enr, ip_mode, chain)
-        };
-
-        //
-        // 3. start discv5
-        //
+        let EnrCombinedKeyWrapper(enr) = enr.into();
         let sk = discv5::enr::CombinedKey::secp256k1_from_bytes(&mut sk.secret_bytes()).unwrap();
         let mut discv5 = match discv5::Discv5::new(enr, sk, discv5_config) {
             Ok(discv5) => discv5,
@@ -244,22 +196,84 @@ impl Discv5 {
         let discv5 = Arc::new(discv5);
 
         //
-        // 4. add boot nodes
+        // 3. add boot nodes
         //
         Self::bootstrap(bootstrap_nodes, &discv5).await?;
 
         let metrics = Discv5Metrics::default();
 
         //
-        // 5. bg kbuckets maintenance
+        // 4. start bg kbuckets maintenance
         //
         Self::spawn_populate_kbuckets_bg(lookup_interval, metrics.clone(), discv5.clone());
 
         Ok((
-            Self { discv5, ip_mode, fork_id_key, discovered_peer_filter, metrics },
+            Self { discv5, ip_mode, fork_key, discovered_peer_filter, metrics },
             discv5_updates,
             bc_enr,
         ))
+    }
+
+    fn build_local_enr(
+        sk: &SecretKey,
+        config: &Config,
+    ) -> (Enr<SecretKey>, NodeRecord, &'static [u8], IpMode) {
+        let mut builder = discv5::enr::Enr::builder();
+
+        let Config { discv5_config, fork, tcp_port, other_enr_kv_pairs, .. } = config;
+
+        let (ip_mode, socket) = match discv5_config.listen_config {
+            ListenConfig::Ipv4 { ip, port } => {
+                if ip != Ipv4Addr::UNSPECIFIED {
+                    builder.ip4(ip);
+                }
+                builder.udp4(port);
+                builder.tcp4(*tcp_port);
+
+                (IpMode::Ip4, (ip, port).into())
+            }
+            ListenConfig::Ipv6 { ip, port } => {
+                if ip != Ipv6Addr::UNSPECIFIED {
+                    builder.ip6(ip);
+                }
+                builder.udp6(port);
+                builder.tcp6(*tcp_port);
+
+                (IpMode::Ip6, (ip, port).into())
+            }
+            ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
+                if ipv4 != Ipv4Addr::UNSPECIFIED {
+                    builder.ip4(ipv4);
+                }
+                builder.udp4(ipv4_port);
+                builder.tcp4(*tcp_port);
+
+                if ipv6 != Ipv6Addr::UNSPECIFIED {
+                    builder.ip6(ipv6);
+                }
+                builder.udp6(ipv6_port);
+
+                (IpMode::DualStack, (ipv6, ipv6_port).into())
+            }
+        };
+
+        // identifies which network node is on
+        let (network, fork_value) = fork;
+        builder.add_value_rlp(network, alloy_rlp::encode(fork_value).into());
+
+        // add other data
+        for (key, value) in other_enr_kv_pairs {
+            builder.add_value_rlp(key, value.clone().into());
+        }
+
+        // enr v4 not to get confused with discv4, independent versioning enr and
+        // discovery
+        let enr = builder.build(sk).expect("should build enr v4");
+
+        // backwards compatible enr
+        let bc_enr = NodeRecord::from_secret_key(socket, sk);
+
+        (enr, bc_enr, network, ip_mode)
     }
 
     /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
@@ -309,7 +323,7 @@ impl Discv5 {
             let local_node_id = discv5.local_enr().node_id();
             let lookup_interval = Duration::from_secs(lookup_interval);
             let metrics = metrics.discovered_peers;
-            let mut log2_distance = 0usize;
+            let mut kbucket_index = MAX_KBUCKET_INDEX;
             let pulse_lookup_interval = Duration::from_secs(DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL);
             // todo: graceful shutdown
 
@@ -335,7 +349,7 @@ impl Discv5 {
                 loop {
                     // make sure node is connected to each subtree in the network by target
                     // selection (ref kademlia)
-                    let target = get_lookup_target(log2_distance, local_node_id);
+                    let target = get_lookup_target(kbucket_index, local_node_id);
 
                     trace!(target: "net::discv5",
                         %target,
@@ -345,12 +359,12 @@ impl Discv5 {
 
                     lookup(target, &discv5, &metrics).await;
 
-                    if log2_distance < MAX_LOG2_DISTANCE {
-                        // try to populate bucket one step further away
-                        log2_distance += 1
+                    if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
+                        // try to populate bucket one step closer
+                        kbucket_index -= 1
                     } else {
-                        // start over with self lookup
-                        log2_distance = 0
+                        // start over with bucket furthest away
+                        kbucket_index = MAX_KBUCKET_INDEX
                     }
 
                     tokio::time::sleep(lookup_interval).await;
@@ -378,10 +392,10 @@ impl Discv5 {
                 None
             }
             discv5::Event::SessionEstablished(enr, remote_socket) => {
-                // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)` 
+                // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)`
                 // and `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
-                // peer has been discovered as part of query, or, by incoming session (peer has 
+                // peer has been discovered as part of query, or, by incoming session (peer has
                 // discovered us)
 
                 self.metrics.discovered_peers_advertised_networks.increment_once_by_network_type(&enr);
@@ -413,20 +427,20 @@ impl Discv5 {
                 return None
             }
         };
-        let fork_id = match self.filter_discovered_peer(enr) {
-            FilterOutcome::Ok => self.get_fork_id(enr).ok(),
-            FilterOutcome::Ignore { reason } => {
-                trace!(target: "net::discovery::discv5",
-                    ?enr,
-                    reason,
-                    "filtered out discovered peer"
-                );
+        if let FilterOutcome::Ignore { reason } = self.filter_discovered_peer(enr) {
+            trace!(target: "net::discovery::discv5",
+                ?enr,
+                reason,
+                "filtered out discovered peer"
+            );
 
-                self.metrics.discovered_peers.increment_established_sessions_filtered(1);
+            self.metrics.discovered_peers.increment_established_sessions_filtered(1);
 
-                return None
-            }
-        };
+            return None
+        }
+
+        let fork_id =
+            (self.fork_key == network_key::ETH).then(|| self.get_fork_id(enr).ok()).flatten();
 
         trace!(target: "net::discovery::discv5",
             ?fork_id,
@@ -475,7 +489,7 @@ impl Discv5 {
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
-        let key = self.fork_id_key;
+        let key = self.fork_key;
         let mut fork_id_bytes = enr.get_raw_rlp(key).ok_or(Error::ForkMissing(key))?;
 
         Ok(ForkId::decode(&mut fork_id_bytes)?)
@@ -503,8 +517,8 @@ impl Discv5 {
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
-    pub fn fork_id_key(&self) -> &[u8] {
-        self.fork_id_key
+    pub fn fork_key(&self) -> &[u8] {
+        self.fork_key
     }
 }
 
@@ -523,26 +537,33 @@ pub struct DiscoveredPeer {
     pub fork_id: Option<ForkId>,
 }
 
-/// Gets the next lookup target, based on which distance is currently being targeted.
+/// Gets the next lookup target, based on which bucket is currently being targeted.
 pub fn get_lookup_target(
-    log2_distance: usize,
+    kbucket_index: usize,
     local_node_id: discv5::enr::NodeId,
 ) -> discv5::enr::NodeId {
+    // init target
     let mut target = local_node_id.raw();
-    //make sure target has a 'distance'-long suffix that differs from local node id
-    if log2_distance != 0 {
-        let suffix_bit_offset = MAX_LOG2_DISTANCE.saturating_sub(log2_distance);
-        let suffix_byte_offset = suffix_bit_offset / 8;
-        // todo: flip the precise bit
-        // let rel_suffix_bit_offset = suffix_bit_offset % 8;
-        target[suffix_byte_offset] = !target[suffix_byte_offset];
 
-        if suffix_byte_offset != 31 {
-            for b in target.iter_mut().take(31).skip(suffix_byte_offset + 1) {
-                *b = rand::random::<u8>();
-            }
-        }
+    // make sure target has a 'log2distance'-long suffix that differs from local node id
+    let bit_offset = MAX_KBUCKET_INDEX.saturating_sub(kbucket_index);
+    let (byte, bit) = (bit_offset / 8, bit_offset % 8);
+    // Flip the target bit.
+    target[byte] ^= 1 << (7 - bit);
+
+    // Randomize the bits after the target.
+    let mut rng = rand::thread_rng();
+    // Randomize remaining bits in the byte we modified.
+    if bit < 7 {
+        // Compute the mask of the bits that need to be randomized.
+        let bits_to_randomize = 0xff >> (bit + 1);
+        // Clear.
+        target[byte] &= !bits_to_randomize;
+        // Randomize.
+        target[byte] |= rng.gen::<u8>() & bits_to_randomize;
     }
+    // Randomize remaining bytes.
+    rng.fill_bytes(&mut target[byte + 1..]);
 
     target.into()
 }
@@ -584,12 +605,11 @@ pub async fn lookup(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use ::enr::{CombinedKey, EnrKey};
-    use rand::Rng;
+    use reth_primitives::MAINNET;
     use secp256k1::rand::thread_rng;
     use tracing::trace;
-
-    use super::*;
 
     fn discv5_noop() -> Discv5 {
         let sk = CombinedKey::generate_secp256k1();
@@ -603,7 +623,7 @@ mod tests {
                 .unwrap(),
             ),
             ip_mode: IpMode::Ip4,
-            fork_id_key: b"noop",
+            fork_key: b"noop",
             discovered_peer_filter: MustNotIncludeKeys::default(),
             metrics: Discv5Metrics::default(),
         }
@@ -775,11 +795,7 @@ mod tests {
             pub fn log2_distance<U>(&self, other: &Key<U>) -> Option<u64> {
                 let xor_dist = self.distance(other);
                 let log_dist = (256 - xor_dist.0.leading_zeros() as u64);
-                if log_dist == 0 {
-                    None
-                } else {
-                    Some(log_dist)
-                }
+                (log_dist != 0).then_some(log_dist)
             }
         }
 
@@ -796,24 +812,32 @@ mod tests {
 
     #[test]
     fn select_lookup_target() {
-        // distance ceiled to the next byte
-        const fn expected_log2_distance(log2_distance: usize) -> u64 {
-            let log2_distance = log2_distance / 8;
-            ((log2_distance + 1) * 8) as u64
+        for bucket_index in 0..=MAX_KBUCKET_INDEX {
+            let sk = CombinedKey::generate_secp256k1();
+            let local_node_id = discv5::enr::NodeId::from(sk.public());
+            let target = get_lookup_target(bucket_index, local_node_id);
+
+            let local_node_id = sigp::Key::from(local_node_id);
+            let target = sigp::Key::from(target);
+
+            assert_eq!(local_node_id.log2_distance(&target), Some(bucket_index as u64 + 1));
         }
+    }
 
-        let log2_distance = rand::thread_rng().gen_range(0..=MAX_LOG2_DISTANCE);
+    #[test]
+    fn build_enr_from_config() {
+        const TCP_PORT: u16 = 30303;
+        let fork_id = MAINNET.latest_fork_id();
 
-        let sk = CombinedKey::generate_secp256k1();
-        let local_node_id = discv5::enr::NodeId::from(sk.public());
-        let target = get_lookup_target(log2_distance, local_node_id);
+        let config = Config::builder(TCP_PORT).fork(network_key::ETH, fork_id).build();
 
-        let local_node_id = sigp::Key::from(local_node_id);
-        let target = sigp::Key::from(target);
+        let sk = SecretKey::new(&mut thread_rng());
+        let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
 
-        assert_eq!(
-            expected_log2_distance(log2_distance),
-            local_node_id.log2_distance(&target).unwrap()
-        );
+        let decoded_fork_id =
+            ForkId::decode(&mut enr.get_raw_rlp(network_key::ETH).unwrap()).unwrap();
+
+        assert_eq!(fork_id, decoded_fork_id);
+        assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
     }
 }

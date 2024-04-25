@@ -36,6 +36,8 @@ reth-prune.workspace = true
 reth-stages.workspace = true
 reth-config.workspace = true
 reth-downloaders.workspace = true
+reth-node-events.workspace = true
+reth-consensus.workspace = true
 
 ## async
 futures.workspace = true

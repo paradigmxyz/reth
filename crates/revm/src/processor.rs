@@ -460,20 +460,16 @@ pub fn compare_receipts_root_and_logs_bloom(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use revm::{Database, TransitionState};
-
+    use super::*;
+    use crate::test_utils::{StateProviderTest, TestEvmConfig};
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
         keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction,
-        TransactionKind, TxEip1559, MAINNET,
+        TxEip1559, TxKind, MAINNET,
     };
-
-    use crate::test_utils::{StateProviderTest, TestEvmConfig};
-
-    use super::*;
+    use revm::{Database, TransitionState};
+    use std::collections::HashMap;
 
     static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
@@ -859,7 +855,7 @@ mod tests {
                 chain_id,
                 nonce: 1,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(Address::ZERO),
+                to: TxKind::Call(Address::ZERO),
                 max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                 ..Default::default()
             }),

@@ -11,17 +11,21 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# reth
 reth-codecs-derive = { path = "./derive", default-features = false }
 
-alloy-eips.workspace = true
+# eth
+alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
+
+# misc
 bytes.workspace = true
+modular-bitfield = { workspace = true, optional = true }
+serde.workspace = true
 
 [dev-dependencies]
-alloy-eips = { workspace = true, features = ["arbitrary", "serde"] }
+alloy-eips = { workspace = true, default-features = false, features = ["arbitrary", "serde"] }
 alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
-serde.workspace = true
-modular-bitfield = "0.11.2"
 test-fuzz.workspace = true
 serde_json.workspace = true
 
@@ -30,6 +34,7 @@ proptest.workspace = true
 proptest-derive.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "alloy"]
 std = ["alloy-primitives/std", "bytes/std"]
+alloy = ["dep:alloy-eips", "dep:modular-bitfield"]
 optimism = ["reth-codecs-derive/optimism"]

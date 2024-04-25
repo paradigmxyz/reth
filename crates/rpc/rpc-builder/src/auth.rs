@@ -13,7 +13,6 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
-use reth_ipc::client::IpcClientBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 use reth_engine_primitives::EngineTypes;
@@ -162,7 +161,7 @@ pub struct AuthServerConfig {
     /// Configs for JSON-RPC Http.
     pub(crate) server_config: ServerBuilder<Identity, Identity>,
     /// Configs for IPC server
-    pub(crate) ipc_server_config: Option<IpcServerBuilder>,
+    pub(crate) ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// IPC endpoint
     pub(crate) ipc_endpoint: Option<String>,
 }
@@ -224,7 +223,7 @@ pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerBuilder<Identity, Identity>>,
-    ipc_server_config: Option<IpcServerBuilder>,
+    ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     ipc_endpoint: Option<String>,
 }
 
@@ -290,7 +289,7 @@ impl AuthServerConfigBuilder {
     /// Configures the IPC server
     ///
     /// Note: this always configures an [EthSubscriptionIdProvider]
-    pub fn with_ipc_config(mut self, config: IpcServerBuilder) -> Self {
+    pub fn with_ipc_config(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -445,6 +444,8 @@ impl AuthServerHandle {
     /// Returns an ipc client connected to the server.
     #[cfg(unix)]
     pub async fn ipc_client(&self) -> Option<jsonrpsee::async_client::Client> {
+        use reth_ipc::client::IpcClientBuilder;
+
         if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
             return Some(
                 IpcClientBuilder::default()

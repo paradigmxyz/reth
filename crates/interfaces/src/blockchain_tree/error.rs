@@ -1,11 +1,11 @@
 //! Error handling for the blockchain tree
 
 use crate::{
-    consensus::ConsensusError,
     executor::{BlockExecutionError, BlockValidationError},
     provider::ProviderError,
     RethError,
 };
+use reth_consensus::ConsensusError;
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
 
 /// Various error cases that can occur when a block violates tree assumptions.
@@ -18,7 +18,7 @@ pub enum BlockchainTreeError {
         last_finalized: BlockNumber,
     },
     /// Thrown if no side chain could be found for the block.
-    #[error("blockChainId can't be found in BlockchainTree with internal index {chain_id}")]
+    #[error("chainId can't be found in BlockchainTree with internal index {chain_id}")]
     BlockSideChainIdConsistency {
         /// The internal identifier for the side chain.
         chain_id: u64,
@@ -241,6 +241,36 @@ impl InsertBlockErrorKind {
     /// Returns true if the error is a consensus error
     pub fn is_consensus_error(&self) -> bool {
         matches!(self, InsertBlockErrorKind::Consensus(_))
+    }
+
+    /// Returns true if this error is a state root error
+    pub fn is_state_root_error(&self) -> bool {
+        // we need to get the state root errors inside of the different variant branches
+        match self {
+            InsertBlockErrorKind::Execution(err) => {
+                matches!(
+                    err,
+                    BlockExecutionError::Validation(BlockValidationError::StateRoot { .. })
+                )
+            }
+            InsertBlockErrorKind::Canonical(err) => {
+                matches!(
+                    err,
+                    CanonicalError::Validation(BlockValidationError::StateRoot { .. }) |
+                        CanonicalError::Provider(
+                            ProviderError::StateRootMismatch(_) |
+                                ProviderError::UnwindStateRootMismatch(_)
+                        )
+                )
+            }
+            InsertBlockErrorKind::Provider(err) => {
+                matches!(
+                    err,
+                    ProviderError::StateRootMismatch(_) | ProviderError::UnwindStateRootMismatch(_)
+                )
+            }
+            _ => false,
+        }
     }
 
     /// Returns true if the error is caused by an invalid block

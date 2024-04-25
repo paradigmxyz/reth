@@ -10,12 +10,13 @@ use crate::{
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{Config, PruneConfig};
+use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::consensus::Consensus;
+use reth_exex::ExExManagerHandle;
 use reth_node_core::{
     args::{get_secret_key, NetworkArgs},
     dirs::ChainPath,
@@ -126,7 +127,7 @@ impl Command {
             let provider = provider_factory.provider_rw()?;
 
             let _ = provider
-                .take_block_and_execution_range(&self.chain, range.clone())
+                .take_block_and_execution_range(range.clone())
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
             provider.commit()?;
@@ -211,6 +212,7 @@ impl Command {
                         .max(stage_conf.account_hashing.clean_threshold)
                         .max(stage_conf.storage_hashing.clean_threshold),
                     config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    ExExManagerHandle::empty(),
                 ))
                 .set(AccountHashingStage::default())
                 .set(StorageHashingStage::default())
@@ -234,10 +236,12 @@ impl Command {
 /// `reth stage unwind` subcommand
 #[derive(Subcommand, Debug, Eq, PartialEq)]
 enum Subcommands {
-    /// Unwinds the database until the given block number (range is inclusive).
+    /// Unwinds the database from the latest block, until the given block number or hash has been
+    /// reached, that block is not included.
     #[command(name = "to-block")]
     ToBlock { target: BlockHashOrNumber },
-    /// Unwinds the given number of blocks from the database.
+    /// Unwinds the database from the latest block, until the given number of blocks have been
+    /// reached.
     #[command(name = "num-blocks")]
     NumBlocks { amount: u64 },
 }
@@ -261,6 +265,9 @@ impl Subcommands {
             },
             Subcommands::NumBlocks { amount } => last.saturating_sub(*amount),
         } + 1;
+        if target > last {
+            eyre::bail!("Target block number is higher than the latest block number")
+        }
         Ok(target..=last)
     }
 }

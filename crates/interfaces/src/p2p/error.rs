@@ -1,5 +1,6 @@
 use super::headers::client::HeadersRequest;
-use crate::{consensus::ConsensusError, db::DatabaseError, provider::ProviderError};
+use crate::{db::DatabaseError, provider::ProviderError};
+use reth_consensus::ConsensusError;
 use reth_network_api::ReputationChangeKind;
 use reth_primitives::{
     BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, WithPeerId, B256,
@@ -132,10 +133,12 @@ pub type DownloadResult<T> = Result<T, DownloadError>;
 pub enum DownloadError {
     /* ==================== HEADER ERRORS ==================== */
     /// Header validation failed.
-    #[error("failed to validate header {hash}: {error}")]
+    #[error("failed to validate header {hash}, block number {number}: {error}")]
     HeaderValidation {
         /// Hash of header failing validation
         hash: B256,
+        /// Number of header failing validation
+        number: u64,
         /// The details of validation failure
         #[source]
         error: Box<ConsensusError>,
