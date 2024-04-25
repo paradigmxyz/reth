@@ -300,7 +300,7 @@ address.to_string(), format_ether(alloc.balance));
             // install auto-seal
             let mining_mode =
                 ctx.dev_mining_mode(node_adapter.components.pool().pending_transactions_listener());
-            info!(target: "reth::cli", mode=%mining_mode.kind(), "configuring dev mining mode");
+            info!(target: "reth::cli", mode=%mining_mode, "configuring dev mining mode");
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
                 ctx.chain_spec(),
