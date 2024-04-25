@@ -267,7 +267,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         genesis: serde_json::from_str(include_str!("../../res/genesis/optimism.json"))
             .expect("Can't deserialize Optimism Mainnet genesis json"),
         genesis_hash: Some(b256!(
-            "438335a20d98863a4c0c97999eb2481921ccd28553eac6f913af7c12aec04108"
+            "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
         )),
         fork_timestamps: ForkTimestamps::default()
             .shanghai(1704992401)
