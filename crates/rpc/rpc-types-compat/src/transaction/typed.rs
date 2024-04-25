@@ -16,7 +16,7 @@ pub fn to_primitive_transaction(
             nonce: tx.nonce,
             gas_price: tx.gas_price.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
-            to: to_primitive_transaction_kind(tx.kind),
+            to: tx.kind,
             value: tx.value,
             input: tx.input,
         }),
@@ -25,7 +25,7 @@ pub fn to_primitive_transaction(
             nonce: tx.nonce,
             gas_price: tx.gas_price.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
-            to: to_primitive_transaction_kind(tx.kind),
+            to: tx.kind,
             value: tx.value,
             input: tx.input,
             access_list: tx.access_list,
@@ -35,7 +35,7 @@ pub fn to_primitive_transaction(
             nonce: tx.nonce,
             max_fee_per_gas: tx.max_fee_per_gas.to(),
             gas_limit: tx.gas_limit.try_into().ok()?,
-            to: to_primitive_transaction_kind(tx.kind),
+            to: tx.kind,
             value: tx.value,
             input: tx.input,
             access_list: tx.access_list,
@@ -47,7 +47,7 @@ pub fn to_primitive_transaction(
             gas_limit: tx.gas_limit.to(),
             max_fee_per_gas: tx.max_fee_per_gas.to(),
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.to(),
-            to: to_primitive_transaction_kind(tx.kind),
+            to: tx.kind,
             value: tx.value,
             access_list: tx.access_list,
             blob_versioned_hashes: tx.blob_versioned_hashes,
@@ -55,12 +55,4 @@ pub fn to_primitive_transaction(
             input: tx.input,
         }),
     })
-}
-
-/// Transforms a [alloy_primitives::TxKind] into a [reth_primitives::TxKind]
-pub fn to_primitive_transaction_kind(kind: alloy_primitives::TxKind) -> reth_primitives::TxKind {
-    match kind {
-        alloy_primitives::TxKind::Call(to) => reth_primitives::TxKind::Call(to),
-        alloy_primitives::TxKind::Create => reth_primitives::TxKind::Create,
-    }
 }

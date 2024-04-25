@@ -16,7 +16,6 @@ reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types.workspace = true
-alloy-primitives.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
