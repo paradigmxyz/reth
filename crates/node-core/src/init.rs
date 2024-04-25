@@ -131,7 +131,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
     tx: &<DB as Database>::TXMut,
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
-    block: u64
+    block: u64,
 ) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
     let mut reverts_init = HashMap::with_capacity(capacity);
