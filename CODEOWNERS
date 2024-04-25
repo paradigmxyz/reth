@@ -1,6 +1,7 @@
 *                           @gakonst
 bin/                        @onbjerg
 crates/blockchain-tree      @rakita @rkrasiuk
+crates/cli/                 @onbjerg @mattsse
 crates/consensus/auto-seal  @mattsse
 crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
 crates/exex                 @onbjerg @shekhirin
