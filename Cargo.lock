@@ -2759,6 +2759,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "exex-rollup"
+version = "0.0.0"
+dependencies = [
+ "alloy-rlp",
+ "alloy-sol-types",
+ "eyre",
+ "futures",
+ "once_cell",
+ "reth",
+ "reth-exex",
+ "reth-interfaces",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tracing",
+ "reth-trie",
+ "rusqlite",
+ "secp256k1 0.27.0",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7827,31 +7852,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8395b4f860856b740f20a296ea2cd4d823e81a2658cf05ef61be22916026a906"
 dependencies = [
  "chrono",
-]
-
-[[package]]
-name = "rollup"
-version = "0.0.0"
-dependencies = [
- "alloy-rlp",
- "alloy-sol-types",
- "eyre",
- "futures",
- "once_cell",
- "reth",
- "reth-exex",
- "reth-interfaces",
- "reth-node-api",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-primitives",
- "reth-provider",
- "reth-tracing",
- "reth-trie",
- "rusqlite",
- "secp256k1 0.27.0",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

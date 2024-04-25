@@ -1,5 +1,5 @@
 [package]
-name = "rollup"
+name = "exex-rollup"
 version = "0.0.0"
 publish = false
 edition.workspace = true
