@@ -56,10 +56,20 @@ pub enum InitDatabaseError {
         /// Actual genesis hash.
         database_hash: B256,
     },
-
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// State root missing from state dump.
+    #[error("state root missing")]
+    SateRootMissing,
+    /// Computed state root doesn't match state root in state dump file.
+    #[error("state root mismatch, state dump: {state_dump}, computed: {computed}")]
+    SateRootMismatch {
+        /// Expected state root.
+        state_dump: B256,
+        /// Actual state root.
+        computed: B256,
+    },
 }
 
 impl From<DatabaseError> for InitDatabaseError {
@@ -306,22 +316,14 @@ pub fn init_from_state_dump<DB: Database>(
 
     // first line can be state root, then it can be used for verifying against computed state root
     reader.read_line(&mut line)?;
-    let expected_state_root = match serde_json::from_str::<StateRoot>(&line) {
-        Ok(root) => {
-            trace!(target: "reth::cli",
-                root=%root.root,
-                "Read state root from file"
-            );
-            Some(root)
-        }
-        Err(_) => {
-            let GenesisAccountWithAddress { genesis_account, address } =
-                serde_json::from_str(&line)?;
-            accounts.push((address, genesis_account));
+    let expected_state_root =
+        serde_json::from_str::<StateRoot>(&line).ok_or(InitDatabaseError::StateRootMissing)?.root;
 
-            None
-        }
-    };
+    trace!(target: "reth::cli",
+        root=%expected_state_root,
+        "Read state root from file"
+    );
+
     line.clear();
 
     // remaining lines are accounts
@@ -376,27 +378,24 @@ pub fn init_from_state_dump<DB: Database>(
         line.clear();
     }
 
-    // compute and compare state root
-    //
-    // note: we compute it even if we have nothing to compare to because we set the stage
-    // checkpoints further up.
+    // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(&provider_rw)?;
-    if let Some(expected_state_root) = expected_state_root {
-        if computed_state_root != expected_state_root {
-            error!(target: "reth::cli",
-                ?computed_state_root,
-                ?expected_state_root,
-                "Computed state root does not match state root in state dump"
-            );
-            eyre::bail!("Computed state root differs from state root in state dump. Got {:?}, expected {:?}", computed_state_root, expected_state_root);
-        } else {
-            info!(target: "reth::cli",
-                ?computed_state_root,
-                
-            "Computed state root matches state root in state dump");
-        }
+    if computed_state_root != expected_state_root {
+        error!(target: "reth::cli",
+            ?computed_state_root,
+            ?expected_state_root,
+            "Computed state root does not match state root in state dump"
+        );
+
+        return Err(InitDatabaseError::SateRootMismatch {
+            state_dump: expected_state_root,
+            computed: computed_state_root.root,
+        })
     } else {
-        warn!(target: "reth::cli", "No state root found in file, skipping verification.");
+        info!(target: "reth::cli",
+            ?computed_state_root,
+            "Computed state root matches state root in state dump"
+        );
     }
 
     provider_rw.commit()?;
@@ -406,7 +405,7 @@ pub fn init_from_state_dump<DB: Database>(
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the
 /// database.
-fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::Result<StateRoot> {
+fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::Result<B256> {
     trace!(target: "reth::cli", "Computing state root");
 
     let tx = provider.tx_ref();
@@ -454,12 +453,13 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                     "State root has been computed"
                 );
 
-                return Ok(StateRoot { root })
+                return Ok(root)
             }
         }
     }
 }
 
+/// Type to deserialize state root from state dump file.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct StateRoot {
     root: B256,
