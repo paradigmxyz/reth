@@ -145,6 +145,16 @@ impl<T> LaunchContextWith<T> {
             attachment: Attached::new(self.attachment, attachment),
         }
     }
+
+    /// Consumes the type and calls a function with a reference to the context.
+    // Returns the context again
+    pub fn inspect<F>(self, f: F) -> Self
+    where
+        F: FnOnce(&Self),
+    {
+        f(&self);
+        self
+    }
 }
 
 impl<L, R> LaunchContextWith<Attached<L, R>> {
@@ -338,6 +348,12 @@ where
         )
     }
 
+    /// Convenience function to [Self::init_genesis]
+    pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
+        init_genesis(self.provider_factory().clone())?;
+        Ok(self)
+    }
+
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
         init_genesis(self.provider_factory().clone())
@@ -350,6 +366,12 @@ where
         C: HeadersClient,
     {
         self.node_config().max_block(client, self.provider_factory().clone()).await
+    }
+
+    /// Convenience function to [Self::start_prometheus_endpoint]
+    pub async fn with_prometheus(self) -> eyre::Result<Self> {
+        self.start_prometheus_endpoint().await?;
+        Ok(self)
     }
 
     /// Starts the prometheus endpoint.
