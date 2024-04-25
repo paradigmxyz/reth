@@ -39,7 +39,7 @@ hyper.workspace = true
 http.workspace = true
 http-body.workspace = true
 reqwest = { version = "0.11", default-features = false, features = [
-    "rustls-tls",
+    "rustls-tls-native-roots",
 ] }
 tracing.workspace = true
 
