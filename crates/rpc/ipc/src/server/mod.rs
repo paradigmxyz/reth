@@ -873,11 +873,14 @@ mod tests {
         let response: Result<String, Error> =
             client.request("anything", rpc_params!["a".repeat(101)]).await;
         assert!(response.is_err());
-
         let mut batch_request_builder = BatchRequestBuilder::new();
-        let _ = batch_request_builder.insert("anything", rpc_params!["a".repeat(10)]);
-        let _ = batch_request_builder.insert("anything", rpc_params!["a".repeat(10)]);
-        let _ = batch_request_builder.insert("anything", rpc_params!["a".repeat(10)]);
+        let _ = batch_request_builder.insert("anything", rpc_params![]);
+        let _ = batch_request_builder.insert("anything", rpc_params![]);
+        let _ = batch_request_builder.insert("anything", rpc_params![]);
+        // the raw request string is:
+        //  [{"jsonrpc":"2.0","id":0,"method":"anything"},{"jsonrpc":"2.0","id":1, \
+        //    "method":"anything"},{"jsonrpc":"2.0","id":2,"method":"anything"}]"
+        // which is 136 bytes, more than 100 bytes.
         let response: Result<client::BatchResponse<'_, String>, Error> =
             client.batch_request(batch_request_builder).await;
         assert!(response.is_err());
@@ -896,6 +899,30 @@ mod tests {
         let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
         let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
         assert_eq!(response, msg);
+    }
+
+    #[tokio::test]
+    async fn test_batch_request() {
+        let endpoint = dummy_endpoint();
+        let server = Builder::default().build(&endpoint);
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _| "ok").unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let mut batch_request_builder = BatchRequestBuilder::new();
+        let _ = batch_request_builder.insert("anything", rpc_params![]);
+        let _ = batch_request_builder.insert("anything", rpc_params![]);
+        let _ = batch_request_builder.insert("anything", rpc_params![]);
+        let result = client
+            .batch_request(batch_request_builder)
+            .await
+            .unwrap()
+            .into_ok()
+            .unwrap()
+            .collect::<Vec<String>>();
+        assert_eq!(result, vec!["ok", "ok", "ok"]);
     }
 
     #[tokio::test]
