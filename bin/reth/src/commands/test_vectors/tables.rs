@@ -81,7 +81,7 @@ where
 {
     let mut rows = vec![];
     let mut seen_keys = HashSet::new();
-    let strat = proptest::collection::vec(
+    let strategy = proptest::collection::vec(
         any_with::<TableRow<T>>((
             <T::Key as Arbitrary>::Parameters::default(),
             <T::Value as Arbitrary>::Parameters::default(),
@@ -94,7 +94,7 @@ where
     while rows.len() < per_table {
         // Generate all `per_table` rows: (Key, Value)
         rows.extend(
-            &mut strat
+            &mut strategy
                 .new_tree(runner)
                 .map_err(|e| eyre::eyre!("{e}"))?
                 .current()

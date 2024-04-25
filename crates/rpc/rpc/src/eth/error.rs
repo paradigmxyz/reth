@@ -6,7 +6,9 @@ use jsonrpsee::types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject};
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
 use reth_revm::tracing::{js::JsInspectorError, MuxError};
-use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use reth_rpc_types::{
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
+};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
@@ -16,12 +18,6 @@ use std::time::Duration;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
-
-/// A tait for custom rpc errors used by [EthApiError::Other].
-pub trait ToRpcError: std::error::Error + Send + Sync + 'static {
-    /// Converts the error to a JSON-RPC error object.
-    fn to_rpc_error(&self) -> ErrorObject<'static>;
-}
 
 /// Errors that can occur when interacting with the `eth_` namespace
 #[derive(Debug, thiserror::Error)]
@@ -119,7 +115,7 @@ pub enum EthApiError {
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
     /// Any other error
-    #[error("0")]
+    #[error("{0}")]
     Other(Box<dyn ToRpcError>),
 }
 

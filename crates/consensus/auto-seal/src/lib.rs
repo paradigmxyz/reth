@@ -16,12 +16,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
-use reth_interfaces::{
-    consensus::{Consensus, ConsensusError},
-    executor::{BlockExecutionError, BlockValidationError},
-};
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
@@ -277,10 +275,9 @@ impl StorageInner {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // check previous block for base fee
-        let base_fee_per_gas = self
-            .headers
-            .get(&self.best_block)
-            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params(timestamp)));
+        let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
+            parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
+        });
 
         let mut header = Header {
             parent_hash: self.best_hash,

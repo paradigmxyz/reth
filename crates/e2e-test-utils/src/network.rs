@@ -5,12 +5,12 @@ use reth_tracing::tracing::info;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Helper for network operations
-pub struct NetworkHelper {
+pub struct NetworkTestContext {
     network_events: UnboundedReceiverStream<NetworkEvent>,
     network: NetworkHandle,
 }
 
-impl NetworkHelper {
+impl NetworkTestContext {
     /// Creates a new network helper
     pub fn new(network: NetworkHandle) -> Self {
         let network_events = network.event_listener();

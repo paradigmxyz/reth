@@ -14,6 +14,7 @@ use crate::{
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
+use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
@@ -120,7 +121,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
@@ -154,6 +155,7 @@ impl Command {
                 Arc::clone(&db),
                 factory.static_file_provider(),
                 metrics_process::Collector::default(),
+                ctx.task_executor,
             )
             .await?;
         }

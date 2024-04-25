@@ -8,11 +8,13 @@ use thiserror::Error;
 /// both execution payloads and forkchoice update attributes with respect to a method version.
 #[derive(Error, Debug)]
 pub enum EngineObjectValidationError {
-    /// Thrown when the underlying validation error occured while validating an `ExecutionPayload`.
+    /// Thrown when the underlying validation error occurred while validating an
+    /// `ExecutionPayload`.
     #[error("Payload validation error: {0}")]
     Payload(VersionSpecificValidationError),
 
-    /// Thrown when the underlying validation error occured while validating a `PayloadAttributes`.
+    /// Thrown when the underlying validation error occurred while validating a
+    /// `PayloadAttributes`.
     #[error("Payload attributes validation error: {0}")]
     PayloadAttributes(VersionSpecificValidationError),
 

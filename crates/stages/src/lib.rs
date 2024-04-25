@@ -15,8 +15,7 @@
 //! # use std::sync::Arc;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
-//! # use reth_interfaces::consensus::Consensus;
-//! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
+//! # use reth_interfaces::test_utils::{TestBodiesClient, TestHeadersClient};
 //! # use reth_revm::EvmProcessorFactory;
 //! # use reth_primitives::{PeerId, MAINNET, B256, PruneModes};
 //! # use reth_stages::Pipeline;
@@ -28,6 +27,8 @@
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::EtlConfig;
+//! # use reth_consensus::Consensus;
+//! # use reth_consensus::test_utils::TestConsensus;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());

@@ -5,13 +5,13 @@ use crate::{
     state::{BlockChainId, TreeState},
     AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
 };
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::{Consensus, ConsensusError},
     executor::{BlockExecutionError, BlockValidationError},
     provider::RootMismatch,
     RethResult,
@@ -1259,8 +1259,8 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
+    use reth_consensus::test_utils::TestConsensus;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
-    use reth_interfaces::test_utils::TestConsensus;
     use reth_node_ethereum::EthEvmConfig;
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::proofs::calculate_receipt_root;
@@ -1715,7 +1715,7 @@ mod tests {
         );
         let block2_chain_id = tree.state.block_indices.get_blocks_chain_id(&block2.hash()).unwrap();
         let block2_chain = tree.state.chains.get(&block2_chain_id).unwrap();
-        assert!(block2_chain.trie_updates().is_some());
+        assert!(block2_chain.trie_updates().is_none());
 
         assert_eq!(
             tree.make_canonical(block2.hash()).unwrap(),
@@ -1750,7 +1750,7 @@ mod tests {
 
         let block5_chain_id = tree.state.block_indices.get_blocks_chain_id(&block5.hash()).unwrap();
         let block5_chain = tree.state.chains.get(&block5_chain_id).unwrap();
-        assert!(block5_chain.trie_updates().is_some());
+        assert!(block5_chain.trie_updates().is_none());
 
         assert_eq!(
             tree.make_canonical(block5.hash()).unwrap(),

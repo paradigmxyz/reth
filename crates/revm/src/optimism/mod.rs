@@ -32,12 +32,17 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError
     let l1_info_tx_data = block
         .body
         .first()
-        .ok_or(reth_executor::BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not find l1 block info tx in the L2 block".to_string(),
-            },
-        ))
+        .ok_or(reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not find l1 block info tx in the L2 block".to_string(),
+        })
         .map(|tx| tx.input())?;
+
+    if l1_info_tx_data.len() < 4 {
+        return Err(reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+            message: "invalid l1 block info transaction calldata in the L2 block".to_string(),
+        }
+        .into())
+    }
 
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
@@ -100,18 +105,21 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, BlockExecuti
 }
 
 /// Parses the calldata of the [L1BlockInfo] transaction post-Ecotone hardfork.
+///
+/// This will fail if the call data is not exactly 160 bytes long:
+///
+/// The `setL1BlockValuesEcotone` tx calldata must be exactly 160 bytes long, considering that
+/// we already removed the first 4 bytes (the function selector). Detailed breakdown:
+///   8 bytes for the block sequence number
+/// + 4 bytes for the blob base fee scalar
+/// + 4 bytes for the base fee scalar
+/// + 8 bytes for the block number
+/// + 8 bytes for the block timestamp
+/// + 32 bytes for the base fee
+/// + 32 bytes for the blob base fee
+/// + 32 bytes for the block hash
+/// + 32 bytes for the batcher hash
 pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, BlockExecutionError> {
-    // The setL1BlockValuesEcotone tx calldata must be exactly 160 bytes long, considering that
-    // we already removed the first 4 bytes (the function selector). Detailed breakdown:
-    //   8 bytes for the block sequence number
-    // + 4 bytes for the blob base fee scalar
-    // + 4 bytes for the base fee scalar
-    // + 8 bytes for the block number
-    // + 8 bytes for the block timestamp
-    // + 32 bytes for the base fee
-    // + 32 bytes for the blob base fee
-    // + 32 bytes for the block hash
-    // + 32 bytes for the batcher hash
     if data.len() != 160 {
         return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
             reth_executor::OptimismBlockExecutionError::L1BlockInfoError {

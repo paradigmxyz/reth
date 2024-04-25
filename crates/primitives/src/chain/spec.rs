@@ -243,6 +243,12 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             (Hardfork::Cancun, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "optimism")]
+            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            #[cfg(feature = "optimism")]
+            (Hardfork::Bedrock, ForkCondition::Block(0)),
+            #[cfg(feature = "optimism")]
+            (Hardfork::Ecotone, ForkCondition::Timestamp(0)),
         ]),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
@@ -655,15 +661,34 @@ impl ChainSpec {
     }
 
     /// Get the [BaseFeeParams] for the chain at the given timestamp.
-    pub fn base_fee_params(&self, timestamp: u64) -> BaseFeeParams {
+    pub fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         match self.base_fee_params {
             BaseFeeParamsKind::Constant(bf_params) => bf_params,
-            BaseFeeParamsKind::Variable(ForkBaseFeeParams { 0: ref bf_params }) => {
+            BaseFeeParamsKind::Variable(ForkBaseFeeParams(ref bf_params)) => {
                 // Walk through the base fee params configuration in reverse order, and return the
                 // first one that corresponds to a hardfork that is active at the
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.is_fork_active_at_timestamp(*fork, timestamp) {
+                        return *params
+                    }
+                }
+
+                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
+            }
+        }
+    }
+
+    /// Get the [BaseFeeParams] for the chain at the given block number
+    pub fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
+        match self.base_fee_params {
+            BaseFeeParamsKind::Constant(bf_params) => bf_params,
+            BaseFeeParamsKind::Variable(ForkBaseFeeParams(ref bf_params)) => {
+                // Walk through the base fee params configuration in reverse order, and return the
+                // first one that corresponds to a hardfork that is active at the
+                // given timestamp.
+                for (fork, params) in bf_params.iter().rev() {
+                    if self.is_fork_active_at_block(*fork, block_number) {
                         return *params
                     }
                 }
@@ -764,6 +789,12 @@ impl ChainSpec {
         self.fork(fork).active_at_timestamp(timestamp)
     }
 
+    /// Convenience method to check if a fork is active at a given block number
+    #[inline]
+    pub fn is_fork_active_at_block(&self, fork: Hardfork, block_number: u64) -> bool {
+        self.fork(fork).active_at_block(block_number)
+    }
+
     /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
     #[inline]
     pub fn is_shanghai_active_at_timestamp(&self, timestamp: u64) -> bool {
@@ -780,6 +811,15 @@ impl ChainSpec {
             .cancun
             .map(|cancun| timestamp >= cancun)
             .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp))
+    }
+
+    /// Convenience method to check if [Hardfork::Prague] is active at a given timestamp.
+    #[inline]
+    pub fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork_timestamps
+            .prague
+            .map(|prague| timestamp >= prague)
+            .unwrap_or_else(|| self.is_fork_active_at_timestamp(Hardfork::Prague, timestamp))
     }
 
     /// Convenience method to check if [Hardfork::Byzantium] is active at a given block number.
@@ -1024,10 +1064,12 @@ impl From<Genesis> for ChainSpec {
 /// Various timestamps of forks
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct ForkTimestamps {
-    /// The timestamp of the shanghai fork
+    /// The timestamp of the Shanghai fork
     pub shanghai: Option<u64>,
-    /// The timestamp of the cancun fork
+    /// The timestamp of the Cancun fork
     pub cancun: Option<u64>,
+    /// The timestamp of the Prague fork
+    pub prague: Option<u64>,
     /// The timestamp of the Regolith fork
     #[cfg(feature = "optimism")]
     pub regolith: Option<u64>,
@@ -1049,6 +1091,9 @@ impl ForkTimestamps {
         if let Some(cancun) = forks.get(&Hardfork::Cancun).and_then(|f| f.as_timestamp()) {
             timestamps = timestamps.cancun(cancun);
         }
+        if let Some(prague) = forks.get(&Hardfork::Prague).and_then(|f| f.as_timestamp()) {
+            timestamps = timestamps.prague(prague);
+        }
         #[cfg(feature = "optimism")]
         {
             if let Some(regolith) = forks.get(&Hardfork::Regolith).and_then(|f| f.as_timestamp()) {
@@ -1064,15 +1109,21 @@ impl ForkTimestamps {
         timestamps
     }
 
-    /// Sets the given shanghai timestamp
+    /// Sets the given Shanghai timestamp
     pub fn shanghai(mut self, shanghai: u64) -> Self {
         self.shanghai = Some(shanghai);
         self
     }
 
-    /// Sets the given cancun timestamp
+    /// Sets the given Cancun timestamp
     pub fn cancun(mut self, cancun: u64) -> Self {
         self.cancun = Some(cancun);
+        self
+    }
+
+    /// Sets the given Prague timestamp
+    pub fn prague(mut self, prague: u64) -> Self {
+        self.prague = Some(prague);
         self
     }
 
@@ -3162,8 +3213,9 @@ Post-merge hard forks (timestamp based):
             genesis.hash_slow(),
             b256!("f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd")
         );
-        let base_fee =
-            genesis.next_block_base_fee(BASE_MAINNET.base_fee_params(genesis.timestamp)).unwrap();
+        let base_fee = genesis
+            .next_block_base_fee(BASE_MAINNET.base_fee_params_at_timestamp(genesis.timestamp))
+            .unwrap();
         // <https://base.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
     }
@@ -3176,8 +3228,9 @@ Post-merge hard forks (timestamp based):
             genesis.hash_slow(),
             b256!("0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4")
         );
-        let base_fee =
-            genesis.next_block_base_fee(BASE_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
+        let base_fee = genesis
+            .next_block_base_fee(BASE_SEPOLIA.base_fee_params_at_timestamp(genesis.timestamp))
+            .unwrap();
         // <https://base-sepolia.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
     }
@@ -3190,8 +3243,9 @@ Post-merge hard forks (timestamp based):
             genesis.hash_slow(),
             b256!("102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d")
         );
-        let base_fee =
-            genesis.next_block_base_fee(OP_SEPOLIA.base_fee_params(genesis.timestamp)).unwrap();
+        let base_fee = genesis
+            .next_block_base_fee(OP_SEPOLIA.base_fee_params_at_timestamp(genesis.timestamp))
+            .unwrap();
         // <https://optimism-sepolia.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
     }

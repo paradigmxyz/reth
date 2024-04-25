@@ -207,9 +207,8 @@ mod tests {
         let genesis = chain_spec.genesis();
         let alloc_accounts = genesis
             .alloc
-            .clone()
-            .into_iter()
-            .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
+            .iter()
+            .map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
         provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
         let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {

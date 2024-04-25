@@ -14,7 +14,7 @@ use crate::{
 use clap::{value_parser, Parser, Subcommand};
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_node_builder::{InitState, WithLaunchContext};
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -130,7 +130,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// ````
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir
@@ -148,7 +148,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
