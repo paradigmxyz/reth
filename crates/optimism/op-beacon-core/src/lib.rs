@@ -9,9 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_consensus::{Consensus, ConsensusError};
-use reth_consensus_common::validation;
+use reth_consensus_common::{validation, validate_header_extradata};
 use reth_primitives::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, Chain, ChainSpec, Hardfork, Header, SealedBlock,
+    Chain, ChainSpec, Hardfork, Header, SealedBlock,
     SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
@@ -27,6 +27,10 @@ pub struct OptimismBeaconConsensus {
 impl OptimismBeaconConsensus {
     /// Create a new instance of [OptimismBeaconConsensus]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        assert!(chain_spec.is_optimism(), "optimism consensus only valid for optimism chains");
+        if !chain_spec.is_optimism() {
+            panic!("Given chain spec is not optimism")
+        }
         Self { chain_spec }
     }
 }
@@ -66,10 +70,6 @@ impl Consensus for OptimismBeaconConsensus {
         }
 
         if is_post_merge {
-            if !self.chain_spec.is_optimism() && !header.is_zero_difficulty() {
-                return Err(ConsensusError::TheMergeDifficultyIsNotZero)
-            }
-
             if header.nonce != 0 {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
@@ -120,17 +120,5 @@ impl Consensus for OptimismBeaconConsensus {
 
     fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         validation::validate_block_standalone(block, &self.chain_spec)
-    }
-}
-
-/// Validates the header's extradata according to the beacon consensus rules.
-///
-/// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
-/// This must be 32 bytes or fewer; formally Hx.
-fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
-    if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
-    } else {
-        Ok(())
     }
 }
