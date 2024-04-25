@@ -9,12 +9,12 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
-use reth_discv5::config::OPSTACK;
+use reth_discv5::network_key;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_primitives::{
-    mainnet_nodes, pk2id, sepolia_nodes, Chain, ChainSpec, ForkFilter, Head, NamedChain,
-    NodeRecord, PeerId, MAINNET,
+    mainnet_nodes, pk2id, sepolia_nodes, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord,
+    PeerId, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -122,23 +122,19 @@ impl<C> NetworkConfig<C> {
     ) -> Self {
         let rlpx_port = self.listener_addr.port();
         let chain = self.chain_spec.chain;
-        let fork_id = self.status.forkid;
+        let fork_id = self.chain_spec.latest_fork_id();
         let boot_nodes = self.boot_nodes.clone();
 
         let mut builder =
-            reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter()); // todo: store discv5 peers in separate file
+            reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter());
 
-        if chain.is_optimism() {
-            builder = builder.fork(OPSTACK, fork_id)
+        if chain.named() == Some(NamedChain::Mainnet) {
+            builder = builder.fork(network_key::ETH, fork_id)
         }
-
-        if chain == Chain::optimism_mainnet() || chain == Chain::base_mainnet() {
-            builder = builder.add_optimism_mainnet_boot_nodes()
-        } else if chain == Chain::from_named(NamedChain::OptimismSepolia) ||
-            chain == Chain::from_named(NamedChain::BaseSepolia)
-        {
-            builder = builder.add_optimism_sepolia_boot_nodes()
-        }
+        // todo: set op EL fork id
+        /*if chain.is_optimism() {
+            builder = builder.fork(network_key::, fork_id)
+        }*/
 
         self.set_discovery_v5(f(builder))
     }
@@ -578,7 +574,7 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::ForkHash;
+    use reth_primitives::{Chain, ForkHash};
     use reth_provider::test_utils::NoopProvider;
     use std::collections::BTreeMap;
 

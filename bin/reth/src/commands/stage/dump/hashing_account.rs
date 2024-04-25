@@ -69,7 +69,7 @@ fn unwind_and_copy<DB: Database>(
     Ok(())
 }
 
-/// Try to re-execute the stage straightaway
+/// Try to re-execute the stage straight away
 async fn dry_run<DB: Database>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,

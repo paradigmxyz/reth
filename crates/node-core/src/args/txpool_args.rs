@@ -14,28 +14,28 @@ use reth_transaction_pool::{
 #[command(next_help_heading = "TxPool")]
 pub struct TxPoolArgs {
     /// Max number of transaction in the pending sub-pool.
-    #[arg(long = "txpool.pending_max_count", default_value_t = TXPOOL_SUBPOOL_MAX_TXS_DEFAULT)]
+    #[arg(long = "txpool.pending-max-count", alias = "txpool.pending_max_count", default_value_t = TXPOOL_SUBPOOL_MAX_TXS_DEFAULT)]
     pub pending_max_count: usize,
     /// Max size of the pending sub-pool in megabytes.
-    #[arg(long = "txpool.pending_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
+    #[arg(long = "txpool.pending-max-size", alias = "txpool.pending_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
     pub pending_max_size: usize,
 
     /// Max number of transaction in the basefee sub-pool
-    #[arg(long = "txpool.basefee_max_count", default_value_t = TXPOOL_SUBPOOL_MAX_TXS_DEFAULT)]
+    #[arg(long = "txpool.basefee-max-count", alias = "txpool.basefee_max_count", default_value_t = TXPOOL_SUBPOOL_MAX_TXS_DEFAULT)]
     pub basefee_max_count: usize,
     /// Max size of the basefee sub-pool in megabytes.
-    #[arg(long = "txpool.basefee_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
+    #[arg(long = "txpool.basefee-max-size", alias = "txpool.basefee_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
     pub basefee_max_size: usize,
 
     /// Max number of transaction in the queued sub-pool
-    #[arg(long = "txpool.queued_max_count", default_value_t = TXPOOL_SUBPOOL_MAX_TXS_DEFAULT)]
+    #[arg(long = "txpool.queued-max-count", alias = "txpool.queued_max_count", default_value_t = TXPOOL_SUBPOOL_MAX_TXS_DEFAULT)]
     pub queued_max_count: usize,
     /// Max size of the queued sub-pool in megabytes.
-    #[arg(long = "txpool.queued_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
+    #[arg(long = "txpool.queued-max-size", alias = "txpool.queued_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
     pub queued_max_size: usize,
 
     /// Max number of executable transaction slots guaranteed per account
-    #[arg(long = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
+    #[arg(long = "txpool.max-account-slots", alias = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
     pub max_account_slots: usize,
 
     /// Price bump (in %) for the transaction pool underpriced check.
@@ -47,11 +47,11 @@ pub struct TxPoolArgs {
     pub blob_transaction_price_bump: u128,
 
     /// Max size in bytes of a single transaction allowed to enter the pool
-    #[arg(long = "txpool.max_tx_input_bytes", default_value_t = DEFAULT_MAX_TX_INPUT_BYTES)]
+    #[arg(long = "txpool.max-tx-input-bytes", alias = "txpool.max_tx_input_bytes", default_value_t = DEFAULT_MAX_TX_INPUT_BYTES)]
     pub max_tx_input_bytes: usize,
 
     /// The maximum number of blobs to keep in the in memory blob cache.
-    #[arg(long = "txpool.max_cached_entries", default_value_t = DEFAULT_MAX_CACHED_BLOBS)]
+    #[arg(long = "txpool.max-cached-entries", alias = "txpool.max_cached_entries", default_value_t = DEFAULT_MAX_CACHED_BLOBS)]
     pub max_cached_entries: u32,
 
     /// Flag to disable local transaction exemptions.

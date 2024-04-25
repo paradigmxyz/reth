@@ -5,7 +5,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use alloy_rlp::Decodable;
@@ -18,8 +17,10 @@ use reth_beacon_consensus::BeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_runner::CliContext;
+use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_interfaces::RethResult;
 use reth_node_api::PayloadBuilderAttributes;
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::EthEvmConfig;
@@ -173,7 +174,7 @@ impl Command {
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
         let best_block =
@@ -286,8 +287,11 @@ impl Command {
         );
 
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(self.chain.clone())
-            .compute_pending_block();
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+            self.chain.clone(),
+            reth_node_optimism::OptimismEvmConfig::default(),
+        )
+        .compute_pending_block();
 
         #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();

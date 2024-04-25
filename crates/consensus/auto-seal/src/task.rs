@@ -1,11 +1,14 @@
 use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
-use reth_interfaces::consensus::ForkchoiceState;
-use reth_node_api::{ConfigureEvm, EngineTypes};
-use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
+use reth_primitives::{
+    Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders, Withdrawals,
+};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
-use reth_stages::PipelineEvent;
+use reth_rpc_types::engine::ForkchoiceState;
+use reth_stages_api::PipelineEvent;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -133,9 +136,13 @@ where
                             (recovered.into_signed(), signer)
                         })
                         .unzip();
+                    let ommers = vec![];
+                    let withdrawals = Some(Withdrawals::default());
 
                     match storage.build_and_execute(
                         transactions.clone(),
+                        ommers.clone(),
+                        withdrawals.clone(),
                         &client,
                         chain_spec,
                         evm_config,
@@ -192,8 +199,8 @@ where
                             let block = Block {
                                 header: new_header.clone().unseal(),
                                 body: transactions,
-                                ommers: vec![],
-                                withdrawals: None,
+                                ommers,
+                                withdrawals,
                             };
                             let sealed_block = block.seal_slow();
 

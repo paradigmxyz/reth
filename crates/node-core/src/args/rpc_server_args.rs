@@ -13,8 +13,9 @@ use clap::{
     Arg, Args, Command,
 };
 use rand::Rng;
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -98,7 +99,7 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub ws_api: Option<RpcModuleSelection>,
 
-    /// Disable the IPC-RPC  server
+    /// Disable the IPC-RPC server
     #[arg(long)]
     pub ipcdisable: bool,
 
@@ -123,6 +124,14 @@ pub struct RpcServerArgs {
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
     pub auth_jwtsecret: Option<PathBuf>,
 
+    /// Enable auth engine API over IPC
+    #[arg(long)]
+    pub auth_ipc: bool,
+
+    /// Filename for auth IPC socket/pipe within the datadir
+    #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
+    pub auth_ipc_path: String,
+
     /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
     /// `--ws.api`.
     ///
@@ -132,37 +141,37 @@ pub struct RpcServerArgs {
     pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into())]
+    #[arg(long = "rpc.max-request-size", alias = "rpc-max-request-size", default_value_t = RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into())]
     pub rpc_max_request_size: MaxU32,
 
     /// Set the maximum RPC response payload size for both HTTP and WS in megabytes.
-    #[arg(long, visible_alias = "--rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
+    #[arg(long = "rpc.max-response-size", alias = "rpc-max-response-size", visible_alias = "rpc.returndata.limit", default_value_t = RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into())]
     pub rpc_max_response_size: MaxU32,
 
     /// Set the maximum concurrent subscriptions per connection.
-    #[arg(long, default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
+    #[arg(long = "rpc.max-subscriptions-per-connection", alias = "rpc-max-subscriptions-per-connection", default_value_t = RPC_DEFAULT_MAX_SUBS_PER_CONN.into())]
     pub rpc_max_subscriptions_per_connection: MaxU32,
 
     /// Maximum number of RPC server connections.
-    #[arg(long, value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS.into())]
+    #[arg(long = "rpc.max-connections", alias = "rpc-max-connections", value_name = "COUNT", default_value_t = RPC_DEFAULT_MAX_CONNECTIONS.into())]
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
-    #[arg(long, value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
+    #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
     pub rpc_max_tracing_requests: usize,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
-    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
+    #[arg(long = "rpc.max-blocks-per-filter", alias = "rpc-max-blocks-per-filter", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
     pub rpc_max_blocks_per_filter: ZeroAsNoneU64,
 
     /// Maximum number of logs that can be returned in a single response. (0 = no limit)
-    #[arg(long, value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
+    #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64))]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     #[arg(
-        long,
-        alias = "rpc.gascap",
+        long = "rpc.gascap",
+        alias = "rpc-gascap",
         value_name = "GAS_CAP",
         value_parser = RangedU64ValueParser::<u64>::new().range(1..),
         default_value_t = RPC_DEFAULT_GAS_CAP.into()
@@ -188,6 +197,12 @@ impl RpcServerArgs {
     /// Enables the WS-RPC server.
     pub fn with_ws(mut self) -> Self {
         self.ws = true;
+        self
+    }
+
+    /// Enables the Auth IPC
+    pub fn with_auth_ipc(mut self) -> Self {
+        self.auth_ipc = true;
         self
     }
 
@@ -348,7 +363,7 @@ impl RpcServerArgs {
 
 impl RethRpcConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
-        // By default IPC is enabled therefor it is enabled if the `ipcdisable` is false.
+        // By default IPC is enabled therefore it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
     }
 
@@ -422,7 +437,7 @@ impl RethRpcConfig for RpcServerArgs {
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
     }
 
-    fn ipc_server_builder(&self) -> IpcServerBuilder {
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity> {
         IpcServerBuilder::default()
             .max_subscriptions_per_connection(self.rpc_max_subscriptions_per_connection.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
@@ -458,7 +473,11 @@ impl RethRpcConfig for RpcServerArgs {
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError> {
         let address = SocketAddr::new(self.auth_addr, self.auth_port);
 
-        Ok(AuthServerConfig::builder(jwt_secret).socket_addr(address).build())
+        let mut builder = AuthServerConfig::builder(jwt_secret).socket_addr(address);
+        if self.auth_ipc {
+            builder = builder.ipc_endpoint(self.auth_ipc_path.clone());
+        }
+        Ok(builder.build())
     }
 
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
@@ -494,6 +513,8 @@ impl Default for RpcServerArgs {
             auth_addr: Ipv4Addr::LOCALHOST.into(),
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,
+            auth_ipc: false,
+            auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),

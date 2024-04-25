@@ -11,13 +11,14 @@ use crate::{
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
+use discv5::ListenConfig;
 use reth_config::Config;
 use reth_db::create_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ProviderFactory;
-use std::{path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
@@ -122,20 +123,35 @@ impl Command {
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
 
-        let mut network_config_builder =
-            config.network_config(self.nat, None, p2p_secret_key).chain_spec(self.chain.clone());
+        let mut network_config_builder = config
+            .network_config(self.nat, None, p2p_secret_key)
+            .chain_spec(self.chain.clone())
+            .boot_nodes(self.chain.bootnodes().unwrap_or_default());
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
-        let network = network_config_builder
-            .build(Arc::new(ProviderFactory::new(
-                noop_db,
-                self.chain.clone(),
-                data_dir.static_files_path(),
-            )?))
-            .start_network()
-            .await?;
+        let mut network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
+            noop_db,
+            self.chain.clone(),
+            data_dir.static_files_path(),
+        )?));
 
+        if self.discovery.enable_discv5_discovery {
+            network_config = network_config.discovery_v5_with_config_builder(|builder| {
+                let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.discovery;
+                builder
+                    .discv5_config(
+                        discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
+                            discv5_addr,
+                            discv5_port,
+                        ))))
+                        .build(),
+                    )
+                    .build()
+            });
+        }
+
+        let network = network_config.start_network().await?;
         let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);
         let backoff = ConstantBuilder::default().with_max_times(retries);

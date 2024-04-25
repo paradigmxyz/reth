@@ -562,6 +562,25 @@ mod tests {
     }
 
     #[test]
+    fn fork_id_rlp() {
+        // <https://github.com/ethereum/go-ethereum/blob/767b00b0b514771a663f3362dd0310fc28d40c25/core/forkid/forkid_test.go#L370-L370>
+        let val = hex!("c6840000000080");
+        let id = ForkId::decode(&mut &val[..]).unwrap();
+        assert_eq!(id, ForkId { hash: ForkHash(hex!("00000000")), next: 0 });
+        assert_eq!(alloy_rlp::encode(id), &val[..]);
+
+        let val = hex!("ca84deadbeef84baddcafe");
+        let id = ForkId::decode(&mut &val[..]).unwrap();
+        assert_eq!(id, ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE });
+        assert_eq!(alloy_rlp::encode(id), &val[..]);
+
+        let val = hex!("ce84ffffffff88ffffffffffffffff");
+        let id = ForkId::decode(&mut &val[..]).unwrap();
+        assert_eq!(id, ForkId { hash: ForkHash(u32::MAX.to_be_bytes()), next: u64::MAX });
+        assert_eq!(alloy_rlp::encode(id), &val[..]);
+    }
+
+    #[test]
     fn compute_cache() {
         let b1 = 1_150_000;
         let b2 = 1_920_000;

@@ -40,7 +40,7 @@ byteorder = "1"
 clap = { workspace = true, features = ["derive"], optional = true }
 derive_more.workspace = true
 itertools.workspace = true
-modular-bitfield = "0.11.2"
+modular-bitfield.workspace = true
 once_cell.workspace = true
 rayon.workspace = true
 serde_with.workspace = true
@@ -51,7 +51,6 @@ tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
 zstd = { version = "0.13", features = ["experimental"], optional = true }
 roaring = "0.10.2"
-cfg-if = "1.0.0"
 
 # `test-utils` feature
 hash-db = { version = "~0.15", optional = true }
@@ -64,14 +63,17 @@ proptest-derive = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+# eth
+revm-primitives = { workspace = true, features = ["arbitrary"] }
+nybbles = { workspace = true, features = ["arbitrary"] }
+alloy-trie = { workspace = true, features = ["arbitrary"] }
+alloy-eips = { workspace = true, features = ["arbitrary"] }
+
 arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
-revm-primitives = { workspace = true, features = ["arbitrary"] }
-nybbles = { workspace = true, features = ["arbitrary"] }
-alloy-trie = { workspace = true, features = ["arbitrary"] }
 serde_json.workspace = true
 test-fuzz.workspace = true
 toml.workspace = true
@@ -99,6 +101,7 @@ arbitrary = [
     "nybbles/arbitrary",
     "alloy-trie/arbitrary",
     "alloy-chains/arbitrary",
+    "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",

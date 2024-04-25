@@ -14,4 +14,7 @@ workspace = true
 # reth
 reth-consensus-common.workspace = true
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
+reth-consensus.workspace = true
+
+[features]
+optimism = ["reth-primitives/optimism"]

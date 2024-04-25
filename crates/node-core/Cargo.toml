@@ -29,17 +29,11 @@ reth-config.workspace = true
 reth-discv4.workspace = true
 reth-net-nat.workspace = true
 reth-network-api.workspace = true
-reth-node-api.workspace = true
+reth-evm.workspace = true
+reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
-reth-downloaders.workspace = true
-reth-revm.workspace = true
-reth-stages.workspace = true
-reth-prune.workspace = true
-reth-blockchain-tree.workspace = true
-reth-static-file.workspace = true
 
 # ethereum
 discv5.workspace = true
@@ -58,11 +52,10 @@ reth-metrics.workspace = true
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
-humantime = "2.1.0"
+humantime.workspace = true
 thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
-pin-project.workspace = true
 derive_more.workspace = true
 
 # io
@@ -94,7 +87,7 @@ procfs = "0.16.0"
 proptest.workspace = true
 tempfile.workspace = true
 jsonrpsee.workspace = true
-assert_matches = "1.5.0"
+assert_matches.workspace = true
 
 [features]
 optimism = [
@@ -104,9 +97,7 @@ optimism = [
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-auto-seal-consensus/optimism",
     "reth-consensus-common/optimism",
-    "reth-blockchain-tree/optimism",
     "reth-beacon-consensus/optimism",
 ]
 

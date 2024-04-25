@@ -7,22 +7,22 @@ use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_config::config::EtlConfig;
+use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
-type DatabaseEnv = TempDatabase<DE>;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_interfaces::{
-    consensus::Consensus,
     executor::BlockExecutionError,
     p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
     sync::NoopSyncStateUpdater,
-    test_utils::{NoopFullBlockClient, TestConsensus},
+    test_utils::NoopFullBlockClient,
 };
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, PruneModes, B256};
+use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
 use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
@@ -39,15 +39,11 @@ use reth_tasks::TokioTaskExecutor;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{oneshot, watch};
 
+type DatabaseEnv = TempDatabase<DE>;
+
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
-    BlockchainProvider<
-        Arc<DatabaseEnv>,
-        ShareableBlockchainTree<
-            Arc<DatabaseEnv>,
-            EitherExecutorFactory<TestExecutorFactory, EvmProcessorFactory<EthEvmConfig>>,
-        >,
-    >,
+    BlockchainProvider<Arc<DatabaseEnv>>,
     Arc<EitherDownloader<Client, NoopFullBlockClient>>,
     EthEngineTypes,
 >;
@@ -421,9 +417,9 @@ where
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let tree = ShareableBlockchainTree::new(
+        let tree = Arc::new(ShareableBlockchainTree::new(
             BlockchainTree::new(externals, config, None).expect("failed to create tree"),
-        );
+        ));
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
         let blockchain_provider =
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
@@ -435,6 +431,7 @@ where
             self.base_config.chain_spec.prune_delete_limit,
             config.max_reorg_depth() as usize,
             None,
+            watch::channel(FinishedExExHeight::NoExExs).1,
         );
 
         let mut hooks = EngineHooks::new();

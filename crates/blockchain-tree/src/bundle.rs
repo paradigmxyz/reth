@@ -44,7 +44,7 @@ pub struct BundleStateData {
     /// Parent block hashes needs for evm BLOCKHASH opcode.
     /// NOTE: it does not mean that all hashes are there but all until finalized are there.
     /// Other hashes can be obtained from provider
-    pub parent_block_hashed: BTreeMap<BlockNumber, BlockHash>,
+    pub parent_block_hashes: BTreeMap<BlockNumber, BlockHash>,
     /// Canonical block where state forked from.
     pub canonical_fork: ForkBlock,
 }
@@ -55,7 +55,7 @@ impl BundleStateDataProvider for BundleStateData {
     }
 
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
-        self.parent_block_hashed.get(&block_number).cloned()
+        self.parent_block_hashes.get(&block_number).cloned()
     }
 
     fn canonical_fork(&self) -> ForkBlock {

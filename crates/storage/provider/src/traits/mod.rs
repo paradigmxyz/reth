@@ -49,7 +49,7 @@ mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;
 
 mod executor;
-pub use executor::{BlockExecutor, BlockExecutorStats, ExecutorFactory, PrunableBlockExecutor};
+pub use executor::{BlockExecutor, ExecutorFactory, PrunableBlockExecutor};
 
 mod chain;
 pub use chain::{
@@ -80,3 +80,6 @@ pub use stats::StatsReader;
 
 mod full;
 pub use full::FullProvider;
+
+mod tree_viewer;
+pub use tree_viewer::TreeViewer;

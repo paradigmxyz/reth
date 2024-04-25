@@ -7,7 +7,7 @@ use futures::{
 };
 use metrics::atomics::AtomicU64;
 use reth_primitives::{
-    basefee::calculate_next_block_base_fee,
+    basefee::calc_next_block_base_fee,
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
     ChainSpec, Receipt, SealedBlock, TransactionSigned, B256,
 };
@@ -239,18 +239,17 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
                      // the stream ended, we are done
                     break;
                 };
-                if let Some(committed) = event.committed() {
-                    let (blocks, receipts): (Vec<_>, Vec<_>) = committed
-                        .blocks_and_receipts()
-                        .map(|(block, receipts)| {
-                            (block.block.clone(), Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
-                        })
-                        .unzip();
-                    fee_history_cache.insert_blocks(blocks.into_iter().zip(receipts)).await;
+                let (blocks, receipts): (Vec<_>, Vec<_>) = event
+                    .committed()
+                    .blocks_and_receipts()
+                    .map(|(block, receipts)| {
+                        (block.block.clone(), Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
+                    })
+                    .unzip();
+                fee_history_cache.insert_blocks(blocks.into_iter().zip(receipts)).await;
 
-                    // keep track of missing blocks
-                    missing_blocks = fee_history_cache.missing_consecutive_blocks().await;
-                }
+                // keep track of missing blocks
+                missing_blocks = fee_history_cache.missing_consecutive_blocks().await;
             }
         }
     }
@@ -371,12 +370,12 @@ impl FeeHistoryEntry {
 
     /// Returns the base fee for the next block according to the EIP-1559 spec.
     pub fn next_block_base_fee(&self, chain_spec: &ChainSpec) -> u64 {
-        calculate_next_block_base_fee(
-            self.gas_used,
-            self.gas_limit,
-            self.base_fee_per_gas,
-            chain_spec.base_fee_params(self.timestamp),
-        )
+        calc_next_block_base_fee(
+            self.gas_used as u128,
+            self.gas_limit as u128,
+            self.base_fee_per_gas as u128,
+            chain_spec.base_fee_params_at_timestamp(self.timestamp),
+        ) as u64
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.

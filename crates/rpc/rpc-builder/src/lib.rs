@@ -17,8 +17,8 @@
 //! Configure only an http server with a selection of [RethRpcModule]s
 //!
 //! ```
+//! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::ConfigureEvm;
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -77,8 +77,9 @@
 //!
 //!
 //! ```
+//! use reth_engine_primitives::EngineTypes;
+//! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_node_api::{ConfigureEvm, EngineTypes};
 //! use reth_provider::{
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -167,10 +168,13 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, Server, ServerHandle},
     Methods, RpcModule,
 };
+use reth_engine_primitives::EngineTypes;
+use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+pub use reth_ipc::server::{
+    Builder as IpcServerBuilder, Endpoint, RpcServiceBuilder as IpcRpcServiceBuilder,
+};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_node_api::{ConfigureEvm, EngineTypes};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
@@ -498,8 +502,8 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_node_api::ConfigureEvm;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
@@ -713,7 +717,7 @@ impl RpcModuleSelection {
 
     /// Creates a new [RpcModule] based on the configured reth modules.
     ///
-    /// Note: This will always create new instance of the module handlers and is therefor only
+    /// Note: This will always create new instance of the module handlers and is therefore only
     /// recommended for launching standalone transports. If multiple transports need to be
     /// configured it's recommended to use the [RpcModuleBuilder].
     #[allow(clippy::too_many_arguments)]
@@ -1470,7 +1474,7 @@ pub struct RpcServerConfig {
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
-    ipc_server_config: Option<IpcServerBuilder>,
+    ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// The Endpoint where to launch the ipc server
     ipc_endpoint: Option<Endpoint>,
     /// JWT secret for authentication
@@ -1506,7 +1510,7 @@ impl RpcServerConfig {
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(config: IpcServerBuilder) -> Self {
+    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
         Self::default().with_ipc(config)
     }
 
@@ -1566,7 +1570,7 @@ impl RpcServerConfig {
     ///
     /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
     /// To set a custom [IdProvider], please use [Self::with_id_provider].
-    pub fn with_ipc(mut self, config: IpcServerBuilder) -> Self {
+    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -1754,13 +1758,12 @@ impl RpcServerConfig {
         server.ws_http = self.build_ws_http(modules).await?;
 
         if let Some(builder) = self.ipc_server_config {
-            // let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::new).unwrap_or_default();
+            let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::ipc).unwrap_or_default();
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
             let ipc = builder
-                // TODO(mattsse): add metrics middleware for IPC
-                // .set_middleware(metrics)
+                .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
                 .build(ipc_path.path());
             server.ipc = Some(ipc);
         }
@@ -2125,7 +2128,7 @@ pub struct RpcServer {
     /// Configured ws,http servers
     ws_http: WsHttpServer,
     /// ipc server
-    ipc: Option<IpcServer>,
+    ipc: Option<IpcServer<Identity, Stack<RpcRequestMetrics, Identity>>>,
 }
 
 // === impl RpcServer ===

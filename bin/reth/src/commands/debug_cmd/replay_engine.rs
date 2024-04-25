@@ -4,7 +4,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
@@ -14,9 +13,10 @@ use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensus, BeaconConsensus
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_runner::CliContext;
 use reth_config::Config;
+use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
-use reth_interfaces::consensus::Consensus;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_core::engine_api_store::{EngineApiStore, StoredEngineApiMessage};
@@ -136,11 +136,10 @@ impl Command {
             EvmProcessorFactory::new(self.chain.clone(), evm_config),
         );
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
-        let blockchain_db =
-            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
 
         // Set up network
         let network_secret_path =
@@ -161,7 +160,10 @@ impl Command {
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(self.chain.clone());
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+            self.chain.clone(),
+            reth_node_optimism::OptimismEvmConfig::default(),
+        );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),

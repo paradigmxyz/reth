@@ -3,6 +3,7 @@ use crate::{
     peers::PeersHandle, protocol::RlpxSubProtocol, swarm::NetworkConnectionState,
     transactions::TransactionsHandle, FetchClient,
 };
+use enr::Enr;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
@@ -236,6 +237,20 @@ impl PeersInfo for NetworkHandle {
 
             NodeRecord::new(socket_addr, id)
         }
+    }
+
+    fn local_enr(&self) -> Enr<SecretKey> {
+        let local_node_record = self.local_node_record();
+        let mut builder = Enr::builder();
+        builder.ip(local_node_record.address);
+        if local_node_record.address.is_ipv4() {
+            builder.udp4(local_node_record.udp_port);
+            builder.tcp4(local_node_record.tcp_port);
+        } else {
+            builder.udp6(local_node_record.udp_port);
+            builder.tcp6(local_node_record.tcp_port);
+        }
+        builder.build(&self.inner.secret_key).expect("valid enr")
     }
 }
 

@@ -26,6 +26,7 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 mod error;
+mod exex;
 pub mod fs;
 pub mod genesis;
 mod header;
@@ -66,6 +67,7 @@ pub use constants::{
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
+pub use exex::FinishedExExHeight;
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
@@ -94,12 +96,13 @@ pub use transaction::{
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction,
-    InvalidTransactionError, Signature, Transaction, TransactionKind, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxEip1559, TxEip2930,
-    TxEip4844, TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    AccessList, AccessListItem, IntoRecoveredTransaction, InvalidTransactionError, Signature,
+    Transaction, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSignedNoHash, TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844,
+    TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
+
 pub use withdrawal::{Withdrawal, Withdrawals};
 
 // Re-exports
@@ -110,7 +113,7 @@ pub use alloy_primitives::{
     eip191_hash_message, hex, hex_literal, keccak256, ruint,
     utils::format_ether,
     Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    StorageValue, TxHash, TxIndex, TxKind, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpMap};
@@ -141,7 +144,11 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::{
-        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA},
+        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA},
+        net::{
+            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, BASE_BOOTNODES,
+            BASE_TESTNET_BOOTNODES, OP_BOOTNODES, OP_TESTNET_BOOTNODES,
+        },
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };
 }

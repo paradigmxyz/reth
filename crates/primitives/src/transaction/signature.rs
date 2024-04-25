@@ -82,6 +82,14 @@ impl Signature {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
             self.odd_y_parity as u64 + chain_id * 2 + 35
         } else {
+            #[cfg(feature = "optimism")]
+            // pre bedrock system transactions were sent from the zero address as legacy
+            // transactions with an empty signature
+            //
+            // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
+            if *self == Self::optimism_deposit_tx_signature() {
+                return 0
+            }
             self.odd_y_parity as u64 + 27
         }
     }
@@ -92,11 +100,20 @@ impl Signature {
         buf: &mut &[u8],
     ) -> alloy_rlp::Result<(Self, Option<u64>)> {
         let v = u64::decode(buf)?;
-        let r = Decodable::decode(buf)?;
-        let s = Decodable::decode(buf)?;
+        let r: U256 = Decodable::decode(buf)?;
+        let s: U256 = Decodable::decode(buf)?;
+
         if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
+                #[cfg(feature = "optimism")]
+                // pre bedrock system transactions were sent from the zero address as legacy
+                // transactions with an empty signature
+                //
+                // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
+                if v == 0 && r.is_zero() && s.is_zero() {
+                    return Ok((Signature { r, s, odd_y_parity: false }, None))
+                }
                 return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
             let odd_y_parity = v == 28;

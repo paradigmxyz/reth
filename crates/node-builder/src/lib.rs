@@ -21,10 +21,15 @@ pub mod components;
 mod builder;
 pub use builder::*;
 
+mod launch;
+pub use launch::*;
+
 mod handle;
 pub use handle::NodeHandle;
 
 pub mod rpc;
+
+pub mod setup;
 
 /// Support for installing the ExExs (execution extensions) in a node.
 pub mod exex;

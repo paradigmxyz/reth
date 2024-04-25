@@ -363,7 +363,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     }
 
     // TODO(joshie) TEMPORARY should be moved to trait providers
-
     /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
     ///
     /// If UNWIND it set to true tip and latest state will be unwind
@@ -388,7 +387,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    fn unwind_or_peek_state<const UNWIND: bool>(
+    pub fn unwind_or_peek_state<const UNWIND: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BundleStateWithReceipts> {
@@ -706,10 +705,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(block_tx)
     }
 
-    /// Return range of blocks and its execution result
-    fn get_take_block_range<const TAKE: bool>(
+    /// Get or unwind the given range of blocks.
+    pub fn get_take_block_range<const TAKE: bool>(
         &self,
-        chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
         // For block we need Headers, Bodies, Uncles, withdrawals, Transactions, Signers
@@ -768,7 +766,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             };
 
             // withdrawal can be missing
-            let shanghai_is_active = chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
+            let shanghai_is_active =
+                self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp);
             let mut withdrawals = Some(Withdrawals::default());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
@@ -1286,6 +1285,67 @@ impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
     }
 }
 
+impl<Tx: DbTx> DatabaseProvider<Tx> {
+    fn process_block_range<F, R>(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        mut assemble_block: F,
+    ) -> ProviderResult<Vec<R>>
+    where
+        F: FnMut(Range<TxNumber>, Header, Vec<Header>, Option<Withdrawals>) -> ProviderResult<R>,
+    {
+        if range.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let len = range.end().saturating_sub(*range.start()) as usize;
+        let mut blocks = Vec::with_capacity(len);
+
+        let headers = self.headers_range(range)?;
+        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+        let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
+
+        for header in headers {
+            // If the body indices are not found, this means that the transactions either do
+            // not exist in the database yet, or they do exit but are
+            // not indexed. If they exist but are not indexed, we don't
+            // have enough information to return the block anyways, so
+            // we skip the block.
+            if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(header.number)? {
+                let tx_range = block_body_indices.tx_num_range();
+
+                // If we are past shanghai, then all blocks should have a withdrawal list,
+                // even if empty
+                let withdrawals =
+                    if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
+                        Some(
+                            withdrawals_cursor
+                                .seek_exact(header.number)?
+                                .map(|(_, w)| w.withdrawals)
+                                .unwrap_or_default(),
+                        )
+                    } else {
+                        None
+                    };
+                let ommers =
+                    if self.chain_spec.final_paris_total_difficulty(header.number).is_some() {
+                        Vec::new()
+                    } else {
+                        ommers_cursor
+                            .seek_exact(header.number)?
+                            .map(|(_, o)| o.ommers)
+                            .unwrap_or_default()
+                    };
+                if let Ok(b) = assemble_block(tx_range, header, ommers, withdrawals) {
+                    blocks.push(b);
+                }
+            }
+        }
+        Ok(blocks)
+    }
+}
+
 impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
         if source.is_database() {
@@ -1409,63 +1469,63 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
-        if range.is_empty() {
-            return Ok(Vec::new())
-        }
-
-        let len = range.end().saturating_sub(*range.start()) as usize;
-        let mut blocks = Vec::with_capacity(len);
-
-        let headers = self.headers_range(range)?;
-        let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
-        let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        self.process_block_range(range, |tx_range, header, ommers, withdrawals| {
+            let body = if tx_range.is_empty() {
+                Vec::new()
+            } else {
+                self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
+            };
+            Ok(Block { header, body, ommers, withdrawals })
+        })
+    }
 
-        for header in headers {
-            // If the body indices are not found, this means that the transactions either do
-            // not exist in the database yet, or they do exit but are
-            // not indexed. If they exist but are not indexed, we don't
-            // have enough information to return the block anyways, so
-            // we skip the block.
-            if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(header.number)? {
-                let tx_range = block_body_indices.tx_num_range();
-                let body = if tx_range.is_empty() {
-                    Vec::new()
-                } else {
-                    self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
-                        .into_iter()
-                        .map(Into::into)
-                        .collect()
-                };
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
 
-                // If we are past shanghai, then all blocks should have a withdrawal list,
-                // even if empty
-                let withdrawals =
-                    if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
-                        Some(
-                            withdrawals_cursor
-                                .seek_exact(header.number)?
-                                .map(|(_, w)| w.withdrawals)
-                                .unwrap_or_default(),
-                        )
-                    } else {
-                        None
-                    };
-                let ommers =
-                    if self.chain_spec.final_paris_total_difficulty(header.number).is_some() {
-                        Vec::new()
-                    } else {
-                        ommers_cursor
-                            .seek_exact(header.number)?
-                            .map(|(_, o)| o.ommers)
-                            .unwrap_or_default()
-                    };
+        self.process_block_range(range, |tx_range, header, ommers, withdrawals| {
+            let (body, senders) = if tx_range.is_empty() {
+                (Vec::new(), Vec::new())
+            } else {
+                let body = self
+                    .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect::<Vec<TransactionSigned>>();
+                // fetch senders from the senders table
+                let known_senders =
+                    senders_cursor
+                        .walk_range(tx_range.clone())?
+                        .collect::<Result<HashMap<_, _>, _>>()?;
 
-                blocks.push(Block { header, body, ommers, withdrawals });
-            }
-        }
-        Ok(blocks)
+                let mut senders = Vec::with_capacity(body.len());
+                for (tx_num, tx) in tx_range.zip(body.iter()) {
+                    match known_senders.get(&tx_num) {
+                        None => {
+                            // recover the sender from the transaction if not found
+                            let sender = tx
+                                .recover_signer_unchecked()
+                                .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                            senders.push(sender);
+                        }
+                        Some(sender) => senders.push(*sender),
+                    }
+                }
+
+                (body, senders)
+            };
+
+            Block { header, body, ommers, withdrawals }
+                .try_with_senders_unchecked(senders)
+                .map_err(|_| ProviderError::SenderRecoveryError)
+        })
     }
 }
 
@@ -2315,7 +2375,6 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     /// Return range of blocks and its execution result
     fn get_or_take_block_and_execution_range<const TAKE: bool>(
         &self,
-        chain_spec: &ChainSpec,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain> {
         if TAKE {
@@ -2386,7 +2445,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
         }
 
         // get blocks
-        let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
+        let blocks = self.get_take_block_range::<TAKE>(range.clone())?;
         let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
         // get execution res
         let execution_state = self.unwind_or_peek_state::<TAKE>(range.clone())?;

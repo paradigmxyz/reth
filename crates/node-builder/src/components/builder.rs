@@ -1,12 +1,11 @@
 //! A generic [NodeComponentsBuilder]
 
 use crate::{
-    components::{
-        NetworkBuilder, NodeComponents, NodeComponentsBuilder, PayloadServiceBuilder, PoolBuilder,
-    },
+    components::{Components, NetworkBuilder, NodeComponents, PayloadServiceBuilder, PoolBuilder},
     BuilderContext, FullNodeTypes,
 };
-use std::marker::PhantomData;
+use reth_transaction_pool::TransactionPool;
+use std::{future::Future, marker::PhantomData};
 
 /// A generic, customizable [`NodeComponentsBuilder`].
 ///
@@ -136,19 +135,19 @@ where
     NetworkB: NetworkBuilder<Node, PoolB::Pool>,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
 {
-    type Pool = PoolB::Pool;
+    type Components = Components<Node, PoolB::Pool>;
 
     async fn build_components(
         self,
         context: &BuilderContext<Node>,
-    ) -> eyre::Result<NodeComponents<Node, Self::Pool>> {
+    ) -> eyre::Result<Self::Components> {
         let Self { pool_builder, payload_builder, network_builder, _marker } = self;
 
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder = payload_builder.spawn_payload_service(context, pool.clone()).await?;
 
-        Ok(NodeComponents { transaction_pool: pool, network, payload_builder })
+        Ok(Components { transaction_pool: pool, network, payload_builder })
     }
 }
 
@@ -160,5 +159,42 @@ impl Default for ComponentsBuilder<(), (), (), ()> {
             network_builder: (),
             _marker: Default::default(),
         }
+    }
+}
+
+/// A type that configures all the customizable components of the node and knows how to build them.
+///
+/// Implementers of this trait are responsible for building all the components of the node: See
+/// [NodeComponents].
+///
+/// The [ComponentsBuilder] is a generic implementation of this trait that can be used to customize
+/// certain components of the node using the builder pattern and defaults, e.g. Ethereum and
+/// Optimism.
+/// A type that's responsible for building the components of the node.
+pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
+    /// The components for the node with the given types
+    type Components: NodeComponents<Node>;
+
+    /// Consumes the type and returns the crated components.
+    fn build_components(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
+}
+
+impl<Node, F, Fut, Pool> NodeComponentsBuilder<Node> for F
+where
+    Node: FullNodeTypes,
+    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, Pool>>> + Send,
+    Pool: TransactionPool + Unpin + 'static,
+{
+    type Components = Components<Node, Pool>;
+
+    fn build_components(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> impl Future<Output = eyre::Result<Self::Components>> + Send {
+        self(ctx)
     }
 }

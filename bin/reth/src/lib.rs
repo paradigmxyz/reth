@@ -39,6 +39,11 @@ pub mod payload {
     pub use reth_payload_validator::ExecutionPayloadValidator;
 }
 
+/// Re-exported from `reth_node_api`.
+pub mod api {
+    pub use reth_node_api::*;
+}
+
 /// Re-exported from `reth_node_core`.
 pub mod core {
     pub use reth_node_core::*;
@@ -152,6 +157,10 @@ pub mod rpc {
         pub use reth_rpc_types_compat::*;
     }
 }
+
+// re-export for convenience
+#[doc(inline)]
+pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
 
 #[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
 pub mod sigsegv_handler;

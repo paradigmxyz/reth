@@ -799,7 +799,7 @@ where
         {
             let conn_eth_version = peer.version;
 
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 failed_to_request_hashes=?*failed_to_request_hashes,
                 %conn_eth_version,

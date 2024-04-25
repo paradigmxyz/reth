@@ -19,7 +19,8 @@ reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
-reth-node-api.workspace = true
+reth-engine-primitives.workspace = true
+reth-evm.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 

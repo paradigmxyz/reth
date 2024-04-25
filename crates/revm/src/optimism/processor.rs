@@ -1,9 +1,8 @@
 use crate::processor::{compare_receipts_root_and_logs_bloom, EVMProcessor};
+use reth_evm::ConfigureEvm;
 use reth_interfaces::executor::{
     BlockExecutionError, BlockValidationError, OptimismBlockExecutionError,
 };
-
-use reth_node_api::ConfigureEvm;
 use reth_primitives::{
     proofs::calculate_receipt_root_optimism, revm_primitives::ResultAndState, BlockWithSenders,
     Bloom, ChainSpec, Hardfork, Receipt, ReceiptWithBloom, TxType, B256, U256,
@@ -72,7 +71,7 @@ where
             self.stats.receipt_root_duration += time.elapsed();
         }
 
-        self.save_receipts(receipts)
+        self.batch_record.save_receipts(receipts)
     }
 
     fn execute_transactions(
@@ -186,11 +185,10 @@ where
     }
 
     fn take_output_state(&mut self) -> BundleStateWithReceipts {
-        let receipts = std::mem::take(&mut self.receipts);
         BundleStateWithReceipts::new(
             self.evm.context.evm.db.take_bundle(),
-            receipts,
-            self.first_block.unwrap_or_default(),
+            self.batch_record.take_receipts(),
+            self.batch_record.first_block().unwrap_or_default(),
         )
     }
 
@@ -208,7 +206,7 @@ mod tests {
     };
     use reth_primitives::{
         b256, Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey,
-        StorageValue, Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
+        StorageValue, Transaction, TransactionSigned, TxEip1559, TxKind, BASE_MAINNET,
     };
     use revm::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr, sync::Arc};
@@ -280,7 +278,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 ..Default::default()
             }),
             Signature::default(),
@@ -289,7 +287,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 gas_limit: 21_000,
                 ..Default::default()
             }),
@@ -314,8 +312,8 @@ mod tests {
             )
             .unwrap();
 
-        let tx_receipt = executor.receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = executor.receipts[0][1].as_ref().unwrap();
+        let tx_receipt = executor.receipts()[0][0].as_ref().unwrap();
+        let deposit_receipt = executor.receipts()[0][1].as_ref().unwrap();
 
         // deposit_receipt_version is not present in pre canyon transactions
         assert!(deposit_receipt.deposit_receipt_version.is_none());
@@ -354,7 +352,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 ..Default::default()
             }),
             Signature::default(),
@@ -363,7 +361,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 gas_limit: 21_000,
                 ..Default::default()
             }),
@@ -388,8 +386,8 @@ mod tests {
             )
             .expect("Executing a block while canyon is active should not fail");
 
-        let tx_receipt = executor.receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = executor.receipts[0][1].as_ref().unwrap();
+        let tx_receipt = executor.receipts()[0][0].as_ref().unwrap();
+        let deposit_receipt = executor.receipts()[0][1].as_ref().unwrap();
 
         // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert_eq!(deposit_receipt.deposit_receipt_version, Some(1));

@@ -488,7 +488,7 @@ impl TransactionFetcher {
         if let Some(failed_to_request_hashes) =
             self.request_transactions_from_peer(hashes_to_request, peer)
         {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 ?failed_to_request_hashes,
                 %conn_eth_version,
@@ -717,7 +717,7 @@ impl TransactionFetcher {
     /// The request hashes buffer is filled as if it's an eth68 request, i.e. smartly assemble
     /// the request based on expected response size. For any hash missing size metadata, it is
     /// guessed at [`AVERAGE_BYTE_SIZE_TX_ENCODED`].
-
+    ///
     /// Loops through hashes pending fetch and does:
     ///
     /// 1. Check if a hash pending fetch is seen by peer.

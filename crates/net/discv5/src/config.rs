@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    fmt::Debug,
     net::{IpAddr, SocketAddr},
 };
 
@@ -10,25 +11,12 @@ use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
 use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
 
-use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys};
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, network_key};
 
-/// L1 EL
-pub const ETH: &[u8] = b"eth";
-/// L1 CL
-pub const ETH2: &[u8] = b"eth2";
-/// Optimism
-pub const OPSTACK: &[u8] = b"opstack";
-
-/// Default interval in seconds at which to run a self-lookup up query.
+/// Default interval in seconds at which to run a lookup up query.
 ///
 /// Default is 60 seconds.
 const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
-
-/// Optimism mainnet and base mainnet boot nodes.
-const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &[&str] = &["enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305", "enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305", "enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305", "enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301", "enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301", "enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301", "enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301", "enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301"];
-
-/// Optimism sepolia and base sepolia boot nodes.
-const BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA: &[&str] = &["enode://09d1a6110757b95628cc54ab6cc50a29773075ed00e3a25bd9388807c9a6c007664e88646a6fefd82baad5d8374ba555e426e8aed93f0f0c517e2eb5d929b2a2@34.65.21.188:30304?discport=30303"];
 
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
@@ -37,14 +25,18 @@ pub struct ConfigBuilder {
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
+    /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
+    /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", ForkId)`.
+    ///
+    /// Defaults to L1 mainnet if not set.
     fork: Option<(&'static [u8], ForkId)>,
     /// RLPx TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
     /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
     tcp_port: u16,
-    /// Additional kv-pairs that should be advertised to peers by including in local node record.
-    other_enr_data: Vec<(&'static str, Bytes)>,
+    /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
+    /// (in addition to tcp port, udp port and fork).
+    other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
@@ -58,9 +50,9 @@ impl ConfigBuilder {
         let Config {
             discv5_config,
             bootstrap_nodes,
-            fork: fork_id,
+            fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         } = discv5_config;
@@ -68,9 +60,9 @@ impl ConfigBuilder {
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork: Some(fork_id),
+            fork: Some(fork),
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
             discovered_peer_filter: Some(discovered_peer_filter),
         }
@@ -123,19 +115,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Add optimism mainnet boot nodes.
-    pub fn add_optimism_mainnet_boot_nodes(self) -> Self {
-        self.add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET)
-    }
-
-    /// Add optimism sepolia boot nodes.
-    pub fn add_optimism_sepolia_boot_nodes(self) -> Self {
-        self.add_serialized_unsigned_boot_nodes(BOOT_NODES_OP_SEPOLIA_AND_BASE_SEPOLIA)
-    }
-
-    /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
-    pub fn fork(mut self, key: &'static [u8], value: ForkId) -> Self {
-        self.fork = Some((key, value));
+    /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
+    /// network know which chain this node belongs to.
+    pub fn fork(mut self, network_key: &'static [u8], fork_id: ForkId) -> Self {
+        self.fork = Some((network_key, fork_id));
         self
     }
 
@@ -145,9 +128,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr).
-    pub fn add_enr_kv_pair(mut self, kv_pair: (&'static str, Bytes)) -> Self {
-        self.other_enr_data.push(kv_pair);
+    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr). Takes the key
+    /// to use for the kv-pair and the rlp encoded value.
+    pub fn add_enr_kv_pair(mut self, key: &'static [u8], value: Bytes) -> Self {
+        self.other_enr_kv_pairs.push((key, value));
         self
     }
 
@@ -168,7 +152,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         } = self;
@@ -176,19 +160,19 @@ impl ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((ETH, MAINNET.latest_fork_id()));
+        let fork = fork.unwrap_or((network_key::ETH, MAINNET.latest_fork_id()));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
 
         let discovered_peer_filter =
-            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[ETH2]));
+            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[network_key::ETH2]));
 
         Config {
             discv5_config,
             bootstrap_nodes,
             fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         }
@@ -203,12 +187,14 @@ pub struct Config {
     pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
+    /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
+    /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", ForkId)`.
     pub(super) fork: (&'static [u8], ForkId),
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
-    /// Additional kv-pairs to include in local node record.
-    pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
+    /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
+    /// peers by including in local node record.
+    pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
     pub(super) lookup_interval: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
@@ -287,6 +273,16 @@ mod test {
     use super::*;
 
     const MULTI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
+    const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &[&str] = &[
+        "enode://ca2774c3c401325850b2477fd7d0f27911efbf79b1e8b335066516e2bd8c4c9e0ba9696a94b1cb030a88eac582305ff55e905e64fb77fe0edcd70a4e5296d3ec@34.65.175.185:30305",
+        "enode://dd751a9ef8912be1bfa7a5e34e2c3785cc5253110bd929f385e07ba7ac19929fb0e0c5d93f77827291f4da02b2232240fbc47ea7ce04c46e333e452f8656b667@34.65.107.0:30305",
+        "enode://c5d289b56a77b6a2342ca29956dfd07aadf45364dde8ab20d1dc4efd4d1bc6b4655d902501daea308f4d8950737a4e93a4dfedd17b49cd5760ffd127837ca965@34.65.202.239:30305",
+        "enode://87a32fd13bd596b2ffca97020e31aef4ddcc1bbd4b95bb633d16c1329f654f34049ed240a36b449fda5e5225d70fe40bc667f53c304b71f8e68fc9d448690b51@3.231.138.188:30301",
+        "enode://ca21ea8f176adb2e229ce2d700830c844af0ea941a1d8152a9513b966fe525e809c3a6c73a2c18a12b74ed6ec4380edf91662778fe0b79f6a591236e49e176f9@184.72.129.189:30301",
+        "enode://acf4507a211ba7c1e52cdf4eef62cdc3c32e7c9c47998954f7ba024026f9a6b2150cd3f0b734d9c78e507ab70d59ba61dfe5c45e1078c7ad0775fb251d7735a2@3.220.145.177:30301",
+        "enode://8a5a5006159bf079d06a04e5eceab2a1ce6e0f721875b2a9c96905336219dbe14203d38f70f3754686a6324f786c2f9852d8c0dd3adac2d080f4db35efc678c5@3.231.11.52:30301",
+        "enode://cdadbe835308ad3557f9a1de8db411da1a260a98f8421d62da90e71da66e55e98aaa8e90aa7ce01b408a54e4bd2253d701218081ded3dbe5efbbc7b41d7cef79@54.198.153.150:30301"
+    ];
 
     #[test]
     fn parse_boot_nodes() {
