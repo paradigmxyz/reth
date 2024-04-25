@@ -297,8 +297,8 @@ impl BundleStateWithReceipts {
     /// files if `static_file_producer` is `Some`. It should be none if there is any kind of
     /// pruning/filtering over the receipts.
     ///
-    /// `omit_changed_check` should be set to true of bundle has some of it data
-    /// detached, This would make some original values not known.
+    /// `omit_changed_check` should be set to true if bundle has some of its data detached. This
+    /// would make some original values not known.
     pub fn write_to_storage<TX>(
         self,
         tx: &TX,
