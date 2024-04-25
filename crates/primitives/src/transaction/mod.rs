@@ -1755,7 +1755,7 @@ mod tests {
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_codecs::Compact;
-    use secp256k1::{KeyPair, Secp256k1};
+    use secp256k1::{Keypair, Secp256k1};
     use std::str::FromStr;
 
     #[test]
@@ -2048,7 +2048,7 @@ mod tests {
                     tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
 
-                let key_pair = KeyPair::new(&secp, &mut rng);
+                let key_pair = Keypair::new(&secp, &mut rng);
 
                 let signature =
                     sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
