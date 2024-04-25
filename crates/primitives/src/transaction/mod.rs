@@ -1733,25 +1733,32 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
             Signature {
                 r: signature.r,
                 s: signature.s,
-                odd_y_parity: match transaction.tx_type() {
-                    // If the transaction type is Legacy, adjust the v component of the signature
-                    // according to the Ethereum specification
-                    TxType::Legacy => {
-                        // Calculate the new v value based on the EIP-155 formula:
-                        // v = {0,1} + CHAIN_ID * 2 + 35
-                        signature.v -
-                            U256::from(if let Some(chain_id) = transaction.chain_id() {
-                                // If CHAIN_ID is available, calculate the new v value accordingly
-                                chain_id.saturating_mul(2).saturating_add(35)
-                            } else {
-                                // If CHAIN_ID is not available, set v = {0,1} + 27
-                                27
-                            })
+                odd_y_parity: if let Some(y_parity) = signature.y_parity {
+                    y_parity.0
+                } else {
+                    match transaction.tx_type() {
+                        // If the transaction type is Legacy, adjust the v component of the
+                        // signature according to the Ethereum specification
+                        TxType::Legacy => {
+                            // Calculate the new v value based on the EIP-155 formula:
+                            // v = {0,1} + CHAIN_ID * 2 + 35
+                            (signature.v -
+                                U256::from(if let Some(chain_id) = transaction.chain_id() {
+                                    // If CHAIN_ID is available, calculate the new v value
+                                    // accordingly
+                                    chain_id.saturating_mul(2).saturating_add(35)
+                                } else {
+                                    // If CHAIN_ID is not available, set v = {0,1} + 27
+                                    27
+                                }))
+                            .try_into()
+                            .map_err(|_| ConversionError::InvalidSignature)?
+                        }
+                        _ => {
+                            signature.v.try_into().map_err(|_| ConversionError::InvalidSignature)?
+                        }
                     }
-                    _ => signature.v,
-                }
-                .try_into()
-                .map_err(|_| ConversionError::InvalidSignature)?,
+                },
             },
         )
         .try_into_ecrecovered()
