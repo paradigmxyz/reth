@@ -11,13 +11,13 @@ to make a PR!
 ## Node Builder
 
 | Example                                                       | Description                                                                                      |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [Additional RPC namespace](./additional-rpc-namespace-in-cli) | Illustrates how to add custom CLI parameters and set up a custom RPC namespace                   |
-| [Custom event hooks](./cli-extension-event-hooks)             | Illustrates how to hook to various node lifecycle events                                         |
+|---------------------------------------------------------------| ------------------------------------------------------------------------------------------------ |
+| [Additional RPC namespace](./node-custom-rpc) | Illustrates how to add custom CLI parameters and set up a custom RPC namespace                   |
+| [Custom event hooks](./node-event-hooks)             | Illustrates how to hook to various node lifecycle events                                         |
 | [Custom dev node](./custom-dev-node)                          | Illustrates how to run a custom dev node programmatically and submit a transaction to it via RPC |
 | [Custom EVM](./custom-evm)                                    | Illustrates how to implement a node with a custom EVM                                            |
 | [Custom inspector](./custom-inspector)                        | Illustrates how to use a custom EVM inspector to trace new transactions                          |
-| [Custom node](./custom-node)                                  | Illustrates how to create a node with custom engine types                                        |
+| [Custom engine types](./custom-engine-types)                  | Illustrates how to create a node with custom engine types                                        |
 | [Custom node components](./custom-node-components)            | Illustrates how to configure custom node components                                              |
 | [Custom payload builder](./custom-payload-builder)            | Illustrates how to use a custom payload builder                                                  |
 
@@ -50,7 +50,7 @@ to make a PR!
 
 | Example                                               | Description                                                                                                                |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| [Trace pending transactions](./trace-transaction-cli) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
+| [Trace pending transactions](./txpool-tracing) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
 | [Standalone txpool](./network-txpool.rs)              | Illustrates how to use the network as a standalone component together with a transaction pool with a custom pool validator |
 
 ## P2P
