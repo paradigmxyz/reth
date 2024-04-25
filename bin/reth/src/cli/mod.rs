@@ -176,6 +176,9 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand),
+    /// Initialize the database from a state dump file.
+    #[command(name = "init-state")]
+    Init(init_cmd::InitStateCommand),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
