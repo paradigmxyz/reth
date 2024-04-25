@@ -77,9 +77,6 @@ impl StateReverts {
                             }
                         }
 
-                        // TODO: fix this comment
-                        // upsert on dupsort tables will append to subkey. see implementation of
-                        // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
                         storage_changeset_cursor.upsert(storage_id, StorageEntry { key, value })?;
                     }
                 }
@@ -109,9 +106,6 @@ impl StateReverts {
                         }
                     }
 
-                    // TODO: fix this comment
-                    // upsert on dupsort tables will append to subkey. see implementation of
-                    // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
                     account_changeset_cursor.upsert(
                         block_number,
                         AccountBeforeTx { address, info: info.map(into_reth_acc) },

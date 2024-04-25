@@ -123,7 +123,7 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
-    insert_state::<DB>(tx, capacity, alloc, 0, false)
+    insert_state::<DB>(tx, capacity, alloc, 0)
 }
 
 /// Inserts state at given block into database.
@@ -357,7 +357,6 @@ pub fn init_from_state_dump<DB: Database>(
                 accounts.len(),
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
-                false,
             )?;
 
             accounts.clear();
