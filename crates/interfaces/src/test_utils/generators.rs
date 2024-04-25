@@ -414,7 +414,7 @@ mod tests {
             let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
             let recovered = signed.recover_signer().unwrap();
 
-            let expected = public_key_to_address(key_pair.public_key());
+            let expected = public_key_to_address(&key_pair.public_key().serialize_uncompressed());
             assert_eq!(recovered, expected);
         }
     }

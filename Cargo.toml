@@ -267,6 +267,7 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-node-events = { path = "crates/node/events" }
 
 # revm
+# RATAN: Determine if we need to remove secp256k1 from revm.
 revm = { version = "8.0.0", features = [
     "std",
     "secp256k1",
@@ -363,11 +364,13 @@ jsonrpsee-core = "0.22"
 jsonrpsee-types = "0.22"
 
 # crypto
+# RATAN: Determine if we need to feature gate secp256k1 at the top level.
 secp256k1 = { version = "0.27.0", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
 enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
+k256 = { version = "0.13.3", default-features = false, features = ["ecdsa"] }
 
 # for eip-4844
 c-kzg = "1.0.0"

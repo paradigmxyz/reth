@@ -79,8 +79,12 @@ pub enum CliqueSignerRecoveryError {
     #[error("Invalid extra data length")]
     InvalidExtraData,
     /// Recovery failed.
+    #[cfg(feature = "secp256k1")]
     #[error("Invalid signature: {0}")]
     InvalidSignature(#[from] secp256k1::Error),
+    #[cfg(not(feature = "secp256k1"))]
+    #[error("Invalid signature: {0}")]
+    InvalidSignature(#[from] k256::ecdsa::Error),
 }
 
 /// Recover the account from signed header per clique consensus rules.

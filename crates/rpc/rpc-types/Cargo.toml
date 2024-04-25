@@ -34,6 +34,7 @@ url = "2.3"
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
 secp256k1.workspace = true
+k256.workspace = true
 
 # arbitrary
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -42,17 +43,33 @@ proptest-derive = { workspace = true, optional = true }
 
 [features]
 default = ["jsonrpsee-types"]
-arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
-ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz", "alloy-rpc-types/ssz", "alloy-rpc-types-engine/ssz"]
+arbitrary = [
+    "dep:arbitrary",
+    "dep:proptest-derive",
+    "dep:proptest",
+    "alloy-primitives/arbitrary",
+    "alloy-rpc-types/arbitrary",
+]
+ssz = [
+    "dep:ethereum_ssz",
+    "dep:ethereum_ssz_derive",
+    "alloy-primitives/ssz",
+    "alloy-rpc-types/ssz",
+    "alloy-rpc-types-engine/ssz",
+]
 
 
 [dev-dependencies]
 # misc
-alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde", "arbitrary"] }
+alloy-primitives = { workspace = true, features = [
+    "rand",
+    "rlp",
+    "serde",
+    "arbitrary",
+] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
 similar-asserts.workspace = true
 bytes.workspace = true
-
