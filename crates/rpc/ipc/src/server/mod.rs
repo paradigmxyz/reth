@@ -66,18 +66,18 @@ impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
 }
 
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
-    where
-        RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
-        for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
-        HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
-        <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Send
+where
+    RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
+    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+    HttpMiddleware: Layer<TowerServiceNoHttp<RpcMiddleware>> + Send + 'static,
+    <HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service: Send
         + Service<
             String,
-            Response=Option<String>,
-            Error=Box<dyn std::error::Error + Send + Sync + 'static>,
+            Response = Option<String>,
+            Error = Box<dyn std::error::Error + Send + Sync + 'static>,
         >,
-        <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<String>>::Future:
-        Send + Unpin,
+    <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<String>>::Future:
+    Send + Unpin,
 {
     /// Start responding to connections requests.
     ///
