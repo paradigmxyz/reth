@@ -1,14 +1,16 @@
 //! JSON-RPC IPC server implementation
 
 use crate::server::{
-    connection::{Incoming, IpcConn, JsonRpcStream},
-    future::{ConnectionGuard, FutureDriver, StopHandle},
+    connection::{IpcConn, JsonRpcStream},
+    future::{ConnectionGuard, StopHandle},
 };
-use futures::{FutureExt, Stream, StreamExt};
+use futures::StreamExt;
+use futures_util::{future::Either, stream::FuturesUnordered};
+use interprocess::local_socket::tokio::{LocalSocketListener, LocalSocketStream};
 use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
     server::{
-        middleware::rpc::{either::Either, RpcLoggerLayer, RpcServiceT},
+        middleware::rpc::{RpcLoggerLayer, RpcServiceT},
         AlreadyStoppedError, IdProvider, RandomIntegerIdProvider,
     },
     BoundedSubscriptions, MethodSink, Methods,
@@ -25,16 +27,18 @@ use tokio::{
     sync::{oneshot, watch, OwnedSemaphorePermit},
 };
 use tower::{layer::util::Identity, Layer, Service};
-use tracing::{debug, trace, warn};
-
+use tracing::{debug, trace, warn, Instrument};
 // re-export so can be used during builder setup
-use crate::server::{
-    connection::IpcConnDriver,
-    rpc_service::{RpcService, RpcServiceCfg},
+use crate::{
+    server::{
+        connection::IpcConnDriver,
+        rpc_service::{RpcService, RpcServiceCfg},
+    },
+    stream_codec::StreamCodec,
 };
-pub use parity_tokio_ipc::Endpoint;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::compat::FuturesAsyncReadCompatExt;
 use tower::layer::{util::Stack, LayerFn};
 
 mod connection;
@@ -47,7 +51,7 @@ mod rpc_service;
 // This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
 pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
-    endpoint: Endpoint,
+    endpoint: String,
     id_provider: Arc<dyn IdProvider>,
     cfg: Settings,
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
@@ -55,9 +59,9 @@ pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
 }
 
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
-    /// Returns the configured [Endpoint]
-    pub fn endpoint(&self) -> &Endpoint {
-        &self.endpoint
+    /// Returns the configured endpoint
+    pub fn endpoint(&self) -> String {
+        self.endpoint.clone()
     }
 }
 
@@ -123,14 +127,28 @@ where
         stop_handle: StopHandle,
         on_ready: oneshot::Sender<Result<(), IpcServerStartError>>,
     ) {
-        trace!(endpoint = ?self.endpoint.path(), "starting ipc server");
+        trace!(endpoint = ?self.endpoint, "starting ipc server");
 
         if cfg!(unix) {
             // ensure the file does not exist
-            if std::fs::remove_file(self.endpoint.path()).is_ok() {
-                debug!(endpoint = ?self.endpoint.path(), "removed existing IPC endpoint file");
+            if std::fs::remove_file(&self.endpoint).is_ok() {
+                debug!(endpoint = ?self.endpoint, "removed existing IPC endpoint file");
             }
         }
+
+        let listener = match LocalSocketListener::bind(self.endpoint.clone()) {
+            Err(err) => {
+                on_ready
+                    .send(Err(IpcServerStartError { endpoint: self.endpoint.clone(), source: err }))
+                    .ok();
+                return;
+            }
+
+            Ok(listener) => listener,
+        };
+
+        // signal that we're ready to accept connections
+        on_ready.send(Ok(())).ok();
 
         let message_buffer_capacity = self.cfg.message_buffer_capacity;
         let max_request_body_size = self.cfg.max_request_body_size;
@@ -142,37 +160,27 @@ where
         let mut id: u32 = 0;
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
-        let mut connections = FutureDriver::default();
-        let endpoint_path = self.endpoint.path().to_string();
-        let incoming = match self.endpoint.incoming() {
-            Ok(connections) => {
-                #[cfg(windows)]
-                    let connections = Box::pin(connections);
-                Incoming::new(connections)
-            }
-            Err(err) => {
-                on_ready
-                    .send(Err(IpcServerStartError { endpoint: endpoint_path, source: err }))
-                    .ok();
-                return
-            }
-        };
-        // signal that we're ready to accept connections
-        on_ready.send(Ok(())).ok();
-
-        let mut incoming = Monitored::new(incoming, &stop_handle);
+        let mut connections = FuturesUnordered::new();
+        let stopped = stop_handle.clone().shutdown();
+        tokio::pin!(stopped);
 
         trace!("accepting ipc connections");
         loop {
-            match connections.select_with(&mut incoming).await {
-                Ok(ipc) => {
+            match try_accept_conn(&listener, stopped).await {
+                AcceptConnection::Established { local_socket_stream, stop } => {
                     trace!("established new connection");
+                    let ipc = IpcConn(tokio_util::codec::Decoder::framed(
+                        StreamCodec::stream_incoming(),
+                        local_socket_stream.compat(),
+                    ));
+
                     let conn = match connection_guard.try_acquire() {
                         Some(conn) => conn,
                         None => {
                             warn!("Too many IPC connections. Please try again later.");
-                            connections.add(ipc.reject_connection().boxed());
-                            continue
+                            connections.push(tokio::spawn(ipc.reject_connection().in_current_span()));
+                            stopped = stop;
+                            continue;
                         }
                     };
 
@@ -198,30 +206,58 @@ where
                     };
 
                     let service = self.http_middleware.service(tower_service);
-                    connections.add(Box::pin(spawn_connection(
+                    connections.push(tokio::spawn(process_connection(
                         ipc,
                         service,
                         stop_handle.clone(),
                         rx,
-                    )));
+                    ).in_current_span()));
 
                     id = id.wrapping_add(1);
+                    stopped = stop;
                 }
-                Err(MonitoredError::Selector(err)) => {
-                    tracing::error!("Error while awaiting a new IPC connection: {:?}", err);
+                AcceptConnection::Shutdown => { break; }
+                AcceptConnection::Err((e, stop)) => {
+                    tracing::error!("Error while awaiting a new IPC connection: {:?}", e);
+                    stopped = stop;
                 }
-                Err(MonitoredError::Shutdown) => break,
             }
         }
 
-        connections.await;
+        // FuturesUnordered won't poll anything until this line but because the
+        // tasks are spawned (so that they can progress independently)
+        // then this just makes sure that all tasks are completed before
+        // returning from this function.
+        while connections.next().await.is_some() {}
+    }
+}
+
+enum AcceptConnection<S> {
+    Shutdown,
+    Established { local_socket_stream: LocalSocketStream, stop: S },
+    Err((io::Error, S)),
+}
+
+async fn try_accept_conn<S>(listener: &LocalSocketListener, stopped: S) -> AcceptConnection<S>
+where
+    S: Future + Unpin,
+{
+    let accept = listener.accept();
+    tokio::pin!(accept);
+
+    match futures_util::future::select(accept, stopped).await {
+        Either::Left((res, stop)) => match res {
+            Ok(local_socket_stream) => AcceptConnection::Established { local_socket_stream, stop },
+            Err(e) => AcceptConnection::Err((e, stop)),
+        },
+        Either::Right(_) => AcceptConnection::Shutdown,
     }
 }
 
 impl std::fmt::Debug for IpcServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcServer")
-            .field("endpoint", &self.endpoint.path())
+            .field("endpoint", &self.endpoint)
             .field("cfg", &self.cfg)
             .field("id_provider", &self.id_provider)
             .finish()
@@ -408,10 +444,10 @@ where
 }
 
 /// Spawns the IPC connection onto a new task
-async fn spawn_connection<S, T>(
+async fn process_connection<S, T>(
     conn: IpcConn<JsonRpcStream<T>>,
     service: S,
-    mut stop_handle: StopHandle,
+    stop_handle: StopHandle,
     rx: mpsc::Receiver<String>,
 ) where
     S: Service<String, Response = Option<String>> + Send + 'static,
@@ -419,70 +455,34 @@ async fn spawn_connection<S, T>(
     S::Future: Send + Unpin,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let task = tokio::task::spawn(async move {
-        let rx_item = ReceiverStream::new(rx);
-        let conn = IpcConnDriver {
-            conn,
-            service,
-            pending_calls: Default::default(),
-            items: Default::default(),
-        };
-        tokio::pin!(conn, rx_item);
+    let rx_item = ReceiverStream::new(rx);
+    let conn = IpcConnDriver {
+        conn,
+        service,
+        pending_calls: Default::default(),
+        items: Default::default(),
+    };
+    tokio::pin!(conn, rx_item);
 
-        loop {
-            tokio::select! {
-                _ = &mut conn => {
-                   break
-                }
-                item = rx_item.next() => {
-                    if let Some(item) = item {
-                        conn.push_back(item);
-                    }
-                }
-                _ = stop_handle.shutdown() => {
-                    // shutdown
-                    break
+    let stopped = stop_handle.shutdown();
+
+    tokio::pin!(stopped);
+
+    loop {
+        tokio::select! {
+            _ = &mut conn => {
+               break
+            }
+            item = rx_item.next() => {
+                if let Some(item) = item {
+                    conn.push_back(item);
                 }
             }
+            _ = &mut stopped=> {
+                // shutdown
+                break
+            }
         }
-    });
-
-    task.await.ok();
-}
-
-/// This is a glorified select listening for new messages, while also checking the `stop_receiver`
-/// signal.
-struct Monitored<'a, F> {
-    future: F,
-    stop_monitor: &'a StopHandle,
-}
-
-impl<'a, F> Monitored<'a, F> {
-    fn new(future: F, stop_monitor: &'a StopHandle) -> Self {
-        Monitored { future, stop_monitor }
-    }
-}
-
-enum MonitoredError<E> {
-    Shutdown,
-    Selector(E),
-}
-
-impl<'a, T, Item> Future for Monitored<'a, Incoming<T, Item>>
-where
-    T: Stream<Item = io::Result<Item>> + Unpin + 'static,
-    Item: AsyncRead + AsyncWrite,
-{
-    type Output = Result<IpcConn<JsonRpcStream<Item>>, MonitoredError<io::Error>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        if this.stop_monitor.shutdown_requested() {
-            return Poll::Ready(Err(MonitoredError::Shutdown))
-        }
-
-        this.future.poll_accept(cx).map_err(MonitoredError::Selector)
     }
 }
 
@@ -734,17 +734,8 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 
     /// Finalize the configuration of the server. Consumes the [`Builder`].
     pub fn build(self, endpoint: impl AsRef<str>) -> IpcServer<HttpMiddleware, RpcMiddleware> {
-        let endpoint = Endpoint::new(endpoint.as_ref().to_string());
-        self.build_with_endpoint(endpoint)
-    }
-
-    /// Finalize the configuration of the server. Consumes the [`Builder`].
-    pub fn build_with_endpoint(
-        self,
-        endpoint: Endpoint,
-    ) -> IpcServer<HttpMiddleware, RpcMiddleware> {
         IpcServer {
-            endpoint,
+            endpoint: endpoint.as_ref().to_string(),
             cfg: self.settings,
             id_provider: self.id_provider,
             http_middleware: self.http_middleware,
@@ -782,7 +773,18 @@ impl ServerHandle {
     }
 }
 
-#[cfg(all(test, unix))]
+/// For testing/examples
+#[cfg(test)]
+pub fn dummy_endpoint() -> String {
+    let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
+    if cfg!(windows) {
+        format!(r"\\.\pipe\my-pipe-{}", num)
+    } else {
+        format!(r"/tmp/my-uds-{}", num)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::client::IpcClientBuilder;
@@ -797,7 +799,6 @@ mod tests {
         types::Request,
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
-    use parity_tokio_ipc::dummy_endpoint;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 
@@ -823,7 +824,7 @@ mod tests {
                     // and you might want to do something smarter if it's
                     // critical that "the most recent item" must be sent when it is produced.
                     if sink.send(notif).await.is_err() {
-                        break Ok(())
+                        break Ok(());
                     }
 
                     closed = c;
@@ -848,6 +849,7 @@ mod tests {
 
     #[tokio::test]
     async fn can_set_the_max_response_body_size() {
+        // init_test_tracing();
         let endpoint = dummy_endpoint();
         let server = Builder::default().max_response_body_size(100).build(&endpoint);
         let mut module = RpcModule::new(());
