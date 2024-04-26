@@ -1,12 +1,12 @@
 //! Discovery v4 protocol implementation.
 
-use crate::{error::DecodePacketError, EnrForkIdEntry, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use crate::{error::DecodePacketError, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable};
 use enr::Enr;
 use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, ForkId, NodeRecord, B256,
+    keccak256, EnrForkIdEntry, ForkId, NodeRecord, B256,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -262,7 +262,7 @@ impl EnrResponse {
     /// See also <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L36>
     pub fn eth_fork_id(&self) -> Option<ForkId> {
         let mut maybe_fork_id = self.enr.get_raw_rlp(b"eth")?;
-        EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(|entry| entry.fork_id)
+        EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(Into::into)
     }
 }
 

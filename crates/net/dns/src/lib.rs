@@ -23,7 +23,7 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
 use reth_network_types::pk2id;
-use reth_primitives::{ForkId, NodeRecord};
+use reth_primitives::{EnrForkIdEntry, ForkId, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -401,7 +401,8 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
     }
     .into_ipv4_mapped();
 
-    let fork_id = enr.get_decodable::<ForkId>(b"eth").transpose().ok()?;
+    let fork_id =
+        enr.get_decodable::<EnrForkIdEntry>(b"eth").transpose().ok().flatten().map(Into::into);
 
     Some(DnsNodeRecordUpdate { node_record, fork_id, enr: enr.clone() })
 }
@@ -424,7 +425,7 @@ mod tests {
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
             .tcp4(30303)
-            .add_value(b"eth", &MAINNET.latest_fork_id())
+            .add_value(b"eth", &EnrForkIdEntry::from(MAINNET.latest_fork_id()))
             .build(&secret_key)
             .unwrap();
 
@@ -447,7 +448,7 @@ mod tests {
             .ip("127.0.0.1".parse().unwrap())
             .udp4(9000)
             .tcp4(30303)
-            .add_value(b"eth", &MAINNET.latest_fork_id())
+            .add_value(b"eth", &EnrForkIdEntry::from(MAINNET.latest_fork_id()))
             .add_value(b"opstack", &ForkId { hash: ForkHash(rand::random()), next: rand::random() })
             .build(&secret_key)
             .unwrap();
@@ -511,7 +512,11 @@ mod tests {
 
         let mut builder = Enr::builder();
         let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier).unwrap();
-        builder.ip4(Ipv4Addr::LOCALHOST).udp4(30303).tcp4(30303).add_value(b"eth", &fork_id);
+        builder
+            .ip4(Ipv4Addr::LOCALHOST)
+            .udp4(30303)
+            .tcp4(30303)
+            .add_value(b"eth", &EnrForkIdEntry::from(fork_id));
         let enr = builder.build(&secret_key).unwrap();
 
         resolver.insert(format!("{}.{}", root.enr_root.clone(), link.domain), enr.to_base64());
