@@ -2205,6 +2205,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "db-access"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth-db",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc-types",
+]
+
+[[package]]
 name = "debug-helper"
 version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
