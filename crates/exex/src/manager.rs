@@ -90,8 +90,9 @@ impl ExExHandle {
             match notification {
                 ExExNotification::ChainCommitted { new } => {
                     // Skip the chain commit notification if the finished height of the ExEx is
-                    // higher than the tip of the new notification
-                    if finished_height > new.tip().number {
+                    // higher than or equal to the tip of the new notification.
+                    // I.e., the ExEx has already processed the notification.
+                    if finished_height >= new.tip().number {
                         debug!(
                             exex_id = %self.id,
                             %notification_id,
