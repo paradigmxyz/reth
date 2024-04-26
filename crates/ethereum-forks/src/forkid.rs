@@ -119,7 +119,7 @@ pub struct ForkId {
 /// EIP-868. Forward compatibility is achieved by allowing trailing fields.
 ///
 /// See:
-/// <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L27-L38>
+/// <https://github.com/ethereum/devp2p/blob/master/enr-entries/eth.md#entry-format>
 ///
 /// for how geth implements ForkId values and forward compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
