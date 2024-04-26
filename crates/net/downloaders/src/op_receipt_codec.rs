@@ -7,7 +7,7 @@ use reth_primitives::{
 };
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::{file_client::FileClientError, op_receipt_file_client::ReceiptWithBlockNumber};
+use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockNumber};
 
 /// Codec for reading raw receipts from a file.
 ///
@@ -51,9 +51,9 @@ impl Encoder<Receipt> for ReceiptFileCodec {
     }
 }
 
+/// See <https://github.com/testinprod-io/op-geth/pull/1>
 #[derive(Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 struct HackReceipt {
-    // Consensus fields: These fields are defined by the Yellow Paper
     tx_type: TxType,
     post_state: Bytes,
     status: u64,

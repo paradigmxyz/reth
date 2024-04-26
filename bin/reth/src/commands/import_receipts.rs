@@ -11,7 +11,7 @@ use clap::Parser;
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
-    op_receipt_file_client::ReceiptFileClient,
+    receipt_file_client::ReceiptFileClient,
 };
 use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::ChainSpec;
