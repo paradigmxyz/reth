@@ -19,6 +19,7 @@ use std::{
 #[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]
 #[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
 pub struct Receipt {
     /// Receipt type.
     pub tx_type: TxType,
