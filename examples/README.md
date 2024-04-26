@@ -37,9 +37,9 @@ to make a PR!
 
 ## Database
 
-| Example                     | Description                                                     |
-| --------------------------- | --------------------------------------------------------------- |
-| [DB access](./db-access.rs) | Illustrates how to access Reth's database in a separate process |
+| Example                  | Description                                                     |
+| ------------------------ | --------------------------------------------------------------- |
+| [DB access](./db-access) | Illustrates how to access Reth's database in a separate process |
 
 ## Network
 
@@ -52,7 +52,7 @@ to make a PR!
 | Example                                        | Description                                                                                                                |
 | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | [Trace pending transactions](./txpool-tracing) | Illustrates how to trace pending transactions as they arrive in the mempool                                                |
-| [Standalone txpool](./network-txpool.rs)       | Illustrates how to use the network as a standalone component together with a transaction pool with a custom pool validator |
+| [Standalone txpool](./network-txpool)          | Illustrates how to use the network as a standalone component together with a transaction pool with a custom pool validator |
 
 ## P2P
 

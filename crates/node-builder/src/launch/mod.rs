@@ -8,7 +8,7 @@ use crate::{
     BuilderContext, NodeBuilderWithComponents, NodeHandle, RethFullAdapter,
 };
 use futures::{future, future::Either, stream, stream_select, StreamExt};
-use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
+use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensus, BeaconConsensusEngine,
@@ -16,7 +16,6 @@ use reth_beacon_consensus::{
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_config::config::EtlConfig;
 use reth_consensus::Consensus;
 use reth_db::{
     database::Database,
@@ -31,15 +30,12 @@ use reth_node_core::{
     engine_api_store::EngineApiStore,
     engine_skip_fcu::EngineApiSkipFcu,
     exit::NodeExitFuture,
-    init::init_genesis,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
-use reth_prune::PrunerBuilder;
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
-use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -99,26 +95,28 @@ where
             config,
         } = target;
 
-        // configure globals
-        ctx.configure_globals();
-
-        let mut ctx = ctx
+        // setup the launch context
+        let ctx = ctx
+            .with_configured_globals()
             // load the toml config
             .with_loaded_toml_config(config)?
             // attach the database
             .attach(database.clone())
+            // ensure certain settings take effect
+            .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory()?;
-
-        info!(target: "reth::cli", "Database opened");
-
-        ctx.start_prometheus_endpoint().await?;
-
-        debug!(target: "reth::cli", chain=%ctx.chain_id(), genesis=?ctx.genesis_hash(), "Initializing genesis");
-
-        init_genesis(ctx.provider_factory().clone())?;
-
-        info!(target: "reth::cli", "\n{}", ctx.chain_spec().display_hardforks());
+            .with_provider_factory()?
+            .inspect(|_| {
+                info!(target: "reth::cli", "Database opened");
+            })
+            .with_prometheus().await?
+            .inspect(|this| {
+                debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
+            })
+            .with_genesis()?
+            .inspect(|this| {
+                info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
+            });
 
         // setup the consensus instance
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
@@ -132,8 +130,6 @@ where
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
         ctx.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        let prune_config = ctx.prune_config()?;
-
         // Configure the blockchain tree for the node
         let evm_config = types.evm_config();
         let tree_config = BlockchainTreeConfig::default();
@@ -142,12 +138,8 @@ where
             consensus.clone(),
             EvmProcessorFactory::new(ctx.chain_spec(), evm_config.clone()),
         );
-        let tree = BlockchainTree::new(
-            tree_externals,
-            tree_config,
-            prune_config.as_ref().map(|prune| prune.segments.clone()),
-        )?
-        .with_sync_metrics_tx(sync_metrics_tx.clone());
+        let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
+            .with_sync_metrics_tx(sync_metrics_tx.clone());
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
@@ -286,29 +278,16 @@ manager",
             consensus_engine_rx = engine_intercept_rx;
         };
 
-        let max_block = ctx
-            .node_config()
-            .max_block(network_client.clone(), ctx.provider_factory().clone())
-            .await?;
+        let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
 
-        let static_file_producer = StaticFileProducer::new(
-            ctx.provider_factory().clone(),
-            ctx.static_file_provider(),
-            prune_config.clone().unwrap_or_default().segments,
-        );
+        let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();
         hooks.add(StaticFileHook::new(
             static_file_producer.clone(),
             Box::new(ctx.task_executor().clone()),
         ));
         info!(target: "reth::cli", "StaticFileProducer initialized");
-
-        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
-        if ctx.toml_config_mut().stages.etl.dir.is_none() {
-            ctx.toml_config_mut().stages.etl.dir =
-                Some(EtlConfig::from_datadir(&ctx.data_dir().data_dir_path()));
-        }
 
         // Configure the pipeline
         let pipeline_exex_handle =
@@ -322,18 +301,9 @@ address.to_string(), format_ether(alloc.balance));
             }
 
             // install auto-seal
-            let pending_transactions_listener =
-                node_adapter.components.pool().pending_transactions_listener();
-
-            let mining_mode = if let Some(interval) = ctx.node_config().dev.block_time {
-                MiningMode::interval(interval)
-            } else if let Some(max_transactions) = ctx.node_config().dev.block_max_transactions {
-                MiningMode::instant(max_transactions, pending_transactions_listener)
-            } else {
-                info!(target: "reth::cli", "No mining mode specified, defaulting to
-ReadyTransaction");
-                MiningMode::instant(1, pending_transactions_listener)
-            };
+            let mining_mode =
+                ctx.dev_mining_mode(node_adapter.components.pool().pending_transactions_listener());
+            info!(target: "reth::cli", mode=%mining_mode, "configuring dev mining mode");
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
                 ctx.chain_spec(),
@@ -354,7 +324,7 @@ ReadyTransaction");
                 ctx.provider_factory().clone(),
                 ctx.task_executor(),
                 sync_metrics_tx,
-                prune_config.clone(),
+                ctx.prune_config(),
                 max_block,
                 static_file_producer,
                 evm_config,
@@ -377,7 +347,7 @@ ReadyTransaction");
                 ctx.provider_factory().clone(),
                 ctx.task_executor(),
                 sync_metrics_tx,
-                prune_config.clone(),
+                ctx.prune_config(),
                 max_block,
                 static_file_producer,
                 evm_config,
@@ -392,11 +362,8 @@ ReadyTransaction");
 
         let initial_target = ctx.initial_pipeline_target();
 
-        let prune_config = prune_config.unwrap_or_default();
-        let mut pruner_builder = PrunerBuilder::new(prune_config.clone())
-            .max_reorg_depth(tree_config.max_reorg_depth() as usize)
-            .prune_delete_limit(ctx.chain_spec().prune_delete_limit)
-            .timeout(PrunerBuilder::DEFAULT_TIMEOUT);
+        let mut pruner_builder =
+            ctx.pruner_builder().max_reorg_depth(tree_config.max_reorg_depth() as usize);
         if let Some(exex_manager_handle) = &exex_manager_handle {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
@@ -405,8 +372,8 @@ ReadyTransaction");
         let mut pruner = pruner_builder.build(ctx.provider_factory().clone());
 
         let pruner_events = pruner.events();
+        info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
         hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor().clone())));
-        info!(target: "reth::cli", ?prune_config, "Pruner initialized");
 
         // Configure the consensus engine
         let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
@@ -462,9 +429,6 @@ ReadyTransaction");
 
         // extract the jwt secret from the args if possible
         let jwt_secret = ctx.auth_jwt_secret()?;
-
-        // adjust rpc port numbers based on instance number
-        ctx.node_config_mut().adjust_instance_ports();
 
         // Start RPC servers
         let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(

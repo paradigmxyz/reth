@@ -1,13 +1,11 @@
 //! Discovery v4 protocol implementation.
 
-use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
-use alloy_rlp::{
-    length_of_length, Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
-};
-use enr::{Enr, EnrKey};
+use crate::{error::DecodePacketError, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable};
+use enr::Enr;
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, pk2id, ForkId, NodeRecord, B256,
+    keccak256, pk2id, EnrForkIdEntry, ForkId, NodeRecord, B256,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
@@ -112,8 +110,7 @@ impl Message {
 
         // Sign the payload with the secret key using recoverable ECDSA
         let signature: RecoverableSignature = SECP256K1.sign_ecdsa_recoverable(
-            &secp256k1::Message::from_slice(keccak256(&payload).as_ref())
-                .expect("B256.len() == MESSAGE_SIZE"),
+            &secp256k1::Message::from_digest(keccak256(&payload).0),
             secret_key,
         );
 
@@ -158,7 +155,7 @@ impl Message {
         let recoverable_sig = RecoverableSignature::from_compact(signature, recovery_id)?;
 
         // recover the public key
-        let msg = secp256k1::Message::from_slice(keccak256(&packet[97..]).as_slice())?;
+        let msg = secp256k1::Message::from_digest(keccak256(&packet[97..]).0);
 
         let pk = SECP256K1.recover_ecdsa(&msg, &recoverable_sig)?;
         let node_id = pk2id(&pk);
@@ -234,85 +231,6 @@ pub struct Neighbours {
     pub expire: u64,
 }
 
-/// Passthrough newtype to [`Enr`].
-///
-/// We need to wrap the ENR type because of Rust's orphan rules not allowing
-/// implementing a foreign trait on a foreign type.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EnrWrapper<K: EnrKey>(Enr<K>);
-
-impl<K: EnrKey> EnrWrapper<K> {
-    /// Creates a new instance of [`EnrWrapper`].
-    pub fn new(enr: Enr<K>) -> Self {
-        EnrWrapper(enr)
-    }
-}
-
-impl<K> Encodable for EnrWrapper<K>
-where
-    K: EnrKey,
-{
-    fn encode(&self, out: &mut dyn BufMut) {
-        let payload_length = self.0.signature().length() +
-            self.0.seq().length() +
-            self.0.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
-
-        let header = Header { list: true, payload_length };
-        header.encode(out);
-
-        self.0.signature().encode(out);
-        self.0.seq().encode(out);
-
-        for (k, v) in self.0.iter() {
-            // Keys are byte data
-            k.as_slice().encode(out);
-            // Values are raw RLP encoded data
-            out.put_slice(v);
-        }
-    }
-
-    fn length(&self) -> usize {
-        let payload_length = self.0.signature().length() +
-            self.0.seq().length() +
-            self.0.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
-        payload_length + length_of_length(payload_length)
-    }
-}
-
-fn to_alloy_rlp_error(e: rlp::DecoderError) -> RlpError {
-    match e {
-        rlp::DecoderError::RlpIsTooShort => RlpError::InputTooShort,
-        rlp::DecoderError::RlpInvalidLength => RlpError::Overflow,
-        rlp::DecoderError::RlpExpectedToBeList => RlpError::UnexpectedString,
-        rlp::DecoderError::RlpExpectedToBeData => RlpError::UnexpectedList,
-        rlp::DecoderError::RlpDataLenWithZeroPrefix |
-        rlp::DecoderError::RlpListLenWithZeroPrefix => RlpError::LeadingZero,
-        rlp::DecoderError::RlpInvalidIndirection => RlpError::NonCanonicalSize,
-        rlp::DecoderError::RlpIncorrectListLen => {
-            RlpError::Custom("incorrect list length when decoding rlp")
-        }
-        rlp::DecoderError::RlpIsTooBig => RlpError::Custom("rlp is too big"),
-        rlp::DecoderError::RlpInconsistentLengthAndData => {
-            RlpError::Custom("inconsistent length and data when decoding rlp")
-        }
-        rlp::DecoderError::Custom(s) => RlpError::Custom(s),
-    }
-}
-
-impl<K: EnrKey> Decodable for EnrWrapper<K> {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let enr = <Enr<K> as rlp::Decodable>::decode(&rlp::Rlp::new(buf))
-            .map_err(to_alloy_rlp_error)
-            .map(EnrWrapper::new);
-        if enr.is_ok() {
-            // Decode was successful, advance buffer
-            let header = Header::decode(buf)?;
-            buf.advance(header.payload_length);
-        }
-        enr
-    }
-}
-
 /// A [ENRRequest packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrrequest-packet-0x05).
 ///
 /// This packet is used to request the current version of a node's Ethereum Node Record (ENR).
@@ -327,12 +245,12 @@ pub struct EnrRequest {
 ///
 /// This packet is used to respond to an ENRRequest packet and includes the requested ENR along with
 /// the hash of the original request.
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct EnrResponse {
     /// The hash of the ENRRequest packet being replied to.
     pub request_hash: B256,
     /// The ENR (Ethereum Node Record) for the responding node.
-    pub enr: EnrWrapper<SecretKey>,
+    pub enr: Enr<SecretKey>,
 }
 
 // === impl EnrResponse ===
@@ -342,34 +260,8 @@ impl EnrResponse {
     ///
     /// See also <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L36>
     pub fn eth_fork_id(&self) -> Option<ForkId> {
-        let mut maybe_fork_id = self.enr.0.get_raw_rlp(b"eth")?;
-        EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(|entry| entry.fork_id)
-    }
-}
-
-impl Decodable for EnrResponse {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let b = &mut &**buf;
-        let rlp_head = Header::decode(b)?;
-        if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
-        }
-        // let started_len = b.len();
-        let this = Self {
-            request_hash: alloy_rlp::Decodable::decode(b)?,
-            enr: EnrWrapper::<SecretKey>::decode(b)?,
-        };
-        // TODO: `Decodable` can be derived once we have native alloy_rlp decoding for ENR: <https://github.com/paradigmxyz/reth/issues/482>
-        // Skipping the size check here is fine since the `buf` is the UDP datagram
-        // let consumed = started_len - b.len();
-        // if consumed != rlp_head.payload_length {
-        //     return Err(alloy_rlp::Error::ListLengthMismatch {
-        //         expected: rlp_head.payload_length,
-        //         got: consumed,
-        //     })
-        // }
-        *buf = *b;
-        Ok(this)
+        let mut maybe_fork_id = self.enr.get_raw_rlp(b"eth")?;
+        EnrForkIdEntry::decode(&mut maybe_fork_id).ok().map(Into::into)
     }
 }
 
@@ -750,7 +642,6 @@ mod tests {
 
     #[test]
     fn encode_decode_enr_msg() {
-        use self::EnrWrapper;
         use alloy_rlp::Decodable;
         use enr::secp256k1::SecretKey;
         use std::net::Ipv4Addr;
@@ -770,7 +661,7 @@ mod tests {
             let forkentry = EnrForkIdEntry { fork_id };
             forkentry.encode(&mut buf);
             builder.add_value_rlp("eth", buf.into());
-            EnrWrapper::new(builder.build(&key).unwrap())
+            builder.build(&key).unwrap()
         };
 
         let enr_response = EnrResponse { request_hash: rng.gen(), enr };
@@ -789,30 +680,25 @@ mod tests {
 
     #[test]
     fn encode_known_rlp_enr() {
-        use self::EnrWrapper;
         use alloy_rlp::Decodable;
         use enr::{secp256k1::SecretKey, EnrPublicKey};
         use std::net::Ipv4Addr;
 
-        let valid_record =
-    hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f"
-    );
-        let signature =
-    hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c"
-    );
+        let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
+        let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
         let expected_pubkey =
             hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
 
-        let enr = EnrWrapper::<SecretKey>::decode(&mut &valid_record[..]).unwrap();
-        let pubkey = enr.0.public_key().encode();
+        let enr = Enr::<SecretKey>::decode(&mut &valid_record[..]).unwrap();
+        let pubkey = enr.public_key().encode();
 
-        assert_eq!(enr.0.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(enr.0.id(), Some(String::from("v4")));
-        assert_eq!(enr.0.udp4(), Some(DEFAULT_DISCOVERY_PORT));
-        assert_eq!(enr.0.tcp4(), None);
-        assert_eq!(enr.0.signature(), &signature[..]);
+        assert_eq!(enr.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(enr.id(), Some(String::from("v4")));
+        assert_eq!(enr.udp4(), Some(DEFAULT_DISCOVERY_PORT));
+        assert_eq!(enr.tcp4(), None);
+        assert_eq!(enr.signature(), &signature[..]);
         assert_eq!(pubkey.to_vec(), expected_pubkey);
-        assert!(enr.0.verify());
+        assert!(enr.verify());
 
         assert_eq!(&alloy_rlp::encode(&enr)[..], &valid_record[..]);
 
@@ -833,19 +719,19 @@ mod tests {
             hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
 
         let mut valid_record_buf = valid_record.as_slice();
-        let enr = EnrWrapper::<SecretKey>::decode(&mut valid_record_buf).unwrap();
-        let pubkey = enr.0.public_key().encode();
+        let enr = Enr::<SecretKey>::decode(&mut valid_record_buf).unwrap();
+        let pubkey = enr.public_key().encode();
 
         // Byte array must be consumed after enr has finished decoding
         assert!(valid_record_buf.is_empty());
 
-        assert_eq!(enr.0.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(enr.0.id(), Some(String::from("v4")));
-        assert_eq!(enr.0.udp4(), Some(DEFAULT_DISCOVERY_PORT));
-        assert_eq!(enr.0.tcp4(), None);
-        assert_eq!(enr.0.signature(), &signature[..]);
+        assert_eq!(enr.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
+        assert_eq!(enr.id(), Some(String::from("v4")));
+        assert_eq!(enr.udp4(), Some(DEFAULT_DISCOVERY_PORT));
+        assert_eq!(enr.tcp4(), None);
+        assert_eq!(enr.signature(), &signature[..]);
         assert_eq!(pubkey.to_vec(), expected_pubkey);
-        assert!(enr.0.verify());
+        assert!(enr.verify());
     }
 
     // test vector from the enr library rlp encoding tests
@@ -863,20 +749,23 @@ mod tests {
             let mut builder = Enr::builder();
             builder.ip(ip.into());
             builder.tcp4(tcp);
-            EnrWrapper::new(builder.build(&key).unwrap())
+            builder.build(&key).unwrap()
         };
 
         let mut encoded_bytes = &alloy_rlp::encode(&enr)[..];
-        let decoded_enr = EnrWrapper::<SecretKey>::decode(&mut encoded_bytes).unwrap();
+        let decoded_enr = Enr::<SecretKey>::decode(&mut encoded_bytes).unwrap();
 
         // Byte array must be consumed after enr has finished decoding
         assert!(encoded_bytes.is_empty());
 
         assert_eq!(decoded_enr, enr);
-        assert_eq!(decoded_enr.0.id(), Some("v4".into()));
-        assert_eq!(decoded_enr.0.ip4(), Some(ip));
-        assert_eq!(decoded_enr.0.tcp4(), Some(tcp));
-        assert_eq!(decoded_enr.0.public_key().encode(), key.public().encode());
-        assert!(decoded_enr.0.verify());
+        assert_eq!(decoded_enr.id(), Some("v4".into()));
+        assert_eq!(decoded_enr.ip4(), Some(ip));
+        assert_eq!(decoded_enr.tcp4(), Some(tcp));
+        assert_eq!(
+            decoded_enr.public_key().encode(),
+            key.public_key(secp256k1::SECP256K1).encode()
+        );
+        assert!(decoded_enr.verify());
     }
 }

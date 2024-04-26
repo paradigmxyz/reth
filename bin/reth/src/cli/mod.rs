@@ -6,8 +6,8 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, node, node::NoArgs, p2p,
-        recover, stage, test_vectors,
+        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state, node, node::NoArgs,
+        p2p, recover, stage, test_vectors,
     },
     version::{LONG_VERSION, SHORT_VERSION},
 };
@@ -145,6 +145,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -176,6 +177,9 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand),
+    /// Initialize the database from a state dump file.
+    #[command(name = "init-state")]
+    InitState(init_state::InitStateCommand),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
