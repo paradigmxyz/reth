@@ -95,7 +95,7 @@ impl SequencerClient {
 
         self.http_client()
             .post(self.endpoint())
-            .header(http::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
             .await
