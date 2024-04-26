@@ -62,7 +62,7 @@ pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
 }
 
 impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware> {
-    /// Returns the configured [Endpoint]
+    /// Returns the configured endpoint
     pub fn endpoint(&self) -> String {
         self.endpoint.clone()
     }
