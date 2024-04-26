@@ -8,8 +8,7 @@ use tracing::trace;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
+    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
@@ -353,14 +352,12 @@ where
     /// Handler for: `eth_feeHistory`
     async fn fee_history(
         &self,
-        block_count: U64HexOrNumber,
+        block_count: u64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(
-            EthApi::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
-        )
+        return Ok(EthApi::fee_history(self, block_count, newest_block, reward_percentiles).await?)
     }
 
     /// Handler for: `eth_mining`
@@ -585,7 +582,7 @@ mod tests {
     async fn test_fee_history_empty() {
         let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
-            1.into(),
+            1,
             BlockNumberOrTag::Latest,
             None,
         )
@@ -607,7 +604,7 @@ mod tests {
 
         let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
-            (newest_block + 1).into(),
+            newest_block + 1,
             newest_block.into(),
             Some(vec![10.0]),
         )
@@ -630,7 +627,7 @@ mod tests {
 
         let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
-            1.into(),
+            1,
             (newest_block + 1000).into(),
             Some(vec![10.0]),
         )
@@ -653,7 +650,7 @@ mod tests {
 
         let response = <EthApi<_, _, _, _> as EthApiServer>::fee_history(
             &eth_api,
-            0.into(),
+            0,
             newest_block.into(),
             None,
         )
