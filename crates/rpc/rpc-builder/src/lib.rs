@@ -1494,6 +1494,13 @@ impl fmt::Debug for RpcServerConfig {
     }
 }
 
+type MiddlewareServiceBuilder = tower::ServiceBuilder<
+    Stack<
+        tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
+        Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
+    >,
+>;
+
 /// === impl RpcServerConfig ===
 
 impl RpcServerConfig {
@@ -1641,12 +1648,7 @@ impl RpcServerConfig {
         &self,
         cors: Option<String>,
         jwt_secret: Option<JwtSecret>,
-    ) -> tower::ServiceBuilder<
-        Stack<
-            tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
-            Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
-        >,
-    > {
+    ) -> MiddlewareServiceBuilder {
         let cors_layer: Option<CorsLayer> =
             cors.as_deref().map(cors::create_cors_layer).and_then(|res| res.ok()).or_else(|| None);
         let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
