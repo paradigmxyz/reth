@@ -1613,7 +1613,7 @@ impl RpcServerConfig {
         self.ws_addr
     }
 
-    /// Returns the [Endpoint] of the ipc server
+    /// Returns the endpoint of the ipc server
     pub fn ipc_endpoint(&self) -> Option<String> {
         self.ipc_endpoint.clone()
     }
@@ -2135,7 +2135,7 @@ impl RpcServer {
         self.ws_http.ws_local_addr
     }
 
-    /// Returns the [`Endpoint`] of the ipc server if started.
+    /// Returns the endpoint of the ipc server if started.
     pub fn ipc_endpoint(&self) -> Option<String> {
         self.ipc.as_ref().map(|ipc| ipc.endpoint())
     }
