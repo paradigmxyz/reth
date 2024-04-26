@@ -10,7 +10,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use clap::Parser;
 use thiserror::Error;
 
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
