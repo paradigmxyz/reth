@@ -901,6 +901,10 @@ where
             ..
         } = request;
 
+        let kind = match to {
+            Some(tx_kind) => tx_kind,
+            None => RpcTransactionKind::Create,
+        };
         // todo: remove this inlining after https://github.com/alloy-rs/alloy/pull/183#issuecomment-1928161285
         let transaction = match (
             gas_price,
@@ -919,10 +923,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind,
                     chain_id: None,
                 }))
             }
@@ -935,10 +936,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind,
                     chain_id: 0,
                     access_list,
                 }))
@@ -958,10 +956,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind,
                     chain_id: 0,
                     access_list: access_list.unwrap_or_default(),
                 }))
@@ -987,10 +982,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind,
                     access_list: access_list.unwrap_or_default(),
 
                     // eip-4844 specific.
