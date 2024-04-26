@@ -160,9 +160,9 @@ pub enum DownloadError {
     /// Block validation failed
     #[error("failed to validate body for header {hash}, block number {number}: {error}")]
     BodyValidation {
-        /// Hash of body failing validation
+        /// Hash of the block failing validation
         hash: B256,
-        /// Number of body failing validation
+        /// Number of the block failing validation
         number: u64,
         /// The details of validation failure
         #[source]
