@@ -2,17 +2,19 @@
 
 use crate::server::{
     connection::{IpcConn, JsonRpcStream},
-    future::{ConnectionGuard, StopHandle},
+    future::StopHandle,
 };
 use futures::StreamExt;
-use futures_util::future::Either;
+use futures_util::{future::Either, FutureExt};
 use interprocess::local_socket::tokio::{LocalSocketListener, LocalSocketStream};
 use jsonrpsee::{
+    batch_response_error,
     core::TEN_MB_SIZE_BYTES,
     server::{
         middleware::rpc::{RpcLoggerLayer, RpcServiceT},
-        AlreadyStoppedError, IdProvider, RandomIntegerIdProvider,
+        AlreadyStoppedError, ConnectionGuard, IdProvider, RandomIntegerIdProvider,
     },
+    types::{ErrorObjectOwned, Id},
     BoundedSubscriptions, MethodSink, Methods,
 };
 use std::{
@@ -24,7 +26,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::{oneshot, watch, OwnedSemaphorePermit},
+    sync::{oneshot, watch},
 };
 use tower::{layer::util::Identity, Layer, Service};
 use tracing::{debug, instrument, trace, warn, Instrument};
@@ -45,6 +47,9 @@ mod connection;
 mod future;
 mod ipc;
 mod rpc_service;
+
+/// Connection limit was exceeded.
+pub const TOO_MANY_CONNECTION_CODE: i32 = -32011;
 
 /// Ipc Server implementation
 
@@ -251,8 +256,8 @@ pub(crate) struct ServiceData {
     pub(crate) stop_handle: StopHandle,
     /// Connection ID
     pub(crate) conn_id: u32,
-    /// Handle to hold a `connection permit`.
-    pub(crate) conn: Arc<OwnedSemaphorePermit>,
+    /// Connection guard.
+    pub(crate) conn_guard: ConnectionGuard,
     /// Limits the number of subscriptions for this connection
     pub(crate) bounded_subscriptions: BoundedSubscriptions,
     /// Sink that is used to send back responses to the connection.
@@ -363,6 +368,20 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!("{:?}", request);
 
+        let conn_guard = &self.inner.conn_guard;
+        let Some(conn_permit) = conn_guard.try_acquire() else {
+            return async move {  Ok( Some(batch_response_error(
+                Id::Null,
+                reject_too_many_connection(),
+            )))}.boxed();
+        };
+
+        let conn = Arc::new(conn_permit);
+
+        let max_conns = conn_guard.max_connections();
+        let curr_conns = max_conns - conn_guard.available_connections();
+        debug!("Accepting new connection {}/{}", curr_conns, max_conns);
+
         let cfg = RpcServiceCfg::CallsAndSubscriptions {
             bounded_subscriptions: BoundedSubscriptions::new(
                 self.inner.server_cfg.max_subscriptions_per_connection,
@@ -379,7 +398,6 @@ where
             self.inner.conn_id as usize,
             cfg,
         ));
-        let conn = self.inner.conn.clone();
         // an ipc connection needs to handle read+write concurrently
         // even if the underlying rpc handler spawns the actual work or is does a lot of async any
         // additional overhead performed by `handle_request` can result in I/O latencies, for
@@ -401,6 +419,15 @@ where
     }
 }
 
+/// Helper to get a `JSON-RPC` error object when the maximum request size limit have been exceeded.
+pub fn reject_too_many_connection() -> ErrorObjectOwned {
+    ErrorObjectOwned::owned(
+        TOO_MANY_CONNECTION_CODE,
+        "Too Many Connections",
+        Some("Too many connections. Please try again later"),
+    )
+}
+
 struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     http_middleware: &'a tower::ServiceBuilder<HttpMiddleware>,
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
@@ -417,7 +444,7 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
 /// Spawns the IPC connection onto a new task
 #[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id), level = "INFO")]
 fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
-    params: ProcessConnection<'b, HttpMiddleware, RpcMiddleware>,
+    params: ProcessConnection<'_, HttpMiddleware, RpcMiddleware>,
 ) where
     RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
     for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
@@ -449,17 +476,6 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
         local_socket_stream.compat(),
     ));
 
-    // todo(abner) remove it
-    let conn = match conn_guard.try_acquire() {
-        Some(conn) => conn,
-        None => {
-            warn!("Too many IPC connections. Please try again later.");
-            return
-            // connections.push(tokio::spawn(ipc.reject_connection().in_current_span()));
-            // stopped = stop;
-        }
-    };
-
     let (tx, rx) = mpsc::channel::<String>(server_cfg.message_buffer_capacity as usize);
     let method_sink = MethodSink::new_with_limit(tx, server_cfg.max_response_body_size);
     let tower_service = TowerServiceNoHttp {
@@ -469,7 +485,7 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
             stop_handle: stop_handle.clone(),
             server_cfg: server_cfg.clone(),
             conn_id,
-            conn: Arc::new(conn),
+            conn_guard: conn_guard.clone(),
             bounded_subscriptions: BoundedSubscriptions::new(
                 server_cfg.max_subscriptions_per_connection,
             ),
