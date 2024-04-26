@@ -1,24 +1,85 @@
 //! [`jsonrpsee`] transport adapter implementation for IPC.
 
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
-
+use crate::stream_codec::StreamCodec;
+use futures::StreamExt;
+use interprocess::local_socket::tokio::{LocalSocketStream, OwnedReadHalf, OwnedWriteHalf};
 use jsonrpsee::{
     async_client::{Client, ClientBuilder},
-    core::client::{TransportReceiverT, TransportSenderT},
+    core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT},
+};
+use std::io;
+use tokio::io::AsyncWriteExt;
+use tokio_util::{
+    codec::FramedRead,
+    compat::{Compat, FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt},
 };
 
-#[cfg(unix)]
-use crate::client::unix::IpcTransportClientBuilder;
-#[cfg(windows)]
-use crate::client::win::IpcTransportClientBuilder;
+/// Sending end of IPC transport.
+#[derive(Debug)]
+pub(crate) struct Sender {
+    inner: Compat<OwnedWriteHalf>,
+}
 
-#[cfg(unix)]
-mod unix;
-#[cfg(windows)]
-mod win;
+#[async_trait::async_trait]
+impl TransportSenderT for Sender {
+    type Error = IpcError;
+
+    /// Sends out a request. Returns a Future that finishes when the request has been successfully
+    /// sent.
+    async fn send(&mut self, msg: String) -> Result<(), Self::Error> {
+        Ok(self.inner.write_all(msg.as_bytes()).await?)
+    }
+
+    async fn send_ping(&mut self) -> Result<(), Self::Error> {
+        tracing::trace!("send ping - not implemented");
+        Err(IpcError::NotSupported)
+    }
+
+    /// Close the connection.
+    async fn close(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+/// Receiving end of IPC transport.
+#[derive(Debug)]
+pub(crate) struct Receiver {
+    pub(crate) inner: FramedRead<Compat<OwnedReadHalf>, StreamCodec>,
+}
+
+#[async_trait::async_trait]
+impl TransportReceiverT for Receiver {
+    type Error = IpcError;
+
+    /// Returns a Future resolving when the server sent us something back.
+    async fn receive(&mut self) -> Result<ReceivedMessage, Self::Error> {
+        self.inner.next().await.map_or(Err(IpcError::Closed), |val| Ok(ReceivedMessage::Text(val?)))
+    }
+}
+
+/// Builder for IPC transport [`Sender`] and [`Receiver`] pair.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub(crate) struct IpcTransportClientBuilder;
+
+impl IpcTransportClientBuilder {
+    pub(crate) async fn build(
+        self,
+        endpoint: impl AsRef<str>,
+    ) -> Result<(Sender, Receiver), IpcError> {
+        let endpoint = endpoint.as_ref().to_string();
+        let conn = LocalSocketStream::connect(endpoint.clone())
+            .await
+            .map_err(|err| IpcError::FailedToConnect { path: endpoint, err })?;
+
+        let (rhlf, whlf) = conn.into_split();
+
+        Ok((
+            Sender { inner: whlf.compat_write() },
+            Receiver { inner: FramedRead::new(rhlf.compat(), StreamCodec::stream_incoming()) },
+        ))
+    }
+}
 
 /// Builder type for [`Client`]
 #[derive(Clone, Default, Debug)]
@@ -37,7 +98,7 @@ impl IpcClientBuilder {
     /// #   Ok(())
     /// # }
     /// ```
-    pub async fn build(self, path: impl AsRef<Path>) -> Result<Client, IpcError> {
+    pub async fn build(self, path: impl AsRef<str>) -> Result<Client, IpcError> {
         let (tx, rx) = IpcTransportClientBuilder::default().build(path).await?;
         Ok(self.build_with_tokio(tx, rx))
     }
@@ -66,7 +127,7 @@ pub enum IpcError {
     FailedToConnect {
         /// The path of the socket.
         #[doc(hidden)]
-        path: PathBuf,
+        path: String,
         /// The error occurred while connecting.
         #[doc(hidden)]
         err: io::Error,
