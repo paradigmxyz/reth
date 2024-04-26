@@ -78,7 +78,7 @@ where
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
-        let at = trace_request.block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let at = trace_request.block_id.unwrap_or_default();
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
@@ -106,11 +106,7 @@ where
     ) -> EthResult<TraceResults> {
         let tx = recover_raw_transaction(tx)?;
 
-        let (cfg, block, at) = self
-            .inner
-            .eth_api
-            .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
-            .await?;
+        let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
         let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
         let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx);
 
