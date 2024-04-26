@@ -184,8 +184,13 @@ where
                 if let Err(error) = self.consensus.validate_block(&block) {
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
+                    let number = block.number;
                     self.pending_headers.push_front(block.header);
-                    return Err(DownloadError::BodyValidation { hash, error: Box::new(error) })
+                    return Err(DownloadError::BodyValidation {
+                        hash,
+                        number,
+                        error: Box::new(error),
+                    })
                 }
 
                 self.buffer.push(BlockResponse::Full(block));

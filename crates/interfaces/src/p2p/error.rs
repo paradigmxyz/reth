@@ -158,12 +158,12 @@ pub enum DownloadError {
 
     /* ==================== BODIES ERRORS ==================== */
     /// Block validation failed
-    #[error("failed to validate body for header {hash}: {error}")]
+    #[error("failed to validate body for header {hash}, block number {number}: {error}")]
     BodyValidation {
-        /// Hash of header failing validation
+        /// Hash of body failing validation
         hash: B256,
-        /// Number of header failing validation
-+        number: u64,
+        /// Number of body failing validation
+        number: u64,
         /// The details of validation failure
         #[source]
         error: Box<ConsensusError>,
