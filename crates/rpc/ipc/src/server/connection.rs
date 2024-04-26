@@ -23,6 +23,8 @@ where
     T: AsyncRead + AsyncWrite + Unpin,
 {
     /// Create a response for when the server is busy and can't accept more requests.
+    /// todo(abner) remove it
+    #[allow(dead_code)]
     pub(crate) async fn reject_connection(self) {
         let mut parts = self.0.into_parts();
         let _ = parts.io.write_all(b"Too many connections. Please try again later.").await;
