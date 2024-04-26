@@ -11,7 +11,7 @@ use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
     PeerId, SealedHeader, B256,
 };
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
@@ -75,82 +75,6 @@ impl FileClient {
         file.read_to_end(&mut reader).await?;
 
         Ok(Self::from_reader(&reader[..], file_len).await?.0)
-    }
-
-    /// Initialize the [`FileClient`] from bytes that have been read from file.
-    pub(crate) async fn from_reader<B>(
-        reader: B,
-        num_bytes: u64,
-    ) -> Result<(Self, Vec<u8>), FileClientError>
-    where
-        B: AsyncReadExt + Unpin,
-    {
-        let mut headers = HashMap::new();
-        let mut hash_to_number = HashMap::new();
-        let mut bodies = HashMap::new();
-
-        // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
-
-        trace!(target: "downloaders::file",
-            target_num_bytes=num_bytes,
-            capacity=stream.read_buffer().capacity(),
-            "init decode stream"
-        );
-
-        let mut remaining_bytes = vec![];
-
-        let mut log_interval = 0;
-        let mut log_interval_start_block = 0;
-
-        while let Some(block_res) = stream.next().await {
-            let block = match block_res {
-                Ok(block) => block,
-                Err(FileClientError::Rlp(err, bytes)) => {
-                    trace!(target: "downloaders::file",
-                        %err,
-                        bytes_len=bytes.len(),
-                        "partial block returned from decoding chunk"
-                    );
-                    remaining_bytes = bytes;
-                    break
-                }
-                Err(err) => return Err(err),
-            };
-            let block_number = block.header.number;
-            let block_hash = block.header.hash_slow();
-
-            // add to the internal maps
-            headers.insert(block.header.number, block.header.clone());
-            hash_to_number.insert(block_hash, block.header.number);
-            bodies.insert(
-                block_hash,
-                BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers,
-                    withdrawals: block.withdrawals,
-                },
-            );
-
-            if log_interval == 0 {
-                trace!(target: "downloaders::file",
-                    block_number,
-                    "read first block"
-                );
-                log_interval_start_block = block_number;
-            } else if log_interval % 100_000 == 0 {
-                trace!(target: "downloaders::file",
-                    blocks=?log_interval_start_block..=block_number,
-                    "read blocks from file"
-                );
-                log_interval_start_block = block_number + 1;
-            }
-            log_interval += 1;
-        }
-
-        trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
-
-        Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
     }
 
     /// Get the tip hash of the chain.
@@ -220,6 +144,83 @@ impl FileClient {
     /// Returns the current number of bodies in the client.
     pub fn bodies_len(&self) -> usize {
         self.bodies.len()
+    }
+}
+
+impl FromReader for FileClient {
+    type Error = FileClientError;
+
+    /// Initialize the [`FileClient`] from bytes that have been read from file.
+    async fn from_reader<B>(reader: B, num_bytes: u64) -> Result<(Self, Vec<u8>), Self::Error>
+    where
+        B: AsyncReadExt + Unpin,
+    {
+        let mut headers = HashMap::new();
+        let mut hash_to_number = HashMap::new();
+        let mut bodies = HashMap::new();
+
+        // use with_capacity to make sure the internal buffer contains the entire chunk
+        let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
+
+        trace!(target: "downloaders::file",
+            target_num_bytes=num_bytes,
+            capacity=stream.read_buffer().capacity(),
+            "init decode stream"
+        );
+
+        let mut remaining_bytes = vec![];
+
+        let mut log_interval = 0;
+        let mut log_interval_start_block = 0;
+
+        while let Some(block_res) = stream.next().await {
+            let block = match block_res {
+                Ok(block) => block,
+                Err(FileClientError::Rlp(err, bytes)) => {
+                    trace!(target: "downloaders::file",
+                        %err,
+                        bytes_len=bytes.len(),
+                        "partial block returned from decoding chunk"
+                    );
+                    remaining_bytes = bytes;
+                    break
+                }
+                Err(err) => return Err(err),
+            };
+            let block_number = block.header.number;
+            let block_hash = block.header.hash_slow();
+
+            // add to the internal maps
+            headers.insert(block.header.number, block.header.clone());
+            hash_to_number.insert(block_hash, block.header.number);
+            bodies.insert(
+                block_hash,
+                BlockBody {
+                    transactions: block.body,
+                    ommers: block.ommers,
+                    withdrawals: block.withdrawals,
+                },
+            );
+
+            if log_interval == 0 {
+                trace!(target: "downloaders::file",
+                    block_number,
+                    "read first block"
+                );
+                log_interval_start_block = block_number;
+            } else if log_interval % 100_000 == 0 {
+                trace!(target: "downloaders::file",
+                    blocks=?log_interval_start_block..=block_number,
+                    "read blocks from file"
+                );
+                log_interval_start_block = block_number + 1;
+            }
+            log_interval += 1;
+        }
+
+        trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
+
+        Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
     }
 }
 
@@ -359,7 +360,10 @@ impl ChunkedFileReader {
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    pub async fn next_chunk(&mut self) -> Result<Option<FileClient>, FileClientError> {
+    pub async fn next_chunk<T>(&mut self) -> Result<Option<T>, T::Error>
+    where
+        T: FromReader,
+    {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
             // eof
             return Ok(None)
@@ -398,20 +402,24 @@ impl ChunkedFileReader {
 
         // make new file client from chunk
         let (file_client, bytes) =
-            FileClient::from_reader(&self.chunk[..], next_chunk_byte_len as u64).await?;
-
-        debug!(target: "downloaders::file",
-            headers_len=file_client.headers.len(),
-            bodies_len=file_client.bodies.len(),
-            remaining_bytes_len=bytes.len(),
-            "parsed blocks that were read from file"
-        );
+            T::from_reader(&self.chunk[..], next_chunk_byte_len as u64).await?;
 
         // save left over bytes
         self.chunk = bytes;
 
         Ok(Some(file_client))
     }
+}
+
+/// Constructs a file client from a reader.
+pub trait FromReader {
+    /// Error returned by file client type.
+    type Error: From<io::Error>;
+    /// Returns a file client
+    async fn from_reader<B>(reader: B, num_bytes: u64) -> Result<(Self, Vec<u8>), Self::Error>
+    where
+        Self: Sized,
+        B: AsyncReadExt + Unpin;
 }
 
 #[cfg(test)]
