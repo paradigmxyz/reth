@@ -1,6 +1,6 @@
 //! Clap parser utilities
 
-use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
+use reth_primitives::{fs, BlockHashOrNumber, ChainSpec, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -11,6 +11,11 @@ use std::{
 
 use reth_primitives::DEV;
 
+#[cfg(not(feature = "optimism"))]
+use reth_primitives::AllGenesisFormats;
+
+#[cfg(feature = "optimism")]
+use crate::args::optimism_genesis::OptimismGenesis;
 #[cfg(feature = "optimism")]
 use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
@@ -103,7 +108,10 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
             };
 
             // both serialized Genesis and ChainSpec structs supported
+            #[cfg(not(feature = "optimism"))]
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
+            #[cfg(feature = "optimism")]
+            let genesis: OptimismGenesis = serde_json::from_str(&raw)?;
 
             Arc::new(genesis.into())
         }
