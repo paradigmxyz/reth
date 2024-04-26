@@ -30,7 +30,6 @@ bytes.workspace = true
 thiserror.workspace = true
 futures-util = "0.3.30"
 interprocess = { version = "1.2.1", features = ["tokio_support"] }
-rand.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52.0", features = ["Win32_Foundation"] }

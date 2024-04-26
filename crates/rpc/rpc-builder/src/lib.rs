@@ -1459,7 +1459,7 @@ where
 ///
 /// Once the [RpcModule] is built via [RpcModuleBuilder] the servers can be started, See also
 /// [ServerBuilder::build] and [Server::start](jsonrpsee::server::Server::start).
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
@@ -1479,21 +1479,6 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
-}
-
-impl fmt::Debug for RpcServerConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RpcServerConfig")
-            .field("http_server_config", &self.http_server_config)
-            .field("http_cors_domains", &self.http_cors_domains)
-            .field("http_addr", &self.http_addr)
-            .field("ws_server_config", &self.ws_server_config)
-            .field("ws_addr", &self.ws_addr)
-            .field("ipc_server_config", &self.ipc_server_config)
-            .field("ipc_endpoint", &self.ipc_endpoint)
-            .field("jwt_secret", &self.jwt_secret)
-            .finish()
-    }
 }
 
 /// === impl RpcServerConfig ===
