@@ -27,6 +27,28 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
+/// Our custom cli args extension that adds one flag to reth default CLI.
+#[derive(Debug, Clone, clap::Parser)]
+struct BeaconSidecarConfig {
+    /// Beacon Node http server address
+    #[arg(long = "cl.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
+    pub cl_addr: IpAddr,
+    /// Beacon Node http server port to listen on
+    #[arg(long = "cl.port", default_value_t = 5052)]
+    pub cl_port: u16,
+}
+
+impl BeaconSidecarConfig {
+    pub fn http_base_url(&self) -> String {
+        format!("http://{}:{}", self.cl_addr, self.cl_port)
+    }
+
+    // We only care about the head
+    pub fn sidecar_url(&self) -> String {
+        format!("{}/eth/v1/beacon/blob_sidecars/head", self.http_base_url())
+    }
+}
+
 //TODO Add nicer errors.
 #[derive(Debug, Error)]
 pub enum SideCarError {
@@ -60,6 +82,7 @@ where
 {
     events: St,
     pool: P,
+    beacon_config: BeaconSidecarConfig,
     client: reqwest::Client,
     pending_requests:
         FuturesUnordered<Pin<Box<dyn Future<Output = Result<Vec<BlobTransaction>, SideCarError>>>>>, /* TODO make vec */
@@ -76,6 +99,7 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this: &mut MinedSidecarStream<St, P> = self.get_mut();
+
         if let Some(mined_sidecar) = this.queued_actions.pop_front() {
             return Poll::Ready(Some(Ok(mined_sidecar)));
         }
@@ -95,11 +119,8 @@ where
                 }
             }
 
-            // todo: update error for transcations
-            // todo: CL connectivty logic
             while let Poll::Ready(Some(notification)) = this.events.poll_next_unpin(cx) {
                 {
-                    let notification_clone = notification.clone();
                     let mut all_blobs_available = true;
                     let mut actions_to_queue: Vec<BlobTransaction> = Vec::new();
 
@@ -116,13 +137,10 @@ where
                         .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect())
                     {
                         Ok(blobs) => {
-                            for ((tx, _), blob) in txs.iter().zip(blobs.iter()) {
-                                match BlobTransaction::try_from_signed(tx.clone(), blob.clone()) {
-                                    Ok(blob_transaction) => actions_to_queue.push(blob_transaction),
-                                    Err(err) => {
-                                        all_blobs_available = false;
-                                    }
-                                }
+                            for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
+                                actions_to_queue.push(BlobTransaction::try_from_signed(tx.clone(), sidecar.clone()).expect(
+                                    "should not fail to convert blob tx if it is already eip4844",
+                                ));
                             }
                         }
                         Err(_err) => {
@@ -135,15 +153,11 @@ where
                     } else {
                         let client_clone = this.client.clone();
 
-                        let url = format!(
-                            "http://{}/eth/v1/beacon/blob_sidecars/{}",
-                            "your-cl-node.com",
-                            notification_clone.tip().block.hash()
-                        );
+                        let sidecar_url = this.beacon_config.sidecar_url();
 
                         let query = Box::pin(async move {
                             let response = match client_clone
-                                .get(url)
+                                .get(sidecar_url)
                                 .header("Accept", "application/json")
                                 .send()
                                 .await
@@ -177,7 +191,6 @@ where
                                 Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
                             };
 
-                            // this is all the sidecars for a blob
                             let mut blobs_bundle: BlobsBundleV1 =
                                 match serde_json::from_slice(&bytes) {
                                     Ok(b) => b,
@@ -192,17 +205,13 @@ where
                                 .iter()
                                 .map(|(tx, blob_len)| {
                                     let sidecar = blobs_bundle.pop_sidecar(*blob_len);
-                                    match BlobTransaction::try_from_signed(
+                                    BlobTransaction::try_from_signed(
                                         tx.clone(),
                                         sidecar.into(),
-                                    ) {
-                                        Ok(blob_transaction) => blob_transaction,
-                                        Err((transaction, sidecar)) => todo!(),
-                                    }
+                                    ).expect("should not fail to convert blob tx if it is already eip4844")
                                 })
                                 .collect();
 
-                            // TODO Logic to figure out sidecar here.
                             Ok(sidecars)
                         });
 
