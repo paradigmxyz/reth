@@ -777,6 +777,7 @@ impl ServerHandle {
 }
 
 /// For testing/examples
+#[cfg(test)]
 pub fn dummy_endpoint() -> String {
     let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
     if cfg!(windows) {
