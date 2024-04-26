@@ -7095,8 +7095,6 @@ dependencies = [
  "async-trait",
  "clap",
  "eyre",
- "http 0.2.12",
- "http-body 0.4.6",
  "hyper 0.14.28",
  "jsonrpsee",
  "parking_lot 0.12.2",
