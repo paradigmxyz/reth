@@ -820,14 +820,13 @@ dependencies = [
  "clap",
  "eyre",
  "futures-util",
- "pin-project",
  "reqwest 0.12.3",
  "reth",
  "reth-node-ethereum",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
- "tracing",
 ]
 
 [[package]]
