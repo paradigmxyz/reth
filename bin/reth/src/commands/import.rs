@@ -29,10 +29,7 @@ use reth_node_core::init::init_genesis;
 use reth_node_ethereum::EthEvmConfig;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
-use reth_provider::{
-    BlockNumReader, HeaderProvider, HeaderSyncMode, ProviderError, ProviderFactory,
-    StageCheckpointReader,
-};
+use reth_provider::{HeaderSyncMode, ProviderFactory, StageCheckpointReader};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -161,7 +158,8 @@ impl ImportCommand {
                 "Importing chain file chunk"
             );
 
-            let tip = file_client.tip().ok_or(eyre::eyre!("file client has no tip"))?;
+            // override the tip
+            let tip = file_client.tip().expect("file client has no tip");
             info!(target: "reth::cli", "Chain file chunk read");
 
             let (mut pipeline, events) = self
@@ -223,25 +221,15 @@ impl ImportCommand {
             eyre::bail!("unable to import non canonical blocks");
         }
 
-        // Retrieve latest header found in the database.
-        let last_block_number = provider_factory.last_block_number()?;
-        let local_head = provider_factory
-            .sealed_header(last_block_number)?
-            .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
-
         let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
             .into_task();
-        // TODO: The pipeline should correctly configure the downloader on its own.
-        // Find the possibility to remove unnecessary pre-configuration.
-        header_downloader.update_local_head(local_head);
+        header_downloader.update_local_head(file_client.start_header().unwrap());
         header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
         let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), provider_factory.clone())
             .into_task();
-        // TODO: The pipeline should correctly configure the downloader on its own.
-        // Find the possibility to remove unnecessary pre-configuration.
         body_downloader
             .set_download_range(file_client.min_block().unwrap()..=file_client.max_block().unwrap())
             .expect("failed to set download range");

@@ -112,7 +112,6 @@ zstd-codec = ["dep:zstd"]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
-    "revm-primitives/optimism",
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]

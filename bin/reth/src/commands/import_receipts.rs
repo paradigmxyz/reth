@@ -1,4 +1,4 @@
-//! Command that initializes the node from a genesis file.
+//! Command that imports receipts from a file.
 
 use crate::{
     args::{

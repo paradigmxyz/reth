@@ -27,10 +27,14 @@ pub mod metrics;
 /// efficiently buffering headers and bodies for retrieval.
 pub mod file_client;
 
+pub mod op_receipt_file_client;
+
 /// Module with a codec for reading and encoding block bodies in files.
 ///
 /// Enables decoding and encoding `Block` types within file contexts.
 pub mod file_codec;
+
+pub mod op_receipt_codec;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
