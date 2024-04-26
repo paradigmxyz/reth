@@ -3,7 +3,9 @@ use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
-use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
+use reth_primitives::{
+    Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders, Withdrawals,
+};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;
@@ -134,9 +136,13 @@ where
                             (recovered.into_signed(), signer)
                         })
                         .unzip();
+                    let ommers = vec![];
+                    let withdrawals = Some(Withdrawals::default());
 
                     match storage.build_and_execute(
                         transactions.clone(),
+                        ommers.clone(),
+                        withdrawals.clone(),
                         &client,
                         chain_spec,
                         evm_config,
@@ -193,8 +199,8 @@ where
                             let block = Block {
                                 header: new_header.clone().unseal(),
                                 body: transactions,
-                                ommers: vec![],
-                                withdrawals: None,
+                                ommers,
+                                withdrawals,
                             };
                             let sealed_block = block.seal_slow();
 

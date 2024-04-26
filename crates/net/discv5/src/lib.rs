@@ -377,8 +377,6 @@ impl Discv5 {
     pub fn on_discv5_update(&mut self, update: discv5::Event) -> Option<DiscoveredPeer> {
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
-            // `EnrAdded` not used in discv5 codebase
-            discv5::Event::EnrAdded { .. } |
             // `Discovered` not unique discovered peers
             discv5::Event::Discovered(_) => None,
             discv5::Event::NodeInserted { replaced: _, .. } => {
@@ -404,6 +402,7 @@ impl Discv5 {
 
                 self.on_discovered_peer(&enr, remote_socket)
             }
+            _ => None,
         }
     }
 

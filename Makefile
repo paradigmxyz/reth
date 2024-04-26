@@ -316,7 +316,7 @@ lint:
 	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
-	make lint-other-targets \
+	make lint-other-targets && \
 	make lint-codespell
 
 fix-lint-reth:

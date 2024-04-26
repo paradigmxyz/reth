@@ -96,11 +96,7 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 [features]
 default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json"]
-test-utils = [
-    "reth-provider/test-utils",
-    "dep:tempfile",
-    "reth-transaction-pool/test-utils",
-]
+test-utils = ["reth-provider/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils"]
 geth-tests = []
 
 [[bench]]

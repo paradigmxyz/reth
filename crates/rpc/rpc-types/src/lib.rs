@@ -37,7 +37,8 @@ pub use eth::{
     engine::{
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
     },
-    transaction::{self, TransactionKind, TransactionRequest, TypedTransactionRequest},
+    error::ToRpcError,
+    transaction::{self, TransactionRequest, TypedTransactionRequest},
 };
 
 pub use mev::*;

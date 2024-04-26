@@ -85,17 +85,17 @@ impl TryFrom<u8> for TxType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         #[cfg(feature = "optimism")]
-        if value == TxType::Deposit as u8 {
+        if value == TxType::Deposit {
             return Ok(TxType::Deposit)
         }
 
-        if value == TxType::Legacy as u8 {
+        if value == TxType::Legacy {
             return Ok(TxType::Legacy)
-        } else if value == TxType::Eip2930 as u8 {
+        } else if value == TxType::Eip2930 {
             return Ok(TxType::Eip2930)
-        } else if value == TxType::Eip1559 as u8 {
+        } else if value == TxType::Eip1559 {
             return Ok(TxType::Eip1559)
-        } else if value == TxType::Eip4844 as u8 {
+        } else if value == TxType::Eip4844 {
             return Ok(TxType::Eip4844)
         }
 
@@ -172,6 +172,12 @@ impl Compact for TxType {
 impl PartialEq<u8> for TxType {
     fn eq(&self, other: &u8) -> bool {
         *self as u8 == *other
+    }
+}
+
+impl PartialEq<TxType> for u8 {
+    fn eq(&self, other: &TxType) -> bool {
+        *self == *other as u8
     }
 }
 

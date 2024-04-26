@@ -3,7 +3,10 @@
 use reth_consensus::ConsensusError;
 use reth_interfaces::RethResult;
 use reth_primitives::{
-    constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
+    constants::{
+        eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
+        MAXIMUM_EXTRA_DATA_SIZE,
+    },
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
     SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
     TxLegacy,
@@ -321,6 +324,18 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
     Ok(())
 }
 
+/// Validates the header's extradata according to the beacon consensus rules.
+///
+/// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
+/// This must be 32 bytes or fewer; formally Hx.
+pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
+    if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
+        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,8 +346,8 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber, Bytes,
-        ChainSpecBuilder, Signature, TransactionKind, TransactionSigned, Withdrawal, Withdrawals,
-        MAINNET, U256,
+        ChainSpecBuilder, Signature, TransactionSigned, TxKind, Withdrawal, Withdrawals, MAINNET,
+        U256,
     };
     use std::ops::RangeBounds;
 
@@ -448,7 +463,7 @@ mod tests {
             nonce,
             gas_price: 0x28f000fff,
             gas_limit: 10,
-            to: TransactionKind::Call(Address::default()),
+            to: TxKind::Call(Address::default()),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
@@ -470,7 +485,7 @@ mod tests {
             max_priority_fee_per_gas: 0x28f000fff,
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
-            to: TransactionKind::Call(Address::default()),
+            to: TxKind::Call(Address::default()),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

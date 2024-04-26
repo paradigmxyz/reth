@@ -26,14 +26,5 @@ async-trait.workspace = true
 tokio.workspace = true
 
 [[example]]
-name = "db-access"
-path = "db-access.rs"
-
-[[example]]
 name = "network"
 path = "network.rs"
-
-[[example]]
-name = "network-txpool"
-path = "network-txpool.rs"
-

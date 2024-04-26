@@ -115,6 +115,32 @@ pub struct ForkId {
     pub next: u64,
 }
 
+/// Represents a forward-compatible ENR entry for including the forkid in a node record via
+/// EIP-868. Forward compatibility is achieved by allowing trailing fields.
+///
+/// See:
+/// <https://github.com/ethereum/devp2p/blob/master/enr-entries/eth.md#entry-format>
+///
+/// for how geth implements ForkId values and forward compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
+pub struct EnrForkIdEntry {
+    /// The inner forkid
+    pub fork_id: ForkId,
+}
+
+impl From<ForkId> for EnrForkIdEntry {
+    fn from(fork_id: ForkId) -> Self {
+        Self { fork_id }
+    }
+}
+
+impl From<EnrForkIdEntry> for ForkId {
+    fn from(entry: EnrForkIdEntry) -> Self {
+        entry.fork_id
+    }
+}
+
 /// Reason for rejecting provided `ForkId`.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Hash)]
 pub enum ValidationError {
