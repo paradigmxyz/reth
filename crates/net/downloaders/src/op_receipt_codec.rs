@@ -2,11 +2,12 @@
 
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_primitives::{
-    bytes::{Buf, BytesMut}, Address, Bloom, Bytes, Log, Receipt, TxType, B256
+    bytes::{Buf, BytesMut},
+    Address, Bloom, Bytes, Log, Receipt, TxType, B256,
 };
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::op_receipt_file_client::{self, ReceiptWithBlockNumber};
+use crate::{file_client::FileClientError, op_receipt_file_client::ReceiptWithBlockNumber};
 
 /// Codec for reading raw receipts from a file.
 ///
@@ -25,7 +26,7 @@ pub(crate) struct ReceiptFileCodec;
 
 impl Decoder for ReceiptFileCodec {
     type Item = ReceiptWithBlockNumber;
-    type Error = op_receipt_file_client::Error;
+    type Error = FileClientError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.is_empty() {
@@ -42,7 +43,7 @@ impl Decoder for ReceiptFileCodec {
 }
 
 impl Encoder<Receipt> for ReceiptFileCodec {
-    type Error = op_receipt_file_client::Error;
+    type Error = FileClientError;
 
     fn encode(&mut self, item: Receipt, dst: &mut BytesMut) -> Result<(), Self::Error> {
         item.encode(dst);
@@ -51,24 +52,24 @@ impl Encoder<Receipt> for ReceiptFileCodec {
 }
 
 #[derive(Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-pub struct HackReceipt {
+struct HackReceipt {
     // Consensus fields: These fields are defined by the Yellow Paper
-    pub tx_type: TxType,
-    pub post_state: Bytes,
-    pub status: u64,
-    pub cumulative_gas_used: u64,
-    pub bloom: Bloom,
-    pub logs: Vec<Log>,
-    pub tx_hash: B256,
-    pub contract_address: Address,
-    pub gas_used: u64,
-    pub block_hash: B256,
-    pub block_number: u64,
-    pub transaction_index: u64,
-    pub l1_gas_price: u64,
-    pub l1_gas_used: u64,
-    pub l1_fee: u64,
-    pub fee_scalar: String,
+    tx_type: TxType,
+    post_state: Bytes,
+    status: u64,
+    cumulative_gas_used: u64,
+    bloom: Bloom,
+    logs: Vec<Log>,
+    tx_hash: B256,
+    contract_address: Address,
+    gas_used: u64,
+    block_hash: B256,
+    block_number: u64,
+    transaction_index: u64,
+    l1_gas_price: u64,
+    l1_gas_used: u64,
+    l1_fee: u64,
+    fee_scalar: String,
 }
 
 impl From<HackReceipt> for ReceiptWithBlockNumber {

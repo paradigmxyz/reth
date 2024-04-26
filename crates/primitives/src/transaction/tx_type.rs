@@ -200,7 +200,7 @@ impl Decodable for TxType {
             return Err(alloy_rlp::Error::Overflow)
         }
 
-        TxType::try_from(buf[0]).map_err(|e| alloy_rlp::Error::Custom(e))
+        TxType::try_from(buf[0]).map_err(alloy_rlp::Error::Custom)
     }
 }
 

@@ -8,13 +8,9 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{database::Database, init_db};
-use reth_node_core::init::{init_from_state_dump, init_genesis};
-use reth_primitives::{ChainSpec, B256};
-use reth_provider::ProviderFactory;
+use reth_primitives::ChainSpec;
 
-use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc};
-use tracing::info;
+use std::{path::PathBuf, sync::Arc};
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]

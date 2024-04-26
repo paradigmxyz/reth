@@ -1,4 +1,5 @@
 use super::file_codec::BlockFileCodec;
+use futures::Future;
 use itertools::Either;
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -151,7 +152,10 @@ impl FromReader for FileClient {
     type Error = FileClientError;
 
     /// Initialize the [`FileClient`] from bytes that have been read from file.
-    async fn from_reader<B>(reader: B, num_bytes: u64) -> Result<(Self, Vec<u8>), Self::Error>
+    fn from_reader<B>(
+        reader: B,
+        num_bytes: u64,
+    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
     where
         B: AsyncReadExt + Unpin,
     {
@@ -173,54 +177,56 @@ impl FromReader for FileClient {
         let mut log_interval = 0;
         let mut log_interval_start_block = 0;
 
-        while let Some(block_res) = stream.next().await {
-            let block = match block_res {
-                Ok(block) => block,
-                Err(FileClientError::Rlp(err, bytes)) => {
+        async move {
+            while let Some(block_res) = stream.next().await {
+                let block = match block_res {
+                    Ok(block) => block,
+                    Err(FileClientError::Rlp(err, bytes)) => {
+                        trace!(target: "downloaders::file",
+                            %err,
+                            bytes_len=bytes.len(),
+                            "partial block returned from decoding chunk"
+                        );
+                        remaining_bytes = bytes;
+                        break
+                    }
+                    Err(err) => return Err(err),
+                };
+                let block_number = block.header.number;
+                let block_hash = block.header.hash_slow();
+
+                // add to the internal maps
+                headers.insert(block.header.number, block.header.clone());
+                hash_to_number.insert(block_hash, block.header.number);
+                bodies.insert(
+                    block_hash,
+                    BlockBody {
+                        transactions: block.body,
+                        ommers: block.ommers,
+                        withdrawals: block.withdrawals,
+                    },
+                );
+
+                if log_interval == 0 {
                     trace!(target: "downloaders::file",
-                        %err,
-                        bytes_len=bytes.len(),
-                        "partial block returned from decoding chunk"
+                        block_number,
+                        "read first block"
                     );
-                    remaining_bytes = bytes;
-                    break
+                    log_interval_start_block = block_number;
+                } else if log_interval % 100_000 == 0 {
+                    trace!(target: "downloaders::file",
+                        blocks=?log_interval_start_block..=block_number,
+                        "read blocks from file"
+                    );
+                    log_interval_start_block = block_number + 1;
                 }
-                Err(err) => return Err(err),
-            };
-            let block_number = block.header.number;
-            let block_hash = block.header.hash_slow();
-
-            // add to the internal maps
-            headers.insert(block.header.number, block.header.clone());
-            hash_to_number.insert(block_hash, block.header.number);
-            bodies.insert(
-                block_hash,
-                BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers,
-                    withdrawals: block.withdrawals,
-                },
-            );
-
-            if log_interval == 0 {
-                trace!(target: "downloaders::file",
-                    block_number,
-                    "read first block"
-                );
-                log_interval_start_block = block_number;
-            } else if log_interval % 100_000 == 0 {
-                trace!(target: "downloaders::file",
-                    blocks=?log_interval_start_block..=block_number,
-                    "read blocks from file"
-                );
-                log_interval_start_block = block_number + 1;
+                log_interval += 1;
             }
-            log_interval += 1;
+
+            trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
+
+            Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
         }
-
-        trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
-
-        Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
     }
 }
 
@@ -416,7 +422,10 @@ pub trait FromReader {
     /// Error returned by file client type.
     type Error: From<io::Error>;
     /// Returns a file client
-    async fn from_reader<B>(reader: B, num_bytes: u64) -> Result<(Self, Vec<u8>), Self::Error>
+    fn from_reader<B>(
+        reader: B,
+        num_bytes: u64,
+    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
     where
         Self: Sized,
         B: AsyncReadExt + Unpin;
@@ -584,7 +593,7 @@ mod tests {
 
         // test
 
-        while let Some(client) = reader.next_chunk().await.unwrap() {
+        while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
             let sync_target = client.tip_header().unwrap();
             let sync_target_hash = sync_target.hash();
 
