@@ -12,11 +12,14 @@ use crate::{
     op_receipt_codec::ReceiptFileCodec,
 };
 
-/// File client for reading RLP encoded receipts from file.
+/// File client for reading RLP encoded receipts from file. Receipts in file must be in sequential
+/// order w.r.t. block number.
 #[derive(Debug)]
 pub struct ReceiptFileClient {
     /// The buffered receipts, read from file.
-    receipts: Receipts,
+    pub receipts: Receipts,
+    /// First (lowest) block number read from file.
+    pub first_block: u64,
 }
 
 impl FromReader for ReceiptFileClient {
@@ -47,7 +50,9 @@ impl FromReader for ReceiptFileClient {
         let mut log_interval_start_block = 0;
 
         let mut block_number = 0;
+        let mut total_receipts = 0;
         let mut receipts_for_block = vec![];
+        let mut first_block = None;
 
         async move {
             while let Some(receipt_res) = stream.next().await {
@@ -66,11 +71,18 @@ impl FromReader for ReceiptFileClient {
                 };
                 let ReceiptWithBlockNumber { receipt, number } = receipt;
 
+                if first_block.is_none() {
+                    first_block = Some(number);
+                    block_number = number;
+                }
+
                 if block_number == number {
                     receipts_for_block.push(Some(receipt));
+                    total_receipts += 1;
                 } else {
-                    // next block
                     receipts.push(receipts_for_block);
+
+                    // next block
                     block_number = number;
                     receipts_for_block = vec![Some(receipt)];
                 }
@@ -78,12 +90,14 @@ impl FromReader for ReceiptFileClient {
                 if log_interval == 0 {
                     trace!(target: "downloaders::file",
                         block_number,
+                        total_receipts,
                         "read first receipt"
                     );
                     log_interval_start_block = block_number;
                 } else if log_interval % 100_000 == 0 {
                     trace!(target: "downloaders::file",
                         blocks=?log_interval_start_block..=block_number,
+                        total_receipts,
                         "read receipts from file"
                     );
                     log_interval_start_block = block_number + 1;
@@ -91,9 +105,13 @@ impl FromReader for ReceiptFileClient {
                 log_interval += 1;
             }
 
-            trace!(target: "downloaders::file", receipts = receipts.len(), "Initialized file client");
+            trace!(target: "downloaders::file",
+                blocks = receipts.len(),
+                total_receipts,
+                "Initialized receipt file client"
+            );
 
-            Ok((Self { receipts }, remaining_bytes))
+            Ok((Self { receipts, first_block: first_block.unwrap() }, remaining_bytes))
         }
     }
 }
