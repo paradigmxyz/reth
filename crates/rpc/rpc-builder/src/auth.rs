@@ -13,7 +13,7 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
@@ -205,8 +205,7 @@ impl AuthServerConfig {
             let ipc_endpoint_str = ipc_endpoint
                 .clone()
                 .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
-            let ipc_path = Endpoint::new(ipc_endpoint_str);
-            let ipc_server = ipc_server_config.build(ipc_path.path());
+            let ipc_server = ipc_server_config.build(ipc_endpoint_str);
             let res = ipc_server
                 .start(module.inner)
                 .await
@@ -449,7 +448,7 @@ impl AuthServerHandle {
         if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
             return Some(
                 IpcClientBuilder::default()
-                    .build(Endpoint::new(ipc_endpoint).path())
+                    .build(ipc_endpoint)
                     .await
                     .expect("Failed to create ipc client"),
             )
@@ -463,10 +462,7 @@ impl AuthServerHandle {
     }
 
     /// Return an ipc endpoint
-    pub fn ipc_endpoint(&self) -> Option<Endpoint> {
-        if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
-            return Some(Endpoint::new(ipc_endpoint))
-        }
-        None
+    pub fn ipc_endpoint(&self) -> Option<String> {
+        self.ipc_endpoint.clone()
     }
 }
