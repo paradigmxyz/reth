@@ -97,7 +97,7 @@ impl Signature {
     /// Outputs (odd_y_parity, chain_id) from the `v` value.
     /// This doesn't check validity of the `v` value for optimism.
     #[inline]
-    pub fn inverse_v(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
+    pub fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
         if v < 35 {
             // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
             if v != 27 && v != 28 {
@@ -133,7 +133,7 @@ impl Signature {
             }
         }
 
-        let (odd_y_parity, chain_id) = Self::inverse_v(v)?;
+        let (odd_y_parity, chain_id) = Self::extract_chain_id(v)?;
         Ok((Self { r, s, odd_y_parity }, chain_id))
     }
 
