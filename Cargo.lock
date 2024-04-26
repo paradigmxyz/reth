@@ -7114,6 +7114,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-consensus"
+version = "0.2.0-beta.6"
+dependencies = [
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-optimism-payload-builder"
 version = "0.2.0-beta.6"
 dependencies = [
