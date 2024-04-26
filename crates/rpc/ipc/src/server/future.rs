@@ -28,13 +28,7 @@
 
 use std::sync::Arc;
 
-use tokio::{
-    sync::{watch, OwnedSemaphorePermit, Semaphore, TryAcquireError},
-    time::Duration,
-};
-
-/// Polling for server stop monitor interval in milliseconds.
-const STOP_MONITOR_POLLING_INTERVAL: Duration = Duration::from_millis(1000);
+use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
 #[derive(Debug, Clone)]
 pub(crate) struct StopHandle(watch::Receiver<()>);
@@ -42,11 +36,6 @@ pub(crate) struct StopHandle(watch::Receiver<()>);
 impl StopHandle {
     pub(crate) fn new(rx: watch::Receiver<()>) -> Self {
         Self(rx)
-    }
-
-    pub(crate) fn shutdown_requested(&self) -> bool {
-        // if a message has been seen, it means that `stop` has been called.
-        self.0.has_changed().unwrap_or(true)
     }
 
     pub(crate) async fn shutdown(mut self) {
