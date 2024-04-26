@@ -314,13 +314,7 @@ where
         state_override: Option<StateOverride>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-        Ok(self
-            .estimate_gas_at(
-                request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                state_override,
-            )
-            .await?)
+        Ok(self.estimate_gas_at(request, block_number.unwrap_or_default(), state_override).await?)
     }
 
     /// Handler for: `eth_gasPrice`
