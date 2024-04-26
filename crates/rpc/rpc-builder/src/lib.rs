@@ -1636,6 +1636,24 @@ impl RpcServerConfig {
         self.build(&modules).await?.start(modules).await
     }
 
+    /// Convenience function to do middleware creation in one spot
+    pub fn create_middleware(
+        &self,
+        cors: Option<String>,
+        jwt_secret: Option<JwtSecret>,
+    ) -> tower::ServiceBuilder<
+        Stack<
+            tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
+            Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
+        >,
+    > {
+        let cors_layer: Option<CorsLayer> =
+            cors.as_deref().map(cors::create_cors_layer).and_then(|res| res.ok()).or_else(|| None);
+        let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
+            jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
+        tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth)
+    }
+
     /// Builds the ws and http server(s).
     ///
     /// If both are on the same port, they are combined into one server.
@@ -1681,16 +1699,7 @@ impl RpcServerConfig {
             modules.config.ensure_ws_http_identical()?;
 
             let builder = self.http_server_config.take().expect("http_server_config is Some");
-            let cors_layer: Option<CorsLayer> = cors
-                .as_deref()
-                .map(cors::create_cors_layer)
-                .and_then(|res| res.ok())
-                .or_else(|| None);
-            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
-                jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
-            let middleware =
-                tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth);
-
+            let middleware = self.create_middleware(cors, jwt_secret);
             let server = builder
                 .set_http_middleware(middleware)
                 .set_rpc_middleware(
@@ -1725,17 +1734,7 @@ impl RpcServerConfig {
         if let Some(builder) = self.ws_server_config.take() {
             let builder = builder.ws_only();
 
-            let cors_layer: Option<CorsLayer> = self
-                .ws_cors_domains
-                .as_deref()
-                .map(cors::create_cors_layer)
-                .and_then(|res| res.ok())
-                .or_else(|| None);
-            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
-                jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
-            let middleware =
-                tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth);
-
+            let middleware = self.create_middleware(self.ws_cors_domains.clone(), jwt_secret);
             let server = builder
                 .set_http_middleware(middleware)
                 .set_rpc_middleware(
@@ -1756,21 +1755,8 @@ impl RpcServerConfig {
         if let Some(builder) = self.http_server_config.take() {
             let builder = builder.http_only();
 
-            let cors_layer: Option<CorsLayer> = self
-                .http_cors_domains
-                .take()
-                .as_deref()
-                .map(cors::create_cors_layer)
-                .and_then(|res| res.ok())
-                .or_else(|| None);
-            let jwt_auth: Option<AuthLayer<JwtAuthValidator>> = self
-                .jwt_secret
-                .as_ref()
-                .map(|secret| AuthLayer::new(JwtAuthValidator::new(secret.clone())));
-
             let middleware =
-                tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth);
-
+                self.create_middleware(self.http_cors_domains.clone(), self.jwt_secret.clone());
             let server = builder
                 .set_http_middleware(middleware)
                 .set_rpc_middleware(
