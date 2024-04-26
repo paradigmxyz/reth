@@ -14,7 +14,6 @@ use reth_interfaces::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
         BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
-    consensus::ForkchoiceState,
     executor::BlockValidationError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     provider::ProviderResult,
@@ -31,7 +30,8 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
+    CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+    PayloadValidationError,
 };
 use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -2354,7 +2354,7 @@ mod tests {
             genesis::{Genesis, GenesisAllocator},
             Hardfork, U256,
         };
-        use reth_provider::test_utils::blocks::BlockChainTestData;
+        use reth_provider::test_utils::blocks::BlockchainTestData;
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
@@ -2569,7 +2569,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_pre_merge() {
-            let data = BlockChainTestData::default();
+            let data = BlockchainTestData::default();
             let mut block1 = data.blocks[0].0.block.clone();
             block1
                 .header

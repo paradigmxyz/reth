@@ -53,7 +53,7 @@ impl DevSigner {
     /// Generates a random dev signer which satisfies [EthSigner] trait
     pub(crate) fn random() -> Box<dyn EthSigner> {
         let mut signers = Self::random_signers(1);
-        signers.pop().expect("expect to generate at leas one signer")
+        signers.pop().expect("expect to generate at least one signer")
     }
 
     /// Generates provided number of random dev signers

@@ -1,6 +1,7 @@
 //! Collection of methods for block validation.
 
-use reth_interfaces::{consensus::ConsensusError, RethResult};
+use reth_consensus::ConsensusError;
+use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
     BlockNumber, ChainSpec, GotExpected, Hardfork, Header, InvalidTransactionError, SealedBlock,
@@ -330,8 +331,8 @@ mod tests {
     };
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber, Bytes,
-        ChainSpecBuilder, Signature, TransactionKind, TransactionSigned, Withdrawal, Withdrawals,
-        MAINNET, U256,
+        ChainSpecBuilder, Signature, TransactionSigned, TxKind, Withdrawal, Withdrawals, MAINNET,
+        U256,
     };
     use std::ops::RangeBounds;
 
@@ -447,7 +448,7 @@ mod tests {
             nonce,
             gas_price: 0x28f000fff,
             gas_limit: 10,
-            to: TransactionKind::Call(Address::default()),
+            to: TxKind::Call(Address::default()),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
@@ -469,7 +470,7 @@ mod tests {
             max_priority_fee_per_gas: 0x28f000fff,
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
-            to: TransactionKind::Call(Address::default()),
+            to: TxKind::Call(Address::default()),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

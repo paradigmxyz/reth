@@ -34,7 +34,7 @@ pub trait GanacheApi {
     /// is the snapshot id to revert to. This deletes the given snapshot, as well as any snapshots
     /// taken after (e.g.: reverting to id 0x1 will delete snapshots with ids 0x1, 0x2, etc.).
     ///
-    /// Reutnrs `true` if a snapshot was reverted, otherwise `false`.
+    /// Returns `true` if a snapshot was reverted, otherwise `false`.
     #[method(name = "revert")]
     async fn evm_revert(&self, snapshot_id: U256) -> RpcResult<bool>;
 

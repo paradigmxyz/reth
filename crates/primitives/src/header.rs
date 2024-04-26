@@ -700,7 +700,8 @@ impl SealedHeader {
         let parent_gas_limit =
             if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
                 parent.gas_limit *
-                    chain_spec.base_fee_params(self.timestamp).elasticity_multiplier as u64
+                    chain_spec.base_fee_params_at_timestamp(self.timestamp).elasticity_multiplier
+                        as u64
             } else {
                 parent.gas_limit
             };
@@ -775,6 +776,17 @@ impl SealedHeader {
         }
 
         // timestamp in past check
+        #[cfg(feature = "optimism")]
+        if chain_spec.is_bedrock_active_at_block(self.header.number) &&
+            self.header.is_timestamp_in_past(parent.timestamp)
+        {
+            return Err(HeaderValidationError::TimestampIsInPast {
+                parent_timestamp: parent.timestamp,
+                timestamp: self.timestamp,
+            })
+        }
+
+        #[cfg(not(feature = "optimism"))]
         if self.header.is_timestamp_in_past(parent.timestamp) {
             return Err(HeaderValidationError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,
@@ -785,32 +797,32 @@ impl SealedHeader {
         // TODO Check difficulty increment between parent and self
         // Ace age did increment it by some formula that we need to follow.
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "optimism")] {
-                // On Optimism, the gas limit can adjust instantly, so we skip this check
-                // if the optimism feature is enabled in the chain spec.
-                if !chain_spec.is_optimism() {
-                    self.validate_gas_limit(parent, chain_spec)?;
-                }
-            } else {
+        if cfg!(feature = "optimism") {
+            // On Optimism, the gas limit can adjust instantly, so we skip this check
+            // if the optimism feature is enabled in the chain spec.
+            if !chain_spec.is_optimism() {
                 self.validate_gas_limit(parent, chain_spec)?;
             }
+        } else {
+            self.validate_gas_limit(parent, chain_spec)?;
         }
 
         // EIP-1559 check base fee
         if chain_spec.fork(Hardfork::London).active_at_block(self.number) {
             let base_fee = self.base_fee_per_gas.ok_or(HeaderValidationError::BaseFeeMissing)?;
 
-            let expected_base_fee =
-                if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-                    constants::EIP1559_INITIAL_BASE_FEE
-                } else {
-                    // This BaseFeeMissing will not happen as previous blocks are checked to have
-                    // them.
-                    parent
-                        .next_block_base_fee(chain_spec.base_fee_params(self.timestamp))
-                        .ok_or(HeaderValidationError::BaseFeeMissing)?
-                };
+            let expected_base_fee = if chain_spec
+                .fork(Hardfork::London)
+                .transitions_at_block(self.number)
+            {
+                constants::EIP1559_INITIAL_BASE_FEE
+            } else {
+                // This BaseFeeMissing will not happen as previous blocks are checked to have
+                // them.
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp))
+                    .ok_or(HeaderValidationError::BaseFeeMissing)?
+            };
             if expected_base_fee != base_fee {
                 return Err(HeaderValidationError::BaseFeeDiff(GotExpected {
                     expected: expected_base_fee,

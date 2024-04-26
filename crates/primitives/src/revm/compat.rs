@@ -1,4 +1,4 @@
-use crate::{revm_primitives::AccountInfo, Account, Address, TransactionKind, KECCAK_EMPTY, U256};
+use crate::{revm_primitives::AccountInfo, Account, Address, TxKind, KECCAK_EMPTY, U256};
 use revm::{
     interpreter::gas::validate_initial_tx_gas,
     primitives::{MergeSpec, ShanghaiSpec},
@@ -34,7 +34,7 @@ pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
 #[inline]
 pub fn calculate_intrinsic_gas_after_merge(
     input: &[u8],
-    kind: &TransactionKind,
+    kind: &TxKind,
     access_list: &[(Address, Vec<U256>)],
     is_shanghai: bool,
 ) -> u64 {

@@ -32,8 +32,8 @@ reth-network-api.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
+reth-trie.workspace = true
 reth-consensus-common.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 
 # ethereum
@@ -72,7 +72,11 @@ hyper.workspace = true
 tracing.workspace = true
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # async
 futures.workspace = true
@@ -88,7 +92,7 @@ procfs = "0.16.0"
 proptest.workspace = true
 tempfile.workspace = true
 jsonrpsee.workspace = true
-assert_matches = "1.5.0"
+assert_matches.workspace = true
 
 [features]
 optimism = [
@@ -98,7 +102,6 @@ optimism = [
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-auto-seal-consensus/optimism",
     "reth-consensus-common/optimism",
     "reth-beacon-consensus/optimism",
 ]

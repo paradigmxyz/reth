@@ -49,7 +49,7 @@ pub trait RethRpcConfig {
     fn http_ws_server_builder(&self) -> ServerBuilder<Identity, Identity>;
 
     /// Returns the default ipc server builder
-    fn ipc_server_builder(&self) -> IpcServerBuilder;
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
 
     /// Creates the [RpcServerConfig] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;

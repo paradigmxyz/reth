@@ -13,14 +13,36 @@ use reth_primitives::{
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
-    HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
+    BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
+    DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
+    ProviderFactory,
 };
+use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
+    io::BufRead,
+    ops::DerefMut,
     sync::Arc,
 };
-use tracing::debug;
+use tracing::{debug, error, info, trace};
+
+/// Default soft limit for number of bytes to read from state dump file, before inserting into
+/// database.
+///
+/// Default is 1 GB.
+pub const DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK: usize = 1_000_000_000;
+
+/// Approximate number of accounts per 1 GB of state dump file. One account is approximately 3.5 KB
+///
+/// Approximate is 285 228 accounts.
+//
+// (14.05 GB OP mainnet state dump at Bedrock block / 4 007 565 accounts in file > 3.5 KB per
+// account)
+pub const AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP: usize = 285_228;
+
+/// Soft limit for the number of flushed updates after which to log progress summary.
+const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
@@ -34,10 +56,19 @@ pub enum InitDatabaseError {
         /// Actual genesis hash.
         database_hash: B256,
     },
-
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// Computed state root doesn't match state root in state dump file.
+    #[error(
+        "state root mismatch, state dump: {expected_state_root}, computed: {computed_state_root}"
+    )]
+    SateRootMismatch {
+        /// Expected state root.
+        expected_state_root: B256,
+        /// Actual state root.
+        computed_state_root: B256,
+    },
 }
 
 impl From<DatabaseError> for InitDatabaseError {
@@ -103,6 +134,16 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
+    insert_state::<DB>(tx, capacity, alloc, 0)
+}
+
+/// Inserts state at given block into database.
+pub fn insert_state<'a, 'b, DB: Database>(
+    tx: &<DB as Database>::TXMut,
+    capacity: usize,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
+    block: u64,
+) -> ProviderResult<()> {
     let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
     let mut reverts_init = HashMap::with_capacity(capacity);
     let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
@@ -149,17 +190,19 @@ pub fn insert_genesis_state<'a, 'b, DB: Database>(
             ),
         );
     }
-    let all_reverts_init: RevertsInit = HashMap::from([(0, reverts_init)]);
+    let all_reverts_init: RevertsInit = HashMap::from([(block, reverts_init)]);
 
     let bundle = BundleStateWithReceipts::new_init(
         state_init,
         all_reverts_init,
         contracts.into_iter().collect(),
         Receipts::new(),
-        0,
+        block,
     );
 
     bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
+
+    trace!(target: "reth::cli", "Inserted state");
 
     Ok(())
 }
@@ -173,6 +216,8 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     let alloc_accounts =
         alloc.clone().map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
     provider.insert_account_for_hashing(alloc_accounts)?;
+
+    trace!(target: "reth::cli", "Inserted account hashes");
 
     let alloc_storage = alloc.filter_map(|(addr, account)| {
         // only return Some if there is storage
@@ -188,6 +233,8 @@ pub fn insert_genesis_hashes<'a, 'b, DB: Database>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
+    trace!(target: "reth::cli", "Inserted storage hashes");
+
     Ok(())
 }
 
@@ -196,15 +243,28 @@ pub fn insert_genesis_history<'a, 'b, DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
 ) -> ProviderResult<()> {
+    insert_history::<DB>(provider, alloc, 0)
+}
+
+/// Inserts history indices for genesis accounts and storage.
+pub fn insert_history<'a, 'b, DB: Database>(
+    provider: &DatabaseProviderRW<DB>,
+    alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)> + Clone,
+    block: u64,
+) -> ProviderResult<()> {
     let account_transitions =
-        alloc.clone().map(|(addr, _)| (*addr, vec![0])).collect::<BTreeMap<_, _>>();
+        alloc.clone().map(|(addr, _)| (*addr, vec![block])).collect::<BTreeMap<_, _>>();
     provider.insert_account_history_index(account_transitions)?;
+
+    trace!(target: "reth::cli", "Inserted account history");
 
     let storage_transitions = alloc
         .filter_map(|(addr, account)| account.storage.as_ref().map(|storage| (addr, storage)))
-        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![0])))
+        .flat_map(|(addr, storage)| storage.iter().map(|(key, _)| ((*addr, *key), vec![block])))
         .collect::<BTreeMap<_, _>>();
     provider.insert_storage_history_index(storage_transitions)?;
+
+    trace!(target: "reth::cli", "Inserted storage history");
 
     Ok(())
 }
@@ -233,12 +293,185 @@ pub fn insert_genesis_header<DB: Database>(
     Ok(())
 }
 
+/// Initialize chain with state at specific block, from reader of state dump.
+pub fn init_from_state_dump<DB: Database>(
+    mut reader: impl BufRead,
+    factory: ProviderFactory<DB>,
+) -> eyre::Result<B256> {
+    let block = factory.last_block_number()?;
+    let hash = factory.block_hash(block)?.unwrap();
+
+    debug!(target: "reth::cli",
+        block,
+        chain=%factory.chain_spec().chain,
+        "Initializing state at block"
+    );
+
+    let mut total_inserted_accounts = 0;
+    let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
+    let mut chunk_total_byte_len = 0;
+    let mut line = String::new();
+
+    // first line can be state root, then it can be used for verifying against computed state root
+    reader.read_line(&mut line)?;
+    let expected_state_root = serde_json::from_str::<StateRoot>(&line)?.root;
+
+    trace!(target: "reth::cli",
+        root=%expected_state_root,
+        "Read state root from file"
+    );
+
+    line.clear();
+
+    // remaining lines are accounts
+    let mut provider_rw = factory.provider_rw()?;
+    while let Ok(n) = reader.read_line(&mut line) {
+        chunk_total_byte_len += n;
+        if DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK <= chunk_total_byte_len || n == 0 {
+            // acc
+            total_inserted_accounts += accounts.len();
+
+            info!(target: "reth::cli",
+                chunk_total_byte_len,
+                parsed_new_accounts=accounts.len(),
+                total_inserted_accounts,
+                "Writing accounts to db"
+            );
+
+            // reset
+            chunk_total_byte_len = 0;
+
+            // use transaction to insert genesis header
+            insert_genesis_hashes(
+                &provider_rw,
+                accounts.iter().map(|(address, account)| (address, account)),
+            )?;
+            insert_history(
+                &provider_rw,
+                accounts.iter().map(|(address, account)| (address, account)),
+                block,
+            )?;
+
+            // block is already written to static files
+            let tx = provider_rw.deref_mut().tx_mut();
+            insert_state::<DB>(
+                tx,
+                accounts.len(),
+                accounts.iter().map(|(address, account)| (address, account)),
+                block,
+            )?;
+
+            accounts.clear();
+        }
+
+        if n == 0 {
+            break;
+        }
+
+        let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
+        accounts.push((address, genesis_account));
+
+        line.clear();
+    }
+
+    // compute and compare state root. this advances the stage checkpoints.
+    let computed_state_root = compute_state_root(&provider_rw)?;
+    if computed_state_root != expected_state_root {
+        error!(target: "reth::cli",
+            ?computed_state_root,
+            ?expected_state_root,
+            "Computed state root does not match state root in state dump"
+        );
+
+        Err(InitDatabaseError::SateRootMismatch { expected_state_root, computed_state_root })?
+    } else {
+        info!(target: "reth::cli",
+            ?computed_state_root,
+            "Computed state root matches state root in state dump"
+        );
+    }
+
+    provider_rw.commit()?;
+
+    Ok(hash)
+}
+
+/// Computes the state root (from scratch) based on the accounts and storages present in the
+/// database.
+fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::Result<B256> {
+    trace!(target: "reth::cli", "Computing state root");
+
+    let tx = provider.tx_ref();
+    let mut intermediate_state: Option<IntermediateStateRootState> = None;
+    let mut total_flushed_updates = 0;
+
+    loop {
+        match StateRootComputer::from_tx(tx)
+            .with_intermediate_state(intermediate_state)
+            .root_with_progress()?
+        {
+            StateRootProgress::Progress(state, _, updates) => {
+                let updates_len = updates.len();
+
+                trace!(target: "reth::cli",
+                    last_account_key = %state.last_account_key,
+                    updates_len,
+                    total_flushed_updates,
+                    "Flushing trie updates"
+                );
+
+                intermediate_state = Some(*state);
+                updates.flush(tx)?;
+
+                total_flushed_updates += updates_len;
+
+                if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
+                    info!(target: "reth::cli",
+                        total_flushed_updates,
+                        "Flushing trie updates"
+                    );
+                }
+            }
+            StateRootProgress::Complete(root, _, updates) => {
+                let updates_len = updates.len();
+
+                updates.flush(tx)?;
+
+                total_flushed_updates += updates_len;
+
+                trace!(target: "reth::cli",
+                    %root,
+                    updates_len = updates_len,
+                    total_flushed_updates,
+                    "State root has been computed"
+                );
+
+                return Ok(root)
+            }
+        }
+    }
+}
+
+/// Type to deserialize state root from state dump file.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct StateRoot {
+    root: B256,
+}
+
+/// An account as in the state dump file. This contains a [`GenesisAccount`] and the account's
+/// address.
+#[derive(Debug, Serialize, Deserialize)]
+struct GenesisAccountWithAddress {
+    /// The account's balance, nonce, code, and storage.
+    #[serde(flatten)]
+    genesis_account: GenesisAccount,
+    /// The account's address.
+    address: Address,
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-
     use reth_db::{
         cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -246,8 +479,8 @@ mod tests {
         DatabaseEnv,
     };
     use reth_primitives::{
-        Address, Chain, ChainSpec, ForkTimestamps, Genesis, GenesisAccount, IntegerList, GOERLI,
-        GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
+        Chain, ForkTimestamps, Genesis, IntegerList, GOERLI, GOERLI_GENESIS_HASH, MAINNET,
+        MAINNET_GENESIS_HASH, SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 

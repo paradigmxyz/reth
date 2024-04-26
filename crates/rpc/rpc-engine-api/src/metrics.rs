@@ -1,10 +1,23 @@
-use metrics::Histogram;
+use crate::EngineApiError;
+use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
+use reth_rpc_types::engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
 
-/// Beacon consensus engine metrics.
+/// All beacon consensus engine metrics
+#[derive(Default)]
+pub(crate) struct EngineApiMetrics {
+    /// Engine API latency metrics
+    pub(crate) latency: EngineApiLatencyMetrics,
+    /// Engine API forkchoiceUpdated response type metrics
+    pub(crate) fcu_response: ForkchoiceUpdatedResponseMetrics,
+    /// Engine API newPayload response type metrics
+    pub(crate) new_payload_response: NewPayloadStatusResponseMetrics,
+}
+
+/// Beacon consensus engine latency metrics.
 #[derive(Metrics)]
 #[metrics(scope = "engine.rpc")]
-pub(crate) struct EngineApiMetrics {
+pub(crate) struct EngineApiLatencyMetrics {
     /// Latency for `engine_newPayloadV1`
     pub(crate) new_payload_v1: Histogram,
     /// Latency for `engine_newPayloadV2`
@@ -29,4 +42,85 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) get_payload_bodies_by_hash_v1: Histogram,
     /// Latency for `engine_exchangeTransitionConfigurationV1`
     pub(crate) exchange_transition_configuration: Histogram,
+}
+
+/// Metrics for engine API forkchoiceUpdated responses.
+#[derive(Metrics)]
+#[metrics(scope = "engine.rpc")]
+pub(crate) struct ForkchoiceUpdatedResponseMetrics {
+    /// The total count of forkchoice updated messages received.
+    pub(crate) forkchoice_updated_messages: Counter,
+    /// The total count of forkchoice updated messages that we responded to with
+    /// [Invalid](reth_rpc_types::engine::PayloadStatusEnum#Invalid).
+    pub(crate) forkchoice_updated_invalid: Counter,
+    /// The total count of forkchoice updated messages that we responded to with
+    /// [Valid](reth_rpc_types::engine::PayloadStatusEnum#Valid).
+    pub(crate) forkchoice_updated_valid: Counter,
+    /// The total count of forkchoice updated messages that we responded to with
+    /// [Syncing](reth_rpc_types::engine::PayloadStatusEnum#Syncing).
+    pub(crate) forkchoice_updated_syncing: Counter,
+    /// The total count of forkchoice updated messages that we responded to with
+    /// [Accepted](reth_rpc_types::engine::PayloadStatusEnum#Accepted).
+    pub(crate) forkchoice_updated_accepted: Counter,
+    /// The total count of forkchoice updated messages that were unsuccessful, i.e. we responded
+    /// with an error type that is not a [PayloadStatusEnum].
+    pub(crate) forkchoice_updated_error: Counter,
+}
+
+/// Metrics for engine API newPayload responses.
+#[derive(Metrics)]
+#[metrics(scope = "engine.rpc")]
+pub(crate) struct NewPayloadStatusResponseMetrics {
+    /// The total count of new payload messages received.
+    pub(crate) new_payload_messages: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Invalid](reth_rpc_types::engine::PayloadStatusEnum#Invalid).
+    pub(crate) new_payload_invalid: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Valid](reth_rpc_types::engine::PayloadStatusEnum#Valid).
+    pub(crate) new_payload_valid: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Syncing](reth_rpc_types::engine::PayloadStatusEnum#Syncing).
+    pub(crate) new_payload_syncing: Counter,
+    /// The total count of new payload messages that we responded to with
+    /// [Accepted](reth_rpc_types::engine::PayloadStatusEnum#Accepted).
+    pub(crate) new_payload_accepted: Counter,
+    /// The total count of new payload messages that were unsuccessful, i.e. we responded with an
+    /// error type that is not a [PayloadStatusEnum].
+    pub(crate) new_payload_error: Counter,
+}
+
+impl NewPayloadStatusResponseMetrics {
+    /// Increment the newPayload counter based on the given rpc result
+    pub(crate) fn update_response_metrics(&self, result: &Result<PayloadStatus, EngineApiError>) {
+        match result {
+            Ok(status) => match status.status {
+                PayloadStatusEnum::Valid => self.new_payload_valid.increment(1),
+                PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
+                PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
+                PayloadStatusEnum::Invalid { .. } => self.new_payload_invalid.increment(1),
+            },
+            Err(_) => self.new_payload_error.increment(1),
+        }
+        self.new_payload_messages.increment(1);
+    }
+}
+
+impl ForkchoiceUpdatedResponseMetrics {
+    /// Increment the forkchoiceUpdated counter based on the given rpc result
+    pub(crate) fn update_response_metrics(
+        &self,
+        result: &Result<ForkchoiceUpdated, EngineApiError>,
+    ) {
+        match result {
+            Ok(status) => match status.payload_status.status {
+                PayloadStatusEnum::Valid => self.forkchoice_updated_valid.increment(1),
+                PayloadStatusEnum::Syncing => self.forkchoice_updated_syncing.increment(1),
+                PayloadStatusEnum::Accepted => self.forkchoice_updated_accepted.increment(1),
+                PayloadStatusEnum::Invalid { .. } => self.forkchoice_updated_invalid.increment(1),
+            },
+            Err(_) => self.forkchoice_updated_error.increment(1),
+        }
+        self.forkchoice_updated_messages.increment(1);
+    }
 }

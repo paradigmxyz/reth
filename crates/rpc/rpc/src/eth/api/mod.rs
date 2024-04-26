@@ -292,8 +292,9 @@ where
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
 
-            latest_header.base_fee_per_gas = latest_header
-                .next_block_base_fee(chain_spec.base_fee_params(latest_header.timestamp));
+            latest_header.base_fee_per_gas = latest_header.next_block_base_fee(
+                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp),
+            );
 
             // update excess blob gas consumed above target
             latest_header.excess_blob_gas = latest_header.next_block_excess_blob_gas();
@@ -354,7 +355,7 @@ where
             let now = Instant::now();
             *lock = Some(PendingBlock {
                 block: pending_block.clone(),
-                expires_at: now + Duration::from_secs(3),
+                expires_at: now + Duration::from_secs(1),
             });
 
             Ok(Some(pending_block))

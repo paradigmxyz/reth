@@ -12,15 +12,13 @@ use crate::{
 use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
-use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
-use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_interfaces::{consensus::Consensus, p2p::headers::client::HeadersClient, RethResult};
+use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
+    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, BlockNumReader, HeaderProvider,
@@ -29,7 +27,6 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use tokio::sync::mpsc::Receiver;
 use tracing::*;
 
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
@@ -265,15 +262,15 @@ impl NodeConfig {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> eyre::Result<Option<PruneConfig>> {
-        self.pruning.prune_config(Arc::clone(&self.chain))
+    pub fn prune_config(&self) -> Option<PruneConfig> {
+        self.pruning.prune_config(&self.chain)
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
     pub async fn max_block<Provider, Client>(
         &self,
-        network_client: &Client,
+        network_client: Client,
         provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
@@ -289,18 +286,6 @@ impl NodeConfig {
         };
 
         Ok(max_block)
-    }
-
-    /// Get the [MiningMode] from the given dev args
-    pub fn mining_mode(&self, pending_transactions_listener: Receiver<TxHash>) -> MiningMode {
-        if let Some(interval) = self.dev.block_time {
-            MiningMode::interval(interval)
-        } else if let Some(max_transactions) = self.dev.block_max_transactions {
-            MiningMode::instant(max_transactions, pending_transactions_listener)
-        } else {
-            info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
-            MiningMode::instant(1, pending_transactions_listener)
-        }
     }
 
     /// Create the [NetworkConfig] for the node
@@ -335,18 +320,6 @@ impl NodeConfig {
         let network_config = self.network_config(config, client, executor, head, data_dir)?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
-    }
-
-    /// Returns the [Consensus] instance to use.
-    ///
-    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
-    /// will be an [AutoSealConsensus] instance.
-    pub fn consensus(&self) -> Arc<dyn Consensus> {
-        if self.dev.dev {
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        }
     }
 
     /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
@@ -452,6 +425,7 @@ impl NodeConfig {
         Client: HeadersClient,
     {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
+        let mut fetch_failures = 0;
         loop {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
@@ -459,7 +433,10 @@ impl NodeConfig {
                     return Ok(tip_header);
                 }
                 Err(error) => {
-                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                    fetch_failures += 1;
+                    if fetch_failures % 20 == 0 {
+                        error!(target: "reth::cli", ?fetch_failures, %error, "Failed to fetch the tip. Retrying...");
+                    }
                 }
             }
         }

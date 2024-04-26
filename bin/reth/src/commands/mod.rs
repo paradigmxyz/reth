@@ -7,6 +7,7 @@ pub mod dump_genesis;
 pub mod import;
 
 pub mod init_cmd;
+pub mod init_state;
 
 pub mod node;
 pub mod p2p;

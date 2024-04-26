@@ -18,9 +18,9 @@ reth-network-api.workspace = true
 reth-stages.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
-reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-primitives.workspace = true
+reth-rpc-types.workspace = true
 
 # async
 tokio.workspace = true

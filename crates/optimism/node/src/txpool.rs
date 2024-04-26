@@ -56,7 +56,6 @@ where
             // so that we will accept txs into the pool before the first block
             if block.number == 0 {
                 this.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
-                *this.block_info.l1_block_info.write() = Some(Default::default())
             } else {
                 this.update_l1_block_info(&block);
             }
@@ -77,7 +76,7 @@ where
     fn update_l1_block_info(&self, block: &Block) {
         self.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
         if let Ok(cost_addition) = reth_revm::optimism::extract_l1_info(block) {
-            *self.block_info.l1_block_info.write() = Some(cost_addition);
+            *self.block_info.l1_block_info.write() = cost_addition;
         }
     }
 
@@ -109,12 +108,7 @@ where
             propagate,
         } = outcome
         {
-            let Some(l1_block_info) = self.block_info.l1_block_info.read().clone() else {
-                return TransactionValidationOutcome::Error(
-                    *valid_tx.hash(),
-                    "L1BlockInfoError".into(),
-                )
-            };
+            let l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::new();
             valid_tx.transaction().to_recovered_transaction().encode_enveloped(&mut encoded);
@@ -199,7 +193,7 @@ where
 #[derive(Debug, Default)]
 pub struct OpL1BlockInfo {
     /// The current L1 block info.
-    l1_block_info: RwLock<Option<L1BlockInfo>>,
+    l1_block_info: RwLock<L1BlockInfo>,
     /// Current block timestamp.
     timestamp: AtomicU64,
 }
@@ -208,8 +202,8 @@ pub struct OpL1BlockInfo {
 mod tests {
     use crate::txpool::OpTransactionValidator;
     use reth_primitives::{
-        Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-        TxDeposit, MAINNET, U256,
+        Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
+        MAINNET, U256,
     };
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
@@ -231,7 +225,7 @@ mod tests {
         let deposit_tx = Transaction::Deposit(TxDeposit {
             source_hash: Default::default(),
             from: signer,
-            to: TransactionKind::Create,
+            to: TxKind::Create,
             mint: None,
             value: U256::ZERO,
             gas_limit: 0u64,
