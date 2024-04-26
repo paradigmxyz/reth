@@ -32,7 +32,6 @@ confidence-threshold = 0.8
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.7 short identifier (+ optional exception)].
 allow = [
-    "CC0-1.0",
     "MIT",
     "MIT-0",
     "Apache-2.0",
@@ -59,6 +58,7 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "secp256k1-sys" },
     { allow = ["CC0-1.0"], name = "tiny-keccak" },
     { allow = ["CC0-1.0"], name = "more-asserts" },
+    { allow = ["CC0-1.0"], name = "to_method" },
     { allow = ["CC0-1.0"], name = "aurora-engine-modexp" },
     # TODO: decide on MPL-2.0 handling
     # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/6980
