@@ -48,7 +48,6 @@ impl BeaconSidecarConfig {
     }
 }
 
-//TODO Add nicer errors.
 #[derive(Debug, Error)]
 pub enum SideCarError {
     #[error("Reqwest encountered an error: {0}")]
@@ -96,6 +95,7 @@ where
 {
     type Item = Result<BlobTransaction, SideCarError>;
 
+    /// Attempt to pull the next BlobTransaction from the stream.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this: &mut MinedSidecarStream<St, P> = self.get_mut();
 
@@ -103,7 +103,7 @@ where
             return Poll::Ready(Some(Ok(mined_sidecar)));
         }
 
-        // return any buffered result
+        // Request locally first, otherwise request from CL
         loop {
             // Check if any pending reqwests are ready and append to buffer
             while let Poll::Ready(Some(pending_result)) = this.pending_requests.poll_next_unpin(cx)
@@ -123,6 +123,7 @@ where
                     let mut all_blobs_available = true;
                     let mut actions_to_queue: Vec<BlobTransaction> = Vec::new();
 
+                    // Collect only the EIP4844 transcations.
                     let txs: Vec<_> = notification
                         .tip()
                         .transactions()
@@ -130,12 +131,13 @@ where
                         .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
                         .collect();
 
-                    //returns
+                    // Retrieves all blobs in the order in which we requested them
                     match this
                         .pool
                         .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect())
                     {
                         Ok(blobs) => {
+                            // Match the corresponding BlobTransaction with its Transcation
                             for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
                                 actions_to_queue.push(BlobTransaction::try_from_signed(tx.clone(), sidecar.clone()).expect(
                                     "should not fail to convert blob tx if it is already eip4844",
@@ -143,6 +145,7 @@ where
                             }
                         }
                         Err(_err) => {
+                            // If a single BlobTransaction is missing we skip the queue.
                             all_blobs_available = false;
                         }
                     };
@@ -154,6 +157,7 @@ where
 
                         let sidecar_url = this.beacon_config.sidecar_url();
 
+                        // Query the Beacon Layer for missing BlobTransactions
                         let query = Box::pin(async move {
                             let response = match client_clone
                                 .get(sidecar_url)
@@ -200,6 +204,7 @@ where
                                     }
                                 };
 
+                            // Blob_len is used to retrieve the BlobTransaction from the bundle
                             let sidecars: Vec<BlobTransaction> = txs
                                 .iter()
                                 .map(|(tx, blob_len)| {
