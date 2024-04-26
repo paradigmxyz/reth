@@ -86,27 +86,29 @@ impl ExExHandle {
         cx: &mut Context<'_>,
         (notification_id, notification): &(usize, ExExNotification),
     ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
-        // Skip the notification if the finished height of the ExEx is higher than the tip of the
-        // new notification
         if let Some(finished_height) = self.finished_height {
             match notification {
-                ExExNotification::ChainCommitted { new } if finished_height > new.tip().number => {
-                    debug!(
-                        exex_id = %self.id,
-                        %notification_id,
-                        %finished_height,
-                        new_tip = %new.tip().number,
-                        "Skipping notification"
-                    );
+                ExExNotification::ChainCommitted { new } => {
+                    // Skip the chain commit notification if the finished height of the ExEx is
+                    // higher than the tip of the new notification
+                    if finished_height > new.tip().number {
+                        debug!(
+                            exex_id = %self.id,
+                            %notification_id,
+                            %finished_height,
+                            new_tip = %new.tip().number,
+                            "Skipping notification"
+                        );
 
-                    self.next_notification_id = notification_id + 1;
-                    return Poll::Ready(Ok(()))
+                        self.next_notification_id = notification_id + 1;
+                        return Poll::Ready(Ok(()))
+                    }
                 }
                 // Do not handle [ExExNotification::ChainReorged] and
                 // [ExExNotification::ChainReverted] cases and always send the
                 // notification, because the ExEx should be aware of the reorgs and reverts lower
                 // than its finished height
-                _ => (),
+                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
             }
         }
 
