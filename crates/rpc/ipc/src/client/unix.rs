@@ -1,8 +1,9 @@
 //! [`jsonrpsee`] transport adapter implementation for Unix IPC by using Unix Sockets.
 
-use std::path::Path;
+use crate::{client::IpcError, stream_codec::StreamCodec};
 use futures::StreamExt;
 use jsonrpsee::core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT};
+use std::path::Path;
 use tokio::{
     io::AsyncWriteExt,
     net::{
@@ -11,7 +12,6 @@ use tokio::{
     },
 };
 use tokio_util::codec::FramedRead;
-use crate::{client::IpcError, stream_codec::StreamCodec};
 
 /// Sending end of IPC transport.
 #[derive(Debug)]

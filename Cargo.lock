@@ -6846,6 +6846,7 @@ dependencies = [
  "interprocess",
  "jsonrpsee",
  "pin-project",
+ "rand 0.8.5",
  "reth-tracing",
  "serde_json",
  "thiserror",

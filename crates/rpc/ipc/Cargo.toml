@@ -37,3 +37,4 @@ windows-sys = { version = "0.52.0", features = ["Win32_Foundation"] }
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }
 reth-tracing.workspace = true
+rand.workspace = true
