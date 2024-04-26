@@ -1740,18 +1740,9 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
                         // If the transaction type is Legacy, adjust the v component of the
                         // signature according to the Ethereum specification
                         TxType::Legacy => {
-                            // Calculate the new v value based on the EIP-155 formula:
-                            // v = {0,1} + CHAIN_ID * 2 + 35
-                            !(signature.v -
-                                U256::from(if let Some(chain_id) = transaction.chain_id() {
-                                    // If CHAIN_ID is available, calculate the new v value
-                                    // accordingly
-                                    chain_id.saturating_mul(2).saturating_add(35)
-                                } else {
-                                    // If CHAIN_ID is not available, set v = {0,1} + 27
-                                    27
-                                }))
-                            .is_zero()
+                            Signature::inverse_v(signature.v.to())
+                                .expect("v would always be valid")
+                                .0
                         }
                         _ => !signature.v.is_zero(),
                     }

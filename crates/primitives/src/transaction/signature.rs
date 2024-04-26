@@ -94,6 +94,22 @@ impl Signature {
         }
     }
 
+    /// Outputs (odd_y_parity, chain_id) from the `v` value.
+    /// This doesn't check validity of the `v` value for optimism.
+    #[inline]
+    pub fn inverse_v(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
+        if v < 35 {
+            // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
+            if v != 27 && v != 28 {
+                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
+            }
+            Ok((v == 28, None))
+        } else {
+            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+            Ok((((v - 35) % 2) != 0, Some((v - 35) >> 1)))
+        }
+    }
+
     /// Decodes the `v`, `r`, `s` values without a RLP header.
     /// This will return a chain ID if the `v` value is [EIP-155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) compatible.
     pub(crate) fn decode_with_eip155_chain_id(
@@ -114,16 +130,11 @@ impl Signature {
                 if v == 0 && r.is_zero() && s.is_zero() {
                     return Ok((Self { r, s, odd_y_parity: false }, None))
                 }
-                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
-            let odd_y_parity = v == 28;
-            Ok((Self { r, s, odd_y_parity }, None))
-        } else {
-            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            let odd_y_parity = ((v - 35) % 2) != 0;
-            let chain_id = (v - 35) >> 1;
-            Ok((Self { r, s, odd_y_parity }, Some(chain_id)))
         }
+
+        let (odd_y_parity, chain_id) = Self::inverse_v(v)?;
+        Ok((Self { r, s, odd_y_parity }, chain_id))
     }
 
     /// Output the length of the signature without the length of the RLP header
