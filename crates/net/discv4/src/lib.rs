@@ -39,7 +39,7 @@ use discv5::{
 };
 use enr::Enr;
 use parking_lot::Mutex;
-use proto::{EnrRequest, EnrResponse, EnrWrapper};
+use proto::{EnrRequest, EnrResponse};
 use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
 use secp256k1::SecretKey;
 use std::{
@@ -1279,7 +1279,7 @@ impl Discv4Service {
             self.send_packet(
                 Message::EnrResponse(EnrResponse {
                     request_hash,
-                    enr: EnrWrapper::new(self.local_eip_868_enr.clone()),
+                    enr: self.local_eip_868_enr.clone(),
                 }),
                 remote_addr,
             );

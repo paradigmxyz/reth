@@ -62,6 +62,17 @@ impl MiningMode {
     }
 }
 
+impl fmt::Display for MiningMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self {
+            MiningMode::None => "None",
+            MiningMode::Auto(_) => "Auto",
+            MiningMode::FixedBlockTime(_) => "FixedBlockTime",
+        };
+        write!(f, "{kind}")
+    }
+}
+
 /// A miner that's supposed to create a new block every `interval`, mining all transactions that are
 /// ready at that time.
 ///

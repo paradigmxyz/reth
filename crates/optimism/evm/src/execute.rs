@@ -182,14 +182,14 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
                 return Err(BlockExecutionError::OptimismBlockExecution(
                     OptimismBlockExecutionError::BlobTransactionRejected,
-                ))
+                ));
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -261,7 +261,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into())
+            .into());
         }
 
         Ok((receipts, cumulative_gas_used))
@@ -378,7 +378,7 @@ where
                 block.timestamp,
             ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error);
             };
         }
 
@@ -539,12 +539,12 @@ mod tests {
     use super::*;
     use reth_primitives::{
         b256, Account, Address, Block, ChainSpecBuilder, Signature, StorageKey, StorageValue,
-        Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
+        Transaction, TransactionSigned, TxEip1559, TxKind, BASE_MAINNET,
     };
-    use reth_revm::database::StateProviderDatabase;
-    use revm::L1_BLOCK_CONTRACT;
+    use reth_revm::{database::StateProviderDatabase, L1_BLOCK_CONTRACT};
     use std::{collections::HashMap, str::FromStr};
 
+    use crate::OptimismEvmConfig;
     use reth_revm::test_utils::StateProviderTest;
 
     fn create_op_state_provider() -> StateProviderTest {
@@ -610,7 +610,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 ..Default::default()
             }),
             Signature::default(),
@@ -619,7 +619,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 gas_limit: 21_000,
                 ..Default::default()
             }),
@@ -690,7 +690,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 ..Default::default()
             }),
             Signature::default(),
@@ -699,7 +699,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 gas_limit: 21_000,
                 ..Default::default()
             }),

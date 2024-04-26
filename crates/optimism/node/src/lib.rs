@@ -17,11 +17,6 @@ pub mod args;
 pub mod engine;
 pub use engine::OptimismEngineTypes;
 
-/// Exports optimism-specific implementations of the
-/// [ConfigureEvmEnv](reth_node_api::ConfigureEvmEnv) trait.
-pub mod evm;
-pub use evm::OptimismEvmConfig;
-
 pub mod node;
 pub use node::OptimismNode;
 
@@ -32,3 +27,5 @@ pub mod rpc;
 pub use reth_optimism_payload_builder::{
     OptimismBuiltPayload, OptimismPayloadBuilder, OptimismPayloadBuilderAttributes,
 };
+
+pub use reth_evm_optimism::*;

@@ -206,7 +206,7 @@ mod tests {
     };
     use reth_primitives::{
         b256, Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey,
-        StorageValue, Transaction, TransactionKind, TransactionSigned, TxEip1559, BASE_MAINNET,
+        StorageValue, Transaction, TransactionSigned, TxEip1559, TxKind, BASE_MAINNET,
     };
     use revm::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr, sync::Arc};
@@ -278,7 +278,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 ..Default::default()
             }),
             Signature::default(),
@@ -287,7 +287,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 gas_limit: 21_000,
                 ..Default::default()
             }),
@@ -352,7 +352,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 ..Default::default()
             }),
             Signature::default(),
@@ -361,7 +361,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TransactionKind::Call(addr),
+                to: TxKind::Call(addr),
                 gas_limit: 21_000,
                 ..Default::default()
             }),

@@ -8,6 +8,7 @@ use crate::{
     },
     EthApi, EthApiSpec,
 };
+use alloy_primitives::TxKind as RpcTransactionKind;
 use async_trait::async_trait;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -15,9 +16,10 @@ use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U256,
+    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered,
+    TxKind::{Call, Create},
+    B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
@@ -32,8 +34,8 @@ use reth_rpc_types::{
         LegacyTransactionRequest,
     },
     AnyReceiptEnvelope, AnyTransactionReceipt, Index, Log, ReceiptWithBloom, Transaction,
-    TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest, WithOtherFields,
+    TransactionInfo, TransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    WithOtherFields,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};

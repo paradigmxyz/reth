@@ -4,7 +4,7 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run --example network-txpool
+//! cargo run --release -p network-txpool -- node
 //! ```
 
 use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};

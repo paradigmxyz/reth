@@ -1,15 +1,13 @@
-use node::NodeHelper;
+use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
-    blockchain_tree::ShareableBlockchainTree,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
-    revm::EvmProcessorFactory,
     tasks::TaskManager,
 };
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
-    components::{NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
-    FullNodeComponentsAdapter, FullNodeTypesAdapter, NodeTypes,
+    components::{Components, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
+    FullNodeTypesAdapter, NodeAdapter,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
@@ -19,6 +17,9 @@ use wallet::Wallet;
 
 /// Wrapper type to create test nodes
 pub mod node;
+
+/// Helper for transaction operations
+pub mod transaction;
 
 /// Helper type to yield accounts from mnemonic
 pub mod wallet;
@@ -31,6 +32,8 @@ mod network;
 
 /// Helper for engine api operations
 mod engine_api;
+/// Helper for rpc operations
+mod rpc;
 
 /// Helper traits
 mod traits;
@@ -56,7 +59,7 @@ where
     };
 
     // Create nodes and peer them
-    let mut nodes: Vec<NodeHelperType<N>> = Vec::with_capacity(num_nodes);
+    let mut nodes: Vec<NodeTestContext<_>> = Vec::with_capacity(num_nodes);
 
     for idx in 0..num_nodes {
         let mut node_config = NodeConfig::test()
@@ -77,7 +80,7 @@ where
             .launch()
             .await?;
 
-        let mut node = NodeHelper::new(node).await?;
+        let mut node = NodeTestContext::new(node).await?;
 
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {
@@ -100,12 +103,11 @@ where
 // Type aliases
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type EvmType<N> = EvmProcessorFactory<<N as NodeTypes>::Evm>;
-type RethProvider<N> = BlockchainProvider<TmpDB, ShareableBlockchainTree<TmpDB, EvmType<N>>>;
 type TmpPool<N> = <<N as reth_node_builder::Node<TmpNodeAdapter<N>>>::PoolBuilder as PoolBuilder<
     TmpNodeAdapter<N>,
 >>::Pool;
-type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, RethProvider<N>>;
+type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
 
 /// Type alias for a type of NodeHelper
-pub type NodeHelperType<N> = NodeHelper<FullNodeComponentsAdapter<TmpNodeAdapter<N>, TmpPool<N>>>;
+pub type NodeHelperType<N> =
+    NodeTestContext<NodeAdapter<TmpNodeAdapter<N>, Components<TmpNodeAdapter<N>, TmpPool<N>>>>;

@@ -2,7 +2,7 @@
 use metrics::{Counter, Gauge};
 use reth_metrics::Metrics;
 
-use crate::config::{ETH, ETH2, OPSTACK};
+use crate::network_key::{ETH, ETH2, OPSTACK};
 
 /// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
@@ -91,13 +91,14 @@ impl DiscoveredPeersMetrics {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "discv5")]
 pub struct AdvertisedChainMetrics {
-    /// Frequency of node records with a kv-pair with [`OPSTACK`] as key.
+    /// Frequency of node records with a kv-pair with [`OPSTACK`](crate::network_key) as
+    /// key.
     opstack: Counter,
 
-    /// Frequency of node records with a kv-pair with [`ETH`] as key.
+    /// Frequency of node records with a kv-pair with [`ETH`](crate::network_key) as key.
     eth: Counter,
 
-    /// Frequency of node records with a kv-pair with [`ETH2`] as key.
+    /// Frequency of node records with a kv-pair with [`ETH2`](crate::network_key) as key.
     eth2: Counter,
 }
 

@@ -96,7 +96,7 @@ mod tests {
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
 
-    use crate::config::{ETH, ETH2};
+    use crate::network_key::{ETH, ETH2};
 
     use super::*;
 
