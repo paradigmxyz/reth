@@ -162,6 +162,8 @@ pub enum DownloadError {
     BodyValidation {
         /// Hash of header failing validation
         hash: B256,
+        /// Number of header failing validation
++        number: u64,
         /// The details of validation failure
         #[source]
         error: Box<ConsensusError>,
