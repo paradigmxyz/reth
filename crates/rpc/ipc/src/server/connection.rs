@@ -67,7 +67,7 @@ where
 }
 
 #[pin_project::pin_project]
-pub(crate) struct IpcConn<T>(#[pin] T);
+pub(crate) struct IpcConn<T>(#[pin] pub(crate) T);
 
 impl<T> IpcConn<JsonRpcStream<T>>
 where

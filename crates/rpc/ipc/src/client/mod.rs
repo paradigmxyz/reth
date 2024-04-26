@@ -78,19 +78,15 @@ pub enum IpcError {
 
 #[cfg(test)]
 mod tests {
-    use interprocess::local_socket::{
-        traits::tokio::Listener, GenericFilePath, ListenerOptions, ToFsName,
-    };
-
     use crate::server::dummy_endpoint;
+    use interprocess::local_socket::tokio::LocalSocketListener;
 
     use super::*;
 
     #[tokio::test]
     async fn test_connect() {
         let endpoint = dummy_endpoint();
-        let name = endpoint.clone().to_fs_name::<GenericFilePath>().unwrap();
-        let binding = ListenerOptions::new().name(name).create_tokio().unwrap();
+        let binding = LocalSocketListener::bind(endpoint.clone()).unwrap();
         tokio::spawn(async move {
             let _x = binding.accept().await;
         });
