@@ -5093,15 +5093,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
-name = "op-beacon-core"
-version = "0.2.0-beta.6"
-dependencies = [
- "reth-consensus",
- "reth-consensus-common",
- "reth-primitives",
-]
-
-[[package]]
 name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7095,6 +7086,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-optimism-consensus"
+version = "0.2.0-beta.6"
+dependencies = [
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-primitives",
 ]
 
 [[package]]

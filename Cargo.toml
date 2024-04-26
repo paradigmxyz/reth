@@ -50,6 +50,7 @@ members = [
     "crates/ethereum/engine-primitives/",
     "crates/node-ethereum/",
     "crates/node-builder/",
+    "crates/optimism/consensus",
     "crates/optimism/node/",
     "crates/optimism/evm/",
     "crates/node-core/",
@@ -70,7 +71,6 @@ members = [
     "crates/transaction-pool/",
     "crates/trie/",
     "crates/trie-parallel/",
-    "crates/optimism/op-beacon-core",
     "examples/",
     "examples/node-custom-rpc/",
     "examples/beacon-api-sse/",
@@ -221,6 +221,7 @@ reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
+reth-node-events = { path = "crates/node/events" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-node-core = { path = "crates/node-core" }
@@ -269,7 +270,7 @@ reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
-reth-node-events = { path = "crates/node/events" }
+reth-optimism-consensus = { path = "crates/optimism/consensus" }
 
 # revm
 revm = { version = "8.0.0", features = [
