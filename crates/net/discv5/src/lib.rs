@@ -17,13 +17,12 @@ use std::{
 };
 
 use ::enr::Enr;
-use alloy_rlp::Decodable;
 use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
-use reth_primitives::{bytes::Bytes, ForkId, NodeRecord, PeerId};
+use reth_primitives::{bytes::Bytes, EnrForkIdEntry, ForkId, NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
 use tracing::{debug, error, trace};
@@ -489,9 +488,12 @@ impl Discv5 {
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
         let key = self.fork_key;
-        let mut fork_id_bytes = enr.get_raw_rlp(key).ok_or(Error::ForkMissing(key))?;
+        let fork_id = enr
+            .get_decodable::<EnrForkIdEntry>(key)
+            .ok_or(Error::ForkMissing(key))?
+            .map(Into::into)?;
 
-        Ok(ForkId::decode(&mut fork_id_bytes)?)
+        Ok(fork_id)
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -834,7 +836,7 @@ mod tests {
         let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
 
         let decoded_fork_id =
-            ForkId::decode(&mut enr.get_raw_rlp(network_key::ETH).unwrap()).unwrap();
+            enr.get_decodable::<EnrForkIdEntry>(network_key::ETH).unwrap().map(Into::into).unwrap();
 
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4

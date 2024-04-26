@@ -38,7 +38,7 @@ to make a PR!
 
 | Example                     | Description                                                     |
 | --------------------------- | --------------------------------------------------------------- |
-| [DB access](./db-access.rs) | Illustrates how to access Reth's database in a separate process |
+| [DB access](./db-access) | Illustrates how to access Reth's database in a separate process |
 
 ## Network
 

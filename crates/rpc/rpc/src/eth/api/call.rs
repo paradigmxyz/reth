@@ -14,7 +14,7 @@ use crate::{
 };
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, U256};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, TxKind, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -406,7 +406,7 @@ where
         }
 
         let from = request.from.unwrap_or_default();
-        let to = if let Some(to) = request.to {
+        let to = if let Some(TxKind::Call(to)) = request.to {
             to
         } else {
             let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
