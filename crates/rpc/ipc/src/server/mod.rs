@@ -206,7 +206,7 @@ impl<HttpMiddleware, RpcMiddleware> IpcServer<HttpMiddleware, RpcMiddleware>
                     };
 
                     let service = self.http_middleware.service(tower_service);
-                    connections.push(tokio::spawn(spawn_connection(
+                    connections.push(tokio::spawn(process_connection(
                         ipc,
                         service,
                         stop_handle.clone(),
@@ -444,7 +444,7 @@ where
 }
 
 /// Spawns the IPC connection onto a new task
-async fn spawn_connection<S, T>(
+async fn process_connection<S, T>(
     conn: IpcConn<JsonRpcStream<T>>,
     service: S,
     stop_handle: StopHandle,
