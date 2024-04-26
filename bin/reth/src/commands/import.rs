@@ -39,7 +39,7 @@ use reth_stages::{
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
-use std::{fs::File, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
