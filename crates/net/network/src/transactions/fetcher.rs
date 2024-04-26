@@ -41,7 +41,8 @@ use reth_eth_wire::{
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
-use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
+use reth_network_types::PeerId;
+use reth_primitives::{PooledTransactionsElement, TxHash};
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};

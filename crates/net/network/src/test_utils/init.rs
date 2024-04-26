@@ -1,5 +1,5 @@
 use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::{net::SocketAddr, time::Duration};
 
 /// The timeout for tests that create a GethInstance

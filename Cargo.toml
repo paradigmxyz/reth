@@ -29,6 +29,7 @@ members = [
     "crates/net/nat/",
     "crates/net/network/",
     "crates/net/network-api/",
+    "crates/net/reth-network-types/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
@@ -87,7 +88,7 @@ members = [
     "examples/custom-inspector/",
     "examples/exex/minimal/",
     "examples/exex/op-bridge/",
-    "testing/ef-tests/",
+    "testing/ef-tests/", "crates/net/reth-network-types",
 ]
 default-members = ["bin/reth"]
 
@@ -246,6 +247,7 @@ reth-net-common = { path = "crates/net/common" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-types = { path = "crates/net/reth-network-types" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }

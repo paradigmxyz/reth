@@ -40,7 +40,8 @@ use discv5::{
 use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
-use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{bytes::Bytes, hex, ForkId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,

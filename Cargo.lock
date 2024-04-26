@@ -4561,6 +4561,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-network",
+ "reth-network-types",
  "reth-primitives",
  "secp256k1",
  "tokio",
@@ -6135,6 +6136,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-evm",
  "reth-interfaces",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6365,6 +6367,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-net-common",
  "reth-net-nat",
+ "reth-network-types",
  "reth-primitives",
  "reth-tracing",
  "secp256k1",
@@ -6390,6 +6393,7 @@ dependencies = [
  "multiaddr",
  "rand 0.8.5",
  "reth-metrics",
+ "reth-network-types",
  "reth-primitives",
  "reth-tracing",
  "secp256k1",
@@ -6409,6 +6413,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-net-common",
+ "reth-network-types",
  "reth-primitives",
  "reth-tracing",
  "schnellru",
@@ -6440,6 +6445,7 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
@@ -6501,6 +6507,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "reth-net-common",
+ "reth-network-types",
  "reth-primitives",
  "secp256k1",
  "sha2 0.10.8",
@@ -6544,6 +6551,7 @@ dependencies = [
  "reth-eth-wire-types",
  "reth-metrics",
  "reth-net-common",
+ "reth-network-types",
  "reth-primitives",
  "reth-tracing",
  "secp256k1",
@@ -6700,6 +6708,7 @@ dependencies = [
  "reth-consensus",
  "reth-eth-wire-types",
  "reth-network-api",
+ "reth-network-types",
  "reth-primitives",
  "secp256k1",
  "thiserror",
@@ -6789,7 +6798,7 @@ name = "reth-net-common"
 version = "0.2.0-beta.6"
 dependencies = [
  "pin-project",
- "reth-primitives",
+ "reth-network-types",
  "tokio",
 ]
 
@@ -6842,6 +6851,7 @@ dependencies = [
  "reth-net-common",
  "reth-network",
  "reth-network-api",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
@@ -6870,11 +6880,23 @@ dependencies = [
  "enr",
  "reth-discv4",
  "reth-eth-wire",
+ "reth-network-types",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "reth-network-types"
+version = "0.2.0-beta.6"
+dependencies = [
+ "enr",
+ "reth-primitives",
+ "reth-rpc-types",
+ "secp256k1",
+ "serde_with",
 ]
 
 [[package]]
@@ -7173,7 +7195,6 @@ dependencies = [
  "clap",
  "criterion",
  "derive_more",
- "enr",
  "hash-db",
  "itertools 0.12.1",
  "modular-bitfield",
@@ -7194,7 +7215,6 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
- "serde_with",
  "sha2 0.10.8",
  "strum 0.26.2",
  "sucds",
@@ -7304,6 +7324,7 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics",
  "reth-network-api",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -7335,6 +7356,7 @@ version = "0.2.0-beta.6"
 dependencies = [
  "jsonrpsee",
  "reth-engine-primitives",
+ "reth-network-types",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
@@ -7598,6 +7620,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-eth-wire",
  "reth-metrics",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -8304,11 +8327,11 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.7.0"
+version = "3.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee80b0e361bbf88fd2f6e242ccd19cfda072cb0faa6ae694ecee08199938569a"
+checksum = "2c85f8e96d1d6857f13768fcbd895fcb06225510022a2774ed8b5150581847b0"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.0",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -8322,9 +8345,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.7.0"
+version = "3.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6561dc161a9224638a31d876ccdfefbc1df91d3f3a8342eddb35f055d48c7655"
+checksum = "c8b3a576c4eb2924262d5951a3b737ccaf16c931e39a2810c36f9a7e25575557"
 dependencies = [
  "darling 0.20.8",
  "proc-macro2",

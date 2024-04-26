@@ -2,8 +2,9 @@ use super::headers::client::HeadersRequest;
 use crate::{db::DatabaseError, provider::ProviderError};
 use reth_consensus::ConsensusError;
 use reth_network_api::ReputationChangeKind;
+use reth_network_types::WithPeerId;
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, WithPeerId, B256,
+    BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, B256,
 };
 use std::ops::RangeInclusive;
 use thiserror::Error;

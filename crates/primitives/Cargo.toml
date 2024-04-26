@@ -27,7 +27,6 @@ alloy-trie = { workspace = true, features = ["serde"] }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
-enr.workspace = true
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery", "rand"] }
@@ -43,7 +42,6 @@ itertools.workspace = true
 modular-bitfield.workspace = true
 once_cell.workspace = true
 rayon.workspace = true
-serde_with.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = { version = "0.10.7", optional = true }

@@ -1,6 +1,6 @@
 //! Support for banning peers.
 
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::{collections::HashMap, net::IpAddr, time::Instant};
 
 /// Determines whether or not the IP is globally routable.

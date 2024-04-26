@@ -1,11 +1,12 @@
 //! Discovery v4 protocol implementation.
 
-use crate::{error::DecodePacketError, EnrForkIdEntry, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use crate::{error::DecodePacketError, EnrForkIdEntry, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable};
 use enr::Enr;
+use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, pk2id, ForkId, NodeRecord, B256,
+    keccak256, ForkId, NodeRecord, B256,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
