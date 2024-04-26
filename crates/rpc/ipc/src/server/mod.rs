@@ -380,7 +380,7 @@ where
 
         let max_conns = conn_guard.max_connections();
         let curr_conns = max_conns - conn_guard.available_connections();
-        debug!("Accepting new connection {}/{}", curr_conns, max_conns);
+        trace!("Accepting new connection {}/{}", curr_conns, max_conns);
 
         let cfg = RpcServiceCfg::CallsAndSubscriptions {
             bounded_subscriptions: BoundedSubscriptions::new(
@@ -856,6 +856,7 @@ mod tests {
         types::Request,
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
+    use reth_tracing::init_test_tracing;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 
@@ -921,6 +922,7 @@ mod tests {
 
     #[tokio::test]
     async fn can_set_the_max_request_body_size() {
+        init_test_tracing();
         let endpoint = dummy_endpoint();
         let server = Builder::default().max_request_body_size(100).build(&endpoint);
         let mut module = RpcModule::new(());
@@ -946,7 +948,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn can_set_max_connections() {
+        init_test_tracing();
+
+        let endpoint = dummy_endpoint();
+        let server = Builder::default().max_connections(2).build(&endpoint);
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _| "succeed").unwrap();
+        let handle = server.start(module).await.unwrap();
+        tokio::spawn(handle.stopped());
+
+        let client1 = IpcClientBuilder::default().build(endpoint.clone()).await.unwrap();
+        let client2 = IpcClientBuilder::default().build(endpoint.clone()).await.unwrap();
+        let client3 = IpcClientBuilder::default().build(endpoint.clone()).await.unwrap();
+
+        let response1: Result<String, Error> = client1.request("anything", rpc_params![]).await;
+        let response2: Result<String, Error> = client2.request("anything", rpc_params![]).await;
+        let response3: Result<String, Error> = client3.request("anything", rpc_params![]).await;
+
+        assert!(response1.is_ok());
+        assert!(response2.is_ok());
+        // Third connection is rejected
+        println!("{:?}", response3);
+        assert!(response3.is_err());
+        // if !matches!(conn3, Err(WebSocketTestError::RejectedWithStatusCode(429))) {
+        //     panic!("Expected RejectedWithStatusCode(429), got: {conn3:#?}");
+        // }
+
+        // Decrement connection count
+        // drop(conn2);
+
+        // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Can connect again
+        // let conn4 = WebSocketTestClient::new(addr).await;
+        // assert!(conn4.is_ok());
+        //
+        // server_handle.stop().unwrap();
+        // server_handle.stopped().await;
+    }
+
+    #[tokio::test]
     async fn test_rpc_request() {
+        init_test_tracing();
         let endpoint = dummy_endpoint();
         let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
@@ -956,6 +1000,14 @@ mod tests {
         tokio::spawn(handle.stopped());
 
         let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
+        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
+        assert_eq!(response, msg);
+        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
+        assert_eq!(response, msg);
+        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
+        assert_eq!(response, msg);
+        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
+        assert_eq!(response, msg);
         let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
         assert_eq!(response, msg);
     }
