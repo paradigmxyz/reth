@@ -6,6 +6,7 @@ use crate::server::{
 };
 use futures::StreamExt;
 use futures_util::{future::Either, stream::FuturesUnordered};
+use interprocess::local_socket::tokio::{LocalSocketListener, LocalSocketStream};
 use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
     server::{
@@ -21,16 +22,12 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-
-use interprocess::local_socket::tokio::{LocalSocketListener, LocalSocketStream};
-
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{oneshot, watch, OwnedSemaphorePermit},
 };
 use tower::{layer::util::Identity, Layer, Service};
 use tracing::{debug, trace, warn, Instrument};
-
 // re-export so can be used during builder setup
 use crate::{
     server::{
