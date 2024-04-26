@@ -156,8 +156,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
-    auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics,
-    RpcModuleSelection::Selection,
+    auth::AuthRpcModule, cors::CorsDomainError, error::WsHttpSamePortError,
+    metrics::RpcRequestMetrics, RpcModuleSelection::Selection,
 };
 use constants::*;
 use error::{RpcError, ServerKind};
@@ -1496,13 +1496,6 @@ impl fmt::Debug for RpcServerConfig {
     }
 }
 
-type MiddlewareServiceBuilder = tower::ServiceBuilder<
-    Stack<
-        tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
-        Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
-    >,
->;
-
 /// === impl RpcServerConfig ===
 
 impl RpcServerConfig {
@@ -1645,17 +1638,14 @@ impl RpcServerConfig {
         self.build(&modules).await?.start(modules).await
     }
 
-    /// Convenience function to do middleware creation in one spot
-    pub fn create_middleware(
-        &self,
-        cors: Option<String>,
-        jwt_secret: Option<JwtSecret>,
-    ) -> MiddlewareServiceBuilder {
-        let cors_layer: Option<CorsLayer> =
-            cors.as_deref().map(cors::create_cors_layer).and_then(|res| res.ok()).or_else(|| None);
-        let jwt_auth: Option<AuthLayer<JwtAuthValidator>> =
-            jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)));
-        tower::ServiceBuilder::new().option_layer(cors_layer).option_layer(jwt_auth)
+    /// Creates the [CorsLayer] if any
+    fn maybe_cors_layer(cors: Option<String>) -> Result<Option<CorsLayer>, CorsDomainError> {
+        cors.as_deref().map(cors::create_cors_layer).transpose()
+    }
+
+    /// Creates the [AuthLayer] if any
+    fn maybe_jwt_layer(&self) -> Option<AuthLayer<JwtAuthValidator>> {
+        self.jwt_secret.clone().map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
     }
 
     /// Builds the ws and http server(s).
@@ -1669,7 +1659,6 @@ impl RpcServerConfig {
             Ipv4Addr::LOCALHOST,
             DEFAULT_HTTP_RPC_PORT,
         )));
-        let jwt_secret = self.jwt_secret.clone();
 
         let ws_socket_addr = self
             .ws_addr
@@ -1695,17 +1684,18 @@ impl RpcServerConfig {
             }
             .cloned();
 
-            let secret = self.jwt_secret.clone();
-
             // we merge this into one server using the http setup
             self.ws_server_config.take();
 
             modules.config.ensure_ws_http_identical()?;
 
             let builder = self.http_server_config.take().expect("http_server_config is Some");
-            let middleware = self.create_middleware(cors, jwt_secret);
             let server = builder
-                .set_http_middleware(middleware)
+                .set_http_middleware(
+                    tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_cors_layer(cors)?)
+                        .option_layer(self.maybe_jwt_layer()),
+                )
                 .set_rpc_middleware(
                     RpcServiceBuilder::new().layer(
                         modules
@@ -1726,7 +1716,7 @@ impl RpcServerConfig {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
-                jwt_secret: secret,
+                jwt_secret: self.jwt_secret.clone(),
             })
         }
 
@@ -1736,11 +1726,13 @@ impl RpcServerConfig {
         let mut ws_local_addr = None;
         let mut ws_server = None;
         if let Some(builder) = self.ws_server_config.take() {
-            let builder = builder.ws_only();
-
-            let middleware = self.create_middleware(self.ws_cors_domains.clone(), jwt_secret);
             let server = builder
-                .set_http_middleware(middleware)
+                .ws_only()
+                .set_http_middleware(
+                    tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
+                        .option_layer(self.maybe_jwt_layer()),
+                )
                 .set_rpc_middleware(
                     RpcServiceBuilder::new()
                         .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
@@ -1757,12 +1749,13 @@ impl RpcServerConfig {
         }
 
         if let Some(builder) = self.http_server_config.take() {
-            let builder = builder.http_only();
-
-            let middleware =
-                self.create_middleware(self.http_cors_domains.clone(), self.jwt_secret.clone());
             let server = builder
-                .set_http_middleware(middleware)
+                .http_only()
+                .set_http_middleware(
+                    tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
+                        .option_layer(self.maybe_jwt_layer()),
+                )
                 .set_rpc_middleware(
                     RpcServiceBuilder::new().layer(
                         modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
