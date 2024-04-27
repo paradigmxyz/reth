@@ -170,6 +170,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                                     chain=%provider.chain_spec().chain,
                                     "tx nonce replayed in below bedrock block"
                                 );
+
+                                continue
                             }
                         }
 
