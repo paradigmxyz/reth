@@ -12,7 +12,7 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_network_api::PeerInfo;
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},

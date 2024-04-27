@@ -11,8 +11,9 @@ use reth_eth_wire::{
     SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
+use reth_network_types::PeerId;
 use reth_primitives::{
-    BlockBody, Bytes, Header, PeerId, PooledTransactionsElement, ReceiptWithBloom, B256,
+    BlockBody, Bytes, Header, PooledTransactionsElement, ReceiptWithBloom, B256,
 };
 use std::{
     fmt,

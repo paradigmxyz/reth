@@ -24,7 +24,8 @@ use crate::p2p::{
     priority::Priority,
 };
 use reth_consensus::{test_utils::TestConsensus, Consensus};
-use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, WithPeerId};
+use reth_network_types::{PeerId, WithPeerId};
+use reth_primitives::{Header, HeadersDirection, SealedHeader};
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]

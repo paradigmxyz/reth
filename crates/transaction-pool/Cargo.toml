@@ -20,6 +20,7 @@ reth-tasks.workspace = true
 revm.workspace = true
 alloy-rlp.workspace = true
 reth-revm = { workspace = true, optional = true }
+reth-network-types.workspace = true
 
 # async/futures
 futures-util.workspace = true

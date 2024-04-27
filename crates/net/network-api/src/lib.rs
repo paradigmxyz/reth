@@ -14,7 +14,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
-use reth_primitives::{NodeRecord, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::NodeRecord;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;

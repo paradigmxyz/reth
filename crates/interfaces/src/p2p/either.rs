@@ -22,7 +22,7 @@ where
     A: DownloadClient,
     B: DownloadClient,
 {
-    fn report_bad_message(&self, peer_id: reth_primitives::PeerId) {
+    fn report_bad_message(&self, peer_id: reth_network_types::PeerId) {
         match self {
             EitherDownloader::Left(a) => a.report_bad_message(peer_id),
             EitherDownloader::Right(b) => b.report_bad_message(peer_id),

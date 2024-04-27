@@ -16,9 +16,9 @@ use reth_interfaces::p2p::{
     },
     priority::Priority,
 };
+use reth_network_types::PeerId;
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, PeerId, SealedHeader,
-    B256,
+    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, SealedHeader, B256,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
