@@ -184,6 +184,12 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                         txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))?
                     }
                 }
+
+                trace!(target: "sync::stages::transaction_lookup",
+                    total_hashes,
+                    "Transaction hashes inserted"
+                );
+
                 break
             }
         }

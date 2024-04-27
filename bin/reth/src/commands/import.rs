@@ -14,7 +14,7 @@ use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
-use reth_db::{database::Database, init_db};
+use reth_db::{database::Database, init_db, tables, transaction::DbTx};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
@@ -202,7 +202,17 @@ impl ImportCommand {
             }
         }
 
-        info!(target: "reth::cli", "Chain file imported");
+        let provider = provider_factory.provider()?;
+
+        let total_blocks = provider.tx_ref().entries::<tables::Headers>()?;
+        let total_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+
+        info!(target: "reth::cli",
+            total_blocks,
+            total_txns,
+            "Chain file imported"
+        );
+
         Ok(())
     }
 
