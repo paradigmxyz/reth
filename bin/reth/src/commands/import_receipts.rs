@@ -8,7 +8,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db::{database::Database, init_db, tables, transaction::DbTx, DatabaseEnv};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
@@ -16,7 +16,7 @@ use reth_downloaders::{
 use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::ChainSpec;
 use reth_provider::{BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -82,13 +82,18 @@ impl ImportReceiptsCommand {
 
         let provider = provider_factory.provider_rw()?;
 
+        let mut total_decoded_receipts = 0;
+
         while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
             // create a new file client from chunk read from file
             info!(target: "reth::cli",
                 "Importing receipt file chunk"
             );
 
-            let ReceiptFileClient { receipts, first_block } = file_client;
+            let ReceiptFileClient { receipts, first_block, total_receipts: total_receipts_chunk } =
+                file_client;
+
+            total_decoded_receipts += total_receipts_chunk;
 
             let bundled_state =
                 BundleStateWithReceipts::new(Default::default(), receipts, first_block);
@@ -98,6 +103,16 @@ impl ImportReceiptsCommand {
                 None,
                 OriginalValuesKnown::Yes,
             )?;
+        }
+
+        let total_imported_receipts = provider.tx_ref().entries::<tables::Receipts>()?;
+
+        if total_imported_receipts != total_decoded_receipts {
+            error!(target: "reth::cli",
+                total_decoded_receipts,
+                total_imported_receipts,
+                "Receipts were partially imported"
+            );
         }
 
         info!(target: "reth::cli", "Receipt file imported");

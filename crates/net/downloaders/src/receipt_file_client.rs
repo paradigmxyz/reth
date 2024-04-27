@@ -15,10 +15,12 @@ use crate::{
 /// order w.r.t. block number.
 #[derive(Debug)]
 pub struct ReceiptFileClient {
-    /// The buffered receipts, read from file.
+    /// The buffered receipts, read from file, as nested lists. One list per block number.
     pub receipts: Receipts,
     /// First (lowest) block number read from file.
     pub first_block: u64,
+    /// Total number of receipts. Count of elements in [`Receipts`] flattened.
+    pub total_receipts: usize,
 }
 
 impl FromReader for ReceiptFileClient {
@@ -110,7 +112,10 @@ impl FromReader for ReceiptFileClient {
                 "Initialized receipt file client"
             );
 
-            Ok((Self { receipts, first_block: first_block.unwrap() }, remaining_bytes))
+            Ok((
+                Self { receipts, first_block: first_block.unwrap(), total_receipts },
+                remaining_bytes,
+            ))
         }
     }
 }
