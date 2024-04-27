@@ -3,13 +3,20 @@
 //! This crate manages and converts Ethereum network entities such as node records, peer IDs, and
 //! Ethereum Node Records (ENRs)
 
-use enr::Enr;
-use reth_rpc_types::NodeRecord;
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 use std::{net::IpAddr, str::FromStr};
 
 // Re-export PeerId for ease of use.
-pub use reth_rpc_types::PeerId;
+pub use enr::Enr;
+pub use reth_rpc_types::{NodeRecord, PeerId};
 
 /// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
 /// uncompressed pubkey.

@@ -33,7 +33,6 @@ mod header;
 mod integer_list;
 mod log;
 mod net;
-//mod peer;
 pub mod proofs;
 mod prune;
 mod receipt;
