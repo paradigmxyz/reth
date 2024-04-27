@@ -104,15 +104,16 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(mut self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         if self.no_state {
-            debug!(target: "reth::cli", "Stages requiring state disabled");
+            info!(target: "reth::cli", "Disabled stages requiring state");
         }
 
         debug!(target: "reth::cli",
-            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking chain import"
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE),
+            "Chunking chain import"
         );
 
         // add network name to data dir
