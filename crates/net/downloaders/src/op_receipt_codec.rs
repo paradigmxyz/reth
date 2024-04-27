@@ -3,7 +3,7 @@
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
-    Address, Bloom, Bytes, ConsensusLog, Log, Receipt, TxType, B256,
+    Address, Bloom, Bytes, Log, Receipt, TxType, B256,
 };
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -60,7 +60,7 @@ struct HackReceipt {
     cumulative_gas_used: u64,
     bloom: Bloom,
     /// <https://github.com/testinprod-io/op-geth/blob/29062eb0fac595eeeddd3a182a25326405c66e05/core/types/log.go#L67-L72>
-    logs: Vec<ConsensusLog>,
+    logs: Vec<Log>,
     tx_hash: B256,
     contract_address: Address,
     gas_used: u64,
@@ -123,7 +123,7 @@ mod test {
         let bloom = rlp.get_next::<Bloom>().expect("bloom");
         println!("Bloom: {:?}", bloom);
 
-        let logs = rlp.get_next::<Vec<ConsensusLog>>().expect("logs");
+        let logs = rlp.get_next::<Vec<Log>>().expect("logs");
         println!("Logs: {:?}", logs);
 
         let tx_hash = rlp.get_next::<B256>().expect("tx hash");
