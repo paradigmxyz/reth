@@ -3,6 +3,7 @@ use crate::{
     pool::size::SizeTracker,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -10,7 +11,6 @@ use std::{
     ops::{Bound::Unbounded, Deref},
     sync::Arc,
 };
-use rustc_hash::FxHashMap;
 
 /// A pool of transactions that are currently parked and are waiting for external changes (e.g.
 /// basefee, ancestor transactions, balance) that eventually move the transaction into the pending

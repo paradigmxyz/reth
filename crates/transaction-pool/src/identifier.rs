@@ -1,6 +1,6 @@
 use reth_primitives::Address;
-use std::collections::HashMap;
 use rustc_hash::FxHashMap;
+use std::collections::HashMap;
 
 /// An internal mapping of addresses.
 ///

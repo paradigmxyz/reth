@@ -25,6 +25,7 @@ use reth_primitives::{
     },
     Address, TxHash, B256,
 };
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -33,7 +34,6 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
-use rustc_hash::FxHashMap;
 use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
