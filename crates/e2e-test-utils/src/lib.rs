@@ -141,7 +141,7 @@ where
     }
 }
 
-// Type aliases for the test context
+// Type aliases
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
 
