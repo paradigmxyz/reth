@@ -1,7 +1,7 @@
 use crate::utils::EthNode;
 use futures::StreamExt;
-use reth::rpc::eth::EthTransactions;
-use reth_e2e_test_utils::setup;
+use reth::{rpc::eth::EthTransactions, tasks::TaskManager};
+use reth_e2e_test_utils::TestNodeGenerator;
 use reth_primitives::{b256, hex, ChainSpec, Genesis};
 use reth_provider::CanonStateSubscriptions;
 use std::sync::Arc;
@@ -9,9 +9,13 @@ use std::sync::Arc;
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (mut nodes, _tasks) = setup(1, custom_chain(), true).await?;
 
-    assert_chain_advances(nodes.pop().unwrap()).await;
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
+
+    let node = TestNodeGenerator::new(custom_chain(), exec).dev().gen().await?;
+
+    assert_chain_advances(node).await;
     Ok(())
 }
 

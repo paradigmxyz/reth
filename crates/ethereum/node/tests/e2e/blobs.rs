@@ -1,14 +1,8 @@
 use std::sync::Arc;
 
-use reth::{
-    args::RpcServerArgs,
-    builder::{NodeBuilder, NodeConfig, NodeHandle},
-    rpc::types::engine::PayloadStatusEnum,
-    tasks::TaskManager,
-};
-use reth_e2e_test_utils::{
-    node::NodeTestContext, transaction::TransactionTestContext, wallet::WalletGenerator,
-};
+use reth::{rpc::types::engine::PayloadStatusEnum, tasks::TaskManager};
+use reth_e2e_test_utils::{transaction::TransactionTestContext, TestNodeGenerator};
+
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{b256, ChainSpecBuilder, Genesis, MAINNET};
 use reth_transaction_pool::TransactionPool;
@@ -29,25 +23,16 @@ async fn can_restore_blob_tx_on_reorg() -> eyre::Result<()> {
             .cancun_activated()
             .build(),
     );
-    let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
-        .with_unused_ports()
-        .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-        .testing_node(exec.clone())
-        .node(EthereumNode::default())
-        .launch()
-        .await?;
 
-    let mut node = NodeTestContext::new(node).await?;
+    let mut node = TestNodeGenerator::<EthereumNode>::new(chain_spec, exec).gen().await?;
 
-    let wallets = WalletGenerator::new(2).gen();
-    let blob_wallet = wallets.first().unwrap();
-    let second_wallet = wallets.last().unwrap();
+    let blob_wallet = node.wallets.pop().unwrap();
+    let second_wallet = node.wallets.pop().unwrap();
 
     // inject normal tx
-    let raw_tx = second_wallet.tx_gen.eip1559().await;
+    let raw_tx = second_wallet.eip1559().await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+
     // build payload with normal tx
     let (payload, attributes) = node.new_payload(eth_payload_attributes).await?;
 
@@ -55,7 +40,7 @@ async fn can_restore_blob_tx_on_reorg() -> eyre::Result<()> {
     node.inner.pool.remove_transactions(vec![tx_hash]);
 
     // build blob tx
-    let blob_tx = blob_wallet.tx_gen.eip4844().await?;
+    let blob_tx = blob_wallet.eip4844().await;
 
     // inject blob tx to the pool
     let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
@@ -85,7 +70,7 @@ async fn can_restore_blob_tx_on_reorg() -> eyre::Result<()> {
     // submit normal payload
     node.engine_api.submit_payload(payload, attributes, PayloadStatusEnum::Valid, vec![]).await?;
 
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // expects the blob tx to be back in the pool
     let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;

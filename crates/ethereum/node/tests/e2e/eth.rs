@@ -4,7 +4,7 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
-use reth_e2e_test_utils::{node::NodeTestContext, setup, wallet::Wallet};
+use reth_e2e_test_utils::{node::NodeTestContext, TestNodeGenerator};
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 use std::sync::Arc;
@@ -13,34 +13,24 @@ use std::sync::Arc;
 async fn can_run_eth_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let (mut nodes, _tasks) = setup::<EthereumNode>(
-        1,
-        Arc::new(
-            ChainSpecBuilder::default()
-                .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
-                .cancun_activated()
-                .build(),
-        ),
-        false,
-    )
-    .await?;
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
 
-    let mut node = nodes.pop().unwrap();
-    let wallet = Wallet::default();
-    let raw_tx = wallet.tx_gen.eip1559().await;
+    let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(genesis)
+            .cancun_activated()
+            .build(),
+    );
 
-    // make the node advance
-    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+    let mut node = TestNodeGenerator::<EthereumNode>::new(chain_spec, exec).gen().await?;
+
+    let raw_tx = node.wallets.first().unwrap().eip1559().await;
 
     // make the node advance
-    let (payload, _) = node.advance_block(vec![], eth_payload_attributes).await?;
-
-    let block_hash = payload.block().hash();
-    let block_number = payload.block().number;
-
-    // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    node.advance(vec![], eth_payload_attributes, raw_tx).await?;
 
     Ok(())
 }
@@ -74,21 +64,10 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
         .await?;
     let mut node = NodeTestContext::new(node).await?;
 
-    // Configure wallet from test mnemonic and create dummy transfer tx
-    let wallet = Wallet::default();
-    let raw_tx = wallet.tx_gen.eip1559().await;
+    let raw_tx = node.wallets.first().unwrap().eip1559().await;
 
     // make the node advance
-    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
-
-    // make the node advance
-    let (payload, _) = node.advance_block(vec![], eth_payload_attributes).await?;
-
-    let block_hash = payload.block().hash();
-    let block_number = payload.block().number;
-
-    // assert the block has been committed to the blockchain
-    node.assert_new_block(tx_hash, block_hash, block_number).await?;
+    node.advance(vec![], eth_payload_attributes, raw_tx).await?;
 
     Ok(())
 }

@@ -1,7 +1,7 @@
 use crate::transaction::TransactionTestContext;
 use alloy_signer::Signer;
 use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
-use reth_primitives::{ChainId, MAINNET};
+use reth_primitives::{Bytes, ChainId, MAINNET};
 
 /// Default test mnemonic used by the accounts in the test genesis allocations
 const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
@@ -74,6 +74,7 @@ impl WalletGenerator {
     }
 }
 /// Helper struct that wraps interaction to a local wallet and a transaction generator
+#[derive(Clone)]
 pub struct Wallet {
     inner: LocalWallet,
     pub tx_gen: TransactionTestContext,
@@ -89,6 +90,20 @@ impl Wallet {
     /// Get the address of the wallet
     pub fn address(&self) -> String {
         self.inner.address().to_string()
+    }
+
+    /// Get an EIP1559 transaction
+    pub async fn eip1559(&self) -> Bytes {
+        self.tx_gen.eip1559().await
+    }
+
+    /// Get an EIP4844 transaction
+    pub async fn eip4844(&self) -> Bytes {
+        self.tx_gen.eip4844().await.unwrap()
+    }
+    /// Get an optimism block info transaction
+    pub async fn optimism_block_info(&self, nonce: u64) -> Bytes {
+        self.tx_gen.optimism_block_info(nonce).await
     }
 }
 
