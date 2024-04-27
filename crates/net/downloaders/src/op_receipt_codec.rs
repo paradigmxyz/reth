@@ -72,6 +72,7 @@ struct HackReceipt {
     fee_scalar: String,
 }
 
+#[allow(clippy::field_reassign_with_default)]
 impl From<HackReceipt> for ReceiptWithBlockNumber {
     fn from(exported_receipt: HackReceipt) -> Self {
         let mut receipt = Receipt::default();

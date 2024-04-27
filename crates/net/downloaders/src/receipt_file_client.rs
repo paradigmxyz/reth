@@ -1,5 +1,4 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-
 use futures::Future;
 use reth_primitives::{Receipt, Receipts};
 use tokio::io::AsyncReadExt;
