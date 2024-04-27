@@ -1,0 +1,27 @@
+[package]
+name = "reth-network-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Network types and utils"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-rpc-types.workspace = true
+reth-primitives.workspace = true
+
+# eth
+enr.workspace = true
+
+# crypto
+secp256k1 = { workspace = true, features = ["global-context", "recovery", "rand"] }
+
+# misc
+serde_with.workspace = true
+

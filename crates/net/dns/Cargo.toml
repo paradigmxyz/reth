@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-net-common.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }

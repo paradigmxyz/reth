@@ -357,9 +357,10 @@ mod tests {
         UnauthedEthStream, UnauthedP2PStream,
     };
     use futures::{Future, SinkExt, StreamExt};
+    use reth_network_types::pk2id;
     use reth_primitives::{
         bytes::{BufMut, Bytes, BytesMut},
-        pk2id, ForkFilter, Hardfork, MAINNET,
+        ForkFilter, Hardfork, MAINNET,
     };
     use secp256k1::{SecretKey, SECP256K1};
     use std::{net::SocketAddr, pin::Pin};
