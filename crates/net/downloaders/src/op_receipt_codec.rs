@@ -123,7 +123,7 @@ mod test {
         let bloom = rlp.get_next::<Bloom>().expect("bloom");
         println!("Bloom: {:?}", bloom);
 
-        let logs = rlp.get_next::<Vec<Log>>().expect("logs");
+        let logs = rlp.get_next::<Vec<ConsensusLog>>().expect("logs");
         println!("Logs: {:?}", logs);
 
         let tx_hash = rlp.get_next::<B256>().expect("tx hash");
