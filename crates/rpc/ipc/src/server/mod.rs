@@ -788,7 +788,7 @@ pub fn dummy_endpoint() -> String {
 mod tests {
     use super::*;
     use crate::client::IpcClientBuilder;
-    use futures::future::{select, Either};
+    use futures::future::select;
     use jsonrpsee::{
         core::{
             client,
