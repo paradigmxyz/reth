@@ -87,11 +87,6 @@ pub struct ImportCommand {
     #[arg(long, verbatim_doc_comment)]
     no_state: bool,
 
-    /// Import OP Mainnet chain below Bedrock. Caution! Flag must be set as env var, since the env
-    /// var is read by another process too, in order to make below Bedrock import work.
-    #[arg(long, verbatim_doc_comment, env = "OP_RETH_MAINNET_BELOW_BEDROCK")]
-    op_mainnet_below_bedrock: bool,
-
     /// Chunk byte length.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
@@ -111,11 +106,6 @@ impl ImportCommand {
     /// Execute `import` command
     pub async fn execute(mut self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
-
-        if self.op_mainnet_below_bedrock {
-            self.no_state = true;
-            debug!(target: "reth::cli", "Importing OP mainnet below bedrock");
-        }
 
         if self.no_state {
             debug!(target: "reth::cli", "Stages requiring state disabled");
