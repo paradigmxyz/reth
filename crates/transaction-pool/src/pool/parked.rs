@@ -3,7 +3,6 @@ use crate::{
     pool::size::SizeTracker,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
-use fnv::FnvHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -11,6 +10,7 @@ use std::{
     ops::{Bound::Unbounded, Deref},
     sync::Arc,
 };
+use rustc_hash::FxHashMap;
 
 /// A pool of transactions that are currently parked and are waiting for external changes (e.g.
 /// basefee, ancestor transactions, balance) that eventually move the transaction into the pending
@@ -40,7 +40,7 @@ pub struct ParkedPool<T: ParkedOrd> {
     last_sender_submission: BTreeSet<SubmissionSenderId>,
     /// Keeps track of the number of transactions in the pool by the sender and the last submission
     /// id.
-    sender_transaction_count: FnvHashMap<SenderId, SenderTransactionCount>,
+    sender_transaction_count: FxHashMap<SenderId, SenderTransactionCount>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`PoolTransaction::size`].
