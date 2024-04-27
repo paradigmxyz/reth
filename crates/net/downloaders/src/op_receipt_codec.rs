@@ -3,7 +3,8 @@
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
-    Address, Bloom, Bytes, Log, Receipt, TxType, B256,
+    revm_primitives::LogData,
+    Address, Log, Receipt, TxType, B256,
 };
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -38,7 +39,7 @@ impl Decoder for ReceiptFileCodec {
             HackReceipt::decode(buf_slice).map_err(|err| Self::Error::Rlp(err, src.to_vec()))?;
         src.advance(src.len() - buf_slice.len());
 
-        Ok(Some(receipt.into()))
+        Ok(Some(receipt.try_into().map_err(FileClientError::from)?))
     }
 }
 
@@ -51,21 +52,48 @@ impl Encoder<Receipt> for ReceiptFileCodec {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+struct GethLog {
+    // Consensus fields:
+    // address of the contract that generated the event
+    address: Address,
+    // list of topics provided by the contract.
+    topics: Vec<B256>,
+    // supplied by the contract, usually ABI-encoded
+    data: Vec<u8>,
+
+    // Derived fields. These fields are filled in by the node
+    // but not secured by consensus.
+    // block in which the transaction was included
+    block_number: u64,
+    // hash of the transaction
+    transaction_hash: B256,
+    // index of the transaction in the block
+    transaction_index: u32,
+    // hash of the block in which the transaction was included
+    block_hash: B256,
+    // index of the log in the block
+    log_index: u32,
+
+    // The Removed field is true if this log was reverted due to a chain reorganisation.
+    // You must pay attention to this field if you receive logs through a filter query.
+    removed: bool,
+}
 /// See <https://github.com/testinprod-io/op-geth/pull/1>
-#[derive(Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 struct HackReceipt {
-    tx_type: TxType,
-    post_state: Bytes,
+    tx_type: u8,
+    post_state: Vec<u8>,
     status: u64,
     cumulative_gas_used: u64,
-    bloom: Bloom,
-    logs: Vec<Log>,
+    bloom: Vec<u8>,
+    logs: Vec<GethLog>,
     tx_hash: B256,
     contract_address: Address,
     gas_used: u64,
     block_hash: B256,
     block_number: u64,
-    transaction_index: u64,
+    transaction_index: u32,
     l1_gas_price: u64,
     l1_gas_used: u64,
     l1_fee: u64,
@@ -73,15 +101,25 @@ struct HackReceipt {
 }
 
 #[allow(clippy::field_reassign_with_default)]
-impl From<HackReceipt> for ReceiptWithBlockNumber {
-    fn from(exported_receipt: HackReceipt) -> Self {
+impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
+    type Error = &'static str;
+    fn try_from(exported_receipt: HackReceipt) -> Result<Self, Self::Error> {
         let mut receipt = Receipt::default();
-        receipt.tx_type = exported_receipt.tx_type;
+        receipt.tx_type = TxType::try_from(exported_receipt.tx_type.to_be_bytes()[0])?;
         receipt.success = exported_receipt.status != 0;
         receipt.cumulative_gas_used = exported_receipt.cumulative_gas_used;
-        receipt.logs = exported_receipt.logs;
 
-        Self { receipt, number: exported_receipt.block_number }
+        let mut logs = Vec::with_capacity(exported_receipt.logs.len());
+        for GethLog { address, topics, data, .. } in exported_receipt.logs {
+            logs.push(Log {
+                address,
+                data: LogData::new(topics, data.into()).ok_or("cannot convert to log data")?,
+            })
+        }
+
+        receipt.logs = logs;
+
+        Ok(Self { receipt, number: exported_receipt.block_number })
     }
 }
 

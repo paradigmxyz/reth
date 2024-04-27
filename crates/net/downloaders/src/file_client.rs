@@ -58,6 +58,16 @@ pub enum FileClientError {
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
     #[error("{0}")]
     Rlp(alloy_rlp::Error, Vec<u8>),
+
+    /// Custom error message.
+    #[error("{0}")]
+    Custom(&'static str),
+}
+
+impl From<&'static str> for FileClientError {
+    fn from(value: &'static str) -> Self {
+        Self::Custom(value)
+    }
 }
 
 impl FileClient {
