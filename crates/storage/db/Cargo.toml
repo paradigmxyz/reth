@@ -37,7 +37,7 @@ tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
 eyre.workspace = true
 paste.workspace = true
-rustc-hash = "1.1.0"
+rustc-hash.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
