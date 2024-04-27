@@ -1858,6 +1858,7 @@ mod tests {
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_codecs::Compact;
+    #[cfg(feature = "secp256k1")]
     use secp256k1::{KeyPair, Secp256k1};
     use std::str::FromStr;
 
@@ -2138,6 +2139,7 @@ mod tests {
         assert_eq!(data.as_slice(), b.as_slice());
     }
 
+    #[cfg(feature = "secp256k1")]
     proptest::proptest! {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
 

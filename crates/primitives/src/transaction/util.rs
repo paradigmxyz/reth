@@ -66,6 +66,11 @@ pub(crate) mod secp256k1 {
     /// This does not ensure that the `s` value in the signature is low, and _just_ wraps the
     /// underlying secp256k1 library.
     pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
+        #[cfg(target_os = "zkvm")]
+        {
+            let pubkey = sp1_precompiles::secp256k1::ecrecover(sig, msg).unwrap();
+            return Ok(public_key_to_address(&pubkey));
+        }
         let mut recid = sig[64];
         let sig = &sig[0..64];
         // parse signature

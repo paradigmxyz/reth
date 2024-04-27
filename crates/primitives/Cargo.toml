@@ -36,6 +36,7 @@ secp256k1 = { workspace = true, features = [
     "rand",
 ], optional = true }
 k256 = { workspace = true, features = ["ecdsa"] }
+sp1-precompiles = { git = "https://github.com/succinctlabs/sp1.git" }
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
