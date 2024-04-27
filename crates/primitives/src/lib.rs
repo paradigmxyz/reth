@@ -33,7 +33,6 @@ mod header;
 mod integer_list;
 mod log;
 mod net;
-mod peer;
 pub mod proofs;
 mod prune;
 mod receipt;
@@ -77,7 +76,6 @@ pub use net::{
     NodeRecordParseError, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,
 };
-pub use peer::{id2pk, pk2id, AnyNode, PeerId, WithPeerId};
 pub use prune::{
     PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneModes, PruneProgress,
     PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,

@@ -29,6 +29,7 @@ members = [
     "crates/net/nat/",
     "crates/net/network/",
     "crates/net/network-api/",
+    "crates/net/types/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
@@ -223,7 +224,6 @@ reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-node-builder = { path = "crates/node-builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
-reth-node-events = { path = "crates/node/events" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-node-core = { path = "crates/node-core" }
@@ -249,6 +249,7 @@ reth-net-common = { path = "crates/net/common" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-types = { path = "crates/net/types" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }
@@ -273,6 +274,7 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
+reth-node-events = { path = "crates/node/events" }
 
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }

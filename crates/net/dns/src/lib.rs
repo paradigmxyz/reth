@@ -22,7 +22,8 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_primitives::{pk2id, EnrForkIdEntry, ForkId, NodeRecord};
+use reth_network_types::pk2id;
+use reth_primitives::{EnrForkIdEntry, ForkId, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{

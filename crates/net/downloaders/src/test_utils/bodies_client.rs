@@ -3,7 +3,8 @@ use reth_interfaces::p2p::{
     download::DownloadClient,
     priority::Priority,
 };
-use reth_primitives::{BlockBody, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{BlockBody, B256};
 use std::{
     collections::HashMap,
     fmt::Debug,
