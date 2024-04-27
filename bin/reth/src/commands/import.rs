@@ -41,7 +41,7 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Stages that require state.
 const STATE_STAGES: &[StageId] = &[
@@ -146,6 +146,9 @@ impl ImportCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
+        let mut total_decoded_blocks = 0;
+        let mut total_decoded_txns = 0;
+
         while let Some(file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
@@ -154,6 +157,9 @@ impl ImportCommand {
 
             let tip = file_client.tip().ok_or(eyre::eyre!("file client has no tip"))?;
             info!(target: "reth::cli", "Chain file chunk read");
+
+            total_decoded_blocks += file_client.headers_len();
+            total_decoded_txns += file_client.bodies_len();
 
             let (mut pipeline, events) = self
                 .build_import_pipeline(
@@ -195,12 +201,24 @@ impl ImportCommand {
 
         let provider = provider_factory.provider()?;
 
-        let total_blocks = provider.tx_ref().entries::<tables::Headers>()?;
-        let total_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+        let total_imported_blocks = provider.tx_ref().entries::<tables::Headers>()?;
+        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+
+        if total_decoded_blocks != total_imported_blocks ||
+            total_decoded_txns != total_imported_txns
+        {
+            error!(target: "reth::cli",
+                total_decoded_blocks,
+                total_imported_blocks,
+                total_decoded_txns,
+                total_imported_txns,
+                "Chain was partially imported"
+            );
+        }
 
         info!(target: "reth::cli",
-            total_blocks,
-            total_txns,
+            total_imported_blocks,
+            total_imported_txns,
             "Chain file imported"
         );
 
