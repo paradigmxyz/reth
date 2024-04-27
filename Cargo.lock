@@ -6392,6 +6392,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "schnellru",
+ "testing-utils",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -9162,6 +9163,15 @@ dependencies = [
  "serde",
  "sha1",
  "test-fuzz-internal",
+]
+
+[[package]]
+name = "testing-utils"
+version = "0.2.0-beta.6"
+dependencies = [
+ "alloy-genesis",
+ "reth-primitives",
+ "secp256k1",
 ]
 
 [[package]]

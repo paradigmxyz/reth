@@ -61,6 +61,7 @@ reth-ethereum-engine-primitives.workspace = true
 reth-config.workspace = true
 
 assert_matches.workspace = true
+testing-utils.workspace = true
 
 [features]
 optimism = [
