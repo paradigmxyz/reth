@@ -66,8 +66,6 @@ revm-primitives = { workspace = true, features = ["arbitrary"] }
 nybbles = { workspace = true, features = ["arbitrary"] }
 alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
-
-arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 proptest.workspace = true
 proptest-derive.workspace = true
