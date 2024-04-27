@@ -153,19 +153,14 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                         );
                     }
 
-                    let key = RawKey::<TxHash>::from_vec(hash);
-                    let res = if append_only {
-                        txhash_cursor.append(key, RawValue::<TxNumber>::from_vec(number))
-                    } else {
-                        txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))
-                    };
-
                     #[cfg(feature = "optimism")]
                     // below bedrock, transaction nonces can be replayed.
                     //
                     // for importing chain segment up until bedrock, end block may be bedrock block.
                     if !provider.chain_spec().is_bedrock_active_at_block(end_block - 1) {
-                        if let Err(reth_db::DatabaseError::Write(ref e)) = res {
+                        if let Err(reth_db::DatabaseError::Write(ref e)) =
+                            txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))
+                        {
                             if e.table_name == <tables::RawTable<tables::TransactionHashNumbers> as reth_db::table::Table>::NAME && e.info.code == reth_db::mdbx::Error::KeyExist.to_err_code() {
 
                                 debug!(target: "sync::stages::transaction_lookup",
@@ -180,7 +175,12 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                         }
                     }
 
-                    res?
+                    let key = RawKey::<TxHash>::from_vec(hash);
+                    if append_only {
+                        txhash_cursor.append(key, RawValue::<TxNumber>::from_vec(number))?
+                    } else {
+                        txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))?
+                    }
                 }
                 break
             }
