@@ -1,6 +1,6 @@
 //! Codec for reading raw receipts from a file.
 
-use alloy_rlp::{Decodable, Encodable, Rlp};
+use alloy_rlp::{Decodable, Encodable, Header, Rlp};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
     Address, Bloom, Bytes, Log, Receipt, TxType, B256,
@@ -102,17 +102,23 @@ impl Decodable for HackReceipt {
             "decoding buffer"
         );
 
-        let header = &mut &alloy_rlp::Header::decode(buf).expect("header");
+        let Header { list, payload_length } = Header::decode(buf).expect("header");
 
-        if !header.list {
+        if !list {
             return Err(alloy_rlp::Error::Custom("expected list"))
         }
 
-        if buf.len() < header.payload_length {
+        if buf.len() < payload_length {
             return Err(alloy_rlp::Error::InputTooShort)
         }
 
-        let mut rlp = Rlp::new(&buf).expect("rlp");
+        trace!(target: "downloaders::file",
+            buf_len=buf.len(),
+            payload_length,
+            "decoding receipt"
+        );
+
+        let mut rlp = Rlp::new(buf).expect("rlp");
 
         let tx_type = rlp
             .get_next::<u8>()
