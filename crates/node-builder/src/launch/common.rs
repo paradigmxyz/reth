@@ -22,7 +22,7 @@ use reth_prune::PrunerBuilder;
 use reth_rpc::JwtSecret;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{error, info};
+use reth_tracing::tracing::{error, info, warn};
 
 /// Reusable setup for launching a node.
 ///
@@ -65,6 +65,19 @@ impl LaunchContext {
 
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
+
+        // Save prune config to the toml file if node is a full node.
+        if toml_config.prune.is_none() {
+            if let Some(prune_config) = config.prune_config() {
+                toml_config.prune = Some(prune_config);
+                //Save the prune config to the toml file
+                info!(target: "reth::cli", "Saving prune config to toml file");
+                confy::store_path(&config_path, &toml_config)
+                    .wrap_err_with(|| format!("Could not save config file {config_path:?}"))?;
+            }
+        } else if config.prune_config().is_none() {
+            warn!(target: "reth::cli", "Prune configs present in config file but --full not provided. Running as a Full node");
+        }
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
