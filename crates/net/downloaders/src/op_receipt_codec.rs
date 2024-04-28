@@ -1,6 +1,6 @@
 //! Codec for reading raw receipts from a file.
 
-use alloy_rlp::{Decodable, Encodable, Header, Rlp};
+use alloy_rlp::{Decodable, Encodable, Header, Rlp, RlpDecodableWrapper};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
     Address, Bloom, Bytes, Log, Receipt, TxType, B256,
@@ -53,6 +53,9 @@ impl Encoder<Receipt> for ReceiptFileCodec {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, RlpDecodableWrapper)]
+struct Logs(Vec<Log>);
+
 /// See <https://github.com/testinprod-io/op-geth/pull/1>
 #[derive(Debug, PartialEq, Eq)]
 pub struct HackReceipt {
@@ -62,7 +65,7 @@ pub struct HackReceipt {
     cumulative_gas_used: u64,
     bloom: Bloom,
     /// <https://github.com/testinprod-io/op-geth/blob/29062eb0fac595eeeddd3a182a25326405c66e05/core/types/log.go#L67-L72>
-    logs: Vec<Log>,
+    logs: Logs,
     tx_hash: B256,
     contract_address: Address,
     gas_used: u64,
@@ -87,7 +90,7 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
             tx_type: TxType::try_from(tx_type.to_be_bytes()[0])?,
             success: status != 0,
             cumulative_gas_used,
-            logs,
+            logs: logs.0,
             ..Default::default()
         };
 
@@ -103,6 +106,9 @@ impl Decodable for HackReceipt {
         );
 
         let Header { mut list, mut payload_length } = Header::decode(buf).expect("header");
+        let Header { mut list, mut payload_length } = Header::decode(buf).expect("header");
+
+        println!("first p len {payload_length}");
 
         // op-geth exports an receipt per block, including genesis block
         if payload_length == 0 {
@@ -110,6 +116,8 @@ impl Decodable for HackReceipt {
 
             list = next_header.list;
             payload_length = next_header.payload_length;
+
+            println!("second p len {payload_length}");
         }
 
         if !list {
@@ -126,87 +134,39 @@ impl Decodable for HackReceipt {
             "decoding receipt"
         );
 
-        let mut rlp = Rlp::new(buf).expect("rlp");
+        //let mut rlp = Rlp::new(buf).expect("rlp");
 
-        let tx_type = rlp
-            .get_next::<u8>()
-            .expect("tx type")
-            .ok_or(alloy_rlp::Error::Custom("missing 'tx type'"))?;
+        let tx_type = u8::decode(buf).expect("tx type");
 
-        let post_state = rlp
-            .get_next::<Bytes>()
-            .expect("post state")
-            .ok_or(alloy_rlp::Error::Custom("missing 'post state'"))?;
+        let post_state = Bytes::decode(buf).expect("post state");
 
-        let status = rlp
-            .get_next::<u64>()
-            .expect("status")
-            .ok_or(alloy_rlp::Error::Custom("missing 'status'"))?;
+        let status = u64::decode(buf).expect("status");
 
-        let cumulative_gas_used = rlp
-            .get_next::<u64>()
-            .expect("cum gas")
-            .ok_or(alloy_rlp::Error::Custom("missing 'cumulative gas used'"))?;
+        let cumulative_gas_used = u64::decode(buf).expect("cumulative gas used");
 
-        let bloom = rlp
-            .get_next::<Bloom>()
-            .expect("bloom")
-            .ok_or(alloy_rlp::Error::Custom("missing 'bloom'"))?;
+        let bloom = Bloom::decode(buf).expect("bloom");
 
-        let logs = rlp
-            .get_next::<Vec<Log>>()
-            .expect("logs")
-            .ok_or(alloy_rlp::Error::Custom("missing 'logs'"))?;
+        let logs = Logs::decode(buf).expect("logs");
 
-        let tx_hash = rlp
-            .get_next::<B256>()
-            .expect("tx hash")
-            .ok_or(alloy_rlp::Error::Custom("missing 'tx hash'"))?;
+        let tx_hash = B256::decode(buf).expect("tx hash");
 
-        let contract_address = rlp
-            .get_next::<Address>()
-            .expect("contract address")
-            .ok_or(alloy_rlp::Error::Custom("missing 'contract address'"))?;
+        let contract_address = Address::decode(buf).expect("contract address");
 
-        let gas_used = rlp
-            .get_next::<u64>()
-            .expect("gas")
-            .ok_or(alloy_rlp::Error::Custom("missing 'gas used'"))?;
+        let gas_used = u64::decode(buf).expect("gas");
 
-        let block_hash = rlp
-            .get_next::<B256>()
-            .expect("block hash")
-            .ok_or(alloy_rlp::Error::Custom("missing 'block hash'"))?;
+        let block_hash = B256::decode(buf).expect("block hash");
 
-        let block_number = rlp
-            .get_next::<u64>()
-            .expect("number")
-            .ok_or(alloy_rlp::Error::Custom("missing 'block number'"))?;
+        let block_number = u64::decode(buf).expect("number");
 
-        let transaction_index = rlp
-            .get_next::<u32>()
-            .expect("tx index")
-            .ok_or(alloy_rlp::Error::Custom("missing 'tx index'"))?;
+        let transaction_index = u32::decode(buf).expect("tx index");
 
-        let l1_gas_price = rlp
-            .get_next::<u64>()
-            .expect("l1 gas price")
-            .ok_or(alloy_rlp::Error::Custom("missing 'l1 gas price'"))?;
+        let l1_gas_price = u64::decode(buf).expect("l1 gas price");
 
-        let l1_gas_used = rlp
-            .get_next::<u64>()
-            .expect("l1 gas used")
-            .ok_or(alloy_rlp::Error::Custom("missing 'l1 gas used'"))?;
+        let l1_gas_used = u64::decode(buf).expect("l1 gas used");
 
-        let l1_fee = rlp
-            .get_next::<u64>()
-            .expect("l1 fee")
-            .ok_or(alloy_rlp::Error::Custom("missing 'l1 fee'"))?;
+        let l1_fee = u64::decode(buf).expect("l1 fee");
 
-        let fee_scalar = rlp
-            .get_next::<String>()
-            .expect("fee scalar")
-            .ok_or(alloy_rlp::Error::Custom("missing 'fee scalar'"))?;
+        let fee_scalar = String::decode(buf).expect("fee scalar");
 
         let receipt = HackReceipt {
             tx_type,
@@ -242,10 +202,12 @@ mod test {
 
     use super::*;
 
+    const HACK_RECEIPT_ENCODED_1_AND_2: &[u8] = &hex!("f9030ff9030c8080018303183db9010000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000f90197f89b948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff863a00109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac60271a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2da000000000000000000000000000000000000000000000000000000000618d8837f89c948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff884a092e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68ca000000000000000000000000000000000000000000000000000000000d0e3ebf0a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d80f85a948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff842a0fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234fa000000000000000000000000000000000000000000000007edc6ca0bb6834800080a05e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a9400000000000000000000000000000000000000008303183da0bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e8754530180018212c2821c2383312e35f9030ff9030c8080018303183db9010000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000f90197f89b948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff863a00109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac60271a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2da000000000000000000000000000000000000000000000000000000000618d8837f89c948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff884a092e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68ca000000000000000000000000000000000000000000000000000000000d0e3ebf0a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d80f85a948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff842a0fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234fa000000000000000000000000000000000000000000000007edc6ca0bb6834800080a05e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a9400000000000000000000000000000000000000008303183da0bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e8754530180018212c2821c2383312e35f90271f9026e8080018301c60db9010000080000000200000000000000000008000000000000000000000100008000000000000000000000000000000000000000000000000000000000400000000000100000000000000000000000020000000000000000000000000000000000004000000000000000000000000000000000400000000400000000000000100000000000000000000000000000020000000000000000000000000000000000000000100000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000008400000000000000000010000000000000000020000000020000000000000000000000000000000000000000000002000f8faf89c948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff884a092e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68ca000000000000000000000000000000000000000000000000000000000d0ea0e40a00000000000000000000000000000000000000000000000000000000000014218a0000000000000000000000000e5e7492282fd1e3bfac337a0beccd29b15b7b24080f85a948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff842a0fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234fa000000000000000000000000000000000000000000000007eda7867e0c7d4800080a0af6ed8a6864d44989adc47c84f6fe0aeb1819817505c42cde6cbbcd5e14dd3179400000000000000000000000000000000000000008301c60da045fd6ce41bb8ebb2bccdaa92dd1619e287704cb07722039901a7eba63dea1d130280018212c2821c2383312e35");
+
     // RLP encoded OP mainnet `HackReceipt` of tx in block 1
     const HACK_RECEIPT_ENCODED: [u8; 786] = hex!("f9030ff9030c8080018303183db9010000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000f90197f89b948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff863a00109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac60271a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2da000000000000000000000000000000000000000000000000000000000618d8837f89c948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff884a092e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68ca000000000000000000000000000000000000000000000000000000000d0e3ebf0a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d80f85a948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff842a0fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234fa000000000000000000000000000000000000000000000007edc6ca0bb6834800080a05e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a9400000000000000000000000000000000000000008303183da0bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e8754530180018212c2821c2383312e35");
 
-    // Can't construct whole `ReceiptWithBlockNumber` as a constant due to `Vec<Log>`
+    // Can't construct whole `ReceiptWithBlockNumber` as a constant due to `Logs`
 
     const TX_TYPE: TxType = TxType::Legacy;
 
@@ -327,9 +289,12 @@ mod test {
             post_state: Bytes::default(),
             status: SUCCESS as u64,
             cumulative_gas_used: CUMULATIVE_GAS_USED,
-            bloom: Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000")), logs: vec![log_1(), log_2(), log_3()],
+            bloom: Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000")),
+            logs: Logs(vec![log_1(), log_2(), log_3()]),
             tx_hash: B256::from(hex!("5e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a")), contract_address: Address::from(hex!("0000000000000000000000000000000000000000")), gas_used: 202813,
-            block_hash: B256::from(hex!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453")), block_number: 1, transaction_index: 0,
+            block_hash: B256::from(hex!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453")),
+            block_number: BLOCK_NUMBER,
+            transaction_index: 0,
             l1_gas_price: 1,
             l1_gas_used: 4802,
             l1_fee: 7203,
@@ -358,14 +323,21 @@ mod test {
             number: BLOCK_NUMBER,
         };
 
-        let mut encoded = BytesMut::from(&HACK_RECEIPT_ENCODED[..]);
+        let encoded = &mut BytesMut::from(&HACK_RECEIPT_ENCODED_1_AND_2[..]);
+        println!("encoded {}", encoded.len());
 
         let mut codec = ReceiptFileCodec;
 
         // test
 
-        let decoded_hack_receipt = codec.decode(&mut encoded).unwrap().unwrap();
+        let decoded_hack_receipt = codec.decode(encoded).unwrap().unwrap();
 
         assert_eq!(decoded, decoded_hack_receipt);
+
+        let second = codec.decode(encoded).unwrap().unwrap();
+
+        println!("encoded {}", encoded.len());
+
+        println!("second {:?}", second);
     }
 }
