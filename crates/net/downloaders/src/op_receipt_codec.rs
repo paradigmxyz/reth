@@ -97,9 +97,9 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
 
 impl Decodable for HackReceipt {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let buf = &mut &alloy_rlp::Header::decode_bytes(buf, true)?[..];
+        let buf = &mut &alloy_rlp::Header::decode_bytes(buf, true).expect("header")[..];
 
-        let mut rlp = Rlp::new(buf)?;
+        let mut rlp = Rlp::new(buf).expect("rlp");
 
         let tx_type = rlp
             .get_next::<u8>()
