@@ -1,5 +1,5 @@
 [package]
-name = "testing-utils"
+name = "reth-testing-utils"
 description = "Testing utils for reth."
 version.workspace = true
 edition.workspace = true

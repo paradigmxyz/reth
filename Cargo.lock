@@ -6389,10 +6389,10 @@ dependencies = [
  "reth-stages-api",
  "reth-static-file",
  "reth-tasks",
+ "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
  "schnellru",
- "testing-utils",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -7773,6 +7773,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-futures",
+]
+
+[[package]]
+name = "reth-testing-utils"
+version = "0.2.0-beta.6"
+dependencies = [
+ "alloy-genesis",
+ "reth-primitives",
+ "secp256k1",
 ]
 
 [[package]]
@@ -9163,15 +9172,6 @@ dependencies = [
  "serde",
  "sha1",
  "test-fuzz-internal",
-]
-
-[[package]]
-name = "testing-utils"
-version = "0.2.0-beta.6"
-dependencies = [
- "alloy-genesis",
- "reth-primitives",
- "secp256k1",
 ]
 
 [[package]]
