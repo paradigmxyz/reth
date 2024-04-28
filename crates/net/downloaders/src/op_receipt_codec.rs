@@ -95,54 +95,89 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
 
 impl Decodable for HackReceipt {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let buf = &mut &alloy_rlp::Header::decode_bytes(buf, true).unwrap()[..];
+        let buf = &mut &alloy_rlp::Header::decode_bytes(buf, true)?[..];
 
         let mut rlp = Rlp::new(buf)?;
 
-        let tx_type = rlp.get_next::<u8>()?.ok_or(alloy_rlp::Error::Custom("missing 'tx type'"))?;
+        let tx_type = rlp
+            .get_next::<u8>()
+            .expect("tx type")
+            .ok_or(alloy_rlp::Error::Custom("missing 'tx type'"))?;
 
-        let post_state =
-            rlp.get_next::<Bytes>()?.ok_or(alloy_rlp::Error::Custom("missing 'post state'"))?;
+        let post_state = rlp
+            .get_next::<Bytes>()
+            .expect("post state")
+            .ok_or(alloy_rlp::Error::Custom("missing 'post state'"))?;
 
-        let status = rlp.get_next::<u64>()?.ok_or(alloy_rlp::Error::Custom("missing 'status'"))?;
+        let status = rlp
+            .get_next::<u64>()
+            .expect("status")
+            .ok_or(alloy_rlp::Error::Custom("missing 'status'"))?;
 
         let cumulative_gas_used = rlp
-            .get_next::<u64>()?
+            .get_next::<u64>()
+            .expect("cum gas")
             .ok_or(alloy_rlp::Error::Custom("missing 'cumulative gas used'"))?;
 
-        let bloom = rlp.get_next::<Bloom>()?.ok_or(alloy_rlp::Error::Custom("missing 'bloom'"))?;
+        let bloom = rlp
+            .get_next::<Bloom>()
+            .expect("bloom")
+            .ok_or(alloy_rlp::Error::Custom("missing 'bloom'"))?;
 
-        let logs = rlp.get_next::<Vec<Log>>()?.ok_or(alloy_rlp::Error::Custom("missing 'logs'"))?;
+        let logs = rlp
+            .get_next::<Vec<Log>>()
+            .expect("logs")
+            .ok_or(alloy_rlp::Error::Custom("missing 'logs'"))?;
 
-        let tx_hash =
-            rlp.get_next::<B256>()?.ok_or(alloy_rlp::Error::Custom("missing 'tx hash'"))?;
+        let tx_hash = rlp
+            .get_next::<B256>()
+            .expect("tx hash")
+            .ok_or(alloy_rlp::Error::Custom("missing 'tx hash'"))?;
 
         let contract_address = rlp
-            .get_next::<Address>()?
+            .get_next::<Address>()
+            .expect("contract address")
             .ok_or(alloy_rlp::Error::Custom("missing 'contract address'"))?;
 
-        let gas_used =
-            rlp.get_next::<u64>()?.ok_or(alloy_rlp::Error::Custom("missing 'gas used'"))?;
+        let gas_used = rlp
+            .get_next::<u64>()
+            .expect("gas")
+            .ok_or(alloy_rlp::Error::Custom("missing 'gas used'"))?;
 
-        let block_hash =
-            rlp.get_next::<B256>()?.ok_or(alloy_rlp::Error::Custom("missing 'block hash'"))?;
+        let block_hash = rlp
+            .get_next::<B256>()
+            .expect("block hash")
+            .ok_or(alloy_rlp::Error::Custom("missing 'block hash'"))?;
 
-        let block_number =
-            rlp.get_next::<u64>()?.ok_or(alloy_rlp::Error::Custom("missing 'block number'"))?;
+        let block_number = rlp
+            .get_next::<u64>()
+            .expect("number")
+            .ok_or(alloy_rlp::Error::Custom("missing 'block number'"))?;
 
-        let transaction_index =
-            rlp.get_next::<u32>()?.ok_or(alloy_rlp::Error::Custom("missing 'tx index'"))?;
+        let transaction_index = rlp
+            .get_next::<u32>()
+            .expect("tx index")
+            .ok_or(alloy_rlp::Error::Custom("missing 'tx index'"))?;
 
-        let l1_gas_price =
-            rlp.get_next::<u64>()?.ok_or(alloy_rlp::Error::Custom("missing 'l1 gas price'"))?;
+        let l1_gas_price = rlp
+            .get_next::<u64>()
+            .expect("l1 gas price")
+            .ok_or(alloy_rlp::Error::Custom("missing 'l1 gas price'"))?;
 
-        let l1_gas_used =
-            rlp.get_next::<u64>()?.ok_or(alloy_rlp::Error::Custom("missing 'l1 gas used'"))?;
+        let l1_gas_used = rlp
+            .get_next::<u64>()
+            .expect("l1 gas used")
+            .ok_or(alloy_rlp::Error::Custom("missing 'l1 gas used'"))?;
 
-        let l1_fee = rlp.get_next::<u64>()?.ok_or(alloy_rlp::Error::Custom("missing 'l1 fee'"))?;
+        let l1_fee = rlp
+            .get_next::<u64>()
+            .expect("l1 fee")
+            .ok_or(alloy_rlp::Error::Custom("missing 'l1 fee'"))?;
 
-        let fee_scalar =
-            rlp.get_next::<String>()?.ok_or(alloy_rlp::Error::Custom("missing 'fee scalar'"))?;
+        let fee_scalar = rlp
+            .get_next::<String>()
+            .expect("fee scalar")
+            .ok_or(alloy_rlp::Error::Custom("missing 'fee scalar'"))?;
 
         Ok(HackReceipt {
             tx_type,
@@ -252,16 +287,16 @@ mod test {
     #[test]
     fn decode_hack_receipt() {
         let receipt = HackReceipt {
-            tx_type: TX_TYPE as u8, 
-            post_state: Bytes::default(), 
-            status: SUCCESS as u64, 
+            tx_type: TX_TYPE as u8,
+            post_state: Bytes::default(),
+            status: SUCCESS as u64,
             cumulative_gas_used: CUMULATIVE_GAS_USED,
             bloom: Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000")), logs: vec![log_1(), log_2(), log_3()],
             tx_hash: B256::from(hex!("5e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a")), contract_address: Address::from(hex!("0000000000000000000000000000000000000000")), gas_used: 202813,
             block_hash: B256::from(hex!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453")), block_number: 1, transaction_index: 0,
             l1_gas_price: 1,
-            l1_gas_used: 4802, 
-            l1_fee: 7203, 
+            l1_gas_used: 4802,
+            l1_fee: 7203,
             fee_scalar: String::from("1.5") 
         };
 
