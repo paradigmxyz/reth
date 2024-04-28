@@ -102,7 +102,15 @@ impl Decodable for HackReceipt {
             "decoding buffer"
         );
 
-        let Header { list, payload_length } = Header::decode(buf).expect("header");
+        let Header { mut list, mut payload_length } = Header::decode(buf).expect("header");
+
+        // op-geth exports an receipt per block, including genesis block
+        if payload_length == 0 {
+            let next_header = Header::decode(buf).expect("header");
+
+            list = next_header.list;
+            payload_length = next_header.payload_length;
+        }
 
         if !list {
             return Err(alloy_rlp::Error::Custom("expected list"))
