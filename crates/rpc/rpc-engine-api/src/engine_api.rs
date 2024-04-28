@@ -11,7 +11,7 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES
+    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
