@@ -580,11 +580,21 @@ where
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
-struct PendingPayload<P> {
+pub struct PendingPayload<P> {
     /// The marker to cancel the job on drop
     _cancel: Cancelled,
     /// The channel to send the result to.
     payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
+}
+
+impl<P> PendingPayload<P> {
+    /// Constructs a `PendingPayload` future.
+    pub fn new(
+        cancel: Cancelled,
+        payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
+    ) -> Self {
+        Self { _cancel: cancel, payload }
+    }
 }
 
 impl<P> Future for PendingPayload<P> {
