@@ -2846,29 +2846,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "examples"
-version = "0.0.0"
-dependencies = [
- "async-trait",
- "eyre",
- "futures",
- "reth-beacon-consensus",
- "reth-blockchain-tree",
- "reth-db",
- "reth-network",
- "reth-network-api",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-rpc-builder",
- "reth-rpc-types",
- "reth-rpc-types-compat",
- "reth-tasks",
- "reth-transaction-pool",
- "tokio",
-]
-
-[[package]]
 name = "exex-minimal"
 version = "0.0.0"
 dependencies = [
@@ -5064,6 +5041,17 @@ dependencies = [
  "pin-project",
  "smallvec",
  "unsigned-varint 0.7.2",
+]
+
+[[package]]
+name = "network"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth-network",
+ "reth-provider",
+ "tokio",
 ]
 
 [[package]]
