@@ -53,7 +53,7 @@ impl Encoder<Receipt> for ReceiptFileCodec {
 
 /// See <https://github.com/testinprod-io/op-geth/pull/1>
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct HackReceipt {
+pub struct HackReceipt {
     tx_type: u8,
     post_state: Bytes,
     status: u64,

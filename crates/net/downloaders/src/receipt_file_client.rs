@@ -26,7 +26,7 @@ pub struct ReceiptFileClient {
 impl FromReader for ReceiptFileClient {
     type Error = FileClientError;
 
-    /// Initialize the [`FileClient`] from bytes that have been read from file.
+    /// Initialize the [`ReceiptFileClient`] from bytes that have been read from file.
     fn from_reader<B>(
         reader: B,
         num_bytes: u64,
