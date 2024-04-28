@@ -201,7 +201,7 @@ impl ImportCommand {
 
         let provider = provider_factory.provider()?;
 
-        let total_imported_blocks = provider.tx_ref().entries::<tables::Headers>()?;
+        let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
         let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
         if total_decoded_blocks != total_imported_blocks ||
