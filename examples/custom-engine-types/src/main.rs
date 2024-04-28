@@ -239,8 +239,9 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes())
-            .max_gas_limit(conf.max_gas_limit());
+            .extradata(conf.extradata_bytes());
+        // .max_gas_limit(conf.max_gas_limit()); removed as this field currently has no effect on
+        // the payload build process
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
