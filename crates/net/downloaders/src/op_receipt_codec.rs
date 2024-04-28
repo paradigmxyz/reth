@@ -174,11 +174,100 @@ mod test {
     // RLP encoded OP mainnet `HackReceipt` of tx in block 1
     const HACK_RECEIPT_ENCODED: [u8; 786] = hex!("f9030ff9030c8080018303183db9010000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000f90197f89b948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff863a00109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac60271a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2da000000000000000000000000000000000000000000000000000000000618d8837f89c948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff884a092e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68ca000000000000000000000000000000000000000000000000000000000d0e3ebf0a00000000000000000000000000000000000000000000000000000000000014218a000000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d80f85a948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff842a0fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234fa000000000000000000000000000000000000000000000007edc6ca0bb6834800080a05e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a9400000000000000000000000000000000000000008303183da0bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e8754530180018212c2821c2383312e35");
 
+    // Can't construct whole `ReceiptWithBlockNumber` as a constant due to `Vec<Log>`
+
+    const TX_TYPE: TxType = TxType::Legacy;
+
+    const SUCCESS: bool = true;
+
+    const CUMULATIVE_GAS_USED: u64 = 202813;
+
+    const BLOCK_NUMBER: u64 = 1;
+
+    fn log_1() -> Log {
+        Log {
+            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850af")),
+            data: LogData::new(
+                vec![
+                    B256::from(hex!(
+                        "0109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac60271"
+                    )),
+                    B256::from(hex!(
+                        "0000000000000000000000000000000000000000000000000000000000014218"
+                    )),
+                    B256::from(hex!(
+                        "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
+                    )),
+                ],
+                Bytes::from(hex!(
+                    "00000000000000000000000000000000000000000000000000000000618d8837"
+                )),
+            )
+            .unwrap(),
+        }
+    }
+
+    fn log_2() -> Log {
+        Log {
+            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850af")),
+            data: LogData::new(
+                vec![
+                    B256::from(hex!(
+                        "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68c"
+                    )),
+                    B256::from(hex!(
+                        "00000000000000000000000000000000000000000000000000000000d0e3ebf0"
+                    )),
+                    B256::from(hex!(
+                        "0000000000000000000000000000000000000000000000000000000000014218"
+                    )),
+                    B256::from(hex!(
+                        "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
+                    )),
+                ],
+                Bytes::default(),
+            )
+            .unwrap(),
+        }
+    }
+
+    fn log_3() -> Log {
+        Log {
+            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850af")),
+            data: LogData::new(
+                vec![
+                    B256::from(hex!(
+                        "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234f"
+                    )),
+                    B256::from(hex!(
+                        "00000000000000000000000000000000000000000000007edc6ca0bb68348000"
+                    )),
+                ],
+                Bytes::default(),
+            )
+            .unwrap(),
+        }
+    }
+
     #[test]
     fn decode_hack_receipt() {
+        let receipt = HackReceipt {
+            tx_type: TX_TYPE as u8, 
+            post_state: Bytes::default(), 
+            status: SUCCESS as u64, 
+            cumulative_gas_used: CUMULATIVE_GAS_USED,
+            bloom: Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000")), logs: vec![log_1(), log_2(), log_3()],
+            tx_hash: B256::from(hex!("5e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a")), contract_address: Address::from(hex!("0000000000000000000000000000000000000000")), gas_used: 202813,
+            block_hash: B256::from(hex!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453")), block_number: 1, transaction_index: 0,
+            l1_gas_price: 1,
+            l1_gas_used: 4802, 
+            l1_fee: 7203, 
+            fee_scalar: String::from("1.5") 
+        };
+
         let decoded = HackReceipt::decode(&mut &HACK_RECEIPT_ENCODED[..]).unwrap();
 
-        assert_eq!("HackReceipt { tx_type: 0, post_state: 0x, status: 1, cumulative_gas_used: 202813, bloom: 0x00000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000400000000000100000000000000200000000002000000000000001000000000000000000004000000000000000000000000000040000400000100400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000001000000000000000000000100000000000000000000000000000000000000000000000000000000000000088000000080000000000010000000000000000000000000000800008000120000000000000000000000000000000002000, logs: [Log { address: 0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850af, data: LogData { topics: [0x0109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac60271, 0x0000000000000000000000000000000000000000000000000000000000014218, 0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d], data: 0x00000000000000000000000000000000000000000000000000000000618d8837 } }, Log { address: 0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850af, data: LogData { topics: [0x92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68c, 0x00000000000000000000000000000000000000000000000000000000d0e3ebf0, 0x0000000000000000000000000000000000000000000000000000000000014218, 0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d], data: 0x } }, Log { address: 0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850af, data: LogData { topics: [0xfe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234f, 0x00000000000000000000000000000000000000000000007edc6ca0bb68348000], data: 0x } }], tx_hash: 0x5e77a04531c7c107af1882d76cbff9486d0a9aa53701c30888509d4f5f2b003a, contract_address: 0x0000000000000000000000000000000000000000, gas_used: 202813, block_hash: 0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453, block_number: 1, transaction_index: 0, l1_gas_price: 1, l1_gas_used: 4802, l1_fee: 7203, fee_scalar: \"1.5\" }", format!("{:?}", decoded));
+        assert_eq!(receipt, decoded);
     }
 
     #[test]
@@ -189,70 +278,13 @@ mod test {
         // OP mainnet receipt of tx in block 1
         let decoded = ReceiptWithBlockNumber {
             receipt: Receipt {
-                tx_type: TxType::Legacy,
-                success: true,
-                cumulative_gas_used: 202813,
-                logs: vec![
-                    Log {
-                        address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850af")),
-                        data: LogData::new(
-                            vec![
-                                B256::from(hex!(
-                                "0109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac60271"
-                            )),
-                                B256::from(hex!(
-                                "0000000000000000000000000000000000000000000000000000000000014218"
-                            )),
-                                B256::from(hex!(
-                                "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
-                            )),
-                            ],
-                            Bytes::from(hex!(
-                                "00000000000000000000000000000000000000000000000000000000618d8837"
-                            )),
-                        )
-                        .unwrap(),
-                    },
-                    Log {
-                        address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850af")),
-                        data: LogData::new(
-                            vec![
-                                B256::from(hex!(
-                                "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68c"
-                            )),
-                                B256::from(hex!(
-                                "00000000000000000000000000000000000000000000000000000000d0e3ebf0"
-                            )),
-                                B256::from(hex!(
-                                "0000000000000000000000000000000000000000000000000000000000014218"
-                            )),
-                                B256::from(hex!(
-                                "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
-                            )),
-                            ],
-                            Bytes::default(),
-                        )
-                        .unwrap(),
-                    },
-                    Log {
-                        address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850af")),
-                        data: LogData::new(
-                            vec![
-                                B256::from(hex!(
-                                "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234f"
-                            )),
-                                B256::from(hex!(
-                                "00000000000000000000000000000000000000000000007edc6ca0bb68348000"
-                            )),
-                            ],
-                            Bytes::default(),
-                        )
-                        .unwrap(),
-                    },
-                ],
+                tx_type: TX_TYPE,
+                success: SUCCESS,
+                cumulative_gas_used: CUMULATIVE_GAS_USED,
+                logs: vec![log_1(), log_2(), log_3()],
                 ..Default::default()
             },
-            number: 1,
+            number: BLOCK_NUMBER,
         };
 
         let mut encoded = BytesMut::from(&HACK_RECEIPT_ENCODED[..]);
