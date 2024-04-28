@@ -1,12 +1,11 @@
 //! Codec for reading raw receipts from a file.
 
-use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpDecodableWrapper};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpDecodableWrapper};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
     Address, Bloom, Bytes, Log, Receipt, TxType, B256,
 };
 use tokio_util::codec::{Decoder, Encoder};
-use tracing::trace;
 
 use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockNumber};
 
@@ -101,91 +100,6 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
         Ok(Self { receipt, number })
     }
 }
-
-/*impl Decodable for HackReceipt {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        trace!(target: "downloaders::file",
-            buf_len=buf.len(),
-            "decoding buffer"
-        );
-
-        let Header { mut list, mut payload_length } = Header::decode(buf).expect("header");
-
-        let Header { mut list, mut payload_length } = Header::decode(buf).expect("header");
-
-        if !list {
-            return Err(alloy_rlp::Error::Custom("expected list"))
-        }
-
-        if buf.len() < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort)
-        }
-
-        trace!(target: "downloaders::file",
-            buf_len=buf.len(),
-            payload_length,
-            "decoding receipt"
-        );
-
-        let tx_type = u8::decode(buf).expect("tx type");
-
-        let post_state = Bytes::decode(buf).expect("post state");
-
-        let status = u64::decode(buf).expect("status");
-
-        let cumulative_gas_used = u64::decode(buf).expect("cumulative gas used");
-
-        let bloom = Bloom::decode(buf).expect("bloom");
-
-        let logs = Logs::decode(buf).expect("logs");
-
-        let tx_hash = B256::decode(buf).expect("tx hash");
-
-        let contract_address = Address::decode(buf).expect("contract address");
-
-        let gas_used = u64::decode(buf).expect("gas");
-
-        let block_hash = B256::decode(buf).expect("block hash");
-
-        let block_number = u64::decode(buf).expect("number");
-
-        let transaction_index = u32::decode(buf).expect("tx index");
-
-        let l1_gas_price = u64::decode(buf).expect("l1 gas price");
-
-        let l1_gas_used = u64::decode(buf).expect("l1 gas used");
-
-        let l1_fee = u64::decode(buf).expect("l1 fee");
-
-        let fee_scalar = String::decode(buf).expect("fee scalar");
-
-        let receipt = HackReceipt {
-            tx_type,
-            post_state,
-            status,
-            cumulative_gas_used,
-            bloom,
-            logs,
-            tx_hash,
-            contract_address,
-            gas_used,
-            block_hash,
-            block_number,
-            transaction_index,
-            l1_gas_price,
-            l1_gas_used,
-            l1_fee,
-            fee_scalar,
-        };
-
-        trace!(target: "downloaders::file",
-            ?receipt,
-            "decoded receipt"
-        );
-
-        Ok(receipt)
-    }
-}*/
 
 #[cfg(test)]
 mod test {
@@ -292,7 +206,7 @@ mod test {
             fee_scalar: String::from("1.5") 
         };
 
-        let decoded = HackReceipt::decode(&mut &HACK_RECEIPT_ENCODED[..]).unwrap();
+        let decoded = HackReceiptContainer::decode(&mut &HACK_RECEIPT_ENCODED[..]).unwrap().0;
 
         assert_eq!(receipt, decoded);
     }
