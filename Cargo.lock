@@ -7389,7 +7389,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
- "anyhow",
  "arbitrary",
  "assert_matches",
  "byteorder",
