@@ -97,14 +97,22 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
 
 impl Decodable for HackReceipt {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let buf = &mut &alloy_rlp::Header::decode_bytes(buf, true).expect("header")[..];
-
         trace!(target: "downloaders::file",
             buf_len=buf.len(),
             "decoding buffer"
         );
 
-        let mut rlp = Rlp::new(buf).expect("rlp");
+        let header = &mut &alloy_rlp::Header::decode(buf).expect("header");
+
+        if !header.list {
+            return Err(alloy_rlp::Error::Custom("expected list"))
+        }
+
+        if buf.len() < header.payload_length {
+            return Err(alloy_rlp::Error::InputTooShort)
+        }
+
+        let mut rlp = Rlp::new(&buf).expect("rlp");
 
         let tx_type = rlp
             .get_next::<u8>()
