@@ -159,7 +159,7 @@ impl ImportCommand {
             info!(target: "reth::cli", "Chain file chunk read");
 
             total_decoded_blocks += file_client.headers_len();
-            total_decoded_txns += file_client.bodies_len();
+            total_decoded_txns += file_client.total_transactions();
 
             let (mut pipeline, events) = self
                 .build_import_pipeline(
