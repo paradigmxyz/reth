@@ -226,12 +226,13 @@ pub struct PrecachedState {
 
 /// Restricts how many generator tasks can be executed at once.
 #[derive(Debug, Clone)]
-struct PayloadTaskGuard(Arc<Semaphore>);
+pub struct PayloadTaskGuard(pub Arc<Semaphore>);
 
 // === impl PayloadTaskGuard ===
 
 impl PayloadTaskGuard {
-    fn new(max_payload_tasks: usize) -> Self {
+    /// Constructs `Self` with a maximum task count of `max_payload_tasks`.
+    pub fn new(max_payload_tasks: usize) -> Self {
         Self(Arc::new(Semaphore::new(max_payload_tasks)))
     }
 }
