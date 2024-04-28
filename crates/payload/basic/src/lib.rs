@@ -242,7 +242,7 @@ impl PayloadTaskGuard {
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
     extradata: Bytes,
-    /// Target gas ceiling for built blocks, defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
+    // Target gas ceiling for built blocks, defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
     // max_gas_limit: u64,
     // max_gas_limit field is removed because it currently has no effect on the payload build
     // process
