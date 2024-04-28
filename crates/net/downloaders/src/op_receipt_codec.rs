@@ -6,6 +6,7 @@ use reth_primitives::{
     Address, Bloom, Bytes, Log, Receipt, TxType, B256,
 };
 use tokio_util::codec::{Decoder, Encoder};
+use tracing::trace;
 
 use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockNumber};
 
@@ -22,7 +23,8 @@ use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockN
 ///
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
-pub(crate) struct ReceiptFileCodec;
+#[derive(Debug)]
+pub struct ReceiptFileCodec;
 
 impl Decoder for ReceiptFileCodec {
     type Item = ReceiptWithBlockNumber;
@@ -52,7 +54,7 @@ impl Encoder<Receipt> for ReceiptFileCodec {
 }
 
 /// See <https://github.com/testinprod-io/op-geth/pull/1>
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct HackReceipt {
     tx_type: u8,
     post_state: Bytes,
@@ -179,7 +181,7 @@ impl Decodable for HackReceipt {
             .expect("fee scalar")
             .ok_or(alloy_rlp::Error::Custom("missing 'fee scalar'"))?;
 
-        Ok(HackReceipt {
+        let receipt = HackReceipt {
             tx_type,
             post_state,
             status,
@@ -196,7 +198,14 @@ impl Decodable for HackReceipt {
             l1_gas_used,
             l1_fee,
             fee_scalar,
-        })
+        };
+
+        trace!(target: "downloaders::file",
+            ?receipt,
+            "decoded receipt"
+        );
+
+        Ok(receipt)
     }
 }
 
