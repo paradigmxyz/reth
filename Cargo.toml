@@ -91,6 +91,7 @@ members = [
     "examples/exex/op-bridge/",
     "examples/db-access",
     "testing/ef-tests/",
+    "testing/testing-utils",
 ]
 default-members = ["bin/reth"]
 
@@ -275,6 +276,7 @@ reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-node-events = { path = "crates/node/events" }
+reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
