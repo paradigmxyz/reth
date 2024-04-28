@@ -1,13 +1,10 @@
 //! Compatibility functions for rpc `Transaction` type.
-use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 
+use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 use reth_primitives::{
-    BlockNumber, Transaction as PrimitiveTransaction, TransactionSignedEcRecovered,
-    TxKind as PrimitiveTransactionKind, TxType, B256,
+    BlockNumber, TransactionSignedEcRecovered, TxKind as PrimitiveTransactionKind, TxType, B256,
 };
-#[cfg(feature = "optimism")]
-use reth_rpc_types::optimism::OptimismTransactionFields;
-use reth_rpc_types::{AccessList, AccessListItem, Transaction};
+use reth_rpc_types::Transaction;
 use signature::from_primitive_signature;
 pub use typed::*;
 
@@ -45,7 +42,7 @@ fn fill(
     transaction_index: Option<usize>,
 ) -> Transaction {
     let signer = tx.signer();
-    let mut signed_tx = tx.into_signed();
+    let signed_tx = tx.into_signed();
 
     let to = match signed_tx.kind() {
         PrimitiveTransactionKind::Create => None,
@@ -77,51 +74,8 @@ fn fill(
 
     // let chain_id = signed_tx.chain_id().map(U64::from);
     let chain_id = signed_tx.chain_id();
-    let mut blob_versioned_hashes = None;
-
-    #[allow(unreachable_patterns)]
-    let access_list = match &mut signed_tx.transaction {
-        PrimitiveTransaction::Legacy(_) => None,
-        PrimitiveTransaction::Eip2930(tx) => Some(AccessList(
-            tx.access_list
-                .0
-                .iter()
-                .map(|item| AccessListItem {
-                    address: item.address.0.into(),
-                    storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
-                })
-                .collect(),
-        )),
-        PrimitiveTransaction::Eip1559(tx) => Some(AccessList(
-            tx.access_list
-                .0
-                .iter()
-                .map(|item| AccessListItem {
-                    address: item.address.0.into(),
-                    storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
-                })
-                .collect(),
-        )),
-        PrimitiveTransaction::Eip4844(tx) => {
-            // extract the blob hashes from the transaction
-            blob_versioned_hashes = Some(std::mem::take(&mut tx.blob_versioned_hashes));
-
-            Some(AccessList(
-                tx.access_list
-                    .0
-                    .iter()
-                    .map(|item| AccessListItem {
-                        address: item.address.0.into(),
-                        storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
-                    })
-                    .collect(),
-            ))
-        }
-        _ => {
-            // OP deposit tx
-            None
-        }
-    };
+    let blob_versioned_hashes = signed_tx.blob_versioned_hashes();
+    let access_list = signed_tx.access_list().cloned();
 
     let signature =
         from_primitive_signature(*signed_tx.signature(), signed_tx.tx_type(), signed_tx.chain_id());
@@ -151,7 +105,7 @@ fn fill(
         blob_versioned_hashes,
         // Optimism fields
         #[cfg(feature = "optimism")]
-        other: OptimismTransactionFields {
+        other: reth_rpc_types::optimism::OptimismTransactionFields {
             source_hash: signed_tx.source_hash(),
             mint: signed_tx.mint().map(reth_primitives::U128::from),
             is_system_tx: signed_tx.is_deposit().then_some(signed_tx.is_system_transaction()),
@@ -160,22 +114,6 @@ fn fill(
         #[cfg(not(feature = "optimism"))]
         other: Default::default(),
     }
-}
-
-/// Convert [reth_primitives::AccessList] to [reth_rpc_types::AccessList]
-pub fn from_primitive_access_list(
-    access_list: reth_primitives::AccessList,
-) -> reth_rpc_types::AccessList {
-    reth_rpc_types::AccessList(
-        access_list
-            .0
-            .into_iter()
-            .map(|item| reth_rpc_types::AccessListItem {
-                address: item.address.0.into(),
-                storage_keys: item.storage_keys.into_iter().map(|key| key.0.into()).collect(),
-            })
-            .collect(),
-    )
 }
 
 /// Convert [TransactionSignedEcRecovered] to [TransactionRequest]
@@ -187,7 +125,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     let input = tx.transaction.input().clone();
     let nonce = tx.transaction.nonce();
     let chain_id = tx.transaction.chain_id();
-    let access_list = tx.transaction.access_list().cloned().map(from_primitive_access_list);
+    let access_list = tx.transaction.access_list().cloned();
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();
