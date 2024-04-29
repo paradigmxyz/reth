@@ -43,7 +43,7 @@ pub struct InitStateCommand {
 
     /// JSONL file with state dump.
     ///
-    /// Must contain accounts in following format, additional account fields are ignored. Can
+    /// Must contain accounts in following format, additional account fields are ignored. Must
     /// also contain { "root": \<state-root\> } as first line.
     /// {
     ///     "balance": "\<balance\>",
