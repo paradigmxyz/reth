@@ -261,11 +261,11 @@ update-book-cli: ## Update book cli documentation.
 
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+	RUSTFLAGS="-C target-cpu=native -Z threads=8" cargo build --profile maxperf --features jemalloc,asm-keccak
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
+	RUSTFLAGS="-C target-cpu=native -Z threads=8" cargo build --profile maxperf --features jemalloc
 
 
 fmt:
