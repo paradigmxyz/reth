@@ -83,7 +83,7 @@ where
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + 'static {
     /// The transaction pool of the node.
-    type Pool: TransactionPool;
+    type Pool: TransactionPool + Unpin;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
