@@ -3,10 +3,10 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{Components, ComponentsBuilder, NodeComponentsBuilder, PoolBuilder},
+    components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, Node, Node2, NodeHandle,
+    DefaultNodeLauncher, Node, NodeHandle,
 };
 use futures::Future;
 use reth_db::{
@@ -204,41 +204,11 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<
-        RethFullAdapter<DB, N>,
-        ComponentsBuilder<
-            RethFullAdapter<DB, N>,
-            N::PoolBuilder,
-            N::PayloadBuilder,
-            N::NetworkBuilder,
-        >,
-    >
-    where
-        N: Node<RethFullAdapter<DB, N>>,
-        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-        N::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-    {
-        self.with_types(node.clone()).with_components(node.components())
-    }
-
-    /// Preconfigures the node with a specific node implementation.
-    ///
-    /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node2<N>(
-        self,
-        node: N,
     ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>
     where
-        N: Node2<RethFullAdapter<DB, N>>,
+        N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components())
+        self.with_types(node.clone()).with_components(node.components_builder())
     }
 }
 
@@ -284,46 +254,16 @@ where
     }
 
     /// Preconfigures the node with a specific node implementation.
-    pub fn node<N>(
-        self,
-        node: N,
-    ) -> WithLaunchContext<
-        NodeBuilderWithComponents<
-            RethFullAdapter<DB, N>,
-            ComponentsBuilder<
-                RethFullAdapter<DB, N>,
-                N::PoolBuilder,
-                N::PayloadBuilder,
-                N::NetworkBuilder,
-            >,
-        >,
-    >
-    where
-        N: Node<RethFullAdapter<DB, N>>,
-        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-        N::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-    {
-        self.with_types(node.clone()).with_components(node.components())
-    }
-
-    /// Preconfigures the node with a specific node implementation.
     ///
     /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node2<N>(
+    pub fn node<N>(
         self,
         node: N,
     ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
     where
-        N: Node2<RethFullAdapter<DB, N>>,
+        N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components())
+        self.with_types(node.clone()).with_components(node.components_builder())
     }
 
     /// Launches a preconfigured [Node]
@@ -338,48 +278,14 @@ where
         NodeHandle<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
-                Components<
-                    RethFullAdapter<DB, N>,
-                    <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-                >,
-            >,
-        >,
-    >
-    where
-        N: Node<RethFullAdapter<DB, N>>,
-        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-        N::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-    {
-        self.node(node).launch().await
-    }
-
-    /// Launches a preconfigured [Node]
-    ///
-    /// This bootstraps the node internals, creates all the components with the given [Node]
-    ///
-    /// Returns a [NodeHandle] that can be used to interact with the node.
-    pub async fn launch_node2<N>(
-        self,
-        node: N,
-    ) -> eyre::Result<
-        NodeHandle<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
     >
     where
-        N: Node2<RethFullAdapter<DB, N>>,
+        N: Node<RethFullAdapter<DB, N>>,
     {
-        self.node2(node).launch().await
+        self.node(node).launch().await
     }
 }
 
