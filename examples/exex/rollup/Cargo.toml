@@ -29,7 +29,8 @@ eyre.workspace = true
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 serde_json.workspace = true
 once_cell.workspace = true
-secp256k1.workspace = true
 
 [dev-dependencies]
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+secp256k1.workspace = true
+

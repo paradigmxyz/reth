@@ -134,7 +134,7 @@ impl Database {
             for (key, data) in storage {
                 tx.execute(
                     "INSERT INTO storage (address, key, data) VALUES (?, ?, ?) ON CONFLICT(address, key) DO UPDATE SET data = excluded.data",
-                    (address.to_string(), key.to_string(), data.to_string()),
+                    (address.to_string(), B256::from(key).to_string(), data.to_string()),
                 )?;
             }
         }
@@ -315,7 +315,7 @@ impl Database {
 /// Insert new account if it does not exist, update otherwise. The provided closure is called
 /// with the current account, if it exists. Connection can be either
 /// [rusqlite::Transaction] or [rusqlite::Connection].
-pub fn upsert_account<C: Deref<Target = Connection>>(
+fn upsert_account<C: Deref<Target = Connection>>(
     connection: &C,
     address: Address,
     f: impl FnOnce(Option<AccountInfo>) -> eyre::Result<AccountInfo>,
@@ -332,7 +332,7 @@ pub fn upsert_account<C: Deref<Target = Connection>>(
 
 /// Delete account by address. Connection can be either [rusqlite::Transaction] or
 /// [rusqlite::Connection].
-pub fn delete_account<C: Deref<Target = Connection>>(
+fn delete_account<C: Deref<Target = Connection>>(
     connection: &C,
     address: Address,
 ) -> eyre::Result<()> {
@@ -359,7 +359,7 @@ fn get_account<C: Deref<Target = Connection>>(
 
 /// Insert new storage if it does not exist, update otherwise. Connection can be either
 /// [rusqlite::Transaction] or [rusqlite::Connection].
-pub fn upsert_storage<C: Deref<Target = Connection>>(
+fn upsert_storage<C: Deref<Target = Connection>>(
     connection: &C,
     address: Address,
     key: B256,
@@ -374,7 +374,7 @@ pub fn upsert_storage<C: Deref<Target = Connection>>(
 
 /// Delete storage by address and key. Connection can be either [rusqlite::Transaction] or
 /// [rusqlite::Connection].
-pub fn delete_storage<C: Deref<Target = Connection>>(
+fn delete_storage<C: Deref<Target = Connection>>(
     connection: &C,
     address: Address,
     key: B256,
