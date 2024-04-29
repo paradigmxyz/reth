@@ -8,14 +8,13 @@ use futures::StreamExt;
 use futures_util::{future::Either, AsyncWriteExt};
 use interprocess::local_socket::tokio::{LocalSocketListener, LocalSocketStream};
 use jsonrpsee::{
-    batch_response_error,
     core::TEN_MB_SIZE_BYTES,
     server::{
         middleware::rpc::{RpcLoggerLayer, RpcServiceT},
         AlreadyStoppedError, ConnectionGuard, ConnectionPermit, IdProvider,
         RandomIntegerIdProvider,
     },
-    types::{ErrorObjectOwned, Id},
+    types::{ErrorObjectOwned},
     BoundedSubscriptions, MethodSink, Methods,
 };
 use std::{
@@ -170,7 +169,7 @@ where
                 AcceptConnection::Established { local_socket_stream, stop } => {
                     let Some(conn_permit) = connection_guard.try_acquire() else {
                         let (mut _reader, mut writer) = local_socket_stream.into_split();
-                        let _ = writer.write_all(batch_response_error(Id::Null, reject_too_many_connection()).as_ref()).await;
+                        let _ = writer.write_all(b"Too many connections. Please try again later.").await;
                         drop((_reader, writer));
                         stopped = stop;
                         continue;
