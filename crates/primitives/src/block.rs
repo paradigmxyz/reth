@@ -1,12 +1,16 @@
+#[cfg(feature = "alloy-compat")]
+use crate::Signature;
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, Signature, TransactionSigned,
+    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::{any, prop_compose};
 use reth_codecs::derive_arbitrary;
+#[cfg(feature = "alloy-compat")]
 use reth_rpc_types::ConversionError;
+
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -148,6 +152,7 @@ impl Deref for Block {
     }
 }
 
+#[cfg(feature = "alloy-compat")]
 impl TryFrom<reth_rpc_types::Block> for Block {
     type Error = ConversionError;
 

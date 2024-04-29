@@ -113,6 +113,7 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]
+alloy-compat = []
 test-utils = ["dep:plain_hasher", "dep:hash-db"]
 
 [[bench]]

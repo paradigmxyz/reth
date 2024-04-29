@@ -16,6 +16,7 @@ use bytes::BufMut;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
+#[cfg(feature = "alloy-compat")]
 use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::{mem, ops::Deref};
@@ -486,6 +487,7 @@ impl Decodable for Header {
     }
 }
 
+#[cfg(feature = "alloy-compat")]
 impl TryFrom<reth_rpc_types::Header> for Header {
     type Error = ConversionError;
 
