@@ -1,6 +1,6 @@
 //! Clap parser utilities
 
-use reth_primitives::{fs, BlockHashOrNumber, ChainSpec, B256};
+use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use reth_primitives::{AllGenesisFormats, DEV};
+use reth_primitives::DEV;
 
 #[cfg(feature = "optimism")]
 use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};

@@ -94,8 +94,6 @@ tempfile.workspace = true
 jsonrpsee.workspace = true
 assert_matches.workspace = true
 
-alloy-genesis = { workspace = true }
-
 [features]
 optimism = [
     "reth-primitives/optimism",
