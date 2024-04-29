@@ -80,7 +80,7 @@ impl ImportReceiptsCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
-        let provider = provider_factory.provider_rw()?;
+        let tx = provider_factory.provider_rw()?.into_tx();
 
         let mut total_decoded_receipts = 0;
 
@@ -99,13 +99,13 @@ impl ImportReceiptsCommand {
                 BundleStateWithReceipts::new(Default::default(), receipts, first_block);
 
             bundled_state.write_to_storage::<<DatabaseEnv as Database>::TXMut>(
-                provider.tx_ref(),
+                &tx,
                 None,
                 OriginalValuesKnown::Yes,
             )?;
         }
 
-        let total_imported_receipts = provider.tx_ref().entries::<tables::Receipts>()?;
+        let total_imported_receipts = tx.entries::<tables::Receipts>()?;
 
         if total_imported_receipts != total_decoded_receipts {
             error!(target: "reth::cli",
@@ -114,6 +114,8 @@ impl ImportReceiptsCommand {
                 "Receipts were partially imported"
             );
         }
+
+        tx.commit()?;
 
         info!(target: "reth::cli", "Receipt file imported");
 
