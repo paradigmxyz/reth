@@ -7,8 +7,9 @@ use reth_db::{
 };
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
-    StaticFileSegment, StorageEntry, B256, U256,
+    stage::{StageCheckpoint, StageId},
+    Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
+    StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
@@ -389,6 +390,14 @@ pub fn init_from_state_dump<DB: Database>(
             ?computed_state_root,
             "Computed state root matches state root in state dump"
         );
+    }
+
+    // insert sync stages for stages that require state
+    let tx = provider_rw.tx_ref();
+
+    for stage in StageId::STATE_REQUIRED.iter() {
+        let checkpoint = StageCheckpoint::new(block).with_block_range(stage, 0, block);
+        tx.put::<tables::StageCheckpoints>(stage.to_string(), checkpoint)?;
     }
 
     provider_rw.commit()?;
