@@ -2350,11 +2350,9 @@ mod tests {
         use super::*;
         use reth_db::test_utils::create_test_static_files_dir;
         use reth_interfaces::test_utils::generators::random_block;
-        use reth_primitives::{
-            genesis::{Genesis, GenesisAllocator},
-            Hardfork, U256,
-        };
+        use reth_primitives::{genesis::Genesis, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockchainTestData;
+        use reth_testing_utils::GenesisAllocator;
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {

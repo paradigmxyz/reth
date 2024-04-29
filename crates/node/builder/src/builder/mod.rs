@@ -3,7 +3,7 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
-    components::{Components, ComponentsBuilder, NodeComponentsBuilder, PoolBuilder},
+    components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, Node, NodeHandle,
@@ -187,7 +187,7 @@ impl<DB> NodeBuilder<DB> {
 
 impl<DB> NodeBuilder<DB>
 where
-    DB: Database + Unpin + Clone + 'static,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self, types: T) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
@@ -204,28 +204,11 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<
-        RethFullAdapter<DB, N>,
-        ComponentsBuilder<
-            RethFullAdapter<DB, N>,
-            N::PoolBuilder,
-            N::PayloadBuilder,
-            N::NetworkBuilder,
-        >,
-    >
+    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>
     where
         N: Node<RethFullAdapter<DB, N>>,
-        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-        N::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
     {
-        self.with_types(node.clone()).with_components(node.components())
+        self.with_types(node.clone()).with_components(node.components_builder())
     }
 }
 
@@ -271,33 +254,16 @@ where
     }
 
     /// Preconfigures the node with a specific node implementation.
+    ///
+    /// This is a convenience method that sets the node's types and components in one call.
     pub fn node<N>(
         self,
         node: N,
-    ) -> WithLaunchContext<
-        NodeBuilderWithComponents<
-            RethFullAdapter<DB, N>,
-            ComponentsBuilder<
-                RethFullAdapter<DB, N>,
-                N::PoolBuilder,
-                N::PayloadBuilder,
-                N::NetworkBuilder,
-            >,
-        >,
-    >
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
     where
         N: Node<RethFullAdapter<DB, N>>,
-        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-        N::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
     {
-        self.with_types(node.clone()).with_components(node.components())
+        self.with_types(node.clone()).with_components(node.components_builder())
     }
 
     /// Launches a preconfigured [Node]
@@ -312,24 +278,12 @@ where
         NodeHandle<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
-                Components<
-                    RethFullAdapter<DB, N>,
-                    <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-                >,
+                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
     >
     where
         N: Node<RethFullAdapter<DB, N>>,
-        N::PoolBuilder: PoolBuilder<RethFullAdapter<DB, N>>,
-        N::NetworkBuilder: crate::components::NetworkBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
-        N::PayloadBuilder: crate::components::PayloadServiceBuilder<
-            RethFullAdapter<DB, N>,
-            <N::PoolBuilder as PoolBuilder<RethFullAdapter<DB, N>>>::Pool,
-        >,
     {
         self.node(node).launch().await
     }
