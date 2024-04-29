@@ -7,7 +7,7 @@ crates/exex                 @onbjerg @shekhirin
 crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
-crates/node-builder/        @mattsse @Rjected @onbjerg
+crates/node/                @mattsse @Rjected @onbjerg
 crates/node-core/           @mattsse @Rjected @onbjerg
 crates/node-ethereum/       @mattsse @Rjected
 crates/payload/             @mattsse @Rjected
@@ -23,4 +23,5 @@ crates/tracing              @onbjerg
 crates/transaction-pool/    @mattsse
 crates/trie                 @rkrasiuk
 crates/trie-parallel        @rkrasiuk
+crates/optimism             @mattsse
 .github/                    @onbjerg @gakonst @DaniPopes
