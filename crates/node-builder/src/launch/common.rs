@@ -66,18 +66,7 @@ impl LaunchContext {
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
 
-        // Save prune config to the toml file if node is a full node.
-        if toml_config.prune.is_none() {
-            if let Some(prune_config) = config.prune_config() {
-                toml_config.prune = Some(prune_config);
-                //Save the prune config to the toml file
-                info!(target: "reth::cli", "Saving prune config to toml file");
-                confy::store_path(&config_path, &toml_config)
-                    .wrap_err_with(|| format!("Could not save config file {config_path:?}"))?;
-            }
-        } else if config.prune_config().is_none() {
-            warn!(target: "reth::cli", "Prune configs present in config file but --full not provided. Running as a Full node");
-        }
+        Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
@@ -92,6 +81,24 @@ impl LaunchContext {
         }
 
         Ok(toml_config)
+    }
+
+    /// Save prune config to the toml file if node is a full node.
+    fn save_pruning_config_if_full_node(
+        reth_config: &mut reth_config::Config,
+        config: &NodeConfig,
+        config_path: impl AsRef<std::path::Path>,
+    ) -> eyre::Result<()> {
+        if reth_config.prune.is_none() {
+            if let Some(prune_config) = config.prune_config() {
+                reth_config.update_prune_confing(prune_config);
+                info!(target: "reth::cli", "Saving prune config to toml file");
+                reth_config.save(config_path.as_ref())?;
+            }
+        } else if config.prune_config().is_none() {
+            warn!(target: "reth::cli", "Prune configs present in config file but --full not provided. Running as a Full node");
+        }
+        Ok(())
     }
 
     /// Convenience function to [Self::configure_globals]
@@ -468,4 +475,43 @@ pub struct WithConfigs {
     pub config: NodeConfig,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LaunchContext, NodeConfig};
+    use reth_config::Config;
+    use reth_node_core::args::PruningArgs;
+
+    const EXTENSION: &str = "toml";
+
+    fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join(filename).with_extension(EXTENSION);
+        proc(&config_path);
+        temp_dir.close().unwrap()
+    }
+
+    #[test]
+    fn test_save_prune_config() {
+        with_tempdir("prune-store-test", |config_path| {
+            let mut reth_config = Config::default();
+            let node_config =
+                NodeConfig { pruning: PruningArgs { full: true }, ..NodeConfig::test() };
+            LaunchContext::save_pruning_config_if_full_node(
+                &mut reth_config,
+                &node_config,
+                config_path,
+            )
+            .unwrap();
+
+            assert_eq!(
+                reth_config.prune.as_ref().map(|p| p.block_interval),
+                node_config.prune_config().map(|p| p.block_interval)
+            );
+
+            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            assert_eq!(reth_config, loaded_config);
+        })
+    }
 }
