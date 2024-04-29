@@ -890,7 +890,7 @@ mod tests {
 
     fn create_state_provider_with_block_hashes(latest_block: u64) -> StateProviderTest {
         let mut db = StateProviderTest::default();
-        for block_number in 0..latest_block {
+        for block_number in 0..=latest_block {
             db.insert_block_hash(block_number, keccak256(block_number.to_string()));
         }
         db
@@ -994,7 +994,8 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_within_window_bounds() {
-        let db = create_state_provider_with_block_hashes((HISTORY_SERVE_WINDOW - 10) as u64);
+        let fork_activation_block = (HISTORY_SERVE_WINDOW - 10) as u64;
+        let db = create_state_provider_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
@@ -1009,11 +1010,7 @@ mod tests {
             TestEvmConfig::default(),
         );
 
-        let header = Header {
-            timestamp: 1,
-            number: (HISTORY_SERVE_WINDOW - 10) as u64,
-            ..Header::default()
-        };
+        let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
 
         executor.init_env(&header, U256::ZERO);
 
@@ -1041,16 +1038,141 @@ mod tests {
         // our fork activation check depends on checking slot 0, so we also check that slot 0 was
         // indeed set if the fork activation block was within `HISTORY_SERVE_WINDOW`
         assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
-        // todo: check all hashes
+        for slot in 0..fork_activation_block {
+            assert_ne!(
+                executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
+                U256::ZERO
+            );
+        }
+
+        // the hash of the block itself should not be in storage
+        assert!(executor
+            .db_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_2935_fork_activation_outside_window_bounds() {
+        let fork_activation_block = (HISTORY_SERVE_WINDOW + 256) as u64;
+        let db = create_state_provider_with_block_hashes(fork_activation_block);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let mut executor = EVMProcessor::new_with_db(
+            chain_spec,
+            StateProviderDatabase::new(db),
+            TestEvmConfig::default(),
+        );
+
+        let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
+
+        executor.init_env(&header, U256::ZERO);
+
+        // attempt to execute the fork activation block, this should not fail
+        executor
+            .execute_and_verify_receipt(
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
+                U256::ZERO,
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // since this is the activation block, the hashes of all ancestors for the block (up to
+        // `HISTORY_SERVE_WINDOW`) must be present.
+        //
+        // our fork activation check depends on checking slot 0, so we also check that slot 0 was
+        // indeed set if the fork activation block was within `HISTORY_SERVE_WINDOW`
+        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        for slot in 0..HISTORY_SERVE_WINDOW {
+            assert_ne!(
+                executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
+                U256::ZERO
+            );
+        }
+    }
+
+    #[test]
+    fn eip_2935_state_transition_inside_fork() {
+        let db = create_state_provider_with_block_hashes(2);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let header = chain_spec.genesis_header();
+        let mut executor = EVMProcessor::new_with_db(
+            chain_spec,
+            StateProviderDatabase::new(db),
+            TestEvmConfig::default(),
+        );
+
+        executor.init_env(&header, U256::ZERO);
+
+        // attempt to execute the genesis block, this should not fail
+        executor
+            .execute_and_verify_receipt(
+                &BlockWithSenders {
+                    block: Block {
+                        header: header.clone(),
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                    },
+                    senders: vec![],
+                },
+                U256::ZERO,
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // nothing should be written as the genesis has no ancestors
+        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
+
+        // attempt to execute block 1, this should not fail
+        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+        executor
+            .execute_and_verify_receipt(
+                &BlockWithSenders {
+                    block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                    senders: vec![],
+                },
+                U256::ZERO,
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the block hash of genesis should now be in storage, but not block 1
+        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
         assert_ne!(
             executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
             U256::ZERO
         );
+        assert!(executor
+            .db_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
+            .unwrap()
+            .is_zero());
     }
-
-    #[test]
-    fn eip_2935_fork_activation_outside_window_bounds() {}
-
-    #[test]
-    fn eip_2935_state_transition_inside_fork() {}
 }
