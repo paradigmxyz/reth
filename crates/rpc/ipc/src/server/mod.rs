@@ -5,14 +5,15 @@ use crate::server::{
     future::StopHandle,
 };
 use futures::StreamExt;
-use futures_util::{future::Either, FutureExt};
+use futures_util::{future::Either, AsyncWriteExt};
 use interprocess::local_socket::tokio::{LocalSocketListener, LocalSocketStream};
 use jsonrpsee::{
     batch_response_error,
     core::TEN_MB_SIZE_BYTES,
     server::{
         middleware::rpc::{RpcLoggerLayer, RpcServiceT},
-        AlreadyStoppedError, ConnectionGuard, IdProvider, RandomIntegerIdProvider,
+        AlreadyStoppedError, ConnectionGuard, ConnectionPermit, IdProvider,
+        RandomIntegerIdProvider,
     },
     types::{ErrorObjectOwned, Id},
     BoundedSubscriptions, MethodSink, Methods,
@@ -167,11 +168,24 @@ where
         loop {
             match try_accept_conn(&listener, stopped).await {
                 AcceptConnection::Established { local_socket_stream, stop } => {
-                    trace!("established new connection");
+                    let Some(conn_permit) = connection_guard.try_acquire() else {
+                        let (mut _reader, mut writer) = local_socket_stream.into_split();
+                        let _ = writer.write_all(batch_response_error(Id::Null, reject_too_many_connection()).as_ref()).await;
+                        drop((_reader, writer));
+                        stopped = stop;
+                        continue;
+                    };
+
+                    let max_conns = connection_guard.max_connections();
+                    let curr_conns = max_conns - connection_guard.available_connections();
+                    trace!("Accepting new connection {}/{}", curr_conns, max_conns);
+
+                    let conn_permit = Arc::new(conn_permit);
+
                     process_connection(ProcessConnection{
                         http_middleware: &self.http_middleware,
                         rpc_middleware: self.rpc_middleware.clone(),
-                        conn_guard: &connection_guard,
+                        conn_permit,
                         conn_id: id,
                         server_cfg: self.cfg.clone(),
                         stop_handle: stop_handle.clone(),
@@ -256,8 +270,8 @@ pub(crate) struct ServiceData {
     pub(crate) stop_handle: StopHandle,
     /// Connection ID
     pub(crate) conn_id: u32,
-    /// Connection guard.
-    pub(crate) conn_guard: ConnectionGuard,
+    /// Connection Permit.
+    pub(crate) conn_permit: Arc<ConnectionPermit>,
     /// Limits the number of subscriptions for this connection
     pub(crate) bounded_subscriptions: BoundedSubscriptions,
     /// Sink that is used to send back responses to the connection.
@@ -368,20 +382,6 @@ where
     fn call(&mut self, request: String) -> Self::Future {
         trace!("{:?}", request);
 
-        let conn_guard = &self.inner.conn_guard;
-        let Some(conn_permit) = conn_guard.try_acquire() else {
-            return async move {  Ok( Some(batch_response_error(
-                Id::Null,
-                reject_too_many_connection(),
-            )))}.boxed();
-        };
-
-        let conn = Arc::new(conn_permit);
-
-        let max_conns = conn_guard.max_connections();
-        let curr_conns = max_conns - conn_guard.available_connections();
-        trace!("Accepting new connection {}/{}", curr_conns, max_conns);
-
         let cfg = RpcServiceCfg::CallsAndSubscriptions {
             bounded_subscriptions: BoundedSubscriptions::new(
                 self.inner.server_cfg.max_subscriptions_per_connection,
@@ -392,6 +392,7 @@ where
 
         let max_response_body_size = self.inner.server_cfg.max_response_body_size as usize;
         let max_request_body_size = self.inner.server_cfg.max_request_body_size as usize;
+        let conn = self.inner.conn_permit.clone();
         let rpc_service = self.rpc_middleware.service(RpcService::new(
             self.inner.methods.clone(),
             max_response_body_size,
@@ -431,7 +432,7 @@ pub fn reject_too_many_connection() -> ErrorObjectOwned {
 struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
     http_middleware: &'a tower::ServiceBuilder<HttpMiddleware>,
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
-    conn_guard: &'a ConnectionGuard,
+    conn_permit: Arc<ConnectionPermit>,
     conn_id: u32,
     server_cfg: Settings,
     stop_handle: StopHandle,
@@ -461,7 +462,7 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
     let ProcessConnection {
         http_middleware,
         rpc_middleware,
-        conn_guard,
+        conn_permit,
         conn_id,
         server_cfg,
         stop_handle,
@@ -485,7 +486,7 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
             stop_handle: stop_handle.clone(),
             server_cfg: server_cfg.clone(),
             conn_id,
-            conn_guard: conn_guard.clone(),
+            conn_permit,
             bounded_subscriptions: BoundedSubscriptions::new(
                 server_cfg.max_subscriptions_per_connection,
             ),
@@ -969,23 +970,16 @@ mod tests {
         assert!(response1.is_ok());
         assert!(response2.is_ok());
         // Third connection is rejected
-        println!("{:?}", response3);
         assert!(response3.is_err());
-        // if !matches!(conn3, Err(WebSocketTestError::RejectedWithStatusCode(429))) {
-        //     panic!("Expected RejectedWithStatusCode(429), got: {conn3:#?}");
-        // }
 
         // Decrement connection count
-        // drop(conn2);
-
-        // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(client2);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Can connect again
-        // let conn4 = WebSocketTestClient::new(addr).await;
-        // assert!(conn4.is_ok());
-        //
-        // server_handle.stop().unwrap();
-        // server_handle.stopped().await;
+        let client4 = IpcClientBuilder::default().build(endpoint.clone()).await.unwrap();
+        let response4: Result<String, Error> = client4.request("anything", rpc_params![]).await;
+        assert!(response4.is_ok());
     }
 
     #[tokio::test]
