@@ -996,6 +996,9 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
+        #[cfg(feature = "optimism")]
+        let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+
         // Block-based hardforks
         let hardfork_opts = [
             (Hardfork::Homestead, genesis.config.homestead_block),
@@ -1012,10 +1015,7 @@ impl From<Genesis> for ChainSpec {
             (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
             (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
             #[cfg(feature = "optimism")]
-            (
-                Hardfork::Bedrock,
-                genesis.config.extra_fields.get("bedrockBlock").and_then(|value| value.as_u64()),
-            ),
+            (Hardfork::Bedrock, optimism_genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
             .iter()
@@ -1043,20 +1043,11 @@ impl From<Genesis> for ChainSpec {
             (Hardfork::Shanghai, genesis.config.shanghai_time),
             (Hardfork::Cancun, genesis.config.cancun_time),
             #[cfg(feature = "optimism")]
-            (
-                Hardfork::Regolith,
-                genesis.config.extra_fields.get("regolithTime").and_then(|value| value.as_u64()),
-            ),
+            (Hardfork::Regolith, optimism_genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
-            (
-                Hardfork::Ecotone,
-                genesis.config.extra_fields.get("ecotoneTime").and_then(|value| value.as_u64()),
-            ),
+            (Hardfork::Ecotone, optimism_genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
-            (
-                Hardfork::Canyon,
-                genesis.config.extra_fields.get("canyonTime").and_then(|value| value.as_u64()),
-            ),
+            (Hardfork::Canyon, optimism_genesis_info.canyon_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -1708,6 +1699,42 @@ pub struct DepositContract {
 impl DepositContract {
     fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
         DepositContract { address, block, topic }
+    }
+}
+
+#[cfg(feature = "optimism")]
+struct OptimismGenesisInfo {
+    bedrock_block: Option<u64>,
+    regolith_time: Option<u64>,
+    ecotone_time: Option<u64>,
+    canyon_time: Option<u64>,
+}
+
+#[cfg(feature = "optimism")]
+impl OptimismGenesisInfo {
+    fn extract_from(genesis: &Genesis) -> Self {
+        Self {
+            bedrock_block: genesis
+                .config
+                .extra_fields
+                .get("bedrockBlock")
+                .and_then(|value| value.as_u64()),
+            regolith_time: genesis
+                .config
+                .extra_fields
+                .get("regolithTime")
+                .and_then(|value| value.as_u64()),
+            ecotone_time: genesis
+                .config
+                .extra_fields
+                .get("ecotoneTime")
+                .and_then(|value| value.as_u64()),
+            canyon_time: genesis
+                .config
+                .extra_fields
+                .get("canyonTime")
+                .and_then(|value| value.as_u64()),
+        }
     }
 }
 
