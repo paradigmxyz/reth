@@ -14,7 +14,6 @@ use jsonrpsee::{
         AlreadyStoppedError, ConnectionGuard, ConnectionPermit, IdProvider,
         RandomIntegerIdProvider,
     },
-    types::{ErrorObjectOwned},
     BoundedSubscriptions, MethodSink, Methods,
 };
 use std::{
@@ -47,9 +46,6 @@ mod connection;
 mod future;
 mod ipc;
 mod rpc_service;
-
-/// Connection limit was exceeded.
-pub const TOO_MANY_CONNECTION_CODE: i32 = -32011;
 
 /// Ipc Server implementation
 
@@ -417,15 +413,6 @@ where
 
         Box::pin(async move { f.await.map_err(|err| err.into()) })
     }
-}
-
-/// Helper to get a `JSON-RPC` error object when the maximum request size limit have been exceeded.
-pub fn reject_too_many_connection() -> ErrorObjectOwned {
-    ErrorObjectOwned::owned(
-        TOO_MANY_CONNECTION_CODE,
-        "Too Many Connections",
-        Some("Too many connections. Please try again later"),
-    )
 }
 
 struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
