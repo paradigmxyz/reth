@@ -1,7 +1,4 @@
-use crate::{
-    components::ComponentsBuilder,
-    rpc::{RethRpcServerHandles, RpcRegistry},
-};
+use crate::rpc::{RethRpcServerHandles, RpcRegistry};
 use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::{
@@ -19,23 +16,18 @@ use reth_tasks::TaskExecutor;
 use std::sync::Arc;
 
 // re-export the node api types
+use crate::components::NodeComponentsBuilder;
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
-/// A [Node] is a [NodeTypes] that comes with preconfigured components.
+/// A [crate::Node] is a [NodeTypes] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
-pub trait Node<N>: NodeTypes + Clone {
-    /// The type that builds the node's pool.
-    type PoolBuilder;
-    /// The type that builds the node's network.
-    type NetworkBuilder;
-    /// The type that builds the node's payload service.
-    type PayloadBuilder;
+pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
+    /// The type that builds the node's components.
+    type ComponentsBuilder: NodeComponentsBuilder<N>;
 
-    /// Returns the [ComponentsBuilder] for the node.
-    fn components(
-        self,
-    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>;
+    /// Returns a [NodeComponentsBuilder] for the node.
+    fn components_builder(self) -> Self::ComponentsBuilder;
 }
 
 /// The launched node with all components including RPC handlers.

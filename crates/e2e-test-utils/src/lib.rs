@@ -6,8 +6,7 @@ use reth::{
 };
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
-    components::{Components, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
-    FullNodeTypesAdapter, NodeAdapter,
+    components::NodeComponentsBuilder, FullNodeTypesAdapter, Node, NodeAdapter, RethFullAdapter,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
@@ -45,10 +44,7 @@ pub async fn setup<N>(
     is_dev: bool,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
-    N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>,
-    N::PoolBuilder: PoolBuilder<TmpNodeAdapter<N>>,
-    N::NetworkBuilder: NetworkBuilder<TmpNodeAdapter<N>, TmpPool<N>>,
-    N::PayloadBuilder: PayloadServiceBuilder<TmpNodeAdapter<N>, TmpPool<N>>,
+    N: Default + Node<TmpNodeAdapter<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -103,11 +99,14 @@ where
 // Type aliases
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type TmpPool<N> = <<N as reth_node_builder::Node<TmpNodeAdapter<N>>>::PoolBuilder as PoolBuilder<
-    TmpNodeAdapter<N>,
->>::Pool;
 type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
 
+type Adapter<N> = NodeAdapter<
+    RethFullAdapter<TmpDB, N>,
+    <<N as Node<TmpNodeAdapter<N>>>::ComponentsBuilder as NodeComponentsBuilder<
+        RethFullAdapter<TmpDB, N>,
+    >>::Components,
+>;
+
 /// Type alias for a type of NodeHelper
-pub type NodeHelperType<N> =
-    NodeTestContext<NodeAdapter<TmpNodeAdapter<N>, Components<TmpNodeAdapter<N>, TmpPool<N>>>>;
+pub type NodeHelperType<N> = NodeTestContext<Adapter<N>>;
