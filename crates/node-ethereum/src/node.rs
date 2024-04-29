@@ -5,8 +5,8 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_network::NetworkHandle;
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
-    node::{FullNodeTypes, Node, NodeTypes},
-    BuilderContext, PayloadBuilderConfig,
+    node::{FullNodeTypes, NodeTypes},
+    BuilderContext, Node, PayloadBuilderConfig,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
@@ -50,18 +50,11 @@ impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Engine = EthEngineTypes>,
 {
-    type PoolBuilder = EthereumPoolBuilder;
-    type NetworkBuilder = EthereumNetworkBuilder;
-    type PayloadBuilder = EthereumPayloadBuilder;
+    type ComponentsBuilder =
+        ComponentsBuilder<N, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetworkBuilder>;
 
-    fn components(
-        self,
-    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
-        ComponentsBuilder::default()
-            .node_types::<N>()
-            .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetworkBuilder::default())
+    fn components_builder(self) -> Self::ComponentsBuilder {
+        Self::components()
     }
 }
 

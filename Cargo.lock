@@ -127,7 +127,7 @@ dependencies = [
  "num_enum",
  "proptest",
  "serde",
- "strum 0.26.2",
+ "strum",
 ]
 
 [[package]]
@@ -1469,6 +1469,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
+name = "castaway"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a17ed5635fc8536268e5d4de1e22e81ac34419e5f052d4d51f4e01dcc263fcc"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "cc"
 version = "1.0.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1671,9 +1680,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b34115915337defe99b2aff5c2ce6771e5fbc4079f4b506301f5cf394c8452f7"
 dependencies = [
  "crossterm",
- "strum 0.26.2",
- "strum_macros 0.26.2",
+ "strum",
+ "strum_macros",
  "unicode-width",
+]
+
+[[package]]
+name = "compact_str"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f86b9c4c00838774a6d902ef931eff7470720c51d90c2e32cfe15dc304737b3f"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "ryu",
+ "static_assertions",
 ]
 
 [[package]]
@@ -2821,29 +2843,6 @@ checksum = "0f214dc438f977e6d4e3500aaa277f5ad94ca83fbbd9b1a15713ce2344ccc5a1"
 dependencies = [
  "event-listener 5.3.0",
  "pin-project-lite",
-]
-
-[[package]]
-name = "examples"
-version = "0.0.0"
-dependencies = [
- "async-trait",
- "eyre",
- "futures",
- "reth-beacon-consensus",
- "reth-blockchain-tree",
- "reth-db",
- "reth-network",
- "reth-network-api",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-rpc-builder",
- "reth-rpc-types",
- "reth-rpc-types-compat",
- "reth-tasks",
- "reth-transaction-pool",
- "tokio",
 ]
 
 [[package]]
@@ -5045,6 +5044,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "network"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth-network",
+ "reth-provider",
+ "tokio",
+]
+
+[[package]]
 name = "network-txpool"
 version = "0.0.0"
 dependencies = [
@@ -6015,19 +6025,20 @@ dependencies = [
 
 [[package]]
 name = "ratatui"
-version = "0.25.0"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5659e52e4ba6e07b2dad9f1158f578ef84a73762625ddb51536019f34d180eb"
+checksum = "a564a852040e82671dc50a37d88f3aa83bbc690dfc6844cfe7a2591620206a80"
 dependencies = [
  "bitflags 2.5.0",
  "cassowary",
+ "compact_str",
  "crossterm",
  "indoc",
  "itertools 0.12.1",
  "lru",
  "paste",
  "stability",
- "strum 0.25.0",
+ "strum",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -6260,7 +6271,6 @@ dependencies = [
  "rand 0.8.5",
  "ratatui",
  "rayon",
- "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
@@ -6292,7 +6302,6 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
- "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-stages",
@@ -6305,7 +6314,6 @@ dependencies = [
  "serde_json",
  "similar-asserts",
  "tempfile",
- "thiserror",
  "tikv-jemallocator",
  "tokio",
  "toml",
@@ -6387,6 +6395,7 @@ dependencies = [
  "reth-stages-api",
  "reth-static-file",
  "reth-tasks",
+ "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
  "schnellru",
@@ -6535,7 +6544,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
- "strum 0.26.2",
+ "strum",
  "tempfile",
  "test-fuzz",
  "thiserror",
@@ -7380,7 +7389,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
- "anyhow",
  "arbitrary",
  "assert_matches",
  "byteorder",
@@ -7410,7 +7418,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.8",
- "strum 0.26.2",
+ "strum",
  "sucds",
  "tempfile",
  "test-fuzz",
@@ -7444,7 +7452,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-trie",
  "revm",
- "strum 0.26.2",
+ "strum",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -7600,7 +7608,7 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "serde_json",
- "strum 0.26.2",
+ "strum",
  "thiserror",
  "tokio",
  "tower",
@@ -7773,6 +7781,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-testing-utils"
+version = "0.2.0-beta.6"
+dependencies = [
+ "alloy-genesis",
+ "reth-primitives",
+ "secp256k1",
+]
+
+[[package]]
 name = "reth-tokio-util"
 version = "0.2.0-beta.6"
 dependencies = [
@@ -7804,7 +7821,6 @@ dependencies = [
  "auto_impl",
  "bitflags 2.5.0",
  "criterion",
- "fnv",
  "futures-util",
  "itertools 0.12.1",
  "metrics",
@@ -7822,6 +7838,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "revm",
+ "rustc-hash",
  "schnellru",
  "serde",
  "serde_json",
@@ -8866,12 +8883,12 @@ checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
 
 [[package]]
 name = "stability"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebd1b177894da2a2d9120208c3386066af06a488255caabc5de8ddca22dbc3ce"
+checksum = "2ff9eaf853dec4c8802325d8b6d3dffa86cc707fd7a1a4cdbf416e13b061787a"
 dependencies = [
  "quote",
- "syn 1.0.109",
+ "syn 2.0.60",
 ]
 
 [[package]]
@@ -8912,33 +8929,11 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
-dependencies = [
- "strum_macros 0.25.3",
-]
-
-[[package]]
-name = "strum"
 version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d8cec3501a5194c432b2b7976db6b7d10ec95c253208b45f83f7136aa985e29"
 dependencies = [
- "strum_macros 0.26.2",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.25.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23dc1fa9ac9c169a78ba62f0b841814b7abae11bdd047b9c58f893439e309ea0"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn 2.0.60",
+ "strum_macros",
 ]
 
 [[package]]

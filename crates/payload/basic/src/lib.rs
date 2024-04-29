@@ -226,12 +226,13 @@ pub struct PrecachedState {
 
 /// Restricts how many generator tasks can be executed at once.
 #[derive(Debug, Clone)]
-struct PayloadTaskGuard(Arc<Semaphore>);
+pub struct PayloadTaskGuard(Arc<Semaphore>);
 
 // === impl PayloadTaskGuard ===
 
 impl PayloadTaskGuard {
-    fn new(max_payload_tasks: usize) -> Self {
+    /// Constructs `Self` with a maximum task count of `max_payload_tasks`.
+    pub fn new(max_payload_tasks: usize) -> Self {
         Self(Arc::new(Semaphore::new(max_payload_tasks)))
     }
 }
@@ -580,11 +581,21 @@ where
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
-struct PendingPayload<P> {
+pub struct PendingPayload<P> {
     /// The marker to cancel the job on drop
     _cancel: Cancelled,
     /// The channel to send the result to.
     payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
+}
+
+impl<P> PendingPayload<P> {
+    /// Constructs a `PendingPayload` future.
+    pub fn new(
+        cancel: Cancelled,
+        payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
+    ) -> Self {
+        Self { _cancel: cancel, payload }
+    }
 }
 
 impl<P> Future for PendingPayload<P> {
