@@ -194,12 +194,6 @@ impl Encodable for TxType {
 
 impl Decodable for TxType {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if buf.is_empty() {
-            return Err(alloy_rlp::Error::InputTooShort)
-        } else if buf.len() > 1 {
-            return Err(alloy_rlp::Error::Overflow)
-        }
-
         let ty = u8::decode(buf)?;
 
         TxType::try_from(ty).map_err(alloy_rlp::Error::Custom)
