@@ -141,65 +141,41 @@ mod tests {
         SealedHeader, TxEip1559, TxEip2930, TxEip4844, TxLegacy, Withdrawal, Withdrawals,
     };
 
+    // each value in the database has an extra field named flags that encodes metadata about other
+    // fields in the value, e.g. offset and length.
+    //
+    // this check is to ensure we do not inadvertently add too many fields to a struct which would
+    // expand the flags field and break backwards compatibility
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert!(Account::bitflag_encoded_bytes() == 2);
-        assert!(Account::bitflag_unused_bits() == 5);
         assert!(AccountHashingCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(AccountHashingCheckpoint::bitflag_unused_bits() == 7);
         assert!(CheckpointBlockRange::bitflag_encoded_bytes() == 1);
-        assert!(CheckpointBlockRange::bitflag_unused_bits() == 0);
         assert!(CompactClientVersion::bitflag_encoded_bytes() == 0);
-        assert!(CompactClientVersion::bitflag_unused_bits() == 0);
         assert!(CompactU256::bitflag_encoded_bytes() == 1);
-        assert!(CompactU256::bitflag_unused_bits() == 2);
         assert!(CompactU64::bitflag_encoded_bytes() == 1);
-        assert!(CompactU64::bitflag_unused_bits() == 4);
         assert!(EntitiesCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(EntitiesCheckpoint::bitflag_unused_bits() == 0);
         assert!(ExecutionCheckpoint::bitflag_encoded_bytes() == 0);
-        assert!(ExecutionCheckpoint::bitflag_unused_bits() == 0);
         assert!(Header::bitflag_encoded_bytes() == 4);
-        assert!(Header::bitflag_unused_bits() == 1);
         assert!(HeadersCheckpoint::bitflag_encoded_bytes() == 0);
-        assert!(HeadersCheckpoint::bitflag_unused_bits() == 0);
         assert!(IndexHistoryCheckpoint::bitflag_encoded_bytes() == 0);
-        assert!(IndexHistoryCheckpoint::bitflag_unused_bits() == 0);
         assert!(PruneCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(PruneCheckpoint::bitflag_unused_bits() == 6);
         assert!(PruneMode::bitflag_encoded_bytes() == 1);
-        assert!(PruneMode::bitflag_unused_bits() == 0);
         assert!(PruneSegment::bitflag_encoded_bytes() == 1);
-        assert!(PruneSegment::bitflag_unused_bits() == 0);
         assert!(Receipt::bitflag_encoded_bytes() == 1);
-        assert!(Receipt::bitflag_unused_bits() == 0);
         assert!(ReceiptWithBloom::bitflag_encoded_bytes() == 0);
-        assert!(ReceiptWithBloom::bitflag_unused_bits() == 0);
         assert!(SealedHeader::bitflag_encoded_bytes() == 0);
-        assert!(SealedHeader::bitflag_unused_bits() == 0);
         assert!(StageCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(StageCheckpoint::bitflag_unused_bits() == 3);
         assert!(StageUnitCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(StageUnitCheckpoint::bitflag_unused_bits() == 0);
         assert!(StoredBlockBodyIndices::bitflag_encoded_bytes() == 1);
-        assert!(StoredBlockBodyIndices::bitflag_unused_bits() == 0);
         assert!(StoredBlockOmmers::bitflag_encoded_bytes() == 0);
-        assert!(StoredBlockOmmers::bitflag_unused_bits() == 0);
         assert!(StoredBlockWithdrawals::bitflag_encoded_bytes() == 0);
-        assert!(StoredBlockWithdrawals::bitflag_unused_bits() == 0);
         assert!(StorageHashingCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(StorageHashingCheckpoint::bitflag_unused_bits() == 6);
         assert!(TxEip1559::bitflag_encoded_bytes() == 4);
-        assert!(TxEip1559::bitflag_unused_bits() == 3);
         assert!(TxEip2930::bitflag_encoded_bytes() == 3);
-        assert!(TxEip2930::bitflag_unused_bits() == 0);
         assert!(TxEip4844::bitflag_encoded_bytes() == 5);
-        assert!(TxEip4844::bitflag_unused_bits() == 6);
         assert!(TxLegacy::bitflag_encoded_bytes() == 3);
-        assert!(TxLegacy::bitflag_unused_bits() == 3);
         assert!(Withdrawal::bitflag_encoded_bytes() == 2);
-        assert!(Withdrawal::bitflag_unused_bits() == 4);
         assert!(Withdrawals::bitflag_encoded_bytes() == 0);
-        assert!(Withdrawals::bitflag_unused_bits() == 0);
     }
 }

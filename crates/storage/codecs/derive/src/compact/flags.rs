@@ -61,12 +61,7 @@ pub(crate) fn generate_flag_struct(
             pub const fn bitflag_encoded_bytes() -> usize {
                 #total_bytes as usize
             }
-
-            #[doc = #bitflag_unused_bits]
-            pub const fn bitflag_unused_bits() -> usize {
-                #unused_bits as usize
-            }
-        }
+       }
         pub use #mod_flags_ident::#flags_ident;
         #[allow(non_snake_case)]
         mod #mod_flags_ident {
