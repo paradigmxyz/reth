@@ -1,4 +1,3 @@
-use alloy_rlp::{RlpDecodable, RlpEncodable};
 use futures::Future;
 use reth_primitives::{Receipt, Receipts};
 use tokio::io::AsyncReadExt;
@@ -8,7 +7,7 @@ use tracing::trace;
 
 use crate::{
     file_client::{FileClientError, FromReader},
-    op_receipt_codec::ReceiptFileCodec,
+    file_codec_ovm_receipt::ReceiptFileCodec,
 };
 
 /// File client for reading RLP encoded receipts from file. Receipts in file must be in sequential
@@ -130,7 +129,7 @@ impl FromReader for ReceiptFileClient {
 }
 
 /// [`Receipt`] with block number.
-#[derive(Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ReceiptWithBlockNumber {
     /// Receipt.
     pub receipt: Receipt,

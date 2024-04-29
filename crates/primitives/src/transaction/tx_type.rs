@@ -1,5 +1,4 @@
 use crate::{U64, U8};
-use alloy_rlp::{Decodable, Encodable};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
@@ -179,30 +178,6 @@ impl PartialEq<u8> for TxType {
 impl PartialEq<TxType> for u8 {
     fn eq(&self, other: &TxType) -> bool {
         *self == *other as u8
-    }
-}
-
-impl Encodable for TxType {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        (*self as u8).encode(out);
-    }
-
-    fn length(&self) -> usize {
-        1
-    }
-}
-
-impl Decodable for TxType {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if buf.is_empty() {
-            return Err(alloy_rlp::Error::InputTooShort)
-        } else if buf.len() > 1 {
-            return Err(alloy_rlp::Error::Overflow)
-        }
-
-        let ty = u8::decode(buf)?;
-
-        TxType::try_from(ty).map_err(alloy_rlp::Error::Custom)
     }
 }
 

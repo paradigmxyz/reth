@@ -1,11 +1,11 @@
 //! Codec for reading raw receipts from a file.
 
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpDecodableWrapper};
+use alloy_rlp::{Decodable, RlpDecodable, RlpDecodableWrapper};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
     Address, Bloom, Bytes, Log, Receipt, TxType, B256,
 };
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::codec::Decoder;
 
 use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockNumber};
 
@@ -41,15 +41,6 @@ impl Decoder for ReceiptFileCodec {
         src.advance(src.len() - buf_slice.len());
 
         Ok(Some(receipt.try_into().map_err(FileClientError::from)?))
-    }
-}
-
-impl Encoder<Receipt> for ReceiptFileCodec {
-    type Error = FileClientError;
-
-    fn encode(&mut self, item: Receipt, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        item.encode(dst);
-        Ok(())
     }
 }
 

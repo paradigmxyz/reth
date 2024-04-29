@@ -32,7 +32,7 @@ pub mod file_client;
 /// Contains [ReceiptFileClient](receipt_file_client::ReceiptFileClient) to read receipt data from
 /// files, efficiently buffering receipts for retrieval.
 ///
-/// Currently configured to use codec [`HackReceipt`](op_receipt_codec::HackReceipt) based on
+/// Currently configured to use codec [`HackReceipt`](file_codec_ovm_receipt::HackReceipt) based on
 /// export of below Bedrock data using <https://github.com/testinprod-io/op-geth/pull/1>. Codec can
 /// be replaced with regular encoding of receipts for export.
 ///
@@ -49,7 +49,7 @@ pub mod file_codec;
 /// Module with a codec for reading and encoding receipts in files.
 ///
 /// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
-pub mod op_receipt_codec;
+pub mod file_codec_ovm_receipt;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
