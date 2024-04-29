@@ -4,15 +4,15 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use reth::revm::db::{
-    states::{PlainStorageChangeset, PlainStorageRevert},
-    BundleState,
-};
 use reth_primitives::{
     revm_primitives::{AccountInfo, Bytecode},
     Address, Bytes, SealedBlockWithSenders, StorageEntry, B256, U256,
 };
 use reth_provider::{bundle_state::StorageRevertsIter, OriginalValuesKnown, ProviderError};
+use reth_revm::db::{
+    states::{PlainStorageChangeset, PlainStorageRevert},
+    BundleState,
+};
 use reth_tracing::tracing::error;
 use rusqlite::Connection;
 
@@ -409,7 +409,7 @@ fn get_storage(connection: &Connection, address: Address, key: B256) -> eyre::Re
     }
 }
 
-impl reth::revm::Database for Database {
+impl reth_revm::Database for Database {
     type Error = ProviderError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {

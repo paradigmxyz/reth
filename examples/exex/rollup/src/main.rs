@@ -3,17 +3,11 @@ use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use db::Database;
 use eyre::OptionExt;
 use once_cell::sync::Lazy;
-use reth::{
-    payload::error::PayloadBuilderError,
-    revm::{
-        db::{states::bundle_state::BundleRetention, BundleState},
-        DatabaseCommit, StateBuilder,
-    },
-};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_interfaces::executor::BlockValidationError;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeComponents};
 use reth_node_ethereum::{EthEvmConfig, EthereumNode};
+use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     address, constants,
     revm::env::fill_tx_env,
@@ -22,6 +16,10 @@ use reth_primitives::{
     Header, Receipt, SealedBlockWithSenders, TransactionSigned, U256,
 };
 use reth_provider::{Chain, ProviderError};
+use reth_revm::{
+    db::{states::bundle_state::BundleRetention, BundleState},
+    DatabaseCommit, StateBuilder,
+};
 use reth_tracing::tracing::{debug, error, info};
 use rusqlite::Connection;
 use std::sync::Arc;
@@ -266,7 +264,7 @@ fn execute_block(
 
     // Execute block
     let state = StateBuilder::new_with_database(
-        Box::new(db) as Box<dyn reth::revm::Database<Error = ProviderError> + Send>
+        Box::new(db) as Box<dyn reth_revm::Database<Error = ProviderError> + Send>
     )
     .with_bundle_update()
     .build();
@@ -380,7 +378,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use alloy_sol_types::{sol, SolCall};
-    use reth::revm::Evm;
     use reth_interfaces::test_utils::generators::{self, sign_tx_with_key_pair};
     use reth_primitives::{
         bytes,
@@ -389,6 +386,7 @@ mod tests {
         revm_primitives::{AccountInfo, ExecutionResult, Output, TransactTo, TxEnv},
         BlockNumber, Receipt, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
     };
+    use reth_revm::Evm;
     use rusqlite::Connection;
     use secp256k1::{Keypair, Secp256k1};
 
