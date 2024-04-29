@@ -1,7 +1,5 @@
 //! IPC request handling adapted from [`jsonrpsee`] http request handling
 
-use std::sync::Arc;
-
 use futures::{stream::FuturesOrdered, StreamExt};
 use jsonrpsee::{
     batch_response_error,
@@ -17,6 +15,7 @@ use jsonrpsee::{
     },
     BatchResponseBuilder, MethodResponse, ResponsePayload,
 };
+use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio_util::either::Either;
 use tracing::instrument;
