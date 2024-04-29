@@ -187,7 +187,7 @@ impl<DB> NodeBuilder<DB> {
 
 impl<DB> NodeBuilder<DB>
 where
-    DB: Database + Unpin + Clone + 'static,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self, types: T) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
