@@ -106,7 +106,9 @@ impl Signature {
             Ok((v == 28, None))
         } else {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            Ok((((v - 35) % 2) != 0, Some((v - 35) >> 1)))
+            let odd_y_parity = ((v - 35) % 2) != 0;
+            let chain_id = (v - 35) >> 1;
+            Ok((odd_y_parity, Some(chain_id)))
         }
     }
 

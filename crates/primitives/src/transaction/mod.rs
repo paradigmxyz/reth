@@ -1741,7 +1741,7 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
                         // signature according to the Ethereum specification
                         TxType::Legacy => {
                             Signature::extract_chain_id(signature.v.to())
-                                .expect("v would always be valid")
+                                .map_err(|_| ConversionError::InvalidSignature)?
                                 .0
                         }
                         _ => !signature.v.is_zero(),
