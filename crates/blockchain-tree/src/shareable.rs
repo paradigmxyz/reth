@@ -82,7 +82,7 @@ where
         res
     }
 
-    fn update_block_hashes_and_remove_chains(
+    fn update_block_hashes_and_clear_buffered(
         &self,
     ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
         let mut tree = self.tree.write();

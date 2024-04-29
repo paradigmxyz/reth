@@ -1629,7 +1629,7 @@ where
         }
 
         if sync_target_state.finalized_block_hash.is_zero() {
-            self.blockchain.update_block_hashes_and_remove_chains()?;
+            self.blockchain.update_block_hashes_and_clear_buffered()?;
             self.blockchain.connect_buffered_blocks_to_canonical_hashes()?;
             // We are on a optimistic syncing process, better to wait for the next FCU to handle
             return Ok(())

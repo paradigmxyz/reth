@@ -656,8 +656,8 @@ where
         self.tree.finalize_block(finalized_block)
     }
 
-    fn update_block_hashes_and_remove_chains(&self) -> RethResult<BTreeMap<BlockNumber, B256>> {
-        self.tree.update_block_hashes_and_remove_chains()
+    fn update_block_hashes_and_clear_buffered(&self) -> RethResult<BTreeMap<BlockNumber, B256>> {
+        self.tree.update_block_hashes_and_clear_buffered()
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(

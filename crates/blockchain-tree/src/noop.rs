@@ -60,7 +60,7 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
         Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
     }
 
-    fn update_block_hashes_and_remove_chains(
+    fn update_block_hashes_and_clear_buffered(
         &self,
     ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
         Ok(BTreeMap::new())

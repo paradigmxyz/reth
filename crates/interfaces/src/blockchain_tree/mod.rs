@@ -79,9 +79,11 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     ) -> RethResult<()>;
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
-    /// them. Remove all mismatches, disconnect them and removes all chains.
-    fn update_block_hashes_and_remove_chains(&self)
-        -> RethResult<BTreeMap<BlockNumber, BlockHash>>;
+    /// them. Remove all mismatches, disconnect them, removes all chains and clears all buffered
+    /// blocks before the tip.
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>>;
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
