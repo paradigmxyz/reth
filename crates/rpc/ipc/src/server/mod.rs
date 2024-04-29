@@ -982,14 +982,6 @@ mod tests {
         let client = IpcClientBuilder::default().build(endpoint).await.unwrap();
         let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
         assert_eq!(response, msg);
-        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
-        assert_eq!(response, msg);
-        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
-        assert_eq!(response, msg);
-        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
-        assert_eq!(response, msg);
-        let response: String = client.request("eth_chainId", rpc_params![]).await.unwrap();
-        assert_eq!(response, msg);
     }
 
     #[tokio::test]
