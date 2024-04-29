@@ -110,6 +110,12 @@ impl FromReader for ReceiptFileClient {
             }
 
             trace!(target: "downloaders::file",
+                blocks=?log_interval_start_block..=block_number,
+                total_receipts,
+                "read receipts from file"
+            );
+
+            trace!(target: "downloaders::file",
                 blocks = receipts.len(),
                 total_receipts,
                 "Initialized receipt file client"
