@@ -90,6 +90,11 @@ impl StageId {
         matches!(self, StageId::Headers | StageId::Bodies)
     }
 
+    /// Returns `true` if it's [TransactionLookup](StageId::TransactionLookup) stage.
+    pub fn is_tx_lookup(&self) -> bool {
+        matches!(self, StageId::TransactionLookup)
+    }
+
     /// Returns true indicating if it's the finish stage [StageId::Finish]
     pub fn is_finish(&self) -> bool {
         matches!(self, StageId::Finish)

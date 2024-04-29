@@ -14,7 +14,7 @@ use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
-use reth_db::{database::Database, init_db};
+use reth_db::{database::Database, init_db, tables, transaction::DbTx};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
@@ -41,7 +41,7 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -76,11 +76,6 @@ pub struct ImportCommand {
     #[arg(long, verbatim_doc_comment)]
     no_state: bool,
 
-    /// Import OP Mainnet chain below Bedrock. Caution! Flag must be set as env var, since the env
-    /// var is read by another process too, in order to make below Bedrock import work.
-    #[arg(long, verbatim_doc_comment, env = "OP_RETH_MAINNET_BELOW_BEDROCK")]
-    op_mainnet_below_bedrock: bool,
-
     /// Chunk byte length.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
@@ -98,20 +93,16 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(mut self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
-        if self.op_mainnet_below_bedrock {
-            self.no_state = true;
-            debug!(target: "reth::cli", "Importing OP mainnet below bedrock");
-        }
-
         if self.no_state {
-            debug!(target: "reth::cli", "Stages requiring state disabled");
+            info!(target: "reth::cli", "Disabled stages requiring state");
         }
 
         debug!(target: "reth::cli",
-            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking chain import"
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE),
+            "Chunking chain import"
         );
 
         // add network name to data dir
@@ -144,6 +135,9 @@ impl ImportCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
+        let mut total_decoded_blocks = 0;
+        let mut total_decoded_txns = 0;
+
         while let Some(file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
@@ -152,6 +146,9 @@ impl ImportCommand {
 
             let tip = file_client.tip().ok_or(eyre::eyre!("file client has no tip"))?;
             info!(target: "reth::cli", "Chain file chunk read");
+
+            total_decoded_blocks += file_client.headers_len();
+            total_decoded_txns += file_client.bodies_len();
 
             let (mut pipeline, events) = self
                 .build_import_pipeline(
@@ -191,7 +188,29 @@ impl ImportCommand {
             }
         }
 
-        info!(target: "reth::cli", "Chain file imported");
+        let provider = provider_factory.provider()?;
+
+        let total_imported_blocks = provider.tx_ref().entries::<tables::Headers>()?;
+        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+
+        if total_decoded_blocks != total_imported_blocks ||
+            total_decoded_txns != total_imported_txns
+        {
+            error!(target: "reth::cli",
+                total_decoded_blocks,
+                total_imported_blocks,
+                total_decoded_txns,
+                total_imported_txns,
+                "Chain was partially imported"
+            );
+        }
+
+        info!(target: "reth::cli",
+            total_imported_blocks,
+            total_imported_txns,
+            "Chain file imported"
+        );
+
         Ok(())
     }
 
