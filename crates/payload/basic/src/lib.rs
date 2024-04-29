@@ -53,9 +53,9 @@ mod metrics;
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
-    /// txpool
+    /// The transaction pool to pull transactions from.
     pool: Pool,
-    /// How to spawn building tasks
+    /// The task executor to spawn payload building tasks on.
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
