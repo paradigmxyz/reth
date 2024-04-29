@@ -54,9 +54,10 @@ impl<Node: FullNodeComponents> Rollup<Node> {
     }
 
     async fn start(mut self) -> eyre::Result<()> {
+        // Process all new chain state notifications
         while let Some(notification) = self.ctx.notifications.recv().await {
-            if let Some(reverted_chan) = notification.reverted_chain() {
-                self.revert(&reverted_chan)?;
+            if let Some(reverted_chain) = notification.reverted_chain() {
+                self.revert(&reverted_chain)?;
             }
 
             if let Some(committed_chain) = notification.committed_chain() {
@@ -68,11 +69,18 @@ impl<Node: FullNodeComponents> Rollup<Node> {
         Ok(())
     }
 
+    /// Process a new chain commit.
+    ///
+    /// This function decodes all transactions to the rollup contract into events, executes the
+    /// corresponding actions and inserts the results into the database.
     fn commit(&mut self, chain: &Chain) -> eyre::Result<()> {
         let events = decode_chain_into_rollup_events(chain);
 
         for (_, tx, event) in events {
             match event {
+                // A new block is submitted to the rollup contract.
+                // The block is executed on top of existing rollup state and committed into the
+                // database.
                 RollupContractEvents::BlockSubmitted(_) => {
                     let call = RollupContractCalls::abi_decode(tx.input(), true)?;
 
@@ -106,6 +114,8 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         }
                     }
                 }
+                // A deposit of ETH to the rollup contract. The deposit is added to the recipient's
+                // balance and committed into the database.
                 RollupContractEvents::Enter(RollupContract::Enter {
                     token,
                     rollupRecipient,
@@ -136,6 +146,10 @@ impl<Node: FullNodeComponents> Rollup<Node> {
         Ok(())
     }
 
+    /// Process a chain revert.
+    ///
+    /// This function decodes all transactions to the rollup contract into events, reverts the
+    /// corresponding actions and updates the database.
     fn revert(&mut self, chain: &Chain) -> eyre::Result<()> {
         let mut events = decode_chain_into_rollup_events(chain);
         // Reverse the order of events to start reverting from the tip
@@ -143,6 +157,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
 
         for (_, tx, event) in events {
             match event {
+                // The block is reverted from the database.
                 RollupContractEvents::BlockSubmitted(_) => {
                     let call = RollupContractCalls::abi_decode(tx.input(), true)?;
 
@@ -160,6 +175,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         );
                     }
                 }
+                // The deposit is subtracted from the recipient's balance.
                 RollupContractEvents::Enter(RollupContract::Enter {
                     token,
                     rollupRecipient,
