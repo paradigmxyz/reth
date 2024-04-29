@@ -5,7 +5,6 @@ use reth_config::config::PruneConfig;
 use reth_primitives::{
     ChainSpec, PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
-use std::sync::Arc;
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -19,31 +18,30 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self, chain_spec: Arc<ChainSpec>) -> eyre::Result<Option<PruneConfig>> {
-        Ok(if self.full {
-            Some(PruneConfig {
-                block_interval: 5,
-                segments: PruneModes {
-                    sender_recovery: Some(PruneMode::Full),
-                    transaction_lookup: None,
-                    receipts: chain_spec
+    pub fn prune_config(&self, chain_spec: &ChainSpec) -> Option<PruneConfig> {
+        if !self.full {
+            return None;
+        }
+        Some(PruneConfig {
+            block_interval: 5,
+            segments: PruneModes {
+                sender_recovery: Some(PruneMode::Full),
+                transaction_lookup: None,
+                receipts: chain_spec
+                    .deposit_contract
+                    .as_ref()
+                    .map(|contract| PruneMode::Before(contract.block)),
+                account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                receipts_log_filter: ReceiptsLogPruneConfig(
+                    chain_spec
                         .deposit_contract
                         .as_ref()
-                        .map(|contract| PruneMode::Before(contract.block)),
-                    account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    receipts_log_filter: ReceiptsLogPruneConfig(
-                        chain_spec
-                            .deposit_contract
-                            .as_ref()
-                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
-                            .into_iter()
-                            .collect(),
-                    ),
-                },
-            })
-        } else {
-            None
+                        .map(|contract| (contract.address, PruneMode::Before(contract.block)))
+                        .into_iter()
+                        .collect(),
+                ),
+            },
         })
     }
 }

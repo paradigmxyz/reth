@@ -28,7 +28,6 @@ use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
-use alloy_rlp::{RlpDecodable, RlpEncodable};
 use discv5::{
     kbucket,
     kbucket::{
@@ -39,8 +38,9 @@ use discv5::{
 };
 use enr::Enr;
 use parking_lot::Mutex;
-use proto::{EnrRequest, EnrResponse, EnrWrapper};
-use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
+use proto::{EnrRequest, EnrResponse};
+use reth_network_types::PeerId;
+use reth_primitives::{bytes::Bytes, hex, ForkId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -211,7 +211,8 @@ impl Discv4 {
     /// # use std::io;
     /// use rand::thread_rng;
     /// use reth_discv4::{Discv4, Discv4Config};
-    /// use reth_primitives::{pk2id, NodeRecord, PeerId};
+    /// use reth_network_types::{pk2id, PeerId};
+    /// use reth_primitives::NodeRecord;
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
@@ -1279,7 +1280,7 @@ impl Discv4Service {
             self.send_packet(
                 Message::EnrResponse(EnrResponse {
                     request_hash,
-                    enr: EnrWrapper::new(self.local_eip_868_enr.clone()),
+                    enr: self.local_eip_868_enr.clone(),
                 }),
                 remote_addr,
             );
@@ -2174,33 +2175,13 @@ pub enum DiscoveryUpdate {
     Batch(Vec<DiscoveryUpdate>),
 }
 
-/// Represents a forward-compatible ENR entry for including the forkid in a node record via
-/// EIP-868. Forward compatibility is achieved by allowing trailing fields.
-///
-/// See:
-/// <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L27-L38>
-///
-/// for how geth implements ForkId values and forward compatibility.
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[rlp(trailing)]
-pub struct EnrForkIdEntry {
-    /// The inner forkid
-    pub fork_id: ForkId,
-}
-
-impl From<ForkId> for EnrForkIdEntry {
-    fn from(fork_id: ForkId) -> Self {
-        Self { fork_id }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
-    use reth_primitives::{hex, mainnet_nodes, ForkHash};
+    use reth_primitives::{hex, mainnet_nodes, EnrForkIdEntry, ForkHash};
     use std::future::poll_fn;
 
     #[tokio::test]

@@ -11,7 +11,8 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{Header, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{Header, B256};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,

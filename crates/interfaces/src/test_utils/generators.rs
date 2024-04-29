@@ -6,7 +6,7 @@ use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
     SealedHeader, StorageEntry, Transaction, TransactionSigned, TxKind, TxLegacy, B256, U256,
 };
-use secp256k1::{KeyPair, Secp256k1};
+use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
     collections::{hash_map::DefaultHasher, BTreeMap},
@@ -91,22 +91,22 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
 /// - There is no guarantee that the nonce is not used twice for the same account
 pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
     let secp = Secp256k1::new();
-    let key_pair = KeyPair::new(&secp, rng);
+    let key_pair = Keypair::new(&secp, rng);
     let tx = random_tx(rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 
 /// Signs the [Transaction] with the given key pair.
-pub fn sign_tx_with_key_pair(key_pair: KeyPair, tx: Transaction) -> TransactionSigned {
+pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
-/// Generates a set of [KeyPair]s based on the desired count.
-pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<KeyPair> {
+/// Generates a set of [Keypair]s based on the desired count.
+pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
     let secp = Secp256k1::new();
-    (0..count).map(|_| KeyPair::new(&secp, rng)).collect()
+    (0..count).map(|_| Keypair::new(&secp, rng)).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
@@ -404,7 +404,7 @@ mod tests {
         let signature_hash = tx.signature_hash();
 
         for _ in 0..100 {
-            let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
+            let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
 
             let signature =
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)

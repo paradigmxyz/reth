@@ -9,7 +9,8 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{BlockBody, Header, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{BlockBody, Header, B256};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{

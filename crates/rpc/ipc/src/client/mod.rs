@@ -2,43 +2,22 @@
 
 use crate::stream_codec::StreamCodec;
 use futures::StreamExt;
+use interprocess::local_socket::tokio::{LocalSocketStream, OwnedReadHalf, OwnedWriteHalf};
 use jsonrpsee::{
     async_client::{Client, ClientBuilder},
     core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT},
 };
-use std::{
-    io,
-    path::{Path, PathBuf},
+use std::io;
+use tokio::io::AsyncWriteExt;
+use tokio_util::{
+    codec::FramedRead,
+    compat::{Compat, FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt},
 };
-use tokio::{io::AsyncWriteExt, net::UnixStream};
-use tokio_util::codec::FramedRead;
-
-/// Builder type for [`Client`]
-#[derive(Clone, Default, Debug)]
-#[non_exhaustive]
-pub struct IpcClientBuilder;
-
-impl IpcClientBuilder {
-    /// Connects to a IPC socket
-    pub async fn build(self, path: impl AsRef<Path>) -> Result<Client, IpcError> {
-        let (tx, rx) = IpcTransportClientBuilder::default().build(path).await?;
-        Ok(self.build_with_tokio(tx, rx))
-    }
-
-    /// Uses the sender and receiver channels to connect to the socket.
-    pub fn build_with_tokio<S, R>(self, sender: S, receiver: R) -> Client
-    where
-        S: TransportSenderT + Send,
-        R: TransportReceiverT + Send,
-    {
-        ClientBuilder::default().build_with_tokio(sender, receiver)
-    }
-}
 
 /// Sending end of IPC transport.
 #[derive(Debug)]
-pub struct Sender {
-    inner: tokio::net::unix::OwnedWriteHalf,
+pub(crate) struct Sender {
+    inner: Compat<OwnedWriteHalf>,
 }
 
 #[async_trait::async_trait]
@@ -64,8 +43,8 @@ impl TransportSenderT for Sender {
 
 /// Receiving end of IPC transport.
 #[derive(Debug)]
-pub struct Receiver {
-    inner: FramedRead<tokio::net::unix::OwnedReadHalf, StreamCodec>,
+pub(crate) struct Receiver {
+    pub(crate) inner: FramedRead<Compat<OwnedReadHalf>, StreamCodec>,
 }
 
 #[async_trait::async_trait]
@@ -81,10 +60,34 @@ impl TransportReceiverT for Receiver {
 /// Builder for IPC transport [`Sender`] and [`Receiver`] pair.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct IpcTransportClientBuilder;
+pub(crate) struct IpcTransportClientBuilder;
 
 impl IpcTransportClientBuilder {
-    /// Try to establish the connection.
+    pub(crate) async fn build(
+        self,
+        endpoint: impl AsRef<str>,
+    ) -> Result<(Sender, Receiver), IpcError> {
+        let endpoint = endpoint.as_ref().to_string();
+        let conn = LocalSocketStream::connect(endpoint.clone())
+            .await
+            .map_err(|err| IpcError::FailedToConnect { path: endpoint, err })?;
+
+        let (rhlf, whlf) = conn.into_split();
+
+        Ok((
+            Sender { inner: whlf.compat_write() },
+            Receiver { inner: FramedRead::new(rhlf.compat(), StreamCodec::stream_incoming()) },
+        ))
+    }
+}
+
+/// Builder type for [`Client`]
+#[derive(Clone, Default, Debug)]
+#[non_exhaustive]
+pub struct IpcClientBuilder;
+
+impl IpcClientBuilder {
+    /// Connects to a IPC socket
     ///
     /// ```
     /// use jsonrpsee::{core::client::ClientT, rpc_params};
@@ -95,19 +98,18 @@ impl IpcTransportClientBuilder {
     /// #   Ok(())
     /// # }
     /// ```
-    pub async fn build(self, path: impl AsRef<Path>) -> Result<(Sender, Receiver), IpcError> {
-        let path = path.as_ref();
+    pub async fn build(self, path: impl AsRef<str>) -> Result<Client, IpcError> {
+        let (tx, rx) = IpcTransportClientBuilder::default().build(path).await?;
+        Ok(self.build_with_tokio(tx, rx))
+    }
 
-        let stream = UnixStream::connect(path)
-            .await
-            .map_err(|err| IpcError::FailedToConnect { path: path.to_path_buf(), err })?;
-
-        let (rhlf, whlf) = stream.into_split();
-
-        Ok((
-            Sender { inner: whlf },
-            Receiver { inner: FramedRead::new(rhlf, StreamCodec::stream_incoming()) },
-        ))
+    /// Uses the sender and receiver channels to connect to the socket.
+    pub fn build_with_tokio<S, R>(self, sender: S, receiver: R) -> Client
+    where
+        S: TransportSenderT + Send,
+        R: TransportReceiverT + Send,
+    {
+        ClientBuilder::default().build_with_tokio(sender, receiver)
     }
 }
 
@@ -125,7 +127,7 @@ pub enum IpcError {
     FailedToConnect {
         /// The path of the socket.
         #[doc(hidden)]
-        path: PathBuf,
+        path: String,
         /// The error occurred while connecting.
         #[doc(hidden)]
         err: io::Error,
@@ -137,13 +139,18 @@ pub enum IpcError {
 
 #[cfg(test)]
 mod tests {
+    use crate::server::dummy_endpoint;
+    use interprocess::local_socket::tokio::LocalSocketListener;
+
     use super::*;
-    use parity_tokio_ipc::{dummy_endpoint, Endpoint};
 
     #[tokio::test]
     async fn test_connect() {
         let endpoint = dummy_endpoint();
-        let _incoming = Endpoint::new(endpoint.clone()).incoming().unwrap();
+        let binding = LocalSocketListener::bind(endpoint.clone()).unwrap();
+        tokio::spawn(async move {
+            let _x = binding.accept().await;
+        });
 
         let (tx, rx) = IpcTransportClientBuilder::default().build(endpoint).await.unwrap();
         let _ = IpcClientBuilder::default().build_with_tokio(tx, rx);

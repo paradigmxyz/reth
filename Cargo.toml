@@ -29,6 +29,7 @@ members = [
     "crates/net/nat/",
     "crates/net/network/",
     "crates/net/network-api/",
+    "crates/net/types/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
@@ -49,7 +50,8 @@ members = [
     "crates/engine-primitives/",
     "crates/ethereum/engine-primitives/",
     "crates/node-ethereum/",
-    "crates/node-builder/",
+    "crates/node/builder/",
+    "crates/optimism/consensus",
     "crates/optimism/node/",
     "crates/optimism/evm/",
     "crates/node-core/",
@@ -70,7 +72,6 @@ members = [
     "crates/transaction-pool/",
     "crates/trie/",
     "crates/trie-parallel/",
-    "examples/",
     "examples/node-custom-rpc/",
     "examples/beacon-api-sse/",
     "examples/node-event-hooks/",
@@ -80,13 +81,17 @@ members = [
     "examples/custom-dev-node/",
     "examples/custom-payload-builder/",
     "examples/manual-p2p/",
+    "examples/network/",
+    "examples/network-txpool/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
     "examples/exex/minimal/",
     "examples/exex/op-bridge/",
+    "examples/db-access",
     "testing/ef-tests/",
+    "testing/testing-utils",
 ]
 default-members = ["bin/reth"]
 
@@ -218,7 +223,7 @@ reth-dns-discovery = { path = "crates/net/dns" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
-reth-node-builder = { path = "crates/node-builder" }
+reth-node-builder = { path = "crates/node/builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
@@ -245,6 +250,7 @@ reth-net-common = { path = "crates/net/common" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-types = { path = "crates/net/types" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }
@@ -268,39 +274,36 @@ reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
+reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-node-events = { path = "crates/node/events" }
+reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
-revm = { version = "8.0.0", features = [
-    "std",
-    "secp256k1",
-], default-features = false }
-revm-primitives = { version = "3.1.0", features = [
-    "std",
-], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "dc614ee" }
+revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "848d568" }
 
 # eth
 alloy-chains = "0.1.15"
 alloy-primitives = "0.7.1"
-alloy-dyn-abi = "0.7.0"
-alloy-sol-types = "0.7.0"
+alloy-dyn-abi = "0.7.1"
+alloy-sol-types = "0.7.1"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "39b8695" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "39b8695" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "4e22b9e" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "4e22b9e" }
 
 # misc
 auto_impl = "1"
@@ -309,6 +312,7 @@ bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
 derive_more = "0.99.17"
+fdlimit = "0.3.0"
 eyre = "0.6"
 tracing = "0.1.0"
 tracing-appender = "0.2"
@@ -319,6 +323,7 @@ serde_with = "3.3.0"
 humantime = "2.1"
 humantime-serde = "1.1"
 rand = "0.8.5"
+rustc-hash = "1.1.0"
 schnellru = "0.2"
 strum = "0.26"
 rayon = "1.7"
@@ -352,13 +357,14 @@ futures = "0.3.26"
 pin-project = "1.0.12"
 futures-util = "0.3.25"
 hyper = "0.14.25"
+reqwest = { version = "0.12", default-features = false }
 tower = "0.4"
 tower-http = "0.4"
 http = "0.2.8"
 http-body = "0.4.5"
 
 # p2p
-discv5 = { git = "https://github.com/sigp/discv5", rev = "04ac004" }
+discv5 = "0.6.0"
 igd-next = "0.14.3"
 
 # rpc
@@ -367,11 +373,12 @@ jsonrpsee-core = "0.22"
 jsonrpsee-types = "0.22"
 
 # crypto
-secp256k1 = { version = "0.27.0", default-features = false, features = [
+secp256k1 = { version = "0.28", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
-enr = { version = "=0.10.0", default-features = false, features = ["k256"] }
+# TODO: Remove `k256` feature: https://github.com/sigp/enr/pull/74
+enr = { version = "0.12.0", default-features = false, features = ["k256", "rust-secp256k1"] }
 
 # for eip-4844
 c-kzg = "1.0.0"

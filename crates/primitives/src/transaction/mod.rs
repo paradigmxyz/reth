@@ -1726,12 +1726,36 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
 
+        let transaction: Transaction = tx.try_into()?;
+
         TransactionSigned::from_transaction_and_signature(
-            tx.try_into()?,
+            transaction.clone(),
             Signature {
                 r: signature.r,
                 s: signature.s,
-                odd_y_parity: signature.y_parity.ok_or(ConversionError::MissingYParity)?.0,
+                odd_y_parity: if let Some(y_parity) = signature.y_parity {
+                    y_parity.0
+                } else {
+                    match transaction.tx_type() {
+                        // If the transaction type is Legacy, adjust the v component of the
+                        // signature according to the Ethereum specification
+                        TxType::Legacy => {
+                            // Calculate the new v value based on the EIP-155 formula:
+                            // v = {0,1} + CHAIN_ID * 2 + 35
+                            !(signature.v -
+                                U256::from(if let Some(chain_id) = transaction.chain_id() {
+                                    // If CHAIN_ID is available, calculate the new v value
+                                    // accordingly
+                                    chain_id.saturating_mul(2).saturating_add(35)
+                                } else {
+                                    // If CHAIN_ID is not available, set v = {0,1} + 27
+                                    27
+                                }))
+                            .is_zero()
+                        }
+                        _ => !signature.v.is_zero(),
+                    }
+                },
             },
         )
         .try_into_ecrecovered()
@@ -1755,7 +1779,7 @@ mod tests {
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_codecs::Compact;
-    use secp256k1::{KeyPair, Secp256k1};
+    use secp256k1::{Keypair, Secp256k1};
     use std::str::FromStr;
 
     #[test]
@@ -2048,7 +2072,7 @@ mod tests {
                     tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
 
-                let key_pair = KeyPair::new(&secp, &mut rng);
+                let key_pair = Keypair::new(&secp, &mut rng);
 
                 let signature =
                     sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();

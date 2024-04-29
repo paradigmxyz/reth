@@ -8,6 +8,7 @@ use crate::{
     },
     EthApi, EthApiSpec,
 };
+use alloy_primitives::TxKind as RpcTransactionKind;
 use async_trait::async_trait;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -33,8 +34,8 @@ use reth_rpc_types::{
         LegacyTransactionRequest,
     },
     AnyReceiptEnvelope, AnyTransactionReceipt, Index, Log, ReceiptWithBloom, Transaction,
-    TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest, WithOtherFields,
+    TransactionInfo, TransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    WithOtherFields,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -918,10 +919,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     chain_id: None,
                 }))
             }
@@ -934,10 +932,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     chain_id: 0,
                     access_list,
                 }))
@@ -957,10 +952,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     chain_id: 0,
                     access_list: access_list.unwrap_or_default(),
                 }))
@@ -986,10 +978,7 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     access_list: access_list.unwrap_or_default(),
 
                     // eip-4844 specific.

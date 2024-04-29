@@ -20,7 +20,9 @@ mod forkid;
 mod hardfork;
 mod head;
 
-pub use forkid::{ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError};
+pub use forkid::{
+    EnrForkIdEntry, ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError,
+};
 pub use hardfork::Hardfork;
 pub use head::Head;
 

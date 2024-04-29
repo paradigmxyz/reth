@@ -55,13 +55,10 @@ impl<N> Node<N> for OptimismNode
 where
     N: FullNodeTypes<Engine = OptimismEngineTypes>,
 {
-    type PoolBuilder = OptimismPoolBuilder;
-    type NetworkBuilder = OptimismNetworkBuilder;
-    type PayloadBuilder = OptimismPayloadBuilder;
+    type ComponentsBuilder =
+        ComponentsBuilder<N, OptimismPoolBuilder, OptimismPayloadBuilder, OptimismNetworkBuilder>;
 
-    fn components(
-        self,
-    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+    fn components_builder(self) -> Self::ComponentsBuilder {
         let Self { args } = self;
         Self::components(args)
     }

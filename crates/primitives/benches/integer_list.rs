@@ -121,7 +121,8 @@ mod elias_fano {
             let mut builder = EliasFanoBuilder::new(
                 list.as_ref().iter().max().map_or(0, |max| max + 1),
                 list.as_ref().len(),
-            )?;
+            )
+            .map_err(|err| EliasFanoError::InvalidInput(err.to_string()))?;
             builder.extend(list.as_ref().iter().copied());
             Ok(Self(builder.build()))
         }
@@ -241,8 +242,8 @@ mod elias_fano {
     #[derive(Debug, thiserror::Error)]
     pub enum EliasFanoError {
         /// The provided input is invalid.
-        #[error(transparent)]
-        InvalidInput(#[from] anyhow::Error),
+        #[error("{0}")]
+        InvalidInput(String),
         /// Failed to deserialize data into type.
         #[error("failed to deserialize data into type")]
         FailedDeserialize,

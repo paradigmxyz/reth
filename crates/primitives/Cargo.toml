@@ -27,7 +27,6 @@ alloy-trie = { workspace = true, features = ["serde"] }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
-enr = { workspace = true, features = ["rust-secp256k1"] }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery", "rand"] }
@@ -43,7 +42,6 @@ itertools.workspace = true
 modular-bitfield.workspace = true
 once_cell.workspace = true
 rayon.workspace = true
-serde_with.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = { version = "0.10.7", optional = true }
@@ -83,7 +81,6 @@ hash-db = "~0.15"
 plain_hasher = "0.2"
 
 sucds = "0.8.1"
-anyhow = "1.0.75"
 
 # necessary so we don't hit a "undeclared 'std'":
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
@@ -105,12 +102,10 @@ arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
-    "zstd-codec"
+    "zstd-codec",
 ]
 c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
-zstd-codec = [
-    "dep:zstd"
-]
+zstd-codec = ["dep:zstd"]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
