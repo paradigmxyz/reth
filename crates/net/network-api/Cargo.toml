@@ -17,6 +17,7 @@ reth-primitives.workspace = true
 reth-eth-wire.workspace = true
 reth-rpc-types.workspace = true
 reth-discv4.workspace = true
+reth-network-types.workspace = true
 
 # eth
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }

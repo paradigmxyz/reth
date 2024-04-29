@@ -39,7 +39,8 @@ use discv5::{
 use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
-use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{bytes::Bytes, hex, ForkId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -210,7 +211,8 @@ impl Discv4 {
     /// # use std::io;
     /// use rand::thread_rng;
     /// use reth_discv4::{Discv4, Discv4Config};
-    /// use reth_primitives::{pk2id, NodeRecord, PeerId};
+    /// use reth_network_types::{pk2id, PeerId};
+    /// use reth_primitives::NodeRecord;
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {

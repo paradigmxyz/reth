@@ -59,6 +59,7 @@ reth-downloaders.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-config.workspace = true
+reth-testing-utils.workspace = true
 
 assert_matches.workspace = true
 

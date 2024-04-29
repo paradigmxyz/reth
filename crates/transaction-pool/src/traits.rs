@@ -9,13 +9,13 @@ use crate::{
 };
 use futures_util::{ready, Stream};
 use reth_eth_wire::HandleMempoolData;
+use reth_network_types::PeerId;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
-    IntoRecoveredTransaction, PeerId, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, SealedBlock, Transaction, TransactionSignedEcRecovered,
-    TryFromRecoveredTransaction, TxEip4844, TxHash, TxKind, B256, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, U256,
+    IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
+    SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip4844,
+    TxHash, TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

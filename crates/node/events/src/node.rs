@@ -217,6 +217,17 @@ impl<DB> NodeState<DB> {
                     self.current_stage = None;
                 }
             }
+            PipelineEvent::Unwind { stage_id, input } => {
+                let current_stage = CurrentStage {
+                    stage_id,
+                    eta: Eta::default(),
+                    checkpoint: input.checkpoint,
+                    target: Some(input.unwind_to),
+                    entities_checkpoint: input.checkpoint.entities(),
+                };
+
+                self.current_stage = Some(current_stage);
+            }
             _ => (),
         }
     }

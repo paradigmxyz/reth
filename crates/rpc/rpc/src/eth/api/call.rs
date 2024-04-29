@@ -14,9 +14,7 @@ use crate::{
 };
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, TxKind, U256,
-};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, TxKind, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -73,13 +71,8 @@ where
         block_number: Option<BlockId>,
         overrides: EvmOverrides,
     ) -> EthResult<Bytes> {
-        let (res, _env) = self
-            .transact_call_at(
-                request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                overrides,
-            )
-            .await?;
+        let (res, _env) =
+            self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
         ensure_success(res.result)
     }
@@ -100,7 +93,7 @@ where
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
-        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let target_block = block_number.unwrap_or_default();
         let is_block_target_pending = target_block.is_pending();
 
         let ((cfg, block_env, _), block) = futures::try_join!(
@@ -390,7 +383,7 @@ where
         mut request: TransactionRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessListWithGasUsed> {
-        let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = at.unwrap_or_default();
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
 

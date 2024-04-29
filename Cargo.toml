@@ -29,6 +29,7 @@ members = [
     "crates/net/nat/",
     "crates/net/network/",
     "crates/net/network-api/",
+    "crates/net/types/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
@@ -49,7 +50,7 @@ members = [
     "crates/engine-primitives/",
     "crates/ethereum/engine-primitives/",
     "crates/node-ethereum/",
-    "crates/node-builder/",
+    "crates/node/builder/",
     "crates/optimism/consensus",
     "crates/optimism/node/",
     "crates/optimism/evm/",
@@ -71,7 +72,6 @@ members = [
     "crates/transaction-pool/",
     "crates/trie/",
     "crates/trie-parallel/",
-    "examples/",
     "examples/node-custom-rpc/",
     "examples/beacon-api-sse/",
     "examples/node-event-hooks/",
@@ -81,6 +81,7 @@ members = [
     "examples/custom-dev-node/",
     "examples/custom-payload-builder/",
     "examples/manual-p2p/",
+    "examples/network/",
     "examples/network-txpool/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
@@ -90,6 +91,7 @@ members = [
     "examples/exex/op-bridge/",
     "examples/db-access",
     "testing/ef-tests/",
+    "testing/testing-utils",
 ]
 default-members = ["bin/reth"]
 
@@ -221,9 +223,8 @@ reth-dns-discovery = { path = "crates/net/dns" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
-reth-node-builder = { path = "crates/node-builder" }
+reth-node-builder = { path = "crates/node/builder" }
 reth-node-ethereum = { path = "crates/node-ethereum" }
-reth-node-events = { path = "crates/node/events" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-node-core = { path = "crates/node-core" }
@@ -249,6 +250,7 @@ reth-net-common = { path = "crates/net/common" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-types = { path = "crates/net/types" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }
@@ -273,6 +275,8 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
+reth-node-events = { path = "crates/node/events" }
+reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
@@ -308,6 +312,7 @@ bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
 derive_more = "0.99.17"
+fdlimit = "0.3.0"
 eyre = "0.6"
 tracing = "0.1.0"
 tracing-appender = "0.2"
@@ -318,6 +323,7 @@ serde_with = "3.3.0"
 humantime = "2.1"
 humantime-serde = "1.1"
 rand = "0.8.5"
+rustc-hash = "1.1.0"
 schnellru = "0.2"
 strum = "0.26"
 rayon = "1.7"

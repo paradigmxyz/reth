@@ -27,8 +27,7 @@
 //! Utilities for handling async code.
 
 use std::sync::Arc;
-
-use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore, TryAcquireError};
+use tokio::sync::watch;
 
 #[derive(Debug, Clone)]
 pub(crate) struct StopHandle(watch::Receiver<()>);
@@ -57,29 +56,5 @@ impl ServerHandle {
     #[allow(dead_code)]
     pub(crate) async fn stopped(self) {
         self.0.closed().await
-    }
-}
-
-/// Limits the number of connections.
-pub(crate) struct ConnectionGuard(Arc<Semaphore>);
-
-impl ConnectionGuard {
-    pub(crate) fn new(limit: usize) -> Self {
-        Self(Arc::new(Semaphore::new(limit)))
-    }
-
-    pub(crate) fn try_acquire(&self) -> Option<OwnedSemaphorePermit> {
-        match self.0.clone().try_acquire_owned() {
-            Ok(guard) => Some(guard),
-            Err(TryAcquireError::Closed) => {
-                unreachable!("Semaphore::Close is never called and can't be closed")
-            }
-            Err(TryAcquireError::NoPermits) => None,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn available_connections(&self) -> usize {
-        self.0.available_permits()
     }
 }

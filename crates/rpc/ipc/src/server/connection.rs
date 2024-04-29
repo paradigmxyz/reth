@@ -9,7 +9,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 use tower::Service;
 
@@ -17,17 +17,6 @@ pub(crate) type JsonRpcStream<T> = Framed<T, StreamCodec>;
 
 #[pin_project::pin_project]
 pub(crate) struct IpcConn<T>(#[pin] pub(crate) T);
-
-impl<T> IpcConn<JsonRpcStream<T>>
-where
-    T: AsyncRead + AsyncWrite + Unpin,
-{
-    /// Create a response for when the server is busy and can't accept more requests.
-    pub(crate) async fn reject_connection(self) {
-        let mut parts = self.0.into_parts();
-        let _ = parts.io.write_all(b"Too many connections. Please try again later.").await;
-    }
-}
 
 impl<T> Stream for IpcConn<JsonRpcStream<T>>
 where
