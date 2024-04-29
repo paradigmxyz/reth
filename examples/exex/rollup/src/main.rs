@@ -87,6 +87,9 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                                 let block = block.seal_slow();
                                 self.db.insert_block_with_bundle(&block, bundle)?;
                                 info!(
+                                    tx_hash = %tx.hash,
+                                    chain_id = %header.rollupChainId,
+                                    sequence = %header.sequence,
                                     transactions = block.body.len(),
                                     "Block submitted, executed and inserted into database"
                                 );
@@ -120,6 +123,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     })?;
 
                     info!(
+                        tx_hash = %tx.hash,
                         %amount,
                         recipient = %rollupRecipient,
                         "Deposit",
@@ -133,7 +137,9 @@ impl<Node: FullNodeComponents> Rollup<Node> {
     }
 
     fn revert(&mut self, chain: &Chain) -> eyre::Result<()> {
-        let events = decode_chain_into_rollup_events(chain);
+        let mut events = decode_chain_into_rollup_events(chain);
+        // Reverse the order of events to start reverting from the tip
+        events.reverse();
 
         for (_, tx, event) in events {
             match event {
@@ -145,9 +151,9 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         ..
                     }) = call
                     {
-                        let block_number = u64::try_from(header.sequence)?;
-                        self.db.revert_block(block_number)?;
+                        self.db.revert_tip_block(header.sequence)?;
                         info!(
+                            tx_hash = %tx.hash,
                             chain_id = %header.rollupChainId,
                             sequence = %header.sequence,
                             "Block reverted"
@@ -171,6 +177,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     })?;
 
                     info!(
+                        tx_hash = %tx.hash,
                         %amount,
                         recipient = %rollupRecipient,
                         "Deposit reverted",
@@ -188,7 +195,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
 /// Rollup contract [ROLLUP_CONTRACT_ADDRESS] and extract [RollupContractEvents].
 fn decode_chain_into_rollup_events(
     chain: &Chain,
-) -> impl Iterator<Item = (&SealedBlockWithSenders, &TransactionSigned, RollupContractEvents)> {
+) -> Vec<(&SealedBlockWithSenders, &TransactionSigned, RollupContractEvents)> {
     chain
         // Get all blocks and receipts
         .blocks_and_receipts()
@@ -210,6 +217,7 @@ fn decode_chain_into_rollup_events(
                 .ok()
                 .map(|event| (block, tx, event))
         })
+        .collect()
 }
 
 /// Execute a rollup block and return (block with recovered senders)[BlockWithSenders], (bundle
@@ -502,7 +510,7 @@ mod tests {
         assert_eq!(account.nonce, 3);
 
         // Revert block with WETH deposit transaction
-        database.revert_block(1)?;
+        database.revert_tip_block(U256::from(1))?;
 
         // Verify WETH balance after revert
         let mut evm = Evm::builder()

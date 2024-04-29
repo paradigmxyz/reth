@@ -87,7 +87,7 @@ impl Database {
 
     /// Insert block with bundle into the database.
     pub fn insert_block_with_bundle(
-        &mut self,
+        &self,
         block: &SealedBlockWithSenders,
         bundle: BundleState,
     ) -> eyre::Result<()> {
@@ -168,21 +168,32 @@ impl Database {
         Ok(())
     }
 
-    /// Revert block from the database.
+    /// Reverts the tip block from the database, checking it against the provided block number.
     ///
     /// The code is adapted from <https://github.com/paradigmxyz/reth/blob/a8cd1f71a03c773c24659fc28bfed2ba5f2bd97b/crates/storage/provider/src/providers/database/provider.rs#L365-L540>
-    pub fn revert_block(&mut self, number: u64) -> eyre::Result<()> {
+    pub fn revert_tip_block(&self, block_number: U256) -> eyre::Result<()> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
 
-        tx.execute("DELETE FROM block WHERE number = ?", (number.to_string(),))?;
+        let tip_block_number = tx
+            .query_row::<String, _, _>(
+                "SELECT number FROM block ORDER BY number DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .map(|data| U256::from_str(&data))??;
+        if block_number != tip_block_number {
+            eyre::bail!("Reverts can only be done from the tip. Attempted to revert block {} with tip block {}", block_number, tip_block_number);
+        }
+
+        tx.execute("DELETE FROM block WHERE number = ?", (block_number.to_string(),))?;
 
         let mut state = BundleStateInit::new();
         let mut reverts = RevertsInit::new();
 
         let account_reverts = tx
             .prepare("SELECT address, data FROM account_revert WHERE block_number = ?")?
-            .query((number.to_string(),))?
+            .query((block_number.to_string(),))?
             .mapped(|row| {
                 Ok((
                     Address::from_str(row.get_ref(0)?.as_str()?),
@@ -213,7 +224,7 @@ impl Database {
 
         let storage_reverts = tx
             .prepare("SELECT address, key, data FROM storage_revert WHERE block_number = ?")?
-            .query((number.to_string(),))?
+            .query((block_number.to_string(),))?
             .mapped(|row| {
                 Ok((
                     Address::from_str(row.get_ref(0)?.as_str()?),
@@ -283,7 +294,7 @@ impl Database {
     }
 
     /// Get block by number.
-    pub fn get_block(&mut self, number: U256) -> eyre::Result<Option<SealedBlockWithSenders>> {
+    pub fn get_block(&self, number: U256) -> eyre::Result<Option<SealedBlockWithSenders>> {
         let block = self.connection().query_row::<String, _, _>(
             "SELECT data FROM block WHERE number = ?",
             (number.to_string(),),
@@ -299,7 +310,7 @@ impl Database {
     /// Insert new account if it does not exist, update otherwise. The provided closure is called
     /// with the current account, if it exists.
     pub fn upsert_account(
-        &mut self,
+        &self,
         address: Address,
         f: impl FnOnce(Option<AccountInfo>) -> eyre::Result<AccountInfo>,
     ) -> eyre::Result<()> {
@@ -307,7 +318,7 @@ impl Database {
     }
 
     /// Get account by address.
-    pub fn get_account(&mut self, address: Address) -> eyre::Result<Option<AccountInfo>> {
+    pub fn get_account(&self, address: Address) -> eyre::Result<Option<AccountInfo>> {
         get_account(&self.connection(), address)
     }
 }
