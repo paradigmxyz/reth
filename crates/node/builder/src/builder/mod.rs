@@ -34,12 +34,9 @@ use std::{str::FromStr, sync::Arc};
 
 mod states;
 
-/// The builtin provider type of the reth node.
+/// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullProviderType<DB> = BlockchainProvider<DB>;
-
-/// The adapter type for a reth node with the given types
-pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>;
+pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, BlockchainProvider<DB>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
