@@ -71,6 +71,9 @@ impl FromReader for ReceiptFileClient {
                     }
                     Err(err) => return Err(err),
                 };
+
+                total_receipts += 1;
+
                 let ReceiptWithBlockNumber { receipt, number } = receipt;
 
                 if first_block.is_none() {
@@ -80,7 +83,6 @@ impl FromReader for ReceiptFileClient {
 
                 if block_number == number {
                     receipts_for_block.push(Some(receipt));
-                    total_receipts += 1;
                 } else {
                     receipts.push(receipts_for_block);
 
