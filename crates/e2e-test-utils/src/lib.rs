@@ -44,10 +44,7 @@ pub async fn setup<N>(
     is_dev: bool,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
-    N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>,
-    // N::PoolBuilder: PoolBuilder<TmpNodeAdapter<N>>,
-    // N::NetworkBuilder: NetworkBuilder<TmpNodeAdapter<N>, TmpPool<N>>,
-    // N::PayloadBuilder: PayloadServiceBuilder<TmpNodeAdapter<N>, TmpPool<N>>,
+    N: Default + Node<TmpNodeAdapter<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -102,9 +99,6 @@ where
 // Type aliases
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-// type TmpPool<N> = <<N as reth_node_builder::Node<TmpNodeAdapter<N>>>::PoolBuilder as PoolBuilder<
-//     TmpNodeAdapter<N>,
-// >>::Pool;
 type TmpNodeAdapter<N> = FullNodeTypesAdapter<N, TmpDB, BlockchainProvider<TmpDB>>;
 
 type Adapter<N> = NodeAdapter<
