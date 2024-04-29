@@ -128,28 +128,6 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         "Deposit",
                     );
                 }
-                RollupContractEvents::ExitFilled(RollupContract::ExitFilled {
-                    token,
-                    hostRecipient,
-                    amount,
-                }) => {
-                    if token != Address::ZERO {
-                        error!(tx_hash = %tx.hash, "Only ETH withdrawals are supported");
-                        continue
-                    }
-
-                    self.db.upsert_account(hostRecipient, |account| {
-                        let mut account = account.ok_or(eyre::eyre!("account not found"))?;
-                        account.balance -= amount;
-                        Ok(account)
-                    })?;
-
-                    info!(
-                        %amount,
-                        recipient = %hostRecipient,
-                        "Withdrawal",
-                    );
-                }
                 _ => (),
             }
         }
@@ -199,28 +177,6 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         %amount,
                         recipient = %rollupRecipient,
                         "Deposit reverted",
-                    );
-                }
-                RollupContractEvents::ExitFilled(RollupContract::ExitFilled {
-                    token,
-                    hostRecipient,
-                    amount,
-                }) => {
-                    if token != Address::ZERO {
-                        error!(tx_hash = %tx.hash, "Only ETH withdrawals are supported");
-                        continue
-                    }
-
-                    self.db.upsert_account(hostRecipient, |account| {
-                        let mut account = account.ok_or(eyre::eyre!("account not found"))?;
-                        account.balance += amount;
-                        Ok(account)
-                    })?;
-
-                    info!(
-                        %amount,
-                        recipient = %hostRecipient,
-                        "Withdrawal reverted",
                     );
                 }
                 _ => (),
