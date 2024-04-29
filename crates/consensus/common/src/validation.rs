@@ -200,10 +200,11 @@ mod tests {
         test_utils::generators::{self, Rng},
     };
     use reth_primitives::{
-        hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber, Bytes,
-        ChainSpecBuilder, Signature, TransactionSigned, TxKind, Withdrawal, Withdrawals, MAINNET,
-        U256,
+        hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
+        BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned,
+        TransactionSignedEcRecovered, TxEip2930, TxEip4844, TxKind, Withdrawal, Withdrawals, U256,
     };
+    use reth_provider::AccountReader;
     use std::ops::RangeBounds;
 
     mock! {
@@ -233,15 +234,6 @@ mod tests {
             Self {
                 is_known: false,
                 parent,
-                account: None,
-                withdrawals_provider: MockWithdrawalsProvider::new(),
-            }
-        }
-        /// New provider where is_known is always true
-        fn new_known() -> Self {
-            Self {
-                is_known: true,
-                parent: None,
                 account: None,
                 withdrawals_provider: MockWithdrawalsProvider::new(),
             }
@@ -312,25 +304,6 @@ mod tests {
         }
     }
 
-    fn mock_tx(nonce: u64) -> TransactionSignedEcRecovered {
-        let request = Transaction::Eip2930(TxEip2930 {
-            chain_id: 1u64,
-            nonce,
-            gas_price: 0x28f000fff,
-            gas_limit: 10,
-            to: TxKind::Call(Address::default()),
-            value: U256::from(3_u64),
-            input: Bytes::from(vec![1, 2]),
-            access_list: Default::default(),
-        });
-
-        let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
-
-        let tx = TransactionSigned::from_transaction_and_signature(request, signature);
-        let signer = Address::ZERO;
-        TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
-    }
-
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
         let mut rng = generators::rng();
         let request = Transaction::Eip4844(TxEip4844 {
@@ -392,60 +365,6 @@ mod tests {
         let body = Vec::new();
 
         (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
-    }
-
-    #[test]
-    fn sanity_tx_nonce_check() {
-        let (block, _) = mock_block();
-        let tx1 = mock_tx(0);
-        let tx2 = mock_tx(1);
-        let provider = Provider::new_known();
-
-        let txs = vec![tx1, tx2];
-        validate_all_transaction_regarding_block_and_nonces(
-            txs.iter(),
-            &block.header,
-            provider,
-            &MAINNET,
-        )
-        .expect("To Pass");
-    }
-
-    #[test]
-    fn nonce_gap_in_first_transaction() {
-        let (block, _) = mock_block();
-        let tx1 = mock_tx(1);
-        let provider = Provider::new_known();
-
-        let txs = vec![tx1];
-        assert_eq!(
-            validate_all_transaction_regarding_block_and_nonces(
-                txs.iter(),
-                &block.header,
-                provider,
-                &MAINNET,
-            ),
-            Err(ConsensusError::from(InvalidTransactionError::NonceNotConsistent).into())
-        )
-    }
-
-    #[test]
-    fn nonce_gap_on_second_tx_from_same_signer() {
-        let (block, _) = mock_block();
-        let tx1 = mock_tx(0);
-        let tx2 = mock_tx(3);
-        let provider = Provider::new_known();
-
-        let txs = vec![tx1, tx2];
-        assert_eq!(
-            validate_all_transaction_regarding_block_and_nonces(
-                txs.iter(),
-                &block.header,
-                provider,
-                &MAINNET,
-            ),
-            Err(ConsensusError::from(InvalidTransactionError::NonceNotConsistent).into())
-        );
     }
 
     #[test]
