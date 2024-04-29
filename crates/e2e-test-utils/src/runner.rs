@@ -15,7 +15,7 @@ pub trait ActionT {
     type Output: Unpin;
     type Future: Future<Output = Self::Output> + Send;
 
-    fn execute(&mut self, ctx: &mut Self::Ctx) -> Pin<Box<Self::Future>>;
+    fn execute(&mut self, ctx: &mut Self::Ctx) -> Self::Future;
 }
 
 pub struct ActionFn<F, N> {
