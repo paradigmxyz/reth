@@ -6395,7 +6395,7 @@ dependencies = [
  "reth-stages-api",
  "reth-static-file",
  "reth-tasks",
- "reth-testing-utils",
+ "reth-test-utils",
  "reth-tokio-util",
  "reth-tracing",
  "schnellru",
@@ -7781,7 +7781,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-testing-utils"
+name = "reth-test-utils"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-genesis",

@@ -1,6 +1,6 @@
 [package]
-name = "reth-testing-utils"
-description = "Testing utils for reth."
+name = "reth-test-utils"
+description = "Test utils for reth."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

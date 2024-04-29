@@ -2352,7 +2352,7 @@ mod tests {
         use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::{genesis::Genesis, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockchainTestData;
-        use reth_testing_utils::GenesisAllocator;
+        use reth_test_utils::GenesisAllocator;
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {

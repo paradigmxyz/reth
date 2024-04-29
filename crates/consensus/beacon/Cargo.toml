@@ -59,7 +59,7 @@ reth-downloaders.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-config.workspace = true
-reth-testing-utils.workspace = true
+reth-test-utils.workspace = true
 
 assert_matches.workspace = true
 
@@ -71,5 +71,5 @@ optimism = [
     "reth-blockchain-tree/optimism",
     "reth-beacon-consensus-core/optimism",
     "reth-revm/optimism",
-    "reth-rpc/optimism"
+    "reth-rpc/optimism",
 ]
