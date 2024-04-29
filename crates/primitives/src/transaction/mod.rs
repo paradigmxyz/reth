@@ -32,7 +32,7 @@ pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 
-pub use signature::Signature;
+pub use signature::{extract_chain_id, Signature};
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -1740,7 +1740,7 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
                         // If the transaction type is Legacy, adjust the v component of the
                         // signature according to the Ethereum specification
                         TxType::Legacy => {
-                            Signature::extract_chain_id(signature.v.to())
+                            extract_chain_id(signature.v.to())
                                 .map_err(|_| ConversionError::InvalidSignature)?
                                 .0
                         }
