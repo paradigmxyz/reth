@@ -157,7 +157,7 @@ impl TxEip2930 {
         TxType::Eip2930
     }
 
-    /// Encodes the legacy transaction in RLP for signing.
+    /// Encodes the EIP-2930 transaction in RLP for signing.
     ///
     /// This encodes the transaction as:
     /// `tx_type || rlp(chain_id, nonce, gas_price, gas_limit, to, value, input, access_list)`
