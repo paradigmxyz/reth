@@ -138,7 +138,7 @@ mod tests {
             StageUnitCheckpoint, StorageHashingCheckpoint,
         },
         Account, Header, PruneCheckpoint, PruneMode, PruneSegment, Receipt, ReceiptWithBloom,
-        SealedHeader, TxEip1559, TxEip2930, TxEip4844, TxLegacy, Withdrawal, Withdrawals,
+        SealedHeader, TxEip1559, TxEip2930, TxEip4844, TxLegacy, Withdrawals,
     };
 
     // each value in the database has an extra field named flags that encodes metadata about other
@@ -177,7 +177,6 @@ mod tests {
             assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
             assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
             assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
-            assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
             assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
         }
 
@@ -210,7 +209,6 @@ mod tests {
             assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
             assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
             assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
-            assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
             assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
         }
     }
