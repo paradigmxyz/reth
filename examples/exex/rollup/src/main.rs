@@ -1,7 +1,3 @@
-mod db;
-
-use std::sync::Arc;
-
 use alloy_rlp::Decodable;
 use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use db::Database;
@@ -28,6 +24,9 @@ use reth_primitives::{
 use reth_provider::{Chain, ProviderError};
 use reth_tracing::tracing::{debug, error, info};
 use rusqlite::Connection;
+use std::sync::Arc;
+
+mod db;
 
 sol!(RollupContract, "rollup_abi.json");
 use RollupContract::{RollupContractCalls, RollupContractEvents};
