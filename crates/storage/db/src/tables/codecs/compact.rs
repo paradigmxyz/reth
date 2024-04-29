@@ -148,34 +148,34 @@ mod tests {
     // expand the flags field and break backwards compatibility
     #[test]
     fn test_ensure_backwards_compatibility() {
-        assert!(Account::bitflag_encoded_bytes() == 2);
-        assert!(AccountHashingCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(CheckpointBlockRange::bitflag_encoded_bytes() == 1);
-        assert!(CompactClientVersion::bitflag_encoded_bytes() == 0);
-        assert!(CompactU256::bitflag_encoded_bytes() == 1);
-        assert!(CompactU64::bitflag_encoded_bytes() == 1);
-        assert!(EntitiesCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(ExecutionCheckpoint::bitflag_encoded_bytes() == 0);
-        assert!(Header::bitflag_encoded_bytes() == 4);
-        assert!(HeadersCheckpoint::bitflag_encoded_bytes() == 0);
-        assert!(IndexHistoryCheckpoint::bitflag_encoded_bytes() == 0);
-        assert!(PruneCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(PruneMode::bitflag_encoded_bytes() == 1);
-        assert!(PruneSegment::bitflag_encoded_bytes() == 1);
-        assert!(Receipt::bitflag_encoded_bytes() == 1);
-        assert!(ReceiptWithBloom::bitflag_encoded_bytes() == 0);
-        assert!(SealedHeader::bitflag_encoded_bytes() == 0);
-        assert!(StageCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(StageUnitCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(StoredBlockBodyIndices::bitflag_encoded_bytes() == 1);
-        assert!(StoredBlockOmmers::bitflag_encoded_bytes() == 0);
-        assert!(StoredBlockWithdrawals::bitflag_encoded_bytes() == 0);
-        assert!(StorageHashingCheckpoint::bitflag_encoded_bytes() == 1);
-        assert!(TxEip1559::bitflag_encoded_bytes() == 4);
-        assert!(TxEip2930::bitflag_encoded_bytes() == 3);
-        assert!(TxEip4844::bitflag_encoded_bytes() == 5);
-        assert!(TxLegacy::bitflag_encoded_bytes() == 3);
-        assert!(Withdrawal::bitflag_encoded_bytes() == 2);
-        assert!(Withdrawals::bitflag_encoded_bytes() == 0);
+        assert_eq!(Account::bitflag_encoded_bytes(), 2);
+        assert_eq!(AccountHashingCheckpoint::bitflag_encoded_bytes(), 1);
+        assert_eq!(CheckpointBlockRange::bitflag_encoded_bytes(), 1);
+        assert_eq!(CompactClientVersion::bitflag_encoded_bytes(), 0);
+        assert_eq!(CompactU256::bitflag_encoded_bytes(), 1);
+        assert_eq!(CompactU64::bitflag_encoded_bytes(), 1);
+        assert_eq!(EntitiesCheckpoint::bitflag_encoded_bytes(), 1);
+        assert_eq!(ExecutionCheckpoint::bitflag_encoded_bytes(), 0);
+        assert_eq!(Header::bitflag_encoded_bytes(), 4);
+        assert_eq!(HeadersCheckpoint::bitflag_encoded_bytes(), 0);
+        assert_eq!(IndexHistoryCheckpoint::bitflag_encoded_bytes(), 0);
+        assert_eq!(PruneCheckpoint::bitflag_encoded_bytes(), 1);
+        assert_eq!(PruneMode::bitflag_encoded_bytes(), 1);
+        assert_eq!(PruneSegment::bitflag_encoded_bytes(), 1);
+        assert_eq!(Receipt::bitflag_encoded_bytes(), 1);
+        assert_eq!(ReceiptWithBloom::bitflag_encoded_bytes(), 0);
+        assert_eq!(SealedHeader::bitflag_encoded_bytes(), 0);
+        assert_eq!(StageCheckpoint::bitflag_encoded_bytes(), 1);
+        assert_eq!(StageUnitCheckpoint::bitflag_encoded_bytes(), 1);
+        assert_eq!(StoredBlockBodyIndices::bitflag_encoded_bytes(), 1);
+        assert_eq!(StoredBlockOmmers::bitflag_encoded_bytes(), 0);
+        assert_eq!(StoredBlockWithdrawals::bitflag_encoded_bytes(), 0);
+        assert_eq!(StorageHashingCheckpoint::bitflag_encoded_bytes(), 1);
+        assert_eq!(TxEip1559::bitflag_encoded_bytes(), 4);
+        assert_eq!(TxEip2930::bitflag_encoded_bytes(), 3);
+        assert_eq!(TxEip4844::bitflag_encoded_bytes(), 5);
+        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
+        assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
+        assert_eq!(Withdrawals::bitflag_encoded_bytes(), 0);
     }
 }
