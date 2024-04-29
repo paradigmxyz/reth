@@ -56,6 +56,7 @@ async fn can_sync() -> eyre::Result<()> {
         .await?;
 
     // Make sure we have the updated block
+    third_node.wait_unwind((tip - reorg_depth) as u64).await?;
     third_node
         .wait_block(
             side_payload_chain[0].0.block().number,

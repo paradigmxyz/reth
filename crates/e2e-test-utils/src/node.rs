@@ -171,10 +171,7 @@ where
 
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    if latest_block.hash_slow() != expected_block_hash {
-                        // TODO: only if its awaiting a reorg
-                        continue
-                    }
+                    assert_eq!(latest_block.hash_slow(), expected_block_hash);
                     break
                 }
                 if wait_finish_checkpoint {
@@ -187,10 +184,14 @@ where
 
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            if self.inner.provider.best_block_number()? == number {
-                break
-            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            if let Some(checkpoint) =
+                    self.inner.provider.get_stage_checkpoint(StageId::Headers)?
+                {
+                    if checkpoint.block_number == number {
+                        break
+                    }
+                }
         }
         Ok(())
     }
