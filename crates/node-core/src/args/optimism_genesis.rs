@@ -1,21 +1,16 @@
 /// Optimism-specific genesis fields.
-use alloy_genesis::Genesis;
-use reth_primitives::{ChainSpec, ForkCondition, Hardfork};
+use reth_primitives::{AllGenesisFormats, ChainSpec, ForkCondition, Hardfork};
 use serde::Deserialize;
 
 /// Genesis type for Optimism networks.
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum OptimismGenesis {
-    Reth(ChainSpec),
-    Geth(Genesis),
-}
+pub(crate) struct OptimismGenesis(AllGenesisFormats);
 
 impl From<OptimismGenesis> for ChainSpec {
     fn from(optimsim_genesis: OptimismGenesis) -> ChainSpec {
-        match optimsim_genesis {
-            OptimismGenesis::Reth(chain_spec) => chain_spec,
-            OptimismGenesis::Geth(genesis) => {
+        match optimsim_genesis.0 {
+            AllGenesisFormats::Reth(chain_spec) => chain_spec,
+            AllGenesisFormats::Geth(genesis) => {
                 let mut chain_spec: ChainSpec = genesis.clone().into();
                 if let Some(block) = genesis.config.extra_fields.get("bedrockBlock") {
                     chain_spec
@@ -49,6 +44,7 @@ impl From<OptimismGenesis> for ChainSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::Genesis;
     use reth_primitives::ChainConfig;
     use serde_json::Value;
     use std::collections::BTreeMap;
@@ -74,7 +70,7 @@ mod tests {
     "#;
         let optimism_genesis: OptimismGenesis = serde_json::from_str(genesis).unwrap();
 
-        if let OptimismGenesis::Geth(genesis) = optimism_genesis {
+        if let AllGenesisFormats::Geth(genesis) = optimism_genesis.0 {
             let actual_nonce = genesis.nonce;
             assert_eq!(actual_nonce, 9);
             let actual_chain_id = genesis.config.chain_id;
@@ -110,10 +106,10 @@ mod tests {
         extra_fields.insert("regolithTime".to_string(), Value::Number(serde_json::Number::from(2)));
         extra_fields.insert("ecotoneTime".to_string(), Value::Number(serde_json::Number::from(3)));
         extra_fields.insert("canyonTime".to_string(), Value::Number(serde_json::Number::from(4)));
-        let optimism_genesis = OptimismGenesis::Geth(Genesis {
+        let optimism_genesis = OptimismGenesis(AllGenesisFormats::Geth(Genesis {
             config: ChainConfig { extra_fields, ..Default::default() },
             ..Default::default()
-        });
+        }));
 
         let chain_spec: ChainSpec = optimism_genesis.into();
 

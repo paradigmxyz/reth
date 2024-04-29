@@ -35,7 +35,6 @@ reth-tasks.workspace = true
 reth-trie.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
-alloy-genesis = { workspace = true, optional = true }
 
 # ethereum
 discv5.workspace = true
@@ -95,6 +94,8 @@ tempfile.workspace = true
 jsonrpsee.workspace = true
 assert_matches.workspace = true
 
+alloy-genesis = { workspace = true }
+
 [features]
 optimism = [
     "reth-primitives/optimism",
@@ -105,7 +106,6 @@ optimism = [
     "reth-rpc-types-compat/optimism",
     "reth-consensus-common/optimism",
     "reth-beacon-consensus/optimism",
-    "alloy-genesis"
 ]
 
 jemalloc = ["dep:tikv-jemalloc-ctl"]
