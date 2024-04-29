@@ -30,7 +30,7 @@ impl Decoder for ReceiptFileCodec {
     type Error = FileClientError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.is_empty() {
+        if src.is_empty() || src.len() == 1 {
             return Ok(None)
         }
 

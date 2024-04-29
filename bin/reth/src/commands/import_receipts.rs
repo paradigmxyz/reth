@@ -103,11 +103,6 @@ impl ImportReceiptsCommand {
                 None,
                 OriginalValuesKnown::Yes,
             )?;
-
-            // `HackReceipt` encoding will export empty list
-            if reader.file_len() <= 1 {
-                break
-            }
         }
 
         let total_imported_receipts = tx.entries::<tables::Receipts>()?;
