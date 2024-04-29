@@ -1174,5 +1174,35 @@ mod tests {
             .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
             .unwrap()
             .is_zero());
+
+        // attempt to execute block 2, this should not fail
+        let header = Header { timestamp: 1, number: 2, ..Header::default() };
+        executor
+            .execute_and_verify_receipt(
+                &BlockWithSenders {
+                    block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                    senders: vec![],
+                },
+                U256::ZERO,
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the block hash of genesis and block 1 should now be in storage, but not block 2
+        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert_ne!(
+            executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap(),
+            U256::ZERO
+        );
+        assert!(executor
+            .db_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(2))
+            .unwrap()
+            .is_zero());
     }
 }
