@@ -220,14 +220,10 @@ impl<DB> NodeState<DB> {
             PipelineEvent::Unwind { stage_id, input } => {
                 let current_stage = CurrentStage {
                     stage_id,
-                    eta: match &self.current_stage {
-                        Some(current_stage) if current_stage.stage_id == stage_id => {
-                            current_stage.eta
-                        }
-                        _ => Eta::default(),
-                    },
+                    eta: Eta::default(),
                     checkpoint: input.checkpoint,
                     target: Some(input.unwind_to),
+                    entities_checkpoint: input.checkpoint.entities(),
                 };
 
                 self.current_stage = Some(current_stage);
