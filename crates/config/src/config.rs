@@ -62,9 +62,9 @@ impl Config {
         confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 
-    /// Update prune_config if it is not already set.
-    pub fn update_prune_confing(&mut self, reth_config: PruneConfig) {
-        self.prune = Some(reth_config);
+    /// Sets the pruning configuration.
+    pub fn update_prune_confing(&mut self, prune_config: PruneConfig) {
+        self.prune = Some(prune_config);
     }
 }
 
