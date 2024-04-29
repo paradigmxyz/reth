@@ -320,10 +320,6 @@ where
     ) -> Result<BlockStatus, InsertBlockErrorKind> {
         debug_assert!(self.validate_block(&block).is_ok(), "Block must be validated");
 
-        if self.is_block_hash_canonical(&block.hash())? {
-            return Ok(BlockStatus::Valid(BlockAttachment::Canonical))
-        }
-
         let parent = block.parent_num_hash();
 
         // check if block parent can be found in any side chain.
@@ -774,6 +770,11 @@ where
         Ok(InsertPayloadOk::Inserted(status))
     }
 
+    /// Discard all blocks that precede block number from the buffer.
+    pub fn remove_old_blocks(&mut self, block: BlockNumber) {
+        self.state.buffered_blocks.remove_old_blocks(block);
+    }
+
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     pub fn finalize_block(&mut self, finalized_block: BlockNumber) {
         // remove blocks
@@ -788,7 +789,7 @@ where
             }
         }
         // clean block buffer.
-        self.state.buffered_blocks.remove_old_blocks(finalized_block);
+        self.remove_old_blocks(finalized_block);
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the

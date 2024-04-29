@@ -185,13 +185,11 @@ where
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            if let Some(checkpoint) =
-                    self.inner.provider.get_stage_checkpoint(StageId::Headers)?
-                {
-                    if checkpoint.block_number == number {
-                        break
-                    }
+            if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? {
+                if checkpoint.block_number == number {
+                    break
                 }
+            }
         }
         Ok(())
     }

@@ -87,6 +87,13 @@ where
     ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
         let mut tree = self.tree.write();
         let res = tree.update_block_hashes();
+
+        if let Ok(Some((block, _))) =
+            res.as_ref().map(|last_canonical_hashes| last_canonical_hashes.last_key_value())
+        {
+            tree.remove_old_blocks(*block);
+        }
+
         tree.update_chains_metrics();
         res
     }
