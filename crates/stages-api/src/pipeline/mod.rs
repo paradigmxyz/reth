@@ -143,7 +143,7 @@ where
                             return (self, Err(err.into()))
                         }
                         if let Err(err) = self.unwind(target, None) {
-                            return (self, Err(err.into()))
+                            return (self, Err(err))
                         }
                         self.progress.update(target);
 
