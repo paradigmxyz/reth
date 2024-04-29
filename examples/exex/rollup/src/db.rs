@@ -1,6 +1,5 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    ops::Deref,
     str::FromStr,
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -316,8 +315,8 @@ impl Database {
 /// Insert new account if it does not exist, update otherwise. The provided closure is called
 /// with the current account, if it exists. Connection can be either
 /// [rusqlite::Transaction] or [rusqlite::Connection].
-fn upsert_account<C: Deref<Target = Connection>>(
-    connection: &C,
+fn upsert_account(
+    connection: &Connection,
     address: Address,
     f: impl FnOnce(Option<AccountInfo>) -> eyre::Result<AccountInfo>,
 ) -> eyre::Result<()> {
@@ -333,21 +332,15 @@ fn upsert_account<C: Deref<Target = Connection>>(
 
 /// Delete account by address. Connection can be either [rusqlite::Transaction] or
 /// [rusqlite::Connection].
-fn delete_account<C: Deref<Target = Connection>>(
-    connection: &C,
-    address: Address,
-) -> eyre::Result<()> {
+fn delete_account(connection: &Connection, address: Address) -> eyre::Result<()> {
     connection.execute("DELETE FROM account WHERE address = ?", (address.to_string(),))?;
     Ok(())
 }
 
 /// Get account by address using the database connection. Connection can be either
 /// [rusqlite::Transaction] or [rusqlite::Connection].
-fn get_account<C: Deref<Target = Connection>>(
-    connection: &C,
-    address: Address,
-) -> eyre::Result<Option<AccountInfo>> {
-    match connection.deref().query_row::<String, _, _>(
+fn get_account(connection: &Connection, address: Address) -> eyre::Result<Option<AccountInfo>> {
+    match connection.query_row::<String, _, _>(
         "SELECT data FROM account WHERE address = ?",
         (address.to_string(),),
         |row| row.get(0),
@@ -360,8 +353,8 @@ fn get_account<C: Deref<Target = Connection>>(
 
 /// Insert new storage if it does not exist, update otherwise. Connection can be either
 /// [rusqlite::Transaction] or [rusqlite::Connection].
-fn upsert_storage<C: Deref<Target = Connection>>(
-    connection: &C,
+fn upsert_storage(
+    connection: &Connection,
     address: Address,
     key: B256,
     data: U256,
@@ -375,11 +368,7 @@ fn upsert_storage<C: Deref<Target = Connection>>(
 
 /// Delete storage by address and key. Connection can be either [rusqlite::Transaction] or
 /// [rusqlite::Connection].
-fn delete_storage<C: Deref<Target = Connection>>(
-    connection: &C,
-    address: Address,
-    key: B256,
-) -> eyre::Result<()> {
+fn delete_storage(connection: &Connection, address: Address, key: B256) -> eyre::Result<()> {
     connection.execute(
         "DELETE FROM storage WHERE address = ? AND key = ?",
         (address.to_string(), key.to_string()),
@@ -389,10 +378,7 @@ fn delete_storage<C: Deref<Target = Connection>>(
 
 /// Get all storages for the provided address using the database connection. Connection can be
 /// either [rusqlite::Transaction] or [rusqlite::Connection].
-fn get_storages<C: Deref<Target = Connection>>(
-    connection: &C,
-    address: Address,
-) -> eyre::Result<Vec<(B256, U256)>> {
+fn get_storages(connection: &Connection, address: Address) -> eyre::Result<Vec<(B256, U256)>> {
     connection
         .prepare("SELECT key, data FROM storage WHERE address = ?")?
         .query((address.to_string(),))?
@@ -411,12 +397,8 @@ fn get_storages<C: Deref<Target = Connection>>(
 
 /// Get storage for the provided address by key using the database connection. Connection can be
 /// either [rusqlite::Transaction] or [rusqlite::Connection].
-fn get_storage<C: Deref<Target = Connection>>(
-    connection: &C,
-    address: Address,
-    key: B256,
-) -> eyre::Result<Option<U256>> {
-    match connection.deref().query_row::<String, _, _>(
+fn get_storage(connection: &Connection, address: Address, key: B256) -> eyre::Result<Option<U256>> {
+    match connection.query_row::<String, _, _>(
         "SELECT data FROM storage WHERE address = ? AND key = ?",
         (address.to_string(), key.to_string()),
         |row| row.get(0),
