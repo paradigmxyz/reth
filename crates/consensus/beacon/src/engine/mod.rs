@@ -707,7 +707,6 @@ where
                             return Some(state.finalized_block_hash)
                         }
 
-
                         // OPTIMISTIC SYNCING
                         //
                         // It can happen when the node is doing an

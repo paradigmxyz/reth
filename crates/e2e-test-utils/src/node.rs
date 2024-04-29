@@ -14,7 +14,6 @@ use reth::{
 };
 use reth_node_builder::NodeTypes;
 use reth_primitives::{stage::StageId, BlockHash, BlockNumber, Bytes, B256};
-use reth_provider::BlockNumReader;
 use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
 
