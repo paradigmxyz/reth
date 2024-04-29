@@ -1228,6 +1228,7 @@ where
             .unwrap_or_default() >
             revert_until
         {
+            // should only happen when an optimistic sync target was re-orged.
             return Err(CanonicalError::OptimisticCanonicalRevert(revert_until))
         }
 
