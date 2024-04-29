@@ -394,10 +394,8 @@ pub fn init_from_state_dump<DB: Database>(
 
     // insert sync stages for stages that require state
     let tx = provider_rw.tx_ref();
-
     for stage in StageId::STATE_REQUIRED.iter() {
-        let checkpoint = StageCheckpoint::new(block).with_block_range(stage, 0, block);
-        tx.put::<tables::StageCheckpoints>(stage.to_string(), checkpoint)?;
+        tx.put::<tables::StageCheckpoints>(stage.to_string(), StageCheckpoint::new(block))?;
     }
 
     provider_rw.commit()?;
