@@ -14,7 +14,7 @@ pub(crate) enum OptimismGenesis {
 impl From<OptimismGenesis> for ChainSpec {
     fn from(optimsim_genesis: OptimismGenesis) -> ChainSpec {
         match optimsim_genesis {
-            OptimismGenesis::Reth(genesis) => genesis,
+            OptimismGenesis::Reth(chain_spec) => chain_spec,
             OptimismGenesis::Geth(genesis) => {
                 let mut chain_spec: ChainSpec = genesis.clone().into();
                 if let Some(block) = genesis.config.extra_fields.get("bedrockBlock") {
