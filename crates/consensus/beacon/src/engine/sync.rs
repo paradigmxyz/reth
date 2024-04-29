@@ -218,6 +218,10 @@ where
     /// But ensures the target is not the zero hash.
     pub(crate) fn set_pipeline_sync_target(&mut self, target: PipelineTarget) {
         if target.sync_target().is_some_and(|target| target.is_zero()) {
+            trace!(
+                target: "consensus::engine::sync",
+                "Pipeline target cannot be zero hash."
+            );
             // precaution to never sync to the zero hash
             return
         }

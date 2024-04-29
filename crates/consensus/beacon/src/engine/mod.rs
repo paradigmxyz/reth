@@ -707,20 +707,20 @@ where
                             return Some(state.finalized_block_hash)
                         }
 
-                        #[cfg(feature = "optimism")]
-                        if self.blockchain.chain_spec().is_optimism() {
-                            // It can happen when the node is doing an
-                            // optimistic sync, where the CL has no knowledge of the finalized hash,
-                            // but is expecting the EL to sync as high
-                            // as possible before finalizing.
-                            //
-                            // This usually doesn't happen on ETH mainnet since CLs use the more
-                            // secure checkpoint syncing.
-                            //
-                            // However, optimism chains will do this. The risk of a reorg is however
-                            // low.
-                            return Some(state.head_block_hash)
-                        }
+
+                        // OPTIMISTIC SYNCING
+                        //
+                        // It can happen when the node is doing an
+                        // optimistic sync, where the CL has no knowledge of the finalized hash,
+                        // but is expecting the EL to sync as high
+                        // as possible before finalizing.
+                        //
+                        // This usually doesn't happen on ETH mainnet since CLs use the more
+                        // secure checkpoint syncing.
+                        //
+                        // However, optimism chains will do this. The risk of a reorg is however
+                        // low.
+                        return Some(state.head_block_hash)
                     }
                     Ok(Some(_)) => {
                         // we're fully synced to the finalized block
