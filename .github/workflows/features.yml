@@ -1,0 +1,20 @@
+name: cfg-check
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+    cfg-check:
+        name: cfg-check
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+        - uses: actions/checkout@v4
+        - uses: dtolnay/rust-toolchain@nightly
+        - run: cargo +nightly -Zcheck-cfg c
