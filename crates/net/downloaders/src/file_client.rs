@@ -341,6 +341,11 @@ pub struct ChunkedFileReader {
 }
 
 impl ChunkedFileReader {
+    /// Returns the remaining file length.
+    pub fn file_len(&self) -> u64 {
+        self.file_byte_len
+    }
+
     /// Opens the file to import from given path. Returns a new instance. If no chunk byte length
     /// is passed, chunks have [`DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE`] (one static file).
     pub async fn new<P: AsRef<Path>>(
