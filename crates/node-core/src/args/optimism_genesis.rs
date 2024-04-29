@@ -1,4 +1,4 @@
-/// Optimism-specific genesis fields.
+//! Logic to handle Optimism-specific genesis fields.
 use reth_primitives::{AllGenesisFormats, ChainSpec, ForkCondition, Hardfork};
 use serde::Deserialize;
 
@@ -7,7 +7,9 @@ const REGOLITH_TIME_FIELD_NAME: &str = "regolithTime";
 const ECOTONE_TIME_FIELD_NAME: &str = "ecotoneTime";
 const CANYON_TIME_FIELD_NAME: &str = "canyonTime";
 
-/// Genesis type for Optimism networks.
+/// Newtype that wraps AllGenesisFormats. It will allow to customize the
+/// conversion to ChainSpec by reading the extra fields contained in the
+/// original genesis, and eventually enabling the correspondent hardforks.
 #[derive(Debug, Deserialize)]
 pub(crate) struct OptimismGenesis(AllGenesisFormats);
 
