@@ -1,6 +1,9 @@
 use futures_util::{ready, Future, Stream};
-use std::{collections::VecDeque, pin::Pin, task::Poll, time::Duration};
+use reth_node_builder::FullNodeComponents;
+use std::{collections::VecDeque, marker::PhantomData, pin::Pin, task::Poll, time::Duration};
 use tokio::time::{sleep_until, Instant, Sleep};
+
+use crate::node::NodeTestContext;
 
 enum Action<F: Future + Send> {
     Next(Box<dyn FnOnce(Option<F::Output>) -> Pin<Box<F>> + Send + 'static>),
@@ -86,7 +89,8 @@ where
             Some(action) => match action {
                 Action::Next(future_fn) => {
                     // Store the future and schedule this future to be polled again for it.
-                    this.future = Some(future_fn(this.previous_item.take()));
+                    let fut = future_fn(this.previous_item.take());
+                    this.future = Some(fut);
                     cx.waker().wake_by_ref();
 
                     Poll::Pending

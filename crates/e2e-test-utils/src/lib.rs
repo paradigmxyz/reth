@@ -35,7 +35,9 @@ mod rpc;
 /// Helper traits
 mod traits;
 
-pub mod chain;
+pub mod runner;
+
+mod chain;
 
 /// Builder for creating a network of nodes for testing.
 /// The network is created with a chain spec and a number of peers.
