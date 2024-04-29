@@ -6,7 +6,7 @@ use reth_network::NetworkHandle;
 use reth_node_builder::{
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
     node::{FullNodeTypes, Node, NodeTypes},
-    BuilderContext, PayloadBuilderConfig,
+    BuilderContext, Node2, PayloadBuilderConfig,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
@@ -57,6 +57,22 @@ where
     fn components(
         self,
     ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+        ComponentsBuilder::default()
+            .node_types::<N>()
+            .pool(EthereumPoolBuilder::default())
+            .payload(EthereumPayloadBuilder::default())
+            .network(EthereumNetworkBuilder::default())
+    }
+}
+
+impl<N: FullNodeTypes> Node2<N> for EthereumNode
+where
+    N: FullNodeTypes<Engine = EthEngineTypes>,
+{
+    type ComponentsBuilder =
+        ComponentsBuilder<N, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetworkBuilder>;
+
+    fn components(self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())

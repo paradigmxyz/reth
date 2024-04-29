@@ -6,7 +6,7 @@ use crate::{
     components::{Components, ComponentsBuilder, NodeComponentsBuilder, PoolBuilder},
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, Node, NodeHandle,
+    DefaultNodeLauncher, Node, Node2, NodeHandle,
 };
 use futures::Future;
 use reth_db::{
@@ -227,6 +227,19 @@ where
     {
         self.with_types(node.clone()).with_components(node.components())
     }
+
+    /// Preconfigures the node with a specific node implementation.
+    ///
+    /// This is a convenience method that sets the node's types and components in one call.
+    pub fn node2<N>(
+        self,
+        node: N,
+    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>
+    where
+        N: Node2<RethFullAdapter<DB, N>>,
+    {
+        self.with_types(node.clone()).with_components(node.components())
+    }
 }
 
 /// A [NodeBuilder] with it's launch context already configured.
@@ -300,6 +313,19 @@ where
         self.with_types(node.clone()).with_components(node.components())
     }
 
+    /// Preconfigures the node with a specific node implementation.
+    ///
+    /// This is a convenience method that sets the node's types and components in one call.
+    pub fn node2<N>(
+        self,
+        node: N,
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
+    where
+        N: Node2<RethFullAdapter<DB, N>>,
+    {
+        self.with_types(node.clone()).with_components(node.components())
+    }
+
     /// Launches a preconfigured [Node]
     ///
     /// This bootstraps the node internals, creates all the components with the given [Node]
@@ -332,6 +358,28 @@ where
         >,
     {
         self.node(node).launch().await
+    }
+
+    /// Launches a preconfigured [Node]
+    ///
+    /// This bootstraps the node internals, creates all the components with the given [Node]
+    ///
+    /// Returns a [NodeHandle] that can be used to interact with the node.
+    pub async fn launch_node2<N>(
+        self,
+        node: N,
+    ) -> eyre::Result<
+        NodeHandle<
+            NodeAdapter<
+                RethFullAdapter<DB, N>,
+                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
+            >,
+        >,
+    >
+    where
+        N: Node2<RethFullAdapter<DB, N>>,
+    {
+        self.node2(node).launch().await
     }
 }
 

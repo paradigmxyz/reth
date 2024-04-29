@@ -19,6 +19,7 @@ use reth_tasks::TaskExecutor;
 use std::sync::Arc;
 
 // re-export the node api types
+use crate::components::NodeComponentsBuilder;
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
 /// A [Node] is a [NodeTypes] that comes with preconfigured components.
@@ -36,6 +37,17 @@ pub trait Node<N>: NodeTypes + Clone {
     fn components(
         self,
     ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder>;
+}
+
+/// A [crate::Node] is a [NodeTypes] that comes with preconfigured components.
+///
+/// This can be used to configure the builder with a preset of components.
+pub trait Node2<N: FullNodeTypes>: NodeTypes + Clone {
+    /// The type that builds the node's components.
+    type ComponentsBuilder: NodeComponentsBuilder<N>;
+
+    /// Returns the [ComponentsBuilder] for the node.
+    fn components(self) -> Self::ComponentsBuilder;
 }
 
 /// The launched node with all components including RPC handlers.
