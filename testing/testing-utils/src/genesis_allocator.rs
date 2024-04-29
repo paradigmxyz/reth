@@ -7,7 +7,10 @@ use secp256k1::{
     rand::{thread_rng, RngCore},
     Keypair, Secp256k1,
 };
-use std::collections::{hash_map::Entry, BTreeMap, HashMap};
+use std::{
+    collections::{hash_map::Entry, BTreeMap, HashMap},
+    fmt,
+};
 
 /// This helps create a custom genesis alloc by making it easy to add funded accounts with known
 /// signers to the genesis block.
@@ -37,19 +40,18 @@ use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 /// // Once you're done adding accounts, you can build the alloc.
 /// let alloc = allocator.build();
 /// ```
-#[derive(Debug)]
 pub struct GenesisAllocator<'a> {
     /// The genesis alloc to be built.
     alloc: HashMap<Address, GenesisAccount>,
     /// The rng to use for generating key pairs.
-    rng: Box<dyn RngDebug + 'a>,
+    rng: Box<dyn RngCore + 'a>,
 }
 
 impl<'a> GenesisAllocator<'a> {
     /// Initialize a new alloc builder with the provided rng.
     pub fn new_with_rng<R>(rng: &'a mut R) -> Self
     where
-        R: RngCore + std::fmt::Debug,
+        R: RngCore,
     {
         Self { alloc: HashMap::default(), rng: Box::new(rng) }
     }
@@ -197,8 +199,8 @@ impl Default for GenesisAllocator<'_> {
     }
 }
 
-/// Helper trait that encapsulates [RngCore], and [Debug](std::fmt::Debug) to get around rules
-/// for auto traits (Opt-in built-in traits).
-trait RngDebug: RngCore + std::fmt::Debug {}
-
-impl<T> RngDebug for T where T: RngCore + std::fmt::Debug {}
+impl fmt::Debug for GenesisAllocator<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GenesisAllocator").field("alloc", &self.alloc).finish_non_exhaustive()
+    }
+}
