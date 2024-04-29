@@ -6,6 +6,7 @@ use std::fmt;
 pub(crate) struct NodeHooks<Node: FullNodeComponents> {
     pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
     pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node>>,
+    pub(crate) on_node_started2: Box<dyn OnNodeStartedHook2<Node>>,
     pub(crate) _marker: std::marker::PhantomData<Node>,
 }
 
@@ -15,6 +16,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
         Self {
             on_component_initialized: Box::<()>::default(),
             on_node_started: Box::<()>::default(),
+            on_node_started2:  Box::<()>::default(),
             _marker: Default::default(),
         }
     }
@@ -44,6 +46,15 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
         F: OnNodeStartedHook<Node> + 'static,
     {
         self.on_node_started = Box::new(hook);
+        self
+    }
+
+    /// Sets the hook that is run once the node has started.
+    pub(crate) fn set_on_node_started2<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: OnNodeStartedHook2<Node> + 'static,
+    {
+        self.on_node_started2 = Box::new(hook);
         self
     }
 
@@ -95,6 +106,30 @@ pub trait OnNodeStartedHook<Node: FullNodeComponents>: Send {
     ///
     /// If this returns an error, the node launch will be aborted.
     fn on_event(&self, node: FullNode<Node>) -> eyre::Result<()>;
+}
+
+/// A helper trait that is run once the node is started.
+pub trait OnNodeStartedHook2<Node: FullNodeComponents>: Send {
+    /// Consumes the event hook and runs it.
+    ///
+    /// If this returns an error, the node launch will be aborted.
+    fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()>;
+}
+
+impl<Node, F> OnNodeStartedHook2<Node> for F
+    where
+        Node: FullNodeComponents,
+        F: FnOnce(FullNode<Node>) -> eyre::Result<()> + Send,
+{
+    fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()> {
+        (*self)(node)
+    }
+}
+
+impl<Node: FullNodeComponents> OnNodeStartedHook2<Node> for () {
+    fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()> {
+        Ok(())
+    }
 }
 
 impl<Node, F> OnNodeStartedHook<Node> for F

@@ -172,6 +172,15 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
         self
     }
 
+    /// Sets the hook that is run once the node has started.
+    pub fn on_node_started2<F>(mut self, hook: F) -> Self
+    where
+        F: FnOnce(FullNode<NodeAdapter<T, CB::Components>>) -> eyre::Result<()> + Send + 'static,
+    {
+        self.add_ons.hooks.set_on_node_started2(Box::new(hook));
+        self
+    }
+
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where

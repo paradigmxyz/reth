@@ -159,7 +159,7 @@ where
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;
 
-        let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+        let NodeHooks { on_component_initialized, on_node_started, on_node_started2,.. } = hooks;
 
         let node_adapter = NodeAdapter {
             components,
@@ -460,7 +460,7 @@ address.to_string(), format_ether(alloc.balance));
             data_dir: ctx.data_dir().clone(),
         };
         // Notify on node started
-        on_node_started.on_event(full_node.clone())?;
+        on_node_started2.on_event(full_node.clone())?;
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(rx, full_node.config.debug.terminate),
