@@ -2,9 +2,9 @@
 use reth_db::models::client_version::ClientVersion;
 
 // The client code for Reth
-pub const CLIENT_CODE : &str = env!("RH");
-// The human readable name of the client 
-pub const NAME_CLIENT: &str = env!("reth");
+pub const CLIENT_CODE: &str = "RH";
+// The human readable name of the client
+pub const NAME_CLIENT: &str = "reth";
 
 /// The latest version from Cargo.toml.
 pub const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -18,11 +18,11 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 //The identification of the client
 /// - The two letter client code
 /// - The human readable name of the client
-/// - The version string of the current implementation 
+/// - The version string of the current implementation
 /// - first four bytes of the latest commit hash of this build
-/// 
+///
 /// # Example
-/// 
+///
 ///  ```text
 // {
 //   code: "RH",
@@ -39,12 +39,9 @@ struct ClientVersionV1<'a> {
 }
 
 pub const CLIENTVERSIONV1: ClientVersionV1<'_> = ClientVersionV1 {
-    code: env!("CLIENT_CODE"),
-    name: env!("NAME_CLIENT"),
-    version: &const_str::concat!(
-        env!("CARGO_PKG_VERSION"),
-        env!("RETH_VERSION_SUFFIX")
-    ),
+    code: CLIENT_CODE,
+    name: NAME_CLIENT,
+    version: &const_str::concat!(env!("CARGO_PKG_VERSION"), env!("RETH_VERSION_SUFFIX")),
     commit: env!("VERGEN_GIT_SHA"),
 };
 
