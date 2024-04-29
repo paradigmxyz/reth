@@ -9,13 +9,8 @@ use std::{
     time::Duration,
 };
 
-use reth_primitives::DEV;
+use reth_primitives::{AllGenesisFormats, DEV};
 
-#[cfg(not(feature = "optimism"))]
-use reth_primitives::AllGenesisFormats;
-
-#[cfg(feature = "optimism")]
-use crate::args::optimism_genesis::OptimismGenesis;
 #[cfg(feature = "optimism")]
 use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
@@ -108,10 +103,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
             };
 
             // both serialized Genesis and ChainSpec structs supported
-            #[cfg(not(feature = "optimism"))]
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
-            #[cfg(feature = "optimism")]
-            let genesis: OptimismGenesis = serde_json::from_str(&raw)?;
 
             Arc::new(genesis.into())
         }

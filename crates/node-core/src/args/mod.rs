@@ -54,6 +54,3 @@ pub use pruning_args::PruningArgs;
 pub mod utils;
 
 pub mod types;
-
-#[cfg(feature = "optimism")]
-mod optimism_genesis;

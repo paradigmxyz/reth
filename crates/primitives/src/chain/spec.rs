@@ -1011,6 +1011,11 @@ impl From<Genesis> for ChainSpec {
             (Hardfork::London, genesis.config.london_block),
             (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
             (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
+            #[cfg(feature = "optimism")]
+            (
+                Hardfork::Bedrock,
+                genesis.config.extra_fields.get("bedrockBlock").and_then(|value| value.as_u64()),
+            ),
         ];
         let mut hardforks = hardfork_opts
             .iter()
@@ -1037,6 +1042,21 @@ impl From<Genesis> for ChainSpec {
         let time_hardfork_opts = [
             (Hardfork::Shanghai, genesis.config.shanghai_time),
             (Hardfork::Cancun, genesis.config.cancun_time),
+            #[cfg(feature = "optimism")]
+            (
+                Hardfork::Regolith,
+                genesis.config.extra_fields.get("regolithTime").and_then(|value| value.as_u64()),
+            ),
+            #[cfg(feature = "optimism")]
+            (
+                Hardfork::Ecotone,
+                genesis.config.extra_fields.get("ecotoneTime").and_then(|value| value.as_u64()),
+            ),
+            #[cfg(feature = "optimism")]
+            (
+                Hardfork::Canyon,
+                genesis.config.extra_fields.get("canyonTime").and_then(|value| value.as_u64()),
+            ),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -3271,5 +3291,55 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn is_bedrock_active() {
         assert!(!OP_MAINNET.is_bedrock_active_at_block(1))
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn parse_optimism_hardforks() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "bedrockBlock": 10,
+        "regolithTime": 20,
+        "ecotoneTime": 30,
+        "canyonTime": 40,
+        "optimism": {
+          "eip1559Elasticity": 50,
+          "eip1559Denominator": 60,
+          "eip1559DenominatorCanyon": 70
+        }
+      }
+    }
+    "#;
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+
+        let actual_bedrock_block = genesis.config.extra_fields.get("bedrockBlock");
+        assert_eq!(actual_bedrock_block, Some(serde_json::Value::from(10)).as_ref());
+        let actual_regolith_timestamp = genesis.config.extra_fields.get("regolithTime");
+        assert_eq!(actual_regolith_timestamp, Some(serde_json::Value::from(20)).as_ref());
+        let actual_ecotone_timestamp = genesis.config.extra_fields.get("ecotoneTime");
+        assert_eq!(actual_ecotone_timestamp, Some(serde_json::Value::from(30)).as_ref());
+        let actual_canyon_timestamp = genesis.config.extra_fields.get("canyonTime");
+        assert_eq!(actual_canyon_timestamp, Some(serde_json::Value::from(40)).as_ref());
+
+        let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
+        assert_eq!(
+            optimism_object,
+            &serde_json::json!({
+                "eip1559Elasticity": 50,
+                "eip1559Denominator": 60,
+                "eip1559DenominatorCanyon": 70
+            })
+        );
+        let chain_spec: ChainSpec = genesis.into();
+        assert!(!chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 0));
+
+        assert!(chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 30));
+        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 40));
     }
 }
