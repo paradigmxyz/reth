@@ -202,13 +202,14 @@ impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<Engine = CustomEngineTypes>,
 {
-    type PoolBuilder = EthereumPoolBuilder;
-    type NetworkBuilder = EthereumNetworkBuilder;
-    type PayloadBuilder = CustomPayloadServiceBuilder;
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        EthereumPoolBuilder,
+        CustomPayloadServiceBuilder,
+        EthereumNetworkBuilder,
+    >;
 
-    fn components(
-        self,
-    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+    fn components_builder(self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
