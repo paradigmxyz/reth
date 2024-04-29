@@ -11,7 +11,9 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hard
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES
+    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
+    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -695,11 +697,14 @@ where
     /// Handler for `engine_getClientVersionV1`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md>
-    async fn get_client_version_v1(&self, client:ClientVersionV1) -> RpcResult<Vec<ClientVersionV1>> {
+    async fn get_client_version_v1(
+        &self,
+        client: ClientVersionV1,
+    ) -> RpcResult<Vec<ClientVersionV1>> {
         trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
-        let start = Instant::now();
+        let _start = Instant::now();
         let res = EngineApi::get_client_version_v1(self, client).await;
-        
+
         Ok(res?)
     }
 
@@ -726,15 +731,23 @@ mod tests {
     use reth_beacon_consensus::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_interfaces::test_utils::generators::random_block;
+    use reth_node_core::CLIENTVERSIONV1;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_types::engine::ClientVersionV1;
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
     {
+        let client = ClientVersionV1 {
+            code: CLIENTVERSIONV1.code,
+            name: CLIENTVERSIONV1.name,
+            version: CLIENTVERSIONV1.version,
+            commit: CLIENTVERSIONV1.commit,
+        };
         let chain_spec: Arc<ChainSpec> = MAINNET.clone();
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
@@ -746,6 +759,7 @@ mod tests {
             BeaconConsensusEngineHandle::new(to_engine),
             payload_store.into(),
             task_executor,
+            client,
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)

@@ -32,6 +32,7 @@ use reth_node_core::{
     engine_skip_fcu::EngineApiSkipFcu,
     exit::NodeExitFuture,
     init::init_genesis,
+    CLIENTVERSIONV1,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
@@ -450,13 +451,19 @@ ReadyTransaction");
                 database.clone(),
             ),
         );
-
+        let client = ClientVersionV1 {
+            code: CLIENTVERSIONV1.code,
+            name: CLIENTVERSIONV1.name,
+            version: CLIENTVERSIONV1.version,
+            commit: CLIENTVERSIONV1.commit,
+        };
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
             ctx.chain_spec(),
             beacon_engine_handle,
             node_adapter.components.payload_builder().clone().into(),
             Box::new(ctx.task_executor().clone()),
+            client,
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
