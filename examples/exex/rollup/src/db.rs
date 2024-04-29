@@ -87,7 +87,6 @@ impl Database {
     }
 
     /// Insert block with bundle into the database.
-    /// Populates the block, account, storage, and bytecode tables.
     pub fn insert_block_with_bundle(
         &mut self,
         block: &SealedBlockWithSenders,
@@ -170,7 +169,9 @@ impl Database {
         Ok(())
     }
 
-    #[allow(unreachable_code)]
+    /// Revert block from the database.
+    ///
+    /// The code is adapted from <https://github.com/paradigmxyz/reth/blob/a8cd1f71a03c773c24659fc28bfed2ba5f2bd97b/crates/storage/provider/src/providers/database/provider.rs#L365-L540>
     pub fn revert_block(&mut self, number: u64) -> eyre::Result<()> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
