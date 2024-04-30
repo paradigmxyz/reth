@@ -135,7 +135,7 @@ where
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
 
-        let components_db = BlockchainProvider::new(
+        let blockchain_db = BlockchainProvider::new(
             ctx.provider_factory().clone(),
             Arc::new(NoopBlockchainTree::with_canon_state_notifications(
                 canon_state_notification_sender.clone(),
@@ -144,7 +144,7 @@ where
 
         let builder_ctx = BuilderContext::new(
             head,
-            components_db,
+            blockchain_db.clone(),
             ctx.task_executor().clone(),
             ctx.data_dir().clone(),
             ctx.node_config().clone(),
@@ -168,8 +168,9 @@ where
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
-        let blockchain_db =
-            BlockchainProvider::new(ctx.provider_factory().clone(), blockchain_tree)?;
+
+        // Replace the tree component with the actual tree
+        let blockchain_db = blockchain_db.with_tree(blockchain_tree);
 
         debug!(target: "reth::cli", "configured blockchain tree");
 
