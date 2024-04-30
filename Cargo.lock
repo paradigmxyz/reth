@@ -2252,8 +2252,8 @@ dependencies = [
 
 [[package]]
 name = "did"
-version = "0.15.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#061d52a7cb0b5665d910bfb8dee0baf995f817e9"
+version = "0.13.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.13.x#bb97ffc3fc4f1929092f0d5f02761fd36f84d80e"
 dependencies = [
  "alloy-primitives",
  "bincode",
@@ -2264,36 +2264,7 @@ dependencies = [
  "ethers-core",
  "hex",
  "ic-log",
- "ic-stable-structures 0.14.0",
- "jsonrpc-core",
- "log",
- "murmur3",
- "num",
- "once_cell",
- "rlp",
- "serde",
- "serde_json",
- "serde_with",
- "sha2",
- "sha3",
- "thiserror",
-]
-
-[[package]]
-name = "did"
-version = "0.16.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.16.x#0a953061d39ccc71429004caaaa1402480b5999a"
-dependencies = [
- "alloy-primitives",
- "bincode",
- "bytes",
- "candid",
- "derive_more",
- "ethereum-types",
- "ethers-core",
- "hex",
- "ic-log",
- "ic-stable-structures 0.14.0",
+ "ic-stable-structures 0.13.0",
  "jsonrpc-core",
  "log",
  "murmur3",
@@ -2735,12 +2706,12 @@ dependencies = [
 
 [[package]]
 name = "ethereum-json-rpc-client"
-version = "0.15.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#061d52a7cb0b5665d910bfb8dee0baf995f817e9"
+version = "0.13.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.13.x#bb97ffc3fc4f1929092f0d5f02761fd36f84d80e"
 dependencies = [
  "anyhow",
  "candid",
- "did 0.15.0",
+ "did",
  "ethers-core",
  "hex",
  "ic-exports",
@@ -3772,16 +3743,16 @@ dependencies = [
 
 [[package]]
 name = "ic-crypto-getrandom-for-wasm"
-version = "0.14.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+version = "0.13.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
 dependencies = [
  "getrandom 0.2.12",
 ]
 
 [[package]]
 name = "ic-exports"
-version = "0.14.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+version = "0.13.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
 dependencies = [
  "candid",
  "ic-cdk",
@@ -3794,8 +3765,8 @@ dependencies = [
 
 [[package]]
 name = "ic-kit"
-version = "0.14.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+version = "0.13.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
 dependencies = [
  "candid",
  "futures",
@@ -3807,8 +3778,8 @@ dependencies = [
 
 [[package]]
 name = "ic-log"
-version = "0.14.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+version = "0.13.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3832,8 +3803,8 @@ dependencies = [
 
 [[package]]
 name = "ic-stable-structures"
-version = "0.14.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.14.x#68800737f188d304afe2ff561008fe4cc76517b4"
+version = "0.13.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.13.x#b4bc0a0edbe9d2b56f01de02f3d2ba3f54b0754e"
 dependencies = [
  "ic-stable-structures 0.6.2",
  "parking_lot 0.12.1",
@@ -6532,7 +6503,7 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "candid",
- "did 0.16.0",
+ "did",
  "ethereum-json-rpc-client",
  "eyre",
  "futures",
@@ -7207,7 +7178,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "derive_more",
- "ethereum-json-rpc-client",
  "futures",
  "http",
  "http-body",

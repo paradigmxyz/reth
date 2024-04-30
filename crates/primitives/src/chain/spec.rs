@@ -68,7 +68,6 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 3500,
         snapshot_block_interval: 500_000,
-        ..Default::default()
     }
     .into()
 });
@@ -113,7 +112,6 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        ..Default::default()
     }
     .into()
 });
@@ -162,7 +160,6 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        ..Default::default()
     }
     .into()
 });
@@ -206,7 +203,6 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
         snapshot_block_interval: 1_000_000,
-        ..Default::default()
     }
     .into()
 });
@@ -635,9 +631,6 @@ pub struct ChainSpec {
 
     /// The block interval for creating snapshots. Each snapshot will have that much blocks in it.
     pub snapshot_block_interval: u64,
-
-    /// The rpc url for the chain
-    pub rpc_url: String,
 }
 
 impl Default for ChainSpec {
@@ -653,7 +646,6 @@ impl Default for ChainSpec {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
             snapshot_block_interval: Default::default(),
-            rpc_url: Default::default(),
         }
     }
 }
@@ -749,7 +741,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.is_fork_active_at_timestamp(*fork, timestamp) {
-                        return *params;
+                        return *params
                     }
                 }
 
@@ -899,8 +891,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block)
-            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block) |
+            ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
@@ -910,7 +902,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block };
+                    return ForkId { hash: forkhash, next: block }
                 }
             }
         }
@@ -931,7 +923,7 @@ impl ChainSpec {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp };
+                return ForkId { hash: forkhash, next: timestamp }
             }
         }
 
@@ -946,7 +938,7 @@ impl ChainSpec {
                 // to satisfy every timestamp ForkCondition, we find the last ForkCondition::Block
                 // if one exists, and include its block_num in the returned Head
                 if let Some(last_block_num) = self.last_block_fork_before_merge_or_timestamp() {
-                    return Head { timestamp, number: last_block_num, ..Default::default() };
+                    return Head { timestamp, number: last_block_num, ..Default::default() }
                 }
                 Head { timestamp, ..Default::default() }
             }
@@ -974,17 +966,17 @@ impl ChainSpec {
                     ForkCondition::TTD { fork_block, .. } => {
                         // handle Sepolia merge netsplit case
                         if fork_block.is_some() {
-                            return *fork_block;
+                            return *fork_block
                         }
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num);
+                            return Some(block_num)
                         }
                     }
                     ForkCondition::Timestamp(_) => {
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num);
+                            return Some(block_num)
                         }
                     }
                     ForkCondition::Block(_) | ForkCondition::Never => continue,
@@ -1475,9 +1467,9 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number)
-            || self.active_at_timestamp(head.timestamp)
-            || self.active_at_ttd(head.total_difficulty, head.difficulty)
+        self.active_at_block(head.number) ||
+            self.active_at_timestamp(head.timestamp) ||
+            self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.

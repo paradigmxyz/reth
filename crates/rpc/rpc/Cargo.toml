@@ -84,9 +84,6 @@ futures.workspace = true
 derive_more = "0.99"
 lazy_static = "*"
 
-# bitfinity
-ethereum-json-rpc-client.workspace = true
-
 [dev-dependencies]
 jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
