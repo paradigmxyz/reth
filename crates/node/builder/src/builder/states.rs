@@ -157,7 +157,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
-        F: Fn(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
     {
         self.add_ons.hooks.set_on_component_initialized(hook);
         self
@@ -166,25 +166,16 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: Fn(FullNode<NodeAdapter<T, CB::Components>>) -> eyre::Result<()> + Send + 'static,
-    {
-        self.add_ons.hooks.set_on_node_started(hook);
-        self
-    }
-
-    /// Sets the hook that is run once the node has started.
-    pub fn on_node_started2<F>(mut self, hook: F) -> Self
-    where
         F: FnOnce(FullNode<NodeAdapter<T, CB::Components>>) -> eyre::Result<()> + Send + 'static,
     {
-        self.add_ons.hooks.set_on_node_started2(Box::new(hook));
+        self.add_ons.hooks.set_on_node_started(hook);
         self
     }
 
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
-        F: Fn(
+        F: FnOnce(
                 RpcContext<'_, NodeAdapter<T, CB::Components>>,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
@@ -198,7 +189,9 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
-        F: Fn(RpcContext<'_, NodeAdapter<T, CB::Components>>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>>) -> eyre::Result<()>
+            + Send
+            + 'static,
     {
         self.add_ons.rpc.set_extend_rpc_modules(hook);
         self
@@ -211,7 +204,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     /// The ExEx ID must be unique.
     pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: Fn(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
