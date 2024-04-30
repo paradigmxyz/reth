@@ -332,7 +332,6 @@ parking_lot = "0.12"
 # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 metrics = "0.21.1"
 modular-bitfield = "0.11.2"
-hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
 nybbles = "0.2.1"
