@@ -539,7 +539,7 @@ mod tests {
     use super::*;
     use reth_primitives::{
         b256, Account, Address, Block, ChainSpecBuilder, Signature, StorageKey, StorageValue,
-        Transaction, TransactionSigned, TxEip1559, TxKind, BASE_MAINNET,
+        Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
