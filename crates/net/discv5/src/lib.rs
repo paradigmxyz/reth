@@ -33,7 +33,7 @@ pub mod enr;
 pub mod error;
 pub mod filter;
 pub mod metrics;
-pub mod network_key;
+pub mod network_stack_id;
 
 pub use discv5::{self, IpMode};
 
@@ -41,6 +41,7 @@ pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
+pub use network_stack_id::NetworkStackId;
 
 use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
@@ -439,7 +440,7 @@ impl Discv5 {
         }
 
         let fork_id =
-            (self.fork_key == network_key::ETH).then(|| self.get_fork_id(enr).ok()).flatten();
+            (self.fork_key == NetworkStackId::ETH).then(|| self.get_fork_id(enr).ok()).flatten();
 
         trace!(target: "net::discovery::discv5",
             ?fork_id,
@@ -831,13 +832,16 @@ mod tests {
         const TCP_PORT: u16 = 30303;
         let fork_id = MAINNET.latest_fork_id();
 
-        let config = Config::builder(TCP_PORT).fork(network_key::ETH, fork_id).build();
+        let config = Config::builder(TCP_PORT).fork(NetworkStackId::ETH, fork_id).build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
 
-        let decoded_fork_id =
-            enr.get_decodable::<EnrForkIdEntry>(network_key::ETH).unwrap().map(Into::into).unwrap();
+        let decoded_fork_id = enr
+            .get_decodable::<EnrForkIdEntry>(NetworkStackId::ETH)
+            .unwrap()
+            .map(Into::into)
+            .unwrap();
 
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4
