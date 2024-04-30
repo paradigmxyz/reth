@@ -14,7 +14,9 @@ use crate::{
 };
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{
+    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, TxKind, U256,
+};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -415,14 +417,22 @@ where
             to
         } else {
             let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
-            from.create(nonce)
+            TxKind::Call(from.create(nonce))
         };
 
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
-        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
+        let mut inspector = AccessListInspector::new(
+            initial,
+            from,
+            match to.to() {
+                Some(to) => *to,
+                None => Default::default(),
+            },
+            precompiles,
+        );
         let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
 
         match result.result {

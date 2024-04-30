@@ -855,7 +855,7 @@ mod tests {
                 chain_id,
                 nonce: 1,
                 gas_limit: 21_000,
-                to: TxKind::Call(Address::ZERO),
+                to: Address::ZERO.into(),
                 max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                 ..Default::default()
             }),

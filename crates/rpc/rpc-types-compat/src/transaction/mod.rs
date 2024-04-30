@@ -2,8 +2,8 @@
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
 
 use reth_primitives::{
-    BlockNumber, Transaction as PrimitiveTransaction, TransactionSignedEcRecovered,
-    TxKind as PrimitiveTransactionKind, TxType, B256,
+    BlockNumber, Transaction as PrimitiveTransaction, TransactionSignedEcRecovered, TxKind, TxType,
+    B256,
 };
 #[cfg(feature = "optimism")]
 use reth_rpc_types::optimism::OptimismTransactionFields;
@@ -48,8 +48,8 @@ fn fill(
     let mut signed_tx = tx.into_signed();
 
     let to = match signed_tx.kind() {
-        PrimitiveTransactionKind::Create => None,
-        PrimitiveTransactionKind::Call(to) => Some(*to),
+        TxKind::Create => None,
+        TxKind::Call(to) => Some(*to),
     };
 
     #[allow(unreachable_patterns)]
@@ -202,7 +202,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
 
     TransactionRequest {
         from: Some(from),
-        to,
+        to: Some(to.expect("Failed to get `to` address").into()),
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas,

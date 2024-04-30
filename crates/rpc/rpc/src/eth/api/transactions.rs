@@ -920,7 +920,10 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
+                        Some(to) => RpcTransactionKind::Call(match to.to() {
+                            Some(to) => *to,
+                            None => Default::default(),
+                        }),
                         None => RpcTransactionKind::Create,
                     },
                     chain_id: None,
@@ -936,7 +939,10 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
+                        Some(to) => RpcTransactionKind::Call(match to.to() {
+                            Some(to) => *to,
+                            None => Default::default(),
+                        }),
                         None => RpcTransactionKind::Create,
                     },
                     chain_id: 0,
@@ -959,7 +965,10 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
+                        Some(to) => RpcTransactionKind::Call(match to.to() {
+                            Some(to) => *to,
+                            None => Default::default(),
+                        }),
                         None => RpcTransactionKind::Create,
                     },
                     chain_id: 0,
@@ -988,7 +997,10 @@ where
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
                     kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
+                        Some(to) => RpcTransactionKind::Call(match to.to() {
+                            Some(to) => *to,
+                            None => Default::default(),
+                        }),
                         None => RpcTransactionKind::Create,
                     },
                     access_list: access_list.unwrap_or_default(),

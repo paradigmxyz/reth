@@ -1,4 +1,4 @@
-use crate::{constants::GWEI_TO_WEI, serde_helper::u64_hex, Address};
+use crate::{constants::GWEI_TO_WEI, serde_helper::num::u64_via_ruint, Address};
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
 use std::{
@@ -11,15 +11,15 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable)]
 pub struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
-    #[serde(with = "u64_hex")]
+    #[serde(with = "u64_via_ruint")]
     pub index: u64,
     /// Index of validator associated with withdrawal.
-    #[serde(with = "u64_hex", rename = "validatorIndex")]
+    #[serde(with = "u64_via_ruint", rename = "validatorIndex")]
     pub validator_index: u64,
     /// Target address for withdrawn ether.
     pub address: Address,
     /// Value of the withdrawal in gwei.
-    #[serde(with = "u64_hex")]
+    #[serde(with = "u64_via_ruint")]
     pub amount: u64,
 }
 

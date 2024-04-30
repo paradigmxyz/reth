@@ -256,7 +256,10 @@ pub(crate) fn create_txn_env(
         caller: from.unwrap_or_default(),
         gas_price,
         gas_priority_fee: max_priority_fee_per_gas,
-        transact_to: to.map(TransactTo::Call).unwrap_or_else(TransactTo::create),
+        transact_to: match to {
+            Some(to) => to.to().map(|to| TransactTo::Call(*to)).unwrap_or_else(TransactTo::create),
+            None => TransactTo::create(),
+        },
         value: value.unwrap_or_default(),
         data: input.try_into_unique_input()?.unwrap_or_default(),
         chain_id,
