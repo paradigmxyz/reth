@@ -248,10 +248,8 @@ pub const TX_DUP_ORIGINALS: [ReplayedTx; 4] =
 /// Returns `true` if transaction is the second or third appearance of the transaction.
 pub fn is_duplicate(tx_hash: TxHash, block_number: u64) -> bool {
     for ReplayedTx { tx_hash: dup_tx_hash, original_block } in TX_DUP_ORIGINALS {
-        if tx_hash == dup_tx_hash {
-            if block_number != original_block {
-                return true
-            }
+        if tx_hash == dup_tx_hash && block_number != original_block {
+            return true
         }
     }
     false

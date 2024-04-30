@@ -269,10 +269,8 @@ where
         .expect("failed to set download range");
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-    let factory = reth_revm::EvmProcessorFactory::new(
-        provider_factory.chain_spec().clone(),
-        EthEvmConfig::default(),
-    );
+    let factory =
+        reth_revm::EvmProcessorFactory::new(provider_factory.chain_spec(), EthEvmConfig::default());
 
     let max_block = file_client.max_block().unwrap_or(0);
 
