@@ -2113,7 +2113,7 @@ impl fmt::Debug for RpcServer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcServer")
             .field("http", &self.ws_http.http_local_addr.is_some())
-            .field("ws", &self.ws_http.http_local_addr.is_some())
+            .field("ws", &self.ws_http.ws_local_addr.is_some())
             .field("ipc", &self.ipc.is_some())
             .finish()
     }
@@ -2122,7 +2122,7 @@ impl fmt::Debug for RpcServer {
 /// A handle to the spawned servers.
 ///
 /// When this type is dropped or [RpcServerHandle::stop] has been called the server will be stopped.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[must_use = "Server stops if dropped"]
 pub struct RpcServerHandle {
     /// The address of the http/ws server
@@ -2222,16 +2222,6 @@ impl RpcServerHandle {
 
         let client = builder.build(url).await.expect("failed to create ws client");
         Some(client)
-    }
-}
-
-impl fmt::Debug for RpcServerHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RpcServerHandle")
-            .field("http", &self.http.is_some())
-            .field("ws", &self.ws.is_some())
-            .field("ipc", &self.ipc.is_some())
-            .finish()
     }
 }
 
