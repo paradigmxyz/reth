@@ -183,16 +183,17 @@ mod test {
             .unwrap(),
         };
 
-        ReceiptWithBlockNumber {
-            receipt: Receipt {
-                tx_type: TxType::Legacy,
-                success: true,
-                cumulative_gas_used: 202813,
-                logs: vec![log_1, log_2, log_3],
-                ..Default::default()
-            },
-            number: 1,
-        }
+        let mut receipt = Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 202813,
+            ..Default::default()
+        };
+        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
+        // feature must not be brought into scope
+        receipt.logs = vec![log_1, log_2, log_3];
+
+        ReceiptWithBlockNumber { receipt, number: 1 }
     }
 
     fn receipt_block_2() -> ReceiptWithBlockNumber {
@@ -234,15 +235,17 @@ mod test {
             .unwrap(),
         };
 
-        ReceiptWithBlockNumber {
-            receipt: Receipt {
-                tx_type: TxType::Legacy,
-                success: true,
-                cumulative_gas_used: 116237,
-                logs: vec![log_1, log_2],
-            },
-            number: 2,
-        }
+        let mut receipt = Receipt {
+            tx_type: TxType::Legacy,
+            success: true,
+            cumulative_gas_used: 116237,
+            ..Default::default()
+        };
+        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
+        // feature must not be brought into scope
+        receipt.logs = vec![log_1, log_2];
+
+        ReceiptWithBlockNumber { receipt, number: 2 }
     }
 
     #[test]
