@@ -15,7 +15,7 @@ use reth_node_core::init::{insert_genesis_header, insert_genesis_history, insert
 use reth_primitives::{
     fs, stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
 };
-use reth_provider::{providers::StaticFileWriter, ProviderFactory};
+use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
 use std::sync::Arc;
 
 /// `reth drop-stage` command
