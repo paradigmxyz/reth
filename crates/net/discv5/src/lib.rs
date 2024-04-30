@@ -44,17 +44,6 @@ pub use filter::{FilterOutcome, MustNotIncludeKeys};
 
 use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
-/// Default number of times to do pulse lookup queries, at bootstrap (pulse intervals, defaulting
-/// to 5 seconds).
-///
-/// Default is 100 counts.
-pub const DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP: u64 = 100;
-
-/// Default duration of look up interval, for pulse look ups at bootstrap.
-///
-/// Default is 5 seconds.
-pub const DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL: u64 = 5;
-
 /// Max kbucket index is 255.
 ///
 /// This is the max log2distance for 32 byte [`NodeId`](discv5::enr::NodeId) - 1. See <https://github.com/sigp/discv5/blob/e9e0d4f93ec35591832a9a8d937b4161127da87b/src/kbucket.rs#L586-L587>.
@@ -179,7 +168,13 @@ impl Discv5 {
         // 2. start discv5
         //
         let Config {
-            discv5_config, bootstrap_nodes, lookup_interval, discovered_peer_filter, ..
+            discv5_config,
+            bootstrap_nodes,
+            lookup_interval,
+            bootstrap_boost_lookup_interval,
+            bootstrap_boost_count_down,
+            discovered_peer_filter,
+            ..
         } = discv5_config;
 
         let EnrCombinedKeyWrapper(enr) = enr.into();
@@ -205,7 +200,13 @@ impl Discv5 {
         //
         // 4. start bg kbuckets maintenance
         //
-        Self::spawn_populate_kbuckets_bg(lookup_interval, metrics.clone(), discv5.clone());
+        Self::spawn_populate_kbuckets_bg(
+            lookup_interval,
+            bootstrap_boost_lookup_interval,
+            bootstrap_boost_count_down,
+            metrics.clone(),
+            discv5.clone(),
+        );
 
         Ok((
             Self { discv5, ip_mode, fork_key, discovered_peer_filter, metrics },
@@ -316,6 +317,8 @@ impl Discv5 {
     /// Backgrounds regular look up queries, in order to keep kbuckets populated.
     fn spawn_populate_kbuckets_bg(
         lookup_interval: u64,
+        bootstrap_lookup_interval: u64,
+        bootstrap_lookup_count_down: u64,
         metrics: Discv5Metrics,
         discv5: Arc<discv5::Discv5>,
     ) {
@@ -324,13 +327,13 @@ impl Discv5 {
             let lookup_interval = Duration::from_secs(lookup_interval);
             let metrics = metrics.discovered_peers;
             let mut kbucket_index = MAX_KBUCKET_INDEX;
-            let pulse_lookup_interval = Duration::from_secs(DEFAULT_SECONDS_PULSE_LOOKUP_INTERVAL);
+            let pulse_lookup_interval = Duration::from_secs(bootstrap_lookup_interval);
             // todo: graceful shutdown
 
             async move {
                 // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
                 // log2distance from local node
-                for i in (0..DEFAULT_COUNT_PULSE_LOOKUPS_AT_BOOTSTRAP).rev() {
+                for i in (0..bootstrap_lookup_count_down).rev() {
                     let target = discv5::enr::NodeId::random();
 
                     trace!(target: "net::discv5",

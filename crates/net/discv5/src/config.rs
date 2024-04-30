@@ -18,6 +18,17 @@ use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, network_
 /// Default is 60 seconds.
 const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
 
+/// Default number of times to do pulse lookup queries, at bootstrap (pulse intervals, defaulting
+/// to 5 seconds).
+///
+/// Default is 100 counts.
+pub const DEFAULT_COUNT_BOOTSTRAP_LOOKUPS: u64 = 100;
+
+/// Default duration of look up interval, for pulse look ups at bootstrap.
+///
+/// Default is 5 seconds.
+pub const DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL: u64 = 5;
+
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
 pub struct ConfigBuilder {
@@ -39,6 +50,11 @@ pub struct ConfigBuilder {
     other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     lookup_interval: Option<u64>,
+    /// Interval in seconds at which to run pulse lookup queries at bootstrap to boost kbucket
+    /// population.
+    bootstrap_boost_lookup_interval: Option<u64>,
+    /// Number of times to run boost lookup queries at start up.
+    bootstrap_boost_count_down: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     discovered_peer_filter: Option<MustNotIncludeKeys>,
@@ -54,6 +70,8 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
+            bootstrap_boost_lookup_interval,
+            bootstrap_boost_count_down,
             discovered_peer_filter,
         } = discv5_config;
 
@@ -64,6 +82,8 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
+            bootstrap_boost_lookup_interval: Some(bootstrap_boost_lookup_interval),
+            bootstrap_boost_count_down: Some(bootstrap_boost_count_down),
             discovered_peer_filter: Some(discovered_peer_filter),
         }
     }
@@ -135,6 +155,26 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the interval at which to run lookup queries, in order to fill kbuckets. Lookup queries
+    /// are done periodically at the given interval for the whole run of the program.
+    pub fn lookup_interval(mut self, seconds: u64) -> Self {
+        self.lookup_interval = Some(seconds);
+        self
+    }
+
+    /// Sets the interval at which to run boost lookup queries at start up. Queries will be started
+    /// at this interval for the configured number of times after start up.
+    pub fn bootstrap_boost_lookup_interval(mut self, seconds: u64) -> Self {
+        self.bootstrap_boost_lookup_interval = Some(seconds);
+        self
+    }
+
+    /// Sets the the number of times at which to run boost lookup queries to bootstrap the node.
+    pub fn bootstrap_boost_count_down(mut self, counts: u64) -> Self {
+        self.bootstrap_boost_count_down = Some(counts);
+        self
+    }
+
     /// Adds keys to disallow when filtering a discovered peer, to determine whether or not it
     /// should be passed to rlpx. The discovered node record is scanned for any kv-pairs where the
     /// key matches the disallowed keys. If not explicitly set, b"eth2" key will be disallowed.
@@ -154,6 +194,8 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
+            bootstrap_boost_lookup_interval,
+            bootstrap_boost_count_down,
             discovered_peer_filter,
         } = self;
 
@@ -164,6 +206,10 @@ impl ConfigBuilder {
         let fork = (network_key, fork_id.into());
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
+        let bootstrap_boost_lookup_interval =
+            bootstrap_boost_lookup_interval.unwrap_or(DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL);
+        let bootstrap_boost_count_down =
+            bootstrap_boost_count_down.unwrap_or(DEFAULT_COUNT_BOOTSTRAP_LOOKUPS);
 
         let discovered_peer_filter =
             discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[network_key::ETH2]));
@@ -175,6 +221,8 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
+            bootstrap_boost_lookup_interval,
+            bootstrap_boost_count_down,
             discovered_peer_filter,
         }
     }
@@ -198,6 +246,11 @@ pub struct Config {
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
     pub(super) lookup_interval: u64,
+    /// Interval in seconds at which to run pulse lookup queries at bootstrap to boost kbucket
+    /// population.
+    pub(super) bootstrap_boost_lookup_interval: u64,
+    /// Number of times to run boost lookup queries at start up.
+    pub(super) bootstrap_boost_count_down: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     pub(super) discovered_peer_filter: MustNotIncludeKeys,
