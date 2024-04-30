@@ -17,16 +17,21 @@ use reth_interfaces::p2p::{
 
 use alloy_rlp::Decodable;
 use reth_primitives::{
-    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig, ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, PeerId, B256, U256
+    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig,
+    ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, PeerId,
+    B256, U256,
 };
 use rlp::Encodable;
 use serde_json::json;
 
-use std::{self, cmp::min, collections::{BTreeMap, HashMap}};
+use std::{
+    self,
+    cmp::min,
+    collections::{BTreeMap, HashMap},
+};
 use thiserror::Error;
 
 use tracing::{debug, error, info, trace, warn};
-
 
 /// Front-end API for fetching chain data from remote sources.
 ///
@@ -43,7 +48,6 @@ pub struct BitfinityEvmClient {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
-
 }
 
 /// An error that can occur when constructing and using a [`RemoteClient`].
@@ -192,7 +196,7 @@ impl BitfinityEvmClient {
 
     /// Fetch Bitfinity chain spec
     pub async fn fetch_chain_spec(rpc: String) -> Result<ChainSpec> {
-        let client = ethereum_json_rpc_client::EthJsonRpcClient::new(ReqwestClient::new(rpc));
+        let client = ethereum_json_rpc_client::EthJsonRpcClient::new(ReqwestClient::new(rpc.clone()));
 
         let chain_id = client.get_chain_id().await.map_err(|e| eyre::eyre!(e))?;
 
@@ -203,15 +207,20 @@ impl BitfinityEvmClient {
             .await
             .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?;
 
-        let genesis_accounts = client
-            .get_genesis_balances()
-            .await
-            .map_err(|e| eyre::eyre!(e))?
-            .into_iter()
-            .map(|(k, v)| {
-                tracing::info!("downloaders::bitfinity_evm_client - Bitfinity genesis account: {:?} {:?}", k, v);
-                (k.0.into(), GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() })
-            });
+        let genesis_accounts =
+            client.get_genesis_balances().await.map_err(|e| eyre::eyre!(e))?.into_iter().map(
+                |(k, v)| {
+                    tracing::info!(
+                        "downloaders::bitfinity_evm_client - Bitfinity genesis account: {:?} {:?}",
+                        k,
+                        v
+                    );
+                    (
+                        k.0.into(),
+                        GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() },
+                    )
+                },
+            );
 
         let chain = Chain::from_id(chain_id);
 
@@ -254,6 +263,7 @@ impl BitfinityEvmClient {
                     ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
                 ),
             ]),
+            rpc_url: Some(rpc),
             ..Default::default()
         };
 
@@ -281,19 +291,34 @@ impl BitfinityEvmClient {
 struct BlockCertificateChecker {
     certified_data: CertifiedResult<did::Block<did::H256>>,
     evmc_principal: Principal,
-    ic_root_key: Vec<u8>
+    ic_root_key: Vec<u8>,
 }
 
 impl BlockCertificateChecker {
-    async fn new(client: &EthJsonRpcClient<ReqwestClient>, certificate_settings: CertificateCheckSettings) -> Result<Self, RemoteClientError> {
-        let evmc_principal = Principal::from_text(certificate_settings.evmc_principal).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse principal: {e}")))?;
-        let ic_root_key = hex::decode(&certificate_settings.ic_root_key).map_err(|e| RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}")))?;
-        let certified_data = client.get_last_certified_block().await.map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
-        Ok(Self{certified_data: CertifiedResult{
-            data: did::Block::from(certified_data.data),
-            certificate: certified_data.certificate,
-            witness: certified_data.witness
-        }, evmc_principal, ic_root_key})
+    async fn new(
+        client: &EthJsonRpcClient<ReqwestClient>,
+        certificate_settings: CertificateCheckSettings,
+    ) -> Result<Self, RemoteClientError> {
+        let evmc_principal =
+            Principal::from_text(certificate_settings.evmc_principal).map_err(|e| {
+                RemoteClientError::CertificateError(format!("failed to parse principal: {e}"))
+            })?;
+        let ic_root_key = hex::decode(&certificate_settings.ic_root_key).map_err(|e| {
+            RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}"))
+        })?;
+        let certified_data = client
+            .get_last_certified_block()
+            .await
+            .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
+        Ok(Self {
+            certified_data: CertifiedResult {
+                data: did::Block::from(certified_data.data),
+                certificate: certified_data.certificate,
+                witness: certified_data.witness,
+            },
+            evmc_principal,
+            ic_root_key,
+        })
     }
 
     fn get_block_number(&self) -> u64 {
@@ -306,32 +331,37 @@ impl BlockCertificateChecker {
         }
 
         if block.number > self.certified_data.data.number {
-            return Err(RemoteClientError::CertificateError(format!("cannot execute block {} after the latest certified", block.number)));
+            return Err(RemoteClientError::CertificateError(format!(
+                "cannot execute block {} after the latest certified",
+                block.number
+            )));
         }
 
         if block.hash != self.certified_data.data.hash {
-            return Err(RemoteClientError::CertificateError(format!("state hash doesn't correspond to certified block, have {}, want {}",
-                block.hash, self.certified_data.data.hash)));
+            return Err(RemoteClientError::CertificateError(format!(
+                "state hash doesn't correspond to certified block, have {}, want {}",
+                block.hash, self.certified_data.data.hash
+            )));
         }
 
-        let certificate = Certificate::from_cbor(&self.certified_data.certificate)
-            .map_err(|e| RemoteClientError::CertificateError(format!("failed to parse certificate: {e}")))?;
-        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key)
-            .map_err(|e| RemoteClientError::CertificateError(format!("certificate validation error: {e}")))?;
+        let certificate =
+            Certificate::from_cbor(&self.certified_data.certificate).map_err(|e| {
+                RemoteClientError::CertificateError(format!("failed to parse certificate: {e}"))
+            })?;
+        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key).map_err(|e| {
+            RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
+        })?;
 
-        let tree = HashTree::from_cbor(&self.certified_data.witness)
-            .map_err(|e| RemoteClientError::CertificateError(format!("failed to parse witness: {e}")))?;
+        let tree = HashTree::from_cbor(&self.certified_data.witness).map_err(|e| {
+            RemoteClientError::CertificateError(format!("failed to parse witness: {e}"))
+        })?;
         Self::validate_tree(self.evmc_principal.as_ref(), &certificate, &tree);
 
         Ok(())
     }
 
     fn validate_tree(canister_id: &[u8], certificate: &Certificate, tree: &HashTree) -> bool {
-        let certified_data_path = [
-            "canister".as_bytes(),
-            canister_id,
-            "certified_data".as_bytes(),
-        ];
+        let certified_data_path = ["canister".as_bytes(), canister_id, "certified_data".as_bytes()];
 
         let witness = match certificate.tree.lookup_path(&certified_data_path) {
             LookupResult::Found(witness) => witness,
@@ -442,14 +472,18 @@ mod tests {
     #[tokio::test]
     async fn remote_client_from_rpc_url() {
         let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
+                .await
+                .unwrap();
         assert!(client.max_block().is_some());
     }
 
     #[tokio::test]
     async fn test_headers_client() {
         let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
+                .await
+                .unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {
@@ -467,7 +501,9 @@ mod tests {
     #[tokio::test]
     async fn test_bodies_client() {
         let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None).await.unwrap();
+            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
+                .await
+                .unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {
