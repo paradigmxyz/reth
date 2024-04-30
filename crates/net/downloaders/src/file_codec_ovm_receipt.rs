@@ -72,7 +72,6 @@ pub struct HackReceipt {
 #[derive(Debug, PartialEq, Eq, RlpDecodable)]
 struct HackReceiptContainer(HackReceipt);
 
-#[allow(clippy::needless_update)]
 impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
     type Error = &'static str;
     fn try_from(exported_receipt: HackReceipt) -> Result<Self, Self::Error> {
@@ -80,13 +79,16 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
             tx_type, status, cumulative_gas_used, logs, block_number: number, ..
         } = exported_receipt;
 
-        let receipt = Receipt {
+        #[allow(clippy::needless_update)]
+        let mut receipt = Receipt {
             tx_type: TxType::try_from(tx_type.to_be_bytes()[0])?,
             success: status != 0,
             cumulative_gas_used,
-            logs,
             ..Default::default()
         };
+        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
+        // feature must not be brought into scope
+        receipt.logs = logs;
 
         Ok(Self { receipt, number })
     }
