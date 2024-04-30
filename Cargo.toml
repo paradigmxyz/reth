@@ -89,6 +89,7 @@ members = [
     "examples/custom-inspector/",
     "examples/exex/minimal/",
     "examples/exex/op-bridge/",
+    "examples/exex/rollup/",
     "examples/db-access",
     "testing/ef-tests/",
     "testing/testing-utils",
