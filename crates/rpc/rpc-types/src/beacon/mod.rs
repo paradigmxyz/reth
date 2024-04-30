@@ -9,6 +9,8 @@ pub mod constants;
 /// Beacon API events support.
 pub mod events;
 pub mod payload;
+/// Beacon sidecar query support
+pub mod sidecar;
 pub mod withdrawals;
 
 /// BLS signature type

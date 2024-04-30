@@ -10,19 +10,21 @@ use std::{
     task::{Context, Poll},
 };
 
+use eyre::Result;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::BlobTransaction,
+    primitives::{BlobTransaction, B256},
     providers::CanonStateNotification,
-    rpc::types::engine::BlobsBundleV1,
+    rpc::types::{beacon::sidecar::BeaconBlobBundle, engine::BlobsBundleV1},
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
 
 #[tokio::main]
-async fn main() -> eyre::Result<()> {
+async fn main() -> Result<()> {
     Ok(())
 }
 
@@ -42,12 +44,12 @@ impl BeaconSidecarConfig {
         format!("http://{}:{}", self.cl_addr, self.cl_port)
     }
 
-    // We only care about the head
-    pub fn sidecar_url(&self) -> String {
-        format!("{}/eth/v1/beacon/blob_sidecars/head", self.http_base_url())
+    pub fn sidecar_url(&self, block_root: B256) -> String {
+        format!("{}/eth/v1/beacon/blob_sidecars/{}", self.http_base_url(), block_root)
     }
 }
 
+// SideCarError Handles Errors from both EL and CL
 #[derive(Debug, Error)]
 pub enum SideCarError {
     #[error("Reqwest encountered an error: {0}")]
@@ -74,6 +76,7 @@ pub enum SideCarError {
     #[error("{0} Error: {1}")]
     UnknownError(u16, String),
 }
+
 pub struct MinedSidecarStream<St, P>
 where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
@@ -131,6 +134,10 @@ where
                         .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
                         .collect();
 
+                    if txs.is_empty() {
+                        continue;
+                    }
+
                     // Retrieves all blobs in the order in which we requested them
                     match this
                         .pool
@@ -155,7 +162,9 @@ where
                     } else {
                         let client_clone = this.client.clone();
 
-                        let sidecar_url = this.beacon_config.sidecar_url();
+                        let block_root = notification.tip().block.hash();
+
+                        let sidecar_url = this.beacon_config.sidecar_url(block_root);
 
                         // Query the Beacon Layer for missing BlobTransactions
                         let query = Box::pin(async move {
@@ -194,7 +203,7 @@ where
                                 Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
                             };
 
-                            let mut blobs_bundle: BlobsBundleV1 =
+                            let mut blobs_bundle: BeaconBlobBundle =
                                 match serde_json::from_slice(&bytes) {
                                     Ok(b) => b,
                                     Err(e) => {
@@ -204,6 +213,7 @@ where
                                     }
                                 };
 
+                            // TODO: Change this to use BeaconBlobBundle
                             // Blob_len is used to retrieve the BlobTransaction from the bundle
                             let sidecars: Vec<BlobTransaction> = txs
                                 .iter()
