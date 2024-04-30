@@ -2,14 +2,14 @@ use crate::{
     commands::db::get::{maybe_json_value_parser, table_key},
     utils::DbTool,
 };
-use ahash::AHasher;
+use ahash::{AHasher, RandomState};
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawKey,
     RawTable, RawValue, TableViewer, Tables,
 };
 use std::{
-    hash::Hasher,
+    hash::{BuildHasher, Hasher},
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -76,7 +76,7 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
         };
 
         let start_time = Instant::now();
-        let mut hasher = AHasher::default();
+        let mut hasher = RandomState::with_seeds(1, 2, 3, 4).build_hasher();
         let mut total = 0;
         for (index, entry) in walker.enumerate() {
             let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = entry?;
