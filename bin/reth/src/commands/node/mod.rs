@@ -53,6 +53,7 @@ pub struct NodeCommand<Ext: RethCliExt = ()> {
     //     required = false,
     // )]
     // pub chain: Arc<ChainSpec>,
+
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -207,8 +208,7 @@ impl<Ext: RethCliExt> NodeCommand<Ext> {
         // set up real database
         let database = DatabaseBuilder::Real(datadir);
 
-        let chain =
-            Arc::new(BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?);
+        let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?);
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -366,24 +366,24 @@ mod tests {
     //     assert_eq!(db_path, Path::new("my/custom/path/db"));
     // }
 
-    // #[test]
-    // #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
-    // fn parse_dev() {
-    //     let cmd = NodeCommand::<()>::parse_from(["reth", "--dev"]);
-    //     let chain = reth_primitives::DEV.clone();
-    //     assert_eq!(cmd.chain.chain, chain.chain);
-    //     assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-    //     assert_eq!(
-    //         cmd.chain.paris_block_and_final_difficulty,
-    //         chain.paris_block_and_final_difficulty
-    //     );
-    //     assert_eq!(cmd.chain.hardforks, chain.hardforks);
+    #[test]
+    #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
+    fn parse_dev() {
+        let cmd = NodeCommand::<()>::parse_from(["reth", "--dev"]);
+        let chain = reth_primitives::DEV.clone();
+        assert_eq!(cmd.chain.chain, chain.chain);
+        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(
+            cmd.chain.paris_block_and_final_difficulty,
+            chain.paris_block_and_final_difficulty
+        );
+        assert_eq!(cmd.chain.hardforks, chain.hardforks);
 
-    //     assert!(cmd.rpc.http);
-    //     assert!(cmd.network.discovery.disable_discovery);
+        assert!(cmd.rpc.http);
+        assert!(cmd.network.discovery.disable_discovery);
 
-    //     assert!(cmd.dev.dev);
-    // }
+        assert!(cmd.dev.dev);
+    }
 
     #[test]
     fn parse_instance() {
