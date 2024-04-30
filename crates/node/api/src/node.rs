@@ -55,6 +55,12 @@ impl<Types, DB, Provider> FullNodeTypesAdapter<Types, DB, Provider> {
     }
 }
 
+impl<Types, DB, Provider> Default for FullNodeTypesAdapter<Types, DB, Provider> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypes,

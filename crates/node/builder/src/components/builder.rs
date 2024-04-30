@@ -10,7 +10,7 @@ use crate::{
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
 
-/// A generic, customizable [`NodeComponentsBuilder`].
+/// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///
 /// This type is stateful and captures the configuration of the node's components.
 ///
