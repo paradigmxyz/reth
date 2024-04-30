@@ -410,22 +410,14 @@ where
             to
         } else {
             let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
-            TxKind::Call(from.create(nonce))
+            from.create(nonce)
         };
 
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
         let precompiles = get_precompiles(env.handler_cfg.spec_id);
-        let mut inspector = AccessListInspector::new(
-            initial,
-            from,
-            match to.to() {
-                Some(to) => *to,
-                None => Default::default(),
-            },
-            precompiles,
-        );
+        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
@@ -451,6 +443,7 @@ where
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }
+
     /// Executes the requests again after an out of gas error to check if the error is gas related
     /// or not
     #[inline]

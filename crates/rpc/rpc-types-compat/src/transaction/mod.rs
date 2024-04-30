@@ -1,9 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
 
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
-use reth_primitives::{
-    BlockNumber, TransactionSignedEcRecovered, TxKind as PrimitiveTransactionKind, TxType, B256,
-};
+use reth_primitives::{BlockNumber, TransactionSignedEcRecovered, TxKind, TxType, B256};
 use reth_rpc_types::Transaction;
 use signature::from_primitive_signature;
 pub use typed::*;
@@ -140,7 +138,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
 
     TransactionRequest {
         from: Some(from),
-        to: Some(to.expect("Failed to get `to` address").into()),
+        to,
         gas_price,
         max_fee_per_gas,
         max_priority_fee_per_gas,
