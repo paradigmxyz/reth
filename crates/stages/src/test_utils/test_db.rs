@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProviderRWRefMut, StaticFileWriter},
-    HistoryWriter, ProviderError, ProviderFactory,
+    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tempfile::TempDir;

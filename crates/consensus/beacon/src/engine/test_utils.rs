@@ -27,6 +27,7 @@ use reth_provider::{
     providers::BlockchainProvider,
     test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
     BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, PrunableBlockExecutor,
+    StaticFileProviderFactory,
 };
 use reth_prune::Pruner;
 use reth_revm::EvmProcessorFactory;
