@@ -51,7 +51,7 @@ impl<E: EngineTypes + 'static> EngineApiTestContext<E> {
         )
         .await?;
 
-        assert!(submission.status == expected_status);
+        assert_eq!(submission.status, expected_status);
 
         Ok(submission.latest_valid_hash.unwrap_or_default())
     }
