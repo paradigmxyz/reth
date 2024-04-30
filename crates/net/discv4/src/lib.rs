@@ -1387,7 +1387,16 @@ impl Discv4Service {
                 BucketEntry::SelfEntry => {
                     // we received our own node entry
                 }
-                _ => self.find_node(&closest, ctx.clone()),
+                BucketEntry::Present(mut entry, _) => {
+                    if entry.value_mut().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
+                    }
+                }
+                BucketEntry::Pending(mut entry, _) => {
+                    if entry.value().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
+                    }
+                }
             }
         }
     }
