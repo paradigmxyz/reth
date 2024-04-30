@@ -202,7 +202,7 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
         BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
-        TxKind, Withdrawal, Withdrawals, U256,
+        Withdrawal, Withdrawals, U256,
     };
     use reth_provider::AccountReader;
     use std::ops::RangeBounds;

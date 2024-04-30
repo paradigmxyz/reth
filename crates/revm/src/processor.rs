@@ -466,7 +466,7 @@ mod tests {
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
         keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction,
-        TxEip1559, TxKind, MAINNET,
+        TxEip1559, MAINNET,
     };
     use revm::{Database, TransitionState};
     use std::collections::HashMap;

@@ -1285,8 +1285,8 @@ mod tests {
         revm_primitives::AccountInfo,
         stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
-        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxKind,
-        Withdrawals, B256, MAINNET,
+        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
+        MAINNET,
     };
     use reth_provider::{
         test_utils::{

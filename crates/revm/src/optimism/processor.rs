@@ -206,7 +206,7 @@ mod tests {
     };
     use reth_primitives::{
         b256, Account, Address, Block, ChainSpecBuilder, Header, Signature, StorageKey,
-        StorageValue, Transaction, TransactionSigned, TxEip1559, TxKind, BASE_MAINNET,
+        StorageValue, Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use revm::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr, sync::Arc};
