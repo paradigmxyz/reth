@@ -234,6 +234,11 @@ impl FileClient {
         let headers = &self.headers;
         headers.keys().zip(bodies.values_mut())
     }
+
+    /// Returns the current number of transactions in the client.
+    pub fn total_transactions(&self) -> usize {
+        self.bodies.iter().flat_map(|(_, body)| &body.transactions).count()
+    }
 }
 
 impl HeadersClient for FileClient {

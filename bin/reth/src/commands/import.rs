@@ -159,7 +159,7 @@ impl ImportCommand {
             info!(target: "reth::cli", "Chain file chunk read");
 
             total_decoded_blocks += file_client.headers_len();
-            total_decoded_txns += file_client.bodies_len();
+            total_decoded_txns += file_client.total_transactions();
 
             let (mut pipeline, events) = build_import_pipeline(
                 &config,
@@ -200,7 +200,7 @@ impl ImportCommand {
 
         let provider = provider_factory.provider()?;
 
-        let total_imported_blocks = provider.tx_ref().entries::<tables::Headers>()?;
+        let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
         let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
         if total_decoded_blocks != total_imported_blocks ||
