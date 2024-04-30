@@ -14,8 +14,10 @@ use reth_downloaders::{
     receipt_file_client::ReceiptFileClient,
 };
 use reth_node_core::version::SHORT_VERSION;
-use reth_primitives::ChainSpec;
-use reth_provider::{BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory};
+use reth_primitives::{ChainSpec, StaticFileSegment};
+use reth_provider::{
+    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StaticFileWriter,
+};
 use tracing::{debug, error, info};
 
 use std::{path::PathBuf, sync::Arc};
@@ -81,6 +83,7 @@ impl ImportReceiptsCommand {
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
         let tx = provider_factory.provider_rw()?.into_tx();
+        let static_file_provider = provider_factory.static_file_provider();
 
         let mut total_decoded_receipts = 0;
 
@@ -98,9 +101,12 @@ impl ImportReceiptsCommand {
             let bundled_state =
                 BundleStateWithReceipts::new(Default::default(), receipts, first_block);
 
+            let static_file_producer =
+                static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
+
             bundled_state.write_to_storage::<<DatabaseEnv as Database>::TXMut>(
                 &tx,
-                None,
+                Some(static_file_producer),
                 OriginalValuesKnown::Yes,
             )?;
         }
