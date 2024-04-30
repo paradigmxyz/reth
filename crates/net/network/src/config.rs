@@ -131,10 +131,9 @@ impl<C> NetworkConfig<C> {
         if chain.named() == Some(NamedChain::Mainnet) {
             builder = builder.fork(network_key::ETH, fork_id)
         }
-        // todo: set op EL fork id
-        /*if chain.is_optimism() {
-            builder = builder.fork(network_key::, fork_id)
-        }*/
+        if chain.is_optimism() {
+            builder = builder.fork(network_key::OPEL, fork_id)
+        }
 
         self.set_discovery_v5(f(builder))
     }
