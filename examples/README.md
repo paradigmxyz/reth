@@ -27,6 +27,7 @@ to make a PR!
 | ---------------------------------- | --------------------------------------------------------------------------------- |
 | [Minimal ExEx](./exex/minimal)     | Illustrates how to build a simple ExEx                                            |
 | [OP Bridge ExEx](./exex/op-bridge) | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1 |
+| [Rollup](./exex/rollup)            | Illustrates a rollup ExEx that derives the state from L1                          |
 
 ## RPC
 

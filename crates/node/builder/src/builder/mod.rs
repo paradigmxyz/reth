@@ -34,12 +34,9 @@ use std::{str::FromStr, sync::Arc};
 
 mod states;
 
-/// The builtin provider type of the reth node.
+/// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullProviderType<DB> = BlockchainProvider<DB>;
-
-/// The adapter type for a reth node with the given types
-pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, RethFullProviderType<DB>>;
+pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, BlockchainProvider<DB>>;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
@@ -53,10 +50,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, RethFullPr
 /// example) and then proceeds to configure the core static types of the node: [NodeTypes], these
 /// include the node's primitive types and the node's engine types.
 ///
-/// Next all stateful components of the node are configured, these include the
-/// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and all the
+/// Next all stateful components of the node are configured, these include all the
 /// components of the node that are downstream of those types, these include:
 ///
+///  - The EVM and Executor configuration: [ExecutorBuilder](crate::components::ExecutorBuilder)
 ///  - The transaction pool: [PoolBuilder]
 ///  - The network: [NetworkBuilder](crate::components::NetworkBuilder)
 ///  - The payload builder: [PayloadBuilder](crate::components::PayloadServiceBuilder)
@@ -74,9 +71,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, RethFullPr
 /// ## Components
 ///
 /// All components are configured with a [NodeComponentsBuilder] that is responsible for actually
-/// creating the node components during the launch process. The [ComponentsBuilder] is a general
-/// purpose implementation of the [NodeComponentsBuilder] trait that can be used to configure the
-/// network, transaction pool and payload builder of the node. It enforces the correct order of
+/// creating the node components during the launch process. The
+/// [ComponentsBuilder](crate::components::ComponentsBuilder) is a general purpose implementation of
+/// the [NodeComponentsBuilder] trait that can be used to configure the executor, network,
+/// transaction pool and payload builder of the node. It enforces the correct order of
 /// configuration, for example the network and the payload builder depend on the transaction pool
 /// type that is configured first.
 ///
@@ -130,8 +128,8 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, RethFullPr
 /// ### Limitations
 ///
 /// Currently the launch process is limited to ethereum nodes and requires all the components
-/// specified above. It also expect beacon consensus with the ethereum engine API that is configured
-/// by the builder itself during launch. This might change in the future.
+/// specified above. It also expects beacon consensus with the ethereum engine API that is
+/// configured by the builder itself during launch. This might change in the future.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB> {
@@ -190,12 +188,11 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(self, types: T) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
+    pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
         T: NodeTypes,
     {
-        let types = FullNodeTypesAdapter::new(types);
-        NodeBuilderWithTypes::new(self.config, types, self.database)
+        NodeBuilderWithTypes::new(self.config, self.database)
     }
 
     /// Preconfigures the node with a specific node implementation.
@@ -208,7 +205,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder())
     }
 }
 
@@ -239,15 +236,12 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(
-        self,
-        types: T,
-    ) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
+    pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
         T: NodeTypes,
     {
         WithLaunchContext {
-            builder: self.builder.with_types(types),
+            builder: self.builder.with_types(),
             task_executor: self.task_executor,
             data_dir: self.data_dir,
         }
@@ -263,7 +257,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder())
     }
 
     /// Launches a preconfigured [Node]
@@ -319,7 +313,7 @@ where
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(self, hook: F) -> Self
     where
-        F: Fn(NodeAdapter<RethFullAdapter<DB, T>, CB::Components>) -> eyre::Result<()>
+        F: FnOnce(NodeAdapter<RethFullAdapter<DB, T>, CB::Components>) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -333,7 +327,9 @@ where
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(self, hook: F) -> Self
     where
-        F: Fn(FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> eyre::Result<()>
+        F: FnOnce(
+                FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+            ) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -347,7 +343,7 @@ where
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(self, hook: F) -> Self
     where
-        F: Fn(
+        F: FnOnce(
                 RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
@@ -364,7 +360,7 @@ where
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(self, hook: F) -> Self
     where
-        F: Fn(
+        F: FnOnce(
                 RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
             ) -> eyre::Result<()>
             + Send
@@ -384,7 +380,7 @@ where
     /// The ExEx ID must be unique.
     pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: Fn(ExExContext<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> R
+        F: FnOnce(ExExContext<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> R
             + Send
             + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
@@ -429,8 +425,6 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) config: NodeConfig,
     /// loaded config
     pub(crate) reth_config: reth_config::Config,
-    /// EVM config of the node
-    pub(crate) evm_config: Node::Evm,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -442,19 +436,13 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
-        evm_config: Node::Evm,
     ) -> Self {
-        Self { head, provider, executor, data_dir, config, reth_config, evm_config }
+        Self { head, provider, executor, data_dir, config, reth_config }
     }
 
     /// Returns the configured provider to interact with the blockchain.
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
-    }
-
-    /// Returns the configured evm.
-    pub fn evm_config(&self) -> &Node::Evm {
-        &self.evm_config
     }
 
     /// Returns the current head of the blockchain at launch.

@@ -2,7 +2,7 @@
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::{logs_bloom, Bloom, Bytes, PruneSegmentError, TxType, B256};
 use alloy_primitives::Log;
-use alloy_rlp::{length_of_length, Decodable, Encodable};
+use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
@@ -18,7 +18,8 @@ use std::{
 #[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
 #[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]
 #[add_arbitrary_tests]
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
 pub struct Receipt {
     /// Receipt type.
     pub tx_type: TxType,

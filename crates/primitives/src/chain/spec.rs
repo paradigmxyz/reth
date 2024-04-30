@@ -4,8 +4,9 @@ use crate::{
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
-    Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
+    Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -575,6 +576,24 @@ impl ChainSpec {
     /// Get information about the chain itself
     pub fn chain(&self) -> Chain {
         self.chain
+    }
+
+    /// Returns `true` if this chain contains Ethereum configuration.
+    #[inline]
+    pub fn is_eth(&self) -> bool {
+        matches!(
+            self.chain.kind(),
+            ChainKind::Named(
+                NamedChain::Mainnet |
+                    NamedChain::Morden |
+                    NamedChain::Ropsten |
+                    NamedChain::Rinkeby |
+                    NamedChain::Goerli |
+                    NamedChain::Kovan |
+                    NamedChain::Holesky |
+                    NamedChain::Sepolia
+            )
+        )
     }
 
     /// Returns `true` if this chain contains Optimism configuration.

@@ -21,7 +21,8 @@ use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
     AccountExtReader, ExecutorFactory, HashingWriter, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StorageReader,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+    StorageReader,
 };
 use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};

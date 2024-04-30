@@ -5,7 +5,7 @@ use crate::{
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_evm::ConfigureEvmEnv;
@@ -67,11 +67,6 @@ impl<DB> ProviderFactory<DB> {
     /// Returns reference to the underlying database.
     pub fn db_ref(&self) -> &DB {
         &self.db
-    }
-
-    /// Returns static file provider
-    pub fn static_file_provider(&self) -> StaticFileProvider {
-        self.static_file_provider.clone()
     }
 
     #[cfg(any(test, feature = "test-utils"))]
@@ -158,6 +153,13 @@ impl<DB: Database> ProviderFactory<DB> {
 impl<DB: Database> DatabaseProviderFactory<DB> for ProviderFactory<DB> {
     fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         self.provider()
+    }
+}
+
+impl<DB> StaticFileProviderFactory for ProviderFactory<DB> {
+    /// Returns static file provider
+    fn static_file_provider(&self) -> StaticFileProvider {
+        self.static_file_provider.clone()
     }
 }
 
