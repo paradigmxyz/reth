@@ -631,7 +631,7 @@ mod tests {
                 .unwrap(),
             ),
             ip_mode: IpMode::Ip4,
-            fork_key: b"noop",
+            fork_key: None,
             discovered_peer_filter: MustNotIncludeKeys::default(),
             metrics: Discv5Metrics::default(),
         }
