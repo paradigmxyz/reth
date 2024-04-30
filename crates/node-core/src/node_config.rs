@@ -476,7 +476,14 @@ impl NodeConfig {
         // work around since discv5 config builder can't be integrated into network config builder
         // due to unsatisfied trait bounds
         config.discovery_v5_with_config_builder(|builder| {
-            let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.network.discovery;
+            let DiscoveryArgs {
+                discv5_addr,
+                discv5_port,
+                discv5_lookup_interval,
+                discv5_bootstrap_lookup_interval,
+                discv5_bootstrap_lookup_countdown,
+                ..
+            } = self.network.discovery;
             builder
                 .discv5_config(
                     discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
@@ -485,6 +492,9 @@ impl NodeConfig {
                     ))))
                     .build(),
                 )
+                .lookup_interval(discv5_lookup_interval)
+                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
                 .build()
         })
     }

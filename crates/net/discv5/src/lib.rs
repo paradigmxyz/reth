@@ -37,7 +37,10 @@ pub mod network_key;
 
 pub use discv5::{self, IpMode};
 
-pub use config::{BootNode, Config, ConfigBuilder};
+pub use config::{
+    BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
+    DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
+};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
@@ -171,8 +174,8 @@ impl Discv5 {
             discv5_config,
             bootstrap_nodes,
             lookup_interval,
-            bootstrap_boost_lookup_interval,
-            bootstrap_boost_count_down,
+            bootstrap_lookup_interval,
+            bootstrap_lookup_countdown,
             discovered_peer_filter,
             ..
         } = discv5_config;
@@ -202,8 +205,8 @@ impl Discv5 {
         //
         Self::spawn_populate_kbuckets_bg(
             lookup_interval,
-            bootstrap_boost_lookup_interval,
-            bootstrap_boost_count_down,
+            bootstrap_lookup_interval,
+            bootstrap_lookup_countdown,
             metrics.clone(),
             discv5.clone(),
         );
@@ -318,7 +321,7 @@ impl Discv5 {
     fn spawn_populate_kbuckets_bg(
         lookup_interval: u64,
         bootstrap_lookup_interval: u64,
-        bootstrap_lookup_count_down: u64,
+        bootstrap_lookup_countdown: u64,
         metrics: Discv5Metrics,
         discv5: Arc<discv5::Discv5>,
     ) {
@@ -333,12 +336,12 @@ impl Discv5 {
             async move {
                 // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
                 // log2distance from local node
-                for i in (0..bootstrap_lookup_count_down).rev() {
+                for i in (0..bootstrap_lookup_countdown).rev() {
                     let target = discv5::enr::NodeId::random();
 
                     trace!(target: "net::discv5",
                         %target,
-                        bootstrap_boost_runs_count_down=i,
+                        bootstrap_boost_runs_countdown=i,
                         lookup_interval=format!("{:#?}", pulse_lookup_interval),
                         "starting bootstrap boost lookup query"
                     );
