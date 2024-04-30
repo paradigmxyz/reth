@@ -1285,8 +1285,8 @@ mod tests {
         revm_primitives::AccountInfo,
         stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
-        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxKind,
-        Withdrawals, B256, MAINNET,
+        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
+        MAINNET,
     };
     use reth_provider::{
         test_utils::{
@@ -1465,7 +1465,7 @@ mod tests {
                     chain_id: chain_spec.chain.id(),
                     nonce,
                     gas_limit: 21_000,
-                    to: TxKind::Call(Address::ZERO),
+                    to: Address::ZERO.into(),
                     max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                     ..Default::default()
                 }),

@@ -429,8 +429,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
-
     use crate::{
         eth::{
             cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
@@ -438,6 +436,7 @@ mod tests {
         },
         EthApi,
     };
+    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;

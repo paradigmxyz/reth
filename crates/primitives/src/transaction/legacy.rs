@@ -190,7 +190,7 @@ mod tests {
             nonce: 0x18,
             gas_price: 0xfa56ea00,
             gas_limit: 119902,
-            to: TxKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
+            to: TxKind::Call(hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
             value: U256::from(0x1c6bf526340000u64),
             input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
         });
