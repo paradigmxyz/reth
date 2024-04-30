@@ -131,7 +131,7 @@ const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
 /// growth of the queue, the queue has a maximum capacity, after which any additional pings will be
 /// discarded.
 ///
-/// This corresponds to 2 full `Neighbourss` responses with 16 new nodes.
+/// This corresponds to 2 full `Neighbours` responses with 16 new nodes.
 const MAX_QUEUED_PINGS: usize = 2 * MAX_NODES_PER_BUCKET;
 
 /// The size of the datagram is limited [`MAX_PACKET_SIZE`], 16 nodes, as the discv4 specifies don't
