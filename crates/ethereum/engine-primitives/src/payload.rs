@@ -57,6 +57,11 @@ impl EthBuiltPayload {
         self.fees
     }
 
+    /// Returns the blob sidecars.
+    pub fn sidecars(&self) -> &Vec<BlobTransactionSidecar> {
+        &self.sidecars
+    }
+
     /// Adds sidecars to the payload.
     pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
         self.sidecars.extend(sidecars)
