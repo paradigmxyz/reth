@@ -24,6 +24,7 @@
 //! # use tokio::sync::watch;
 //! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
+//! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;

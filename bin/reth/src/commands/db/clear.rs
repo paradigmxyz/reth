@@ -7,7 +7,7 @@ use reth_db::{
     TableViewer, Tables,
 };
 use reth_primitives::{static_file::find_fixed_range, StaticFileSegment};
-use reth_provider::ProviderFactory;
+use reth_provider::{ProviderFactory, StaticFileProviderFactory};
 
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]

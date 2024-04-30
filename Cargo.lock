@@ -7749,7 +7749,6 @@ name = "reth-static-file"
 version = "0.2.0-beta.6"
 dependencies = [
  "assert_matches",
- "clap",
  "parking_lot 0.12.2",
  "rayon",
  "reth-db",

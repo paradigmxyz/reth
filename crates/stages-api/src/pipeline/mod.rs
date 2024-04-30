@@ -13,6 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;

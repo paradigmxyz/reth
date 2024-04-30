@@ -53,9 +53,9 @@ mod metrics;
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
-    /// txpool
+    /// The transaction pool to pull transactions from.
     pool: Pool,
-    /// How to spawn building tasks
+    /// The task executor to spawn payload building tasks on.
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
@@ -528,11 +528,11 @@ where
 #[derive(Debug)]
 pub struct ResolveBestPayload<Payload> {
     /// Best payload so far.
-    best_payload: Option<Payload>,
+    pub best_payload: Option<Payload>,
     /// Regular payload job that's currently running that might produce a better payload.
-    maybe_better: Option<PendingPayload<Payload>>,
+    pub maybe_better: Option<PendingPayload<Payload>>,
     /// The empty payload building job in progress.
-    empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
+    pub empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
 }
 
 impl<Payload> Future for ResolveBestPayload<Payload>

@@ -255,7 +255,7 @@ mod tests {
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
-        ProviderFactory,
+        ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{
