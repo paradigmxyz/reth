@@ -485,6 +485,12 @@ impl DataReader {
         let offset_file = File::open(path.as_ref().with_extension(OFFSETS_FILE_EXTENSION))?;
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
+        let offset_size = offset_mmap[0] as u64;
+
+        // Ensure that the size of an offset is at most 8 bytes.
+        if offset_size > 8 {
+            return Err(NippyJarError::OffsetSizeTooBig { offset_size })
+        }
 
         Ok(Self {
             data_file,
