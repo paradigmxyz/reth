@@ -296,6 +296,8 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Bedrock, ForkCondition::Block(105235063)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -2464,6 +2466,25 @@ Post-merge hard forks (timestamp based):
                 (
                     Head { number: 0, timestamp: 1708534800, ..Default::default() },
                     ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 0 },
+                ),
+            ],
+        );
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn op_mainnet_forkids() {
+        test_fork_ids(
+            &OP_MAINNET,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xca, 0xf5, 0x17, 0xed]), next: 3950000 },
+                ),
+                // TODO: complete these, see https://github.com/paradigmxyz/reth/issues/8012
+                (
+                    Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 0 },
                 ),
             ],
         );
