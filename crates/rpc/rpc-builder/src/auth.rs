@@ -501,7 +501,7 @@ where
 }
 
 /// Helper function to convert a secret into a Bearer auth header value with claims according to
-/// https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims.
+/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims>.
 /// The token is valid for 60 seconds.
 pub(crate) fn secret_to_bearer_header(secret: &JwtSecret) -> HeaderValue {
     format!(
