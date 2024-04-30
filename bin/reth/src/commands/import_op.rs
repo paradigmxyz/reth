@@ -18,7 +18,7 @@ use reth_downloaders::file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CH
 
 use reth_node_core::init::init_genesis;
 
-use reth_primitives::{stage::StageId, ChainSpec, PruneModes};
+use reth_primitives::{hex, stage::StageId, ChainSpec, PruneModes, TxHash};
 use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -115,8 +115,9 @@ impl ImportOpCommand {
 
         let mut total_decoded_blocks = 0;
         let mut total_decoded_txns = 0;
+        let mut total_filtered_out_dup_txns = 0;
 
-        while let Some(file_client) = reader.next_chunk().await? {
+        while let Some(mut file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -127,6 +128,16 @@ impl ImportOpCommand {
 
             total_decoded_blocks += file_client.headers_len();
             total_decoded_txns += file_client.bodies_len();
+
+            for (block_number, body) in file_client.bodies_iter_mut() {
+                body.transactions.retain(|tx| {
+                    if is_duplicate(tx.hash, *block_number) {
+                        total_filtered_out_dup_txns += 1;
+                        return false
+                    }
+                    true
+                })
+            }
 
             let (mut pipeline, events) = build_import_pipeline(
                 &config,
@@ -190,6 +201,60 @@ impl ImportOpCommand {
 
         Ok(())
     }
+}
+
+/// A transaction that has been replayed in chain below Bedrock.
+#[derive(Debug)]
+pub struct ReplayedTx {
+    tx_hash: TxHash,
+    original_block: u64,
+}
+
+impl ReplayedTx {
+    /// Returns a new instance.
+    pub const fn new(tx_hash: TxHash, original_block: u64) -> Self {
+        Self { tx_hash, original_block }
+    }
+}
+
+/// Transaction 0x9ed8..9cb9, first seen in block 985.
+pub const TX_BLOCK_985: ReplayedTx = ReplayedTx::new(
+    TxHash::new(hex!("9ed8f713b2cc6439657db52dcd2fdb9cc944915428f3c6e2a7703e242b259cb9")),
+    985,
+);
+
+/// Transaction 0x86f8..76e5, first seen in block 123 322.
+pub const TX_BLOCK_123_322: ReplayedTx = ReplayedTx::new(
+    TxHash::new(hex!("c033250c5a45f9d104fc28640071a776d146d48403cf5e95ed0015c712e26cb6")),
+    123_322,
+);
+
+/// Transaction 0x86f8..76e5, first seen in block 1 133 328.
+pub const TX_BLOCK_1_133_328: ReplayedTx = ReplayedTx::new(
+    TxHash::new(hex!("86f8c77cfa2b439e9b4e92a10f6c17b99fce1220edf4001e4158b57f41c576e5")),
+    1_133_328,
+);
+
+/// Transaction 0x3cc2..cd4e, first seen in block 1 244 152.
+pub const TX_BLOCK_1_244_152: ReplayedTx = ReplayedTx::new(
+    TxHash::new(hex!("3cc27e7cc8b7a9380b2b2f6c224ea5ef06ade62a6af564a9dd0bcca92131cd4e")),
+    1_244_152,
+);
+
+/// List of original occurrences of all duplicate transactions below Bedrock.
+pub const TX_DUP_ORIGINALS: [ReplayedTx; 4] =
+    [TX_BLOCK_985, TX_BLOCK_123_322, TX_BLOCK_1_133_328, TX_BLOCK_1_244_152];
+
+/// Returns `true` if transaction is the second or third appearance of the transaction.
+pub fn is_duplicate(tx_hash: TxHash, block_number: u64) -> bool {
+    for ReplayedTx { tx_hash: dup_tx_hash, original_block } in TX_DUP_ORIGINALS {
+        if tx_hash == dup_tx_hash {
+            if block_number != original_block {
+                return true
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
