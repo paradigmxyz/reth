@@ -20,7 +20,7 @@ use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
-use tracing::debug;
+
 // re-export for convenience
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use secp256k1::SecretKey;
@@ -122,19 +122,16 @@ impl<C> NetworkConfig<C> {
         f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::Config,
     ) -> Self {
         let rlpx_port = self.listener_addr.port();
-        let fork_id_key = NetworkStackId::id(&self.chain_spec);
+        let network_stack_id = NetworkStackId::id(&self.chain_spec);
         let fork_id = self.chain_spec.latest_fork_id();
         let boot_nodes = self.boot_nodes.clone();
 
         let mut builder =
             reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter());
 
-        debug!(target: "net",
-            fork_id_key=%String::from_utf8_lossy(fork_id_key),
-            "adding network stack identifier to local ENR"
-        );
-
-        builder = builder.fork(fork_id_key, fork_id);
+        if let Some(id) = network_stack_id {
+            builder = builder.fork(id, fork_id);
+        }
 
         self.set_discovery_v5(f(builder))
     }

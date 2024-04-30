@@ -9,7 +9,7 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord, MAINNET};
+use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
@@ -50,7 +50,7 @@ impl ConfigBuilder {
         let Config {
             discv5_config,
             bootstrap_nodes,
-            fork: (fork_key, fork_id),
+            fork,
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
@@ -60,7 +60,7 @@ impl ConfigBuilder {
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork: Some((fork_key, fork_id.fork_id)),
+            fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
@@ -160,8 +160,7 @@ impl ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let (fork_key, fork_id) = fork.unwrap_or((NetworkStackId::ETH, MAINNET.latest_fork_id()));
-        let fork = (fork_key, fork_id.into());
+        let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
 
@@ -190,7 +189,7 @@ pub struct Config {
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
     /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", [ForkId])`.
-    pub(super) fork: (&'static [u8], EnrForkIdEntry),
+    pub(super) fork: Option<(&'static [u8], EnrForkIdEntry)>,
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
