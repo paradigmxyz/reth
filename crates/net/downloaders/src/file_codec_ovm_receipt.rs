@@ -219,7 +219,7 @@ mod test {
             number: BLOCK_NUMBER,
         };
 
-        let encoded = &mut BytesMut::from(&HACK_RECEIPT_ENCODED_1_AND_2[..]);
+        let encoded = &mut BytesMut::from(HACK_RECEIPT_ENCODED_1_AND_2);
 
         let mut codec = ReceiptFileCodec;
 
