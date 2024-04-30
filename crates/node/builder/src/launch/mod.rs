@@ -240,8 +240,7 @@ where
                 async move {
                     while let Ok(notification) = canon_state_notifications.recv().await {
                         handle.send_async(notification.into()).await.expect(
-                            "blockchain tree notification could not be sent to exex
-manager",
+                            "blockchain tree notification could not be sent to exex manager",
                         );
                     }
                 },

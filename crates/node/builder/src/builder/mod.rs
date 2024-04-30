@@ -312,7 +312,7 @@ where
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(self, hook: F) -> Self
     where
-        F: Fn(NodeAdapter<RethFullAdapter<DB, T>, CB::Components>) -> eyre::Result<()>
+        F: FnOnce(NodeAdapter<RethFullAdapter<DB, T>, CB::Components>) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -326,7 +326,9 @@ where
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(self, hook: F) -> Self
     where
-        F: Fn(FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> eyre::Result<()>
+        F: FnOnce(
+                FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+            ) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -340,7 +342,7 @@ where
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(self, hook: F) -> Self
     where
-        F: Fn(
+        F: FnOnce(
                 RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
@@ -357,7 +359,7 @@ where
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(self, hook: F) -> Self
     where
-        F: Fn(
+        F: FnOnce(
                 RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
             ) -> eyre::Result<()>
             + Send
@@ -377,7 +379,7 @@ where
     /// The ExEx ID must be unique.
     pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: Fn(ExExContext<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> R
+        F: FnOnce(ExExContext<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> R
             + Send
             + 'static,
         R: Future<Output = eyre::Result<E>> + Send,

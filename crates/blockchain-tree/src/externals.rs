@@ -6,7 +6,7 @@ use reth_db::{
 };
 use reth_interfaces::RethResult;
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
-use reth_provider::{ProviderFactory, StatsReader};
+use reth_provider::{ProviderFactory, StaticFileProviderFactory, StatsReader};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// A container for external components.

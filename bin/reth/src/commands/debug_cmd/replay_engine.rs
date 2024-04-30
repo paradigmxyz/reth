@@ -24,7 +24,10 @@ use reth_node_core::engine_api_store::{EngineApiStore, StoredEngineApiMessage};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{fs, ChainSpec, PruneModes};
-use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
+use reth_provider::{
+    providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory,
+    StaticFileProviderFactory,
+};
 use reth_revm::EvmProcessorFactory;
 use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
