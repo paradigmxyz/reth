@@ -2,7 +2,7 @@
 use metrics::{Counter, Gauge};
 use reth_metrics::Metrics;
 
-use crate::network_key::{ETH, ETH2, OPSTACK};
+use crate::network_key::{ETH, ETH2, OPEL, OPSTACK};
 
 /// Information tracked by [`Discv5`](crate::Discv5).
 #[derive(Debug, Default, Clone)]
@@ -91,20 +91,27 @@ impl DiscoveredPeersMetrics {
 #[derive(Metrics, Clone)]
 #[metrics(scope = "discv5")]
 pub struct AdvertisedChainMetrics {
-    /// Frequency of node records with a kv-pair with [`OPSTACK`](crate::network_key) as
+    /// Frequency of node records with a kv-pair with [`OPEL`](crate::network_key::OPEL) as
+    /// key.
+    opel: Counter,
+
+    /// Frequency of node records with a kv-pair with [`OPSTACK`](crate::network_key::OPSTACK) as
     /// key.
     opstack: Counter,
 
-    /// Frequency of node records with a kv-pair with [`ETH`](crate::network_key) as key.
+    /// Frequency of node records with a kv-pair with [`ETH`](crate::network_key::ETH) as key.
     eth: Counter,
 
-    /// Frequency of node records with a kv-pair with [`ETH2`](crate::network_key) as key.
+    /// Frequency of node records with a kv-pair with [`ETH2`](crate::network_key::ETH2) as key.
     eth2: Counter,
 }
 
 impl AdvertisedChainMetrics {
     /// Counts each recognised network type that is advertised on node record, once.
     pub fn increment_once_by_network_type(&self, enr: &discv5::Enr) {
+        if enr.get_raw_rlp(OPEL).is_some() {
+            self.opel.increment(1u64)
+        }
         if enr.get_raw_rlp(OPSTACK).is_some() {
             self.opstack.increment(1u64)
         }
