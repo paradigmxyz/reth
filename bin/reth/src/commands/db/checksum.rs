@@ -2,7 +2,7 @@ use crate::{
     commands::db::get::{maybe_json_value_parser, table_key},
     utils::DbTool,
 };
-use ahash::{AHasher, RandomState};
+use ahash::RandomState;
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawKey,
@@ -27,13 +27,23 @@ pub struct Command {
     /// end of range
     #[arg(long, value_parser = maybe_json_value_parser)]
     end_key: Option<String>,
+
+    /// specify the maximum number of record that are queried and used to computing
+    /// the checksum.
+    #[arg(long)]
+    limit: Option<usize>,
 }
 
 impl Command {
     /// Execute `db checksum` command
     pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
-        self.table.view(&ChecksumViewer { tool, start_key: self.start_key, end_key: self.end_key })
+        self.table.view(&ChecksumViewer {
+            tool,
+            start_key: self.start_key,
+            end_key: self.end_key,
+            limit: self.limit,
+        })
     }
 }
 
@@ -41,11 +51,12 @@ pub(crate) struct ChecksumViewer<'a, DB: Database> {
     tool: &'a DbTool<DB>,
     start_key: Option<String>,
     end_key: Option<String>,
+    limit: Option<usize>,
 }
 
 impl<DB: Database> ChecksumViewer<'_, DB> {
     pub(crate) fn new(tool: &'_ DbTool<DB>) -> ChecksumViewer<'_, DB> {
-        ChecksumViewer { tool, start_key: None, end_key: None }
+        ChecksumViewer { tool, start_key: None, end_key: None, limit: None }
     }
 
     pub(crate) fn get_checksum<T: Table>(&self) -> Result<(u64, Duration), eyre::Report> {
@@ -78,6 +89,10 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
         let start_time = Instant::now();
         let mut hasher = RandomState::with_seeds(1, 2, 3, 4).build_hasher();
         let mut total = 0;
+
+        let limit = self.limit.unwrap_or(usize::MAX);
+        let mut enumerate_start_key = None;
+        let mut enumerate_end_key = None;
         for (index, entry) in walker.enumerate() {
             let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = entry?;
 
@@ -87,10 +102,23 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
 
             hasher.write(k.raw_key());
             hasher.write(v.raw_value());
-            total = index;
+
+            if enumerate_start_key.is_none() {
+                enumerate_start_key = Some(k.clone());
+            }
+            enumerate_end_key = Some(k);
+
+            total = index + 1;
+            if total >= limit {
+                break
+            }
         }
 
         info!("Hashed {total} entries.");
+        if let (Some(s), Some(e)) = (enumerate_start_key, enumerate_end_key) {
+            info!("start-key: {}", serde_json::to_string(&s.key()?).unwrap_or_default());
+            info!("end-key: {}", serde_json::to_string(&e.key()?).unwrap_or_default());
+        }
 
         let checksum = hasher.finish();
         let elapsed = start_time.elapsed();
