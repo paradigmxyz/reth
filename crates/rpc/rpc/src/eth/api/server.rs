@@ -30,6 +30,7 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
 use tracing::trace;
+use ethereum_json_rpc_client::{EthJsonRpcClient, reqwest::ReqwestClient};
 
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
@@ -362,8 +363,19 @@ where
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, _tx: Bytes) -> Result<B256> {
-        Err(internal_rpc_err("read-only node"))
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
+        let Some(rpc_url) = &self.provider().chain_spec().rpc_url else {
+            return Err(internal_rpc_err("no url found for eth_sendRawTransaction"))
+        };
+        trace!(target: "rpc::eth", ?rpc_url, "Serving eth_sendRawTransaction");
+
+        let client = EthJsonRpcClient::new(ReqwestClient::new(rpc_url.to_string()));
+
+        let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
+            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+        })?;
+
+        Ok(tx_hash.0.into())
     }
 
     /// Handler for: `eth_sign`
