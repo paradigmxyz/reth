@@ -1421,7 +1421,7 @@ impl Discv4Service {
 
         let mut failed_lookups = Vec::new();
         self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
-            if now.duration_since(*lookup_sent_at) > self.config.ping_expiration {
+            if now.duration_since(*lookup_sent_at) > self.config.neighbours_expiration {
                 failed_lookups.push(*node_id);
                 return false
             }
