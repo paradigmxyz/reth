@@ -1421,7 +1421,7 @@ impl Discv4Service {
 
         let mut failed_lookups = Vec::new();
         self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
-            if now.duration_since(*lookup_sent_at) > self.config.ping_expiration {
+            if now.duration_since(*lookup_sent_at) > self.config.request_timeout {
                 failed_lookups.push(*node_id);
                 return false
             }
@@ -1441,7 +1441,7 @@ impl Discv4Service {
     fn evict_failed_neighbours(&mut self, now: Instant) {
         let mut failed_neighbours = Vec::new();
         self.pending_find_nodes.retain(|node_id, find_node_request| {
-            if now.duration_since(find_node_request.sent_at) > self.config.request_timeout {
+            if now.duration_since(find_node_request.sent_at) > self.config.neighbours_expiration {
                 if !find_node_request.answered {
                     // node actually responded but with fewer entries than expected, but we don't
                     // treat this as an hard error since it responded.
@@ -2549,6 +2549,7 @@ mod tests {
         let config = Discv4Config::builder()
             .request_timeout(Duration::from_millis(200))
             .ping_expiration(Duration::from_millis(200))
+            .lookup_neighbours_expiration(Duration::from_millis(200))
             .add_eip868_pair("eth", fork_id)
             .build();
         let (_disv4, mut service) = create_discv4_with_config(config).await;
