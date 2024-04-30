@@ -331,7 +331,7 @@ impl Future for ExExManager {
         // handle incoming exex events
         for exex in self.exex_handles.iter_mut() {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(exex_id = exex.id, ?event, "Received event from exex");
+                debug!(exex_id = %exex.id, ?event, "Received event from exex");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),

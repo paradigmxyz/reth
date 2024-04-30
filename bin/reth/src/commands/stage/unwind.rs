@@ -25,6 +25,7 @@ use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_stages::{
