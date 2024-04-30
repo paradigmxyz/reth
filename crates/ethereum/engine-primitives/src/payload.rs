@@ -58,7 +58,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the blob sidecars.
-    pub fn sidecars(&self) -> &Vec<BlobTransactionSidecar> {
+    pub fn sidecars(&self) -> &[BlobTransactionSidecar] {
         &self.sidecars
     }
 
