@@ -424,8 +424,6 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) config: NodeConfig,
     /// loaded config
     pub(crate) reth_config: reth_config::Config,
-    // /// EVM config of the node
-    // pub(crate) evm_config: Node::Evm,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -437,7 +435,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
-        // evm_config: Node::Evm,
     ) -> Self {
         Self { head, provider, executor, data_dir, config, reth_config }
     }
@@ -446,11 +443,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
     }
-
-    // /// Returns the configured evm.
-    // pub fn evm_config(&self) -> &Node::Evm {
-    //     &self.evm_config
-    // }
 
     /// Returns the current head of the blockchain at launch.
     pub fn head(&self) -> Head {

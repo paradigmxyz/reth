@@ -21,11 +21,6 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
-    // /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    // type Evm: ConfigureEvm;
-    //
-    // /// Returns the node's evm config.
-    // fn evm_config(&self) -> Self::Evm;
 }
 
 /// A helper trait that is downstream of the [NodeTypes] trait and adds stateful components to the
