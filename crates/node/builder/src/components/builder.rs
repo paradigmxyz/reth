@@ -272,9 +272,9 @@ impl Default for ComponentsBuilder<(), (), (), (), ()> {
 /// Implementers of this trait are responsible for building all the components of the node: See
 /// [NodeComponents].
 ///
-/// The [ComponentsBuilder] is a generic implementation of this trait that can be used to customize
-/// certain components of the node using the builder pattern and defaults, e.g. Ethereum and
-/// Optimism.
+/// The [ComponentsBuilder] is a generic, general purpose implementation of this trait that can be
+/// used to customize certain components of the node using the builder pattern and defaults, e.g.
+/// Ethereum and Optimism.
 /// A type that's responsible for building the components of the node.
 pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     /// The components for the node with the given types

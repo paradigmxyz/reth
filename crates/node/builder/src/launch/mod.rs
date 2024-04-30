@@ -128,13 +128,18 @@ where
         // fetch the head block from the database
         let head = ctx.lookup_head()?;
 
-        // TODO(mattsse): There's a cyclic dependency here, the blockchainprovider needs the evm
-        // config for the tree, but the evm config will need the blockchain provider for building
-        // the components  configure the tree component with the real new state channel, or
-        // separate evm and executor setup the blockchain provider for the components
+        // Configure the blockchain tree for the node
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
         let components_db = BlockchainProvider::new(
             ctx.provider_factory().clone(),
-            Arc::new(NoopBlockchainTree::default()),
+            Arc::new(NoopBlockchainTree::with_canon_state_notifications(
+                canon_state_notification_sender.clone(),
+            )),
         )?;
 
         let builder_ctx = BuilderContext::new(
@@ -149,22 +154,22 @@ where
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;
 
-        // Configure the blockchain tree for the node
-        let tree_config = BlockchainTreeConfig::default();
         let tree_externals = TreeExternals::new(
             ctx.provider_factory().clone(),
             consensus.clone(),
             EvmProcessorFactory::new(ctx.chain_spec(), components.evm_config().clone()),
         );
         let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
-            .with_sync_metrics_tx(sync_metrics_tx.clone());
+            .with_sync_metrics_tx(sync_metrics_tx.clone())
+            // Note: This is required because we need to ensure that both the components and the
+            // tree are using the same channel for canon state notifications. This will be removed
+            // once the Blockchain provider no longer depends on an instance of the tree
+            .with_canon_state_notification_sender(canon_state_notification_sender);
 
         let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
-        let blockchain_db = BlockchainProvider::new(
-            ctx.provider_factory().clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db =
+            BlockchainProvider::new(ctx.provider_factory().clone(), blockchain_tree)?;
 
         debug!(target: "reth::cli", "configured blockchain tree");
 
@@ -233,7 +238,7 @@ where
             });
 
             // send notifications from the blockchain tree to exex manager
-            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            let mut canon_state_notifications = blockchain_db.subscribe_to_canonical_state();
             let mut handle = exex_manager_handle.clone();
             ctx.task_executor().spawn_critical(
                 "exex manager blockchain tree notifications",

@@ -24,6 +24,7 @@ mod payload;
 mod pool;
 
 /// An abstraction over the components of a node, consisting of:
+///  - evm and executor
 ///  - transaction pool
 ///  - network
 ///  - payload builder.

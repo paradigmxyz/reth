@@ -50,10 +50,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// example) and then proceeds to configure the core static types of the node: [NodeTypes], these
 /// include the node's primitive types and the node's engine types.
 ///
-/// Next all stateful components of the node are configured, these include the
-/// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and all the
+/// Next all stateful components of the node are configured, these include all the
 /// components of the node that are downstream of those types, these include:
 ///
+///  - The EVM and Executor configuration: [ExecutorBuilder](crate::components::ExecutorBuilder)
 ///  - The transaction pool: [PoolBuilder]
 ///  - The network: [NetworkBuilder](crate::components::NetworkBuilder)
 ///  - The payload builder: [PayloadBuilder](crate::components::PayloadServiceBuilder)
@@ -71,9 +71,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// ## Components
 ///
 /// All components are configured with a [NodeComponentsBuilder] that is responsible for actually
-/// creating the node components during the launch process. The [ComponentsBuilder] is a general
-/// purpose implementation of the [NodeComponentsBuilder] trait that can be used to configure the
-/// network, transaction pool and payload builder of the node. It enforces the correct order of
+/// creating the node components during the launch process. The
+/// [ComponentsBuilder](crate::components::ComponentsBuilder) is a general purpose implementation of
+/// the [NodeComponentsBuilder] trait that can be used to configure the executor, network,
+/// transaction pool and payload builder of the node. It enforces the correct order of
 /// configuration, for example the network and the payload builder depend on the transaction pool
 /// type that is configured first.
 ///
@@ -127,8 +128,8 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// ### Limitations
 ///
 /// Currently the launch process is limited to ethereum nodes and requires all the components
-/// specified above. It also expect beacon consensus with the ethereum engine API that is configured
-/// by the builder itself during launch. This might change in the future.
+/// specified above. It also expects beacon consensus with the ethereum engine API that is
+/// configured by the builder itself during launch. This might change in the future.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB> {

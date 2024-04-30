@@ -1,4 +1,4 @@
-//! Traits for configuring a node
+//! Traits for configuring a node.
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
 use reth_db::{
@@ -15,7 +15,9 @@ use std::marker::PhantomData;
 /// The type that configures the essential types of an ethereum like node.
 ///
 /// This includes the primitive types of a node, the engine API types for communication with the
-/// consensus layer, and the EVM configuration type for setting up the Ethereum Virtual Machine.
+/// consensus layer.
+///
+/// This trait is intended to be stateless and only define the types of the node.
 pub trait NodeTypes: Send + Sync + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
@@ -25,6 +27,8 @@ pub trait NodeTypes: Send + Sync + 'static {
 
 /// A helper trait that is downstream of the [NodeTypes] trait and adds stateful components to the
 /// node.
+///
+/// Its types are configured by node internally and are not intended to be user configurable.
 pub trait FullNodeTypes: NodeTypes + 'static {
     /// Underlying database type used by the node to store and retrieve data.
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
