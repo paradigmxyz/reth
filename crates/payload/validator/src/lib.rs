@@ -38,6 +38,12 @@ impl ExecutionPayloadValidator {
         self.chain_spec().is_cancun_active_at_timestamp(timestamp)
     }
 
+    /// Returns true if the Shanghai hardfork is active at the given timestamp.
+    #[inline]
+    fn is_shanghai_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.chain_spec().is_shanghai_active_at_timestamp(timestamp)
+    }
+
     /// Cancun specific checks for EIP-4844 blob transactions.
     ///
     /// Ensures that the number of blob versioned hashes matches the number hashes included in the
@@ -116,9 +122,51 @@ impl ExecutionPayloadValidator {
 
         let cancun_active = self.is_cancun_active_at_timestamp(sealed_block.timestamp);
 
-        if !cancun_active && sealed_block.has_blob_transactions() {
-            // cancun not active but blob transactions present
-            return Err(PayloadError::PreCancunBlockWithBlobTransactions)
+        if !cancun_active {
+            if sealed_block.has_blob_transactions() {
+                // cancun not active but blob transactions present
+                return Err(PayloadError::PreCancunBlockWithBlobTransactions)
+            }
+            if let Some(_) = sealed_block.header.blob_gas_used {
+                // cancun not active but blob gas used present
+                return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
+            }
+            if let Some(_) = sealed_block.header.excess_blob_gas {
+                // cancun not active but excess blob gas present
+                return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
+            }
+            if let Some(_) = cancun_fields.into_inner() {
+                // cancun not active but cancun fields present
+                return Err(PayloadError::PreCancunWithCancunFields)
+            }
+        } else {
+            if !sealed_block.has_blob_transactions() {
+                // cancun active but blob transactions not present
+                return Err(PayloadError::PostCancunBlockWithoutBlobTransactions)
+            }
+            if let None = sealed_block.header.blob_gas_used {
+                // cancun active but blob gas used not present
+                return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
+            }
+            if let None = sealed_block.header.excess_blob_gas {
+                // cancun active but excess blob gas not present
+                return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
+            }
+            if let None = cancun_fields.into_inner() {
+                // cancun active but cancun fields not present
+                return Err(PayloadError::PostCancunWithoutCancunFields)
+            }
+        }
+
+        let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
+        if !shanghai_active {
+            if let Some(_) = sealed_block.withdrawals {
+                // shanghai not active but withdrawals present
+                return Err(PayloadError::PreShanghaiBlockWithWithdrawals);
+            }
+        } else if let None = sealed_block.withdrawals {
+            // shanghai active but withdrawals not present
+            return Err(PayloadError::PostShanghaiBlockWithoutWithdrawals);
         }
 
         // EIP-4844 checks
