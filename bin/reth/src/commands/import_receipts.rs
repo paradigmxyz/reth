@@ -16,7 +16,8 @@ use reth_downloaders::{
 use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::{ChainSpec, StaticFileSegment};
 use reth_provider::{
-    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StaticFileWriter,
+    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use tracing::{debug, error, info};
 
