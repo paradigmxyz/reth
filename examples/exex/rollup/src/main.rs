@@ -513,7 +513,7 @@ mod tests {
                 ..Default::default()
             })
             .build();
-        let result = evm.transact()?.result;
+        let result = evm.transact().map_err(|err| eyre::eyre!(err))?.result;
         assert_eq!(
             result.output(),
             Some(&U256::from(0.5 * ETH_TO_WEI as f64).to_be_bytes_vec().into())
@@ -538,7 +538,7 @@ mod tests {
                 ..Default::default()
             })
             .build();
-        let result = evm.transact()?.result;
+        let result = evm.transact().map_err(|err| eyre::eyre!(err))?.result;
         assert_eq!(result.output(), Some(&U256::ZERO.to_be_bytes_vec().into()));
         drop(evm);
 
