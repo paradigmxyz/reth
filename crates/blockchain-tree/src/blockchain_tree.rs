@@ -1228,7 +1228,12 @@ where
             .unwrap_or_default() >
             revert_until
         {
-            // should only happen when an optimistic sync target was re-orged.
+            // This should only happen when an optimistic sync target was re-orged.
+            //
+            // Static files generally contain finalized data. The blockchain tree only deals
+            // with unfinalized data. The only scenario where canonical reverts go past the highest
+            // static file is when an optimistic sync occured and unfinalized data was written to
+            // static files.
             return Err(CanonicalError::OptimisticCanonicalRevert(revert_until))
         }
 
