@@ -17,12 +17,14 @@
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestHeadersClient};
 //! # use reth_revm::EvmProcessorFactory;
-//! # use reth_primitives::{PeerId, MAINNET, B256, PruneModes};
+//! # use reth_primitives::{MAINNET, B256, PruneModes};
+//! # use reth_network_types::PeerId;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
 //! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
+//! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;

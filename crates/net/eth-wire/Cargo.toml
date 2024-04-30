@@ -19,6 +19,7 @@ reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 reth-discv4.workspace = true
 reth-eth-wire-types.workspace = true
+reth-network-types.workspace = true
 
 # metrics
 reth-metrics.workspace = true

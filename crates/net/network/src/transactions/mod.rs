@@ -26,9 +26,9 @@ use reth_interfaces::{
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
+use reth_network_types::PeerId;
 use reth_primitives::{
-    FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned, TxHash,
-    B256,
+    FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},

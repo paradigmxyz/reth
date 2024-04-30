@@ -19,6 +19,7 @@ use std::{
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
+    p2pstream::DisconnectP2P,
     CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
@@ -465,7 +466,7 @@ where
             let mut conn_ready = true;
             loop {
                 match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(_) => {
+                    Poll::Ready(Ok(())) => {
                         if let Some(msg) = this.inner.out_buffer.pop_front() {
                             if let Err(err) = this.inner.conn.start_send_unpin(msg) {
                                 return Poll::Ready(Some(Err(err.into())))
@@ -473,6 +474,14 @@ where
                         } else {
                             break
                         }
+                    }
+                    Poll::Ready(Err(err)) => {
+                        if let Err(disconnect_err) =
+                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+                        {
+                            return Poll::Ready(Some(Err(disconnect_err.into())));
+                        }
+                        return Poll::Ready(Some(Err(err.into())));
                     }
                     Poll::Pending => {
                         conn_ready = false;

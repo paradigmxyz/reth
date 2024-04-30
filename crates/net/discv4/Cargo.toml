@@ -16,6 +16,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-net-nat.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 alloy-rlp = { workspace = true, features = ["derive"] }

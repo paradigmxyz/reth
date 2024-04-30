@@ -5,7 +5,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     node::FullNode,
-    BuilderContext, NodeBuilderWithComponents, NodeHandle, RethFullAdapter,
+    BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
 use futures::{future, future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
@@ -17,14 +17,10 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_consensus::Consensus;
-use reth_db::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     engine_api_store::EngineApiStore,
@@ -74,18 +70,16 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, DB, CB> LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
-    for DefaultNodeLauncher
+impl<T, CB> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypes,
-    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+    T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
+    CB: NodeComponentsBuilder<T>,
 {
-    type Node = NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>;
+    type Node = NodeHandle<NodeAdapter<T, CB::Components>>;
 
     async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>,
+        target: NodeBuilderWithComponents<T, CB>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {
@@ -238,8 +232,7 @@ where
                 async move {
                     while let Ok(notification) = canon_state_notifications.recv().await {
                         handle.send_async(notification.into()).await.expect(
-                            "blockchain tree notification could not be sent to exex
-manager",
+                            "blockchain tree notification could not be sent to exex manager",
                         );
                     }
                 },

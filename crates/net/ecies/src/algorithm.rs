@@ -13,9 +13,10 @@ use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
 use educe::Educe;
 use rand::{thread_rng, Rng};
+use reth_network_types::{id2pk, pk2id};
 use reth_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
-    id2pk, pk2id, B128, B256, B512 as PeerId,
+    B128, B256, B512 as PeerId,
 };
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},

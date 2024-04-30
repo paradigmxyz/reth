@@ -13,7 +13,8 @@ use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
-use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use secp256k1::SecretKey;
 use std::{

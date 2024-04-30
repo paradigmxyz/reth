@@ -1,7 +1,10 @@
 //! Traits for configuring a node
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
-use reth_db::database::Database;
+use reth_db::{
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+};
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
@@ -25,11 +28,11 @@ pub trait NodeTypes: Send + Sync + 'static {
     fn evm_config(&self) -> Self::Evm;
 }
 
-/// A helper type that is downstream of the [NodeTypes] trait and adds stateful components to the
+/// A helper trait that is downstream of the [NodeTypes] trait and adds stateful components to the
 /// node.
 pub trait FullNodeTypes: NodeTypes + 'static {
-    /// Underlying database type.
-    type DB: Database + Clone + 'static;
+    /// Underlying database type used by the node to store and retrieve data.
+    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<Self::DB>;
 }
@@ -71,7 +74,7 @@ impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Prov
 where
     Types: NodeTypes,
     Provider: FullProvider<DB>,
-    DB: Database + Clone + 'static,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     type DB = DB;
     type Provider = Provider;
@@ -80,7 +83,7 @@ where
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + 'static {
     /// The transaction pool of the node.
-    type Pool: TransactionPool;
+    type Pool: TransactionPool + Unpin;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;

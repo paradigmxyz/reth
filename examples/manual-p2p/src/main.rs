@@ -16,8 +16,9 @@ use reth_eth_wire::{
     EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_network::config::rng_secret_key;
+use reth_network_types::pk2id;
 use reth_primitives::{
-    mainnet_nodes, pk2id, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS_HASH,
+    mainnet_nodes, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS_HASH,
 };
 use secp256k1::{SecretKey, SECP256K1};
 use tokio::net::TcpStream;

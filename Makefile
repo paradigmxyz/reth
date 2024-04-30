@@ -414,8 +414,11 @@ test:
 	make test-doc && \
 	make test-other-targets
 
+cfg-check:
+	cargo +nightly -Zcheck-cfg c
+
 pr:
-	make fmt && \
+	make cfg-check && \
 	make lint && \
 	make docs && \
 	make test

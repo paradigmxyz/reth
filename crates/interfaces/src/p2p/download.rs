@@ -1,4 +1,4 @@
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::fmt::Debug;
 
 /// Generic download client for peer penalization
