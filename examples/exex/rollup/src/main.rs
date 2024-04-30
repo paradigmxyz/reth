@@ -1,3 +1,9 @@
+//! Example of a simple rollup that derives its state from the L1 chain by executing transactions,
+//! processing deposits and storing all related data in an SQLite database.
+//!
+//! The rollup contract accepts blocks of transactions and deposits of ETH and is deployed on
+//! Holesky at [ROLLUP_CONTRACT_ADDRESS], see <https://github.com/init4tech/zenith/blob/3a9a742a2497653b16fb3e947bcd118562c3356c/src/CalldataZenith.sol>.
+
 use alloy_rlp::Decodable;
 use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use db::Database;
@@ -28,6 +34,7 @@ mod db;
 sol!(RollupContract, "rollup_abi.json");
 use RollupContract::{RollupContractCalls, RollupContractEvents};
 
+const DATABASE_PATH: &str = "rollup.db";
 const ROLLUP_CONTRACT_ADDRESS: Address = address!("74ae65DF20cB0e3BF8c022051d0Cdd79cc60890C");
 const ROLLUP_SUBMITTER_ADDRESS: Address = address!("B01042Db06b04d3677564222010DF5Bd09C5A947");
 const CHAIN_ID: u64 = 17001;
@@ -386,7 +393,8 @@ fn main() -> eyre::Result<()> {
         let handle = builder
             .node(EthereumNode::default())
             .install_exex("Rollup", move |ctx| async {
-                let connection = Connection::open("rollup.db")?;
+                let connection = Connection::open(DATABASE_PATH)?;
+
                 Ok(Rollup::new(ctx, connection)?.start())
             })
             .launch()
