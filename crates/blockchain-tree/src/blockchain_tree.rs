@@ -156,6 +156,18 @@ where
         })
     }
 
+    /// Replaces the canon state notification sender.
+    ///
+    /// Caution: this will close any existing subscriptions to the previous sender.
+    #[doc(hidden)]
+    pub fn with_canon_state_notification_sender(
+        mut self,
+        canon_state_notification_sender: CanonStateNotificationSender,
+    ) -> Self {
+        self.canon_state_notification_sender = canon_state_notification_sender;
+        self
+    }
+
     /// Set the sync metric events sender.
     ///
     /// A transmitter for sending synchronization metrics. This is used for monitoring the node's
