@@ -1387,20 +1387,14 @@ impl Discv4Service {
                 BucketEntry::SelfEntry => {
                     // we received our own node entry
                 }
-                _ => {
-                    let key = kad_key(closest.id);
-                    match self.kbuckets.entry(&key) {
-                        kbucket::Entry::Present(mut entry, _) => {
-                            if entry.value_mut().has_endpoint_proof {
-                                self.find_node(&closest, ctx.clone());
-                            }
-                        }
-                        kbucket::Entry::Pending(mut entry, _) => {
-                            if entry.value().has_endpoint_proof {
-                                self.find_node(&closest, ctx.clone());
-                            }
-                        }
-                        _ => {}
+                BucketEntry::Present(mut entry, _) => {
+                    if entry.value_mut().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
+                    }
+                }
+                BucketEntry::Pending(mut entry, _) => {
+                    if entry.value().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
                     }
                 }
             }
