@@ -31,7 +31,7 @@ use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockNumReader, HeaderProvider, HeaderSyncMode, ProviderError, ProviderFactory,
-    StageCheckpointReader,
+    StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_stages::{
     prelude::*,

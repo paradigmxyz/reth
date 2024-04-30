@@ -616,7 +616,10 @@ mod tests {
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
         B256, U256,
     };
-    use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
+        StaticFileProviderFactory,
+    };
     use reth_revm::EvmProcessorFactory;
     use std::collections::BTreeMap;
 
