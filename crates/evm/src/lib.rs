@@ -80,7 +80,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
-pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
+pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The type of the transaction metadata that should be used to fill fields in the transaction
     /// environment.
     ///
