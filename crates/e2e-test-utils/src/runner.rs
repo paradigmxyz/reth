@@ -1,5 +1,5 @@
 use crate::node::NodeTestContext;
-use futures_util::{ready, Future, Stream};
+use futures_util::{Future, Stream};
 use reth_node_builder::FullNodeComponents;
 use std::{
     collections::VecDeque,
@@ -12,8 +12,8 @@ use tokio::time::{sleep_until, Instant, Sleep};
 
 pub trait ActionT {
     type Ctx;
-    type Output: Unpin;
-    type Future: Future<Output = Self::Output> + Send;
+    type Event: Unpin;
+    type Future: Future<Output = Self::Event> + Send;
 
     fn execute(&mut self, ctx: &mut Self::Ctx) -> Self::Future;
 }
@@ -30,16 +30,16 @@ where
     Fut: Future<Output = eyre::Result<()>> + Send,
 {
     type Ctx = NodeTestContext<N>;
-    type Output = eyre::Result<()>;
+    type Event = eyre::Result<()>;
     type Future = Fut;
 
-    fn execute(&mut self, ctx: &mut Self::Ctx) -> Pin<Box<Self::Future>> {
-        Box::pin((self.func)(ctx))
+    fn execute(&mut self, ctx: &mut Self::Ctx) -> Self::Future {
+        (self.func)(ctx)
     }
 }
 
 enum Action<A: ActionT> {
-    Next(Box<dyn FnOnce(Option<A::Output>) -> Pin<Box<A>> + Send + 'static>),
+    Next(A::Future),
     Wait(Duration),
 }
 pub struct ChainRunner<A: ActionT> {
@@ -52,11 +52,9 @@ impl<A: ActionT> ChainRunner<A> {
         ChainRunner { actions: VecDeque::new(), ctx }
     }
 
-    pub fn next(
-        mut self,
-        action_fn: impl FnOnce(Option<A::Output>) -> Pin<Box<A>> + Send + 'static,
-    ) -> Self {
-        self.actions.push_back(Action::Next(Box::new(action_fn)));
+    pub fn next(mut self, action: impl FnOnce() -> A::Future + Send + 'static) -> Self {
+        let future = action();
+        self.actions.push_back(Action::Next(future));
         self
     }
 
@@ -66,13 +64,7 @@ impl<A: ActionT> ChainRunner<A> {
     }
 
     pub fn build(self) -> Chain<A> {
-        Chain {
-            actions: self.actions,
-            ctx: self.ctx,
-            sleep: None,
-            future: None,
-            previous_item: None,
-        }
+        Chain { actions: self.actions, ctx: self.ctx, sleep: None, future: None }
     }
 }
 
@@ -80,7 +72,6 @@ pub struct Chain<A: ActionT> {
     actions: VecDeque<Action<A>>,
     ctx: A::Ctx,
     future: Option<Pin<Box<A::Future>>>,
-    previous_item: Option<A::Output>,
     sleep: Option<Pin<Box<Sleep>>>,
 }
 
@@ -90,43 +81,46 @@ impl<A: ActionT> Chain<A> {
     }
 }
 
-impl<A: ActionT> Stream for Chain<A>
-where
-    A::Output: Unpin,
-    <A as ActionT>::Ctx: Unpin,
-{
-    type Item = A::Output;
+impl<A: ActionT> Stream for Chain<A> {
+    type Item = A::Event;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        // Try polling the future next
-        if let Some(ref mut future) = this.future {
-            let result = ready!(future.as_mut().poll(cx));
-            // Store the result in previous_item before discarding the future
-            this.previous_item = Some(result);
-            // Since we're ready, discard the future
-            this.future.take();
-            return Poll::Ready(this.previous_item.take());
-        }
+        loop {
+            // First, try to progress any existing futures.
+            if let Some(future) = this.future.as_mut() {
+                return match future.as_mut().poll(cx) {
+                    Poll::Ready(event) => {
+                        this.future = None; // Clear the future once it's done
+                        Poll::Ready(Some(event)) // Return the event
+                    }
+                    Poll::Pending => Poll::Pending,
+                };
+            }
 
-        match this.next_action() {
-            Some(action) => match action {
-                Action::Next(action_fn) => {
-                    // Execute the action and store the future
-                    let mut action = action_fn(this.previous_item.take());
-                    this.future = Some(Box::pin(action.execute(&mut this.ctx)));
-                    cx.waker().wake_by_ref();
+            // Next, check if there's a sleep that needs to poll.
+            if let Some(sleep) = this.sleep.as_mut() {
+                return match sleep.as_mut().poll(cx) {
+                    Poll::Ready(_) => {
+                        this.sleep = None; // Clear the sleep once it's done
+                        self.poll_next(cx) // Immediately try to continue processing
+                    }
+                    Poll::Pending => Poll::Pending,
+                };
+            }
 
-                    Poll::Pending
+            // Handle the next action if no futures or sleeps are active.
+            match this.next_action() {
+                Some(Action::Next(future)) => {
+                    this.future = Some(Box::pin(future));
+                    return Poll::Pending
                 }
-                Action::Wait(duration) => {
-                    // Set up a sleep future and schedule this future to be polled again for it.
+                Some(Action::Wait(duration)) => {
                     this.sleep = Some(Box::pin(sleep_until(Instant::now() + duration)));
-                    cx.waker().wake_by_ref();
-                    Poll::Pending
+                    return Poll::Pending
                 }
-            },
-            None => Poll::Ready(None),
+                None => return Poll::Ready(None),
+            }
         }
     }
 }

@@ -37,8 +37,6 @@ mod traits;
 
 pub mod runner;
 
-mod chain;
-
 /// Builder for creating a network of nodes for testing.
 /// The network is created with a chain spec and a number of peers.
 /// The nodes are interconnected in a chain.
