@@ -7,7 +7,6 @@ use reth_exex::{ExExContext, ExExEvent};
 use reth_interfaces::executor::BlockValidationError;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeComponents};
 use reth_node_ethereum::{EthEvmConfig, EthereumNode};
-use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     address, constants,
     revm::env::fill_tx_env,
@@ -15,7 +14,7 @@ use reth_primitives::{
     Address, Block, BlockWithSenders, Bytes, ChainSpec, ChainSpecBuilder, Genesis, Hardfork,
     Header, Receipt, SealedBlockWithSenders, TransactionSigned, U256,
 };
-use reth_provider::{Chain, ProviderError};
+use reth_provider::Chain;
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     DatabaseCommit, StateBuilder,
@@ -288,7 +287,7 @@ fn execute_block(
 
     // Execute block
     let state = StateBuilder::new_with_database(
-        Box::new(db) as Box<dyn reth_revm::Database<Error = ProviderError> + Send>
+        Box::new(db) as Box<dyn reth_revm::Database<Error = eyre::Report> + Send>
     )
     .with_bundle_update()
     .build();
@@ -341,7 +340,7 @@ fn execute_block(
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err).into())
+                            eyre::bail!(err)
                         }
                     }
                 }

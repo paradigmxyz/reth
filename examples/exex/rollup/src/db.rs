@@ -8,12 +8,11 @@ use reth_primitives::{
     revm_primitives::{AccountInfo, Bytecode},
     Address, Bytes, SealedBlockWithSenders, StorageEntry, B256, U256,
 };
-use reth_provider::{bundle_state::StorageRevertsIter, OriginalValuesKnown, ProviderError};
+use reth_provider::{bundle_state::StorageRevertsIter, OriginalValuesKnown};
 use reth_revm::db::{
     states::{PlainStorageChangeset, PlainStorageRevert},
     BundleState,
 };
-use reth_tracing::tracing::error;
 use rusqlite::Connection;
 
 /// Type used to initialize revms bundle state.
@@ -421,13 +420,10 @@ fn get_storage(connection: &Connection, address: Address, key: B256) -> eyre::Re
 }
 
 impl reth_revm::Database for Database {
-    type Error = ProviderError;
+    type Error = eyre::Report;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.get_account(address).map_err(|err| {
-            error!(%err, %address, "Failed to get account by address");
-            ProviderError::UnsupportedProvider
-        })
+        self.get_account(address)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -439,20 +435,12 @@ impl reth_revm::Database for Database {
         match bytecode {
             Ok(data) => Ok(Bytecode::new_raw(Bytes::from_str(&data).unwrap())),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Bytecode::default()),
-            Err(err) => {
-                error!(%err, %code_hash, "Failed to get bytecode by hash");
-                Err(ProviderError::UnsupportedProvider)
-            }
+            Err(err) => Err(err.into()),
         }
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        get_storage(&self.connection(), address, index.into())
-            .map(|data| data.unwrap_or_default())
-            .map_err(|err| {
-                error!(%err, %address, "Failed to get account by address");
-                ProviderError::UnsupportedProvider
-            })
+        get_storage(&self.connection(), address, index.into()).map(|data| data.unwrap_or_default())
     }
 
     fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
@@ -466,10 +454,7 @@ impl reth_revm::Database for Database {
             // No special handling for `QueryReturnedNoRows` is needed, because revm does block
             // number bound checks on its own.
             // See https://github.com/bluealloy/revm/blob/1ca3d39f6a9e9778f8eb0fcb74fe529345a531b4/crates/interpreter/src/instructions/host.rs#L106-L123.
-            Err(err) => {
-                error!(%err, %number, "Failed to get block hash by number");
-                Err(ProviderError::UnsupportedProvider)
-            }
+            Err(err) => Err(err.into()),
         }
     }
 }
