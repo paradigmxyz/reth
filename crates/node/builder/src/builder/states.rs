@@ -31,8 +31,8 @@ pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
 
 impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     /// Creates a new instance of the node builder with the given configuration and types.
-    pub fn new(config: NodeConfig, types: T, database: T::DB) -> Self {
-        Self { config, adapter: NodeTypesAdapter::new(types, database) }
+    pub fn new(config: NodeConfig, database: T::DB) -> Self {
+        Self { config, adapter: NodeTypesAdapter::new(database) }
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
@@ -59,14 +59,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
 pub(crate) struct NodeTypesAdapter<T: FullNodeTypes> {
     /// The database type used by the node.
     pub(crate) database: T::DB,
-    // TODO(mattsse): make this stateless
-    pub(crate) types: T,
 }
 
 impl<T: FullNodeTypes> NodeTypesAdapter<T> {
     /// Create a new adapter from the given node types.
-    pub(crate) fn new(types: T, database: T::DB) -> Self {
-        Self { types, database }
+    pub(crate) fn new(database: T::DB) -> Self {
+        Self { database }
     }
 }
 
@@ -85,18 +83,11 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     pub task_executor: TaskExecutor,
     /// The provider of the node.
     pub provider: T::Provider,
-    /// EVM config
-    pub evm: T::Evm,
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypes for NodeAdapter<T, C> {
     type Primitives = T::Primitives;
     type Engine = T::Engine;
-    type Evm = T::Evm;
-
-    fn evm_config(&self) -> Self::Evm {
-        self.evm.clone()
-    }
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
@@ -106,9 +97,14 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C>
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
     type Pool = C::Pool;
+    type Evm = C::Evm;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.components.evm_config()
     }
 
     fn provider(&self) -> &Self::Provider {
@@ -134,7 +130,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
             components: self.components.clone(),
             task_executor: self.task_executor.clone(),
             provider: self.provider.clone(),
-            evm: self.evm.clone(),
         }
     }
 }

@@ -187,12 +187,11 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(self, types: T) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
+    pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
         T: NodeTypes,
     {
-        let types = FullNodeTypesAdapter::new(types);
-        NodeBuilderWithTypes::new(self.config, types, self.database)
+        NodeBuilderWithTypes::new(self.config, self.database)
     }
 
     /// Preconfigures the node with a specific node implementation.
@@ -205,7 +204,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder())
     }
 }
 
@@ -236,15 +235,12 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(
-        self,
-        types: T,
-    ) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
+    pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
         T: NodeTypes,
     {
         WithLaunchContext {
-            builder: self.builder.with_types(types),
+            builder: self.builder.with_types(),
             task_executor: self.task_executor,
             data_dir: self.data_dir,
         }
@@ -260,7 +256,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder())
     }
 
     /// Launches a preconfigured [Node]
@@ -426,8 +422,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) config: NodeConfig,
     /// loaded config
     pub(crate) reth_config: reth_config::Config,
-    /// EVM config of the node
-    pub(crate) evm_config: Node::Evm,
+    // /// EVM config of the node
+    // pub(crate) evm_config: Node::Evm,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -439,9 +435,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
-        evm_config: Node::Evm,
+        // evm_config: Node::Evm,
     ) -> Self {
-        Self { head, provider, executor, data_dir, config, reth_config, evm_config }
+        Self { head, provider, executor, data_dir, config, reth_config }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -449,10 +445,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self.provider
     }
 
-    /// Returns the configured evm.
-    pub fn evm_config(&self) -> &Node::Evm {
-        &self.evm_config
-    }
+    // /// Returns the configured evm.
+    // pub fn evm_config(&self) -> &Node::Evm {
+    //     &self.evm_config
+    // }
 
     /// Returns the current head of the blockchain at launch.
     pub fn head(&self) -> Head {
