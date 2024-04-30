@@ -28,7 +28,6 @@ use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
-use alloy_rlp::{RlpDecodable, RlpEncodable};
 use discv5::{
     kbucket,
     kbucket::{
@@ -40,7 +39,8 @@ use discv5::{
 use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
-use reth_primitives::{bytes::Bytes, hex, ForkId, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{bytes::Bytes, hex, ForkId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -119,9 +119,20 @@ const MIN_PACKET_SIZE: usize = 32 + 65 + 1;
 /// Concurrency factor for `FindNode` requests to pick `ALPHA` closest nodes, <https://github.com/ethereum/devp2p/blob/master/discv4.md#recursive-lookup>
 const ALPHA: usize = 3;
 
-/// Maximum number of nodes to ping at concurrently. 2 full `Neighbours` responses with 16 _new_
-/// nodes. This will apply some backpressure in recursive lookups.
+/// Maximum number of nodes to ping at concurrently.
+///
+/// This corresponds to 2 full `Neighbours` responses with 16 _new_ nodes. This will apply some
+/// backpressure in recursive lookups.
 const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
+
+/// Maximum number of pings to keep queued.
+///
+/// If we are currently sending too many pings, any new pings will be queued. To prevent unbounded
+/// growth of the queue, the queue has a maximum capacity, after which any additional pings will be
+/// discarded.
+///
+/// This corresponds to 2 full `Neighbours` responses with 16 new nodes.
+const MAX_QUEUED_PINGS: usize = 2 * MAX_NODES_PER_BUCKET;
 
 /// The size of the datagram is limited [`MAX_PACKET_SIZE`], 16 nodes, as the discv4 specifies don't
 /// fit in one datagram. The safe number of nodes that always fit in a datagram is 12, with worst
@@ -211,7 +222,8 @@ impl Discv4 {
     /// # use std::io;
     /// use rand::thread_rng;
     /// use reth_discv4::{Discv4, Discv4Config};
-    /// use reth_primitives::{pk2id, NodeRecord, PeerId};
+    /// use reth_network_types::{pk2id, PeerId};
+    /// use reth_primitives::NodeRecord;
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
@@ -569,7 +581,7 @@ impl Discv4Service {
             _tasks: tasks,
             ingress: ingress_rx,
             egress: egress_tx,
-            queued_pings: Default::default(),
+            queued_pings: VecDeque::with_capacity(MAX_QUEUED_PINGS),
             pending_pings: Default::default(),
             pending_lookup: Default::default(),
             pending_find_nodes: Default::default(),
@@ -1130,7 +1142,7 @@ impl Discv4Service {
 
         if self.pending_pings.len() < MAX_NODES_PING {
             self.send_ping(node, reason);
-        } else {
+        } else if self.queued_pings.len() < MAX_QUEUED_PINGS {
             self.queued_pings.push_back((node, reason));
         }
     }
@@ -1375,7 +1387,16 @@ impl Discv4Service {
                 BucketEntry::SelfEntry => {
                     // we received our own node entry
                 }
-                _ => self.find_node(&closest, ctx.clone()),
+                BucketEntry::Present(mut entry, _) => {
+                    if entry.value_mut().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
+                    }
+                }
+                BucketEntry::Pending(mut entry, _) => {
+                    if entry.value().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
+                    }
+                }
             }
         }
     }
@@ -1420,7 +1441,7 @@ impl Discv4Service {
 
         let mut failed_lookups = Vec::new();
         self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
-            if now.duration_since(*lookup_sent_at) > self.config.ping_expiration {
+            if now.duration_since(*lookup_sent_at) > self.config.request_timeout {
                 failed_lookups.push(*node_id);
                 return false
             }
@@ -1440,7 +1461,7 @@ impl Discv4Service {
     fn evict_failed_neighbours(&mut self, now: Instant) {
         let mut failed_neighbours = Vec::new();
         self.pending_find_nodes.retain(|node_id, find_node_request| {
-            if now.duration_since(find_node_request.sent_at) > self.config.request_timeout {
+            if now.duration_since(find_node_request.sent_at) > self.config.neighbours_expiration {
                 if !find_node_request.answered {
                     // node actually responded but with fewer entries than expected, but we don't
                     // treat this as an hard error since it responded.
@@ -2174,33 +2195,13 @@ pub enum DiscoveryUpdate {
     Batch(Vec<DiscoveryUpdate>),
 }
 
-/// Represents a forward-compatible ENR entry for including the forkid in a node record via
-/// EIP-868. Forward compatibility is achieved by allowing trailing fields.
-///
-/// See:
-/// <https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/discovery.go#L27-L38>
-///
-/// for how geth implements ForkId values and forward compatibility.
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[rlp(trailing)]
-pub struct EnrForkIdEntry {
-    /// The inner forkid
-    pub fork_id: ForkId,
-}
-
-impl From<ForkId> for EnrForkIdEntry {
-    fn from(fork_id: ForkId) -> Self {
-        Self { fork_id }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
-    use reth_primitives::{hex, mainnet_nodes, ForkHash};
+    use reth_primitives::{hex, mainnet_nodes, EnrForkIdEntry, ForkHash};
     use std::future::poll_fn;
 
     #[tokio::test]
@@ -2568,6 +2569,7 @@ mod tests {
         let config = Discv4Config::builder()
             .request_timeout(Duration::from_millis(200))
             .ping_expiration(Duration::from_millis(200))
+            .lookup_neighbours_expiration(Duration::from_millis(200))
             .add_eip868_pair("eth", fork_id)
             .build();
         let (_disv4, mut service) = create_discv4_with_config(config).await;

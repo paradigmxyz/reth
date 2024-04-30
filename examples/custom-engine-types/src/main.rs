@@ -37,9 +37,8 @@ use reth_node_api::{
     EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{
-    node::{EthereumNetworkBuilder, EthereumPoolBuilder},
-    EthEvmConfig,
+use reth_node_ethereum::node::{
+    EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
@@ -187,12 +186,6 @@ impl NodeTypes for MyCustomNode {
     type Primitives = ();
     // use the custom engine types
     type Engine = CustomEngineTypes;
-    // use the default ethereum EVM config
-    type Evm = EthEvmConfig;
-
-    fn evm_config(&self) -> Self::Evm {
-        Self::Evm::default()
-    }
 }
 
 /// Implement the Node trait for the custom node
@@ -202,18 +195,21 @@ impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<Engine = CustomEngineTypes>,
 {
-    type PoolBuilder = EthereumPoolBuilder;
-    type NetworkBuilder = EthereumNetworkBuilder;
-    type PayloadBuilder = CustomPayloadServiceBuilder;
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        EthereumPoolBuilder,
+        CustomPayloadServiceBuilder,
+        EthereumNetworkBuilder,
+        EthereumExecutorBuilder,
+    >;
 
-    fn components(
-        self,
-    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
+    fn components_builder(self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
             .payload(CustomPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
+            .executor(EthereumExecutorBuilder::default())
     }
 }
 

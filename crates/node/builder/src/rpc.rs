@@ -98,7 +98,7 @@ impl<Node: FullNodeComponents> fmt::Debug for RpcHooks<Node> {
 pub trait OnRpcStarted<Node: FullNodeComponents>: Send {
     /// The hook that is called once the rpc server is started.
     fn on_rpc_started(
-        &self,
+        self: Box<Self>,
         ctx: RpcContext<'_, Node>,
         handles: RethRpcServerHandles,
     ) -> eyre::Result<()>;
@@ -106,20 +106,24 @@ pub trait OnRpcStarted<Node: FullNodeComponents>: Send {
 
 impl<Node, F> OnRpcStarted<Node> for F
 where
-    F: Fn(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()> + Send,
+    F: FnOnce(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
     fn on_rpc_started(
-        &self,
+        self: Box<Self>,
         ctx: RpcContext<'_, Node>,
         handles: RethRpcServerHandles,
     ) -> eyre::Result<()> {
-        self(ctx, handles)
+        (*self)(ctx, handles)
     }
 }
 
 impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
-    fn on_rpc_started(&self, _: RpcContext<'_, Node>, _: RethRpcServerHandles) -> eyre::Result<()> {
+    fn on_rpc_started(
+        self: Box<Self>,
+        _: RpcContext<'_, Node>,
+        _: RethRpcServerHandles,
+    ) -> eyre::Result<()> {
         Ok(())
     }
 }
@@ -127,21 +131,21 @@ impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
 /// Event hook that is called when the rpc server is started.
 pub trait ExtendRpcModules<Node: FullNodeComponents>: Send {
     /// The hook that is called once the rpc server is started.
-    fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()>;
+    fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node>) -> eyre::Result<()>;
 }
 
 impl<Node, F> ExtendRpcModules<Node> for F
 where
-    F: Fn(RpcContext<'_, Node>) -> eyre::Result<()> + Send,
+    F: FnOnce(RpcContext<'_, Node>) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
-    fn extend_rpc_modules(&self, ctx: RpcContext<'_, Node>) -> eyre::Result<()> {
-        self(ctx)
+    fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node>) -> eyre::Result<()> {
+        (*self)(ctx)
     }
 }
 
 impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
-    fn extend_rpc_modules(&self, _: RpcContext<'_, Node>) -> eyre::Result<()> {
+    fn extend_rpc_modules(self: Box<Self>, _: RpcContext<'_, Node>) -> eyre::Result<()> {
         Ok(())
     }
 }
@@ -270,7 +274,7 @@ where
         .with_network(node.network().clone())
         .with_events(node.provider().clone())
         .with_executor(node.task_executor().clone())
-        .with_evm_config(node.evm_config())
+        .with_evm_config(node.evm_config().clone())
         .build_with_auth_server(module_config, engine_api);
 
     let mut registry = RpcRegistry { registry };
@@ -301,7 +305,6 @@ where
     let launch_auth = auth_module.clone().start_server(auth_config).map_ok(|handle| {
         let addr = handle.local_addr();
         if let Some(ipc_endpoint) = handle.ipc_endpoint() {
-            let ipc_endpoint = ipc_endpoint.path();
             info!(target: "reth::cli", url=%addr, ipc_endpoint=%ipc_endpoint,"RPC auth server started");
         } else {
             info!(target: "reth::cli", url=%addr, "RPC auth server started");

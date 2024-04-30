@@ -13,7 +13,7 @@ fn test_basic_setup() {
     let msg = "On components".to_string();
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types(EthereumNode::default())
+        .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
@@ -32,4 +32,12 @@ fn test_basic_setup() {
             Ok(())
         })
         .check_launch();
+}
+
+#[test]
+fn test_node_setup() {
+    let config = NodeConfig::test();
+    let db = create_test_rw_db();
+    let _builder =
+        NodeBuilder::new(config).with_database(db).node(EthereumNode::default()).check_launch();
 }

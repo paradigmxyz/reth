@@ -541,11 +541,10 @@ mod tests {
         b256, Account, Address, Block, ChainSpecBuilder, Signature, StorageKey, StorageValue,
         Transaction, TransactionSigned, TxEip1559, TxKind, BASE_MAINNET,
     };
-    use reth_revm::{database::StateProviderDatabase, L1_BLOCK_CONTRACT};
+    use reth_revm::{
+        database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
+    };
     use std::{collections::HashMap, str::FromStr};
-
-    use crate::OptimismEvmConfig;
-    use reth_revm::test_utils::StateProviderTest;
 
     fn create_op_state_provider() -> StateProviderTest {
         let mut db = StateProviderTest::default();

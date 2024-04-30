@@ -13,7 +13,7 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
@@ -34,7 +34,6 @@ use reth_rpc_api::servers::*;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use std::{
-    fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -205,8 +204,7 @@ impl AuthServerConfig {
             let ipc_endpoint_str = ipc_endpoint
                 .clone()
                 .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
-            let ipc_path = Endpoint::new(ipc_endpoint_str);
-            let ipc_server = ipc_server_config.build(ipc_path.path());
+            let ipc_server = ipc_server_config.build(ipc_endpoint_str);
             let res = ipc_server
                 .start(module.inner)
                 .await
@@ -219,24 +217,13 @@ impl AuthServerConfig {
 }
 
 /// Builder type for configuring an `AuthServerConfig`.
+#[derive(Debug)]
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerBuilder<Identity, Identity>>,
     ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     ipc_endpoint: Option<String>,
-}
-
-impl fmt::Debug for AuthServerConfigBuilder {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthServerConfig")
-            .field("socket_addr", &self.socket_addr)
-            .field("secret", &self.secret)
-            .field("server_config", &self.server_config)
-            .field("ipc_server_config", &self.ipc_server_config)
-            .field("ipc_endpoint", &self.ipc_endpoint)
-            .finish()
-    }
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -449,7 +436,7 @@ impl AuthServerHandle {
         if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
             return Some(
                 IpcClientBuilder::default()
-                    .build(Endpoint::new(ipc_endpoint).path())
+                    .build(ipc_endpoint)
                     .await
                     .expect("Failed to create ipc client"),
             )
@@ -463,10 +450,7 @@ impl AuthServerHandle {
     }
 
     /// Return an ipc endpoint
-    pub fn ipc_endpoint(&self) -> Option<Endpoint> {
-        if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
-            return Some(Endpoint::new(ipc_endpoint))
-        }
-        None
+    pub fn ipc_endpoint(&self) -> Option<String> {
+        self.ipc_endpoint.clone()
     }
 }

@@ -1,5 +1,5 @@
-use fnv::FnvHashMap;
 use reth_primitives::Address;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 /// An internal mapping of addresses.
@@ -13,7 +13,7 @@ pub(crate) struct SenderIdentifiers {
     /// Assigned `SenderId` for an `Address`.
     address_to_id: HashMap<Address, SenderId>,
     /// Reverse mapping of `SenderId` to `Address`.
-    sender_to_address: FnvHashMap<SenderId, Address>,
+    sender_to_address: FxHashMap<SenderId, Address>,
 }
 
 impl SenderIdentifiers {

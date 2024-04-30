@@ -49,7 +49,7 @@ pub struct Block {
 }
 
 impl Block {
-    /// Create SealedBLock that will create all header hashes.
+    /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
         SealedBlock {
             header: self.header.seal_slow(),
@@ -175,7 +175,7 @@ impl TryFrom<reth_rpc_types::Block> for Block {
                     .collect(),
                 reth_rpc_types::BlockTransactions::Hashes(_) |
                 reth_rpc_types::BlockTransactions::Uncle => {
-                    return Err(ConversionError::MissingFullTransactions);
+                    return Err(ConversionError::MissingFullTransactions)
                 }
             };
             transactions?
@@ -212,6 +212,12 @@ impl BlockWithSenders {
     pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
         let Self { block, senders } = self;
         SealedBlockWithSenders { block: block.seal(hash), senders }
+    }
+
+    /// Calculate the header hash and seal the block with senders so that it can't be changed.
+    #[inline]
+    pub fn seal_slow(self) -> SealedBlockWithSenders {
+        SealedBlockWithSenders { block: self.block.seal_slow(), senders: self.senders }
     }
 
     /// Split Structure to its components
@@ -294,66 +300,6 @@ pub struct SealedBlock {
         proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
     pub withdrawals: Option<Withdrawals>,
-}
-
-/// Generates a header which is valid __with respect to past and future forks__. This means, for
-/// example, that if the withdrawals root is present, the base fee per gas is also present.
-///
-/// If blob gas used were present, then the excess blob gas and parent beacon block root are also
-/// present. In this example, the withdrawals root would also be present.
-///
-/// This __does not, and should not guarantee__ that the header is valid with respect to __anything
-/// else__.
-#[cfg(any(test, feature = "arbitrary"))]
-pub fn generate_valid_header(
-    mut header: Header,
-    eip_4844_active: bool,
-    blob_gas_used: u64,
-    excess_blob_gas: u64,
-    parent_beacon_block_root: B256,
-) -> Header {
-    // EIP-1559 logic
-    if header.base_fee_per_gas.is_none() {
-        // If EIP-1559 is not active, clear related fields
-        header.withdrawals_root = None;
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if header.withdrawals_root.is_none() {
-        // If EIP-4895 is not active, clear related fields
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if eip_4844_active {
-        // Set fields based on EIP-4844 being active
-        header.blob_gas_used = Some(blob_gas_used);
-        header.excess_blob_gas = Some(excess_blob_gas);
-        header.parent_beacon_block_root = Some(parent_beacon_block_root);
-    } else {
-        // If EIP-4844 is not active, clear related fields
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    }
-
-    header
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-prop_compose! {
-    /// Generates a proptest strategy for constructing an instance of a header which is valid __with
-    /// respect to past and future forks__.
-    ///
-    /// See docs for [generate_valid_header] for more information.
-    pub fn valid_header_strategy()(
-        header in any::<Header>(),
-        eip_4844_active in any::<bool>(),
-        blob_gas_used in any::<u64>(),
-        excess_blob_gas in any::<u64>(),
-        parent_beacon_block_root in any::<B256>()
-    ) -> Header {
-        generate_valid_header(header, eip_4844_active, blob_gas_used, excess_blob_gas, parent_beacon_block_root)
-    }
 }
 
 impl SealedBlock {
@@ -458,6 +404,12 @@ impl SealedBlock {
         self.blob_transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 
+    /// Returns whether or not the block contains any blob transactions.
+    #[inline]
+    pub fn has_blob_transactions(&self) -> bool {
+        self.body.iter().any(|tx| tx.is_eip4844())
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
@@ -510,7 +462,7 @@ impl std::ops::DerefMut for SealedBlock {
 }
 
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SealedBlockWithSenders {
     /// Sealed block
     pub block: SealedBlock,
@@ -650,6 +602,66 @@ impl BlockBody {
 impl From<Block> for BlockBody {
     fn from(block: Block) -> Self {
         Self { transactions: block.body, ommers: block.ommers, withdrawals: block.withdrawals }
+    }
+}
+
+/// Generates a header which is valid __with respect to past and future forks__. This means, for
+/// example, that if the withdrawals root is present, the base fee per gas is also present.
+///
+/// If blob gas used were present, then the excess blob gas and parent beacon block root are also
+/// present. In this example, the withdrawals root would also be present.
+///
+/// This __does not, and should not guarantee__ that the header is valid with respect to __anything
+/// else__.
+#[cfg(any(test, feature = "arbitrary"))]
+pub fn generate_valid_header(
+    mut header: Header,
+    eip_4844_active: bool,
+    blob_gas_used: u64,
+    excess_blob_gas: u64,
+    parent_beacon_block_root: B256,
+) -> Header {
+    // EIP-1559 logic
+    if header.base_fee_per_gas.is_none() {
+        // If EIP-1559 is not active, clear related fields
+        header.withdrawals_root = None;
+        header.blob_gas_used = None;
+        header.excess_blob_gas = None;
+        header.parent_beacon_block_root = None;
+    } else if header.withdrawals_root.is_none() {
+        // If EIP-4895 is not active, clear related fields
+        header.blob_gas_used = None;
+        header.excess_blob_gas = None;
+        header.parent_beacon_block_root = None;
+    } else if eip_4844_active {
+        // Set fields based on EIP-4844 being active
+        header.blob_gas_used = Some(blob_gas_used);
+        header.excess_blob_gas = Some(excess_blob_gas);
+        header.parent_beacon_block_root = Some(parent_beacon_block_root);
+    } else {
+        // If EIP-4844 is not active, clear related fields
+        header.blob_gas_used = None;
+        header.excess_blob_gas = None;
+        header.parent_beacon_block_root = None;
+    }
+
+    header
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+prop_compose! {
+    /// Generates a proptest strategy for constructing an instance of a header which is valid __with
+    /// respect to past and future forks__.
+    ///
+    /// See docs for [generate_valid_header] for more information.
+    pub fn valid_header_strategy()(
+        header in any::<Header>(),
+        eip_4844_active in any::<bool>(),
+        blob_gas_used in any::<u64>(),
+        excess_blob_gas in any::<u64>(),
+        parent_beacon_block_root in any::<B256>()
+    ) -> Header {
+        generate_valid_header(header, eip_4844_active, blob_gas_used, excess_blob_gas, parent_beacon_block_root)
     }
 }
 

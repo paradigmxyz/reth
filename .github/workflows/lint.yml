@@ -126,11 +126,23 @@ jobs:
         with:
           cmd: jq empty etc/grafana/dashboards/overview.json
 
+  check-cfg:
+    name: check-cfg
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo +nightly -Zcheck-cfg c
+
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
-    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, codespell, grafana]
+    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, codespell, grafana, check-cfg]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

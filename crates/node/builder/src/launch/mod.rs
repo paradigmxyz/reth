@@ -5,7 +5,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     node::FullNode,
-    BuilderContext, NodeBuilderWithComponents, NodeHandle, RethFullAdapter,
+    BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
 use futures::{future, future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
@@ -17,14 +17,10 @@ use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
 use reth_consensus::Consensus;
-use reth_db::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     engine_api_store::EngineApiStore,
@@ -44,6 +40,7 @@ use tokio::sync::{mpsc::unbounded_channel, oneshot};
 
 pub mod common;
 pub use common::LaunchContext;
+use reth_blockchain_tree::noop::NoopBlockchainTree;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
@@ -74,22 +71,20 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, DB, CB> LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
-    for DefaultNodeLauncher
+impl<T, CB> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypes,
-    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+    T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
+    CB: NodeComponentsBuilder<T>,
 {
-    type Node = NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>;
+    type Node = NodeHandle<NodeAdapter<T, CB::Components>>;
 
     async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>,
+        target: NodeBuilderWithComponents<T, CB>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {
-            adapter: NodeTypesAdapter { types, database },
+            adapter: NodeTypesAdapter { database },
             components_builder,
             add_ons: NodeAddOns { hooks, rpc, exexs: installed_exex },
             config,
@@ -130,27 +125,22 @@ where
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
         ctx.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        // Configure the blockchain tree for the node
-        let evm_config = types.evm_config();
-        let tree_config = BlockchainTreeConfig::default();
-        let tree_externals = TreeExternals::new(
-            ctx.provider_factory().clone(),
-            consensus.clone(),
-            EvmProcessorFactory::new(ctx.chain_spec(), evm_config.clone()),
-        );
-        let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
-            .with_sync_metrics_tx(sync_metrics_tx.clone());
-
-        let canon_state_notification_sender = tree.canon_state_notification_sender();
-        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
-        debug!(target: "reth::cli", "configured blockchain tree");
-
         // fetch the head block from the database
         let head = ctx.lookup_head()?;
 
-        // setup the blockchain provider
-        let blockchain_db =
-            BlockchainProvider::new(ctx.provider_factory().clone(), blockchain_tree.clone())?;
+        // Configure the blockchain tree for the node
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
+        let blockchain_db = BlockchainProvider::new(
+            ctx.provider_factory().clone(),
+            Arc::new(NoopBlockchainTree::with_canon_state_notifications(
+                canon_state_notification_sender.clone(),
+            )),
+        )?;
 
         let builder_ctx = BuilderContext::new(
             head,
@@ -159,11 +149,30 @@ where
             ctx.data_dir().clone(),
             ctx.node_config().clone(),
             ctx.toml_config().clone(),
-            evm_config.clone(),
         );
 
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;
+
+        let tree_externals = TreeExternals::new(
+            ctx.provider_factory().clone(),
+            consensus.clone(),
+            EvmProcessorFactory::new(ctx.chain_spec(), components.evm_config().clone()),
+        );
+        let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
+            .with_sync_metrics_tx(sync_metrics_tx.clone())
+            // Note: This is required because we need to ensure that both the components and the
+            // tree are using the same channel for canon state notifications. This will be removed
+            // once the Blockchain provider no longer depends on an instance of the tree
+            .with_canon_state_notification_sender(canon_state_notification_sender);
+
+        let canon_state_notification_sender = tree.canon_state_notification_sender();
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
+
+        // Replace the tree component with the actual tree
+        let blockchain_db = blockchain_db.with_tree(blockchain_tree);
+
+        debug!(target: "reth::cli", "configured blockchain tree");
 
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
@@ -171,7 +180,6 @@ where
             components,
             task_executor: ctx.task_executor().clone(),
             provider: blockchain_db.clone(),
-            evm: evm_config.clone(),
         };
 
         debug!(target: "reth::cli", "calling on_component_initialized hook");
@@ -231,15 +239,14 @@ where
             });
 
             // send notifications from the blockchain tree to exex manager
-            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            let mut canon_state_notifications = blockchain_db.subscribe_to_canonical_state();
             let mut handle = exex_manager_handle.clone();
             ctx.task_executor().spawn_critical(
                 "exex manager blockchain tree notifications",
                 async move {
                     while let Ok(notification) = canon_state_notifications.recv().await {
                         handle.send_async(notification.into()).await.expect(
-                            "blockchain tree notification could not be sent to exex
-manager",
+                            "blockchain tree notification could not be sent to exex manager",
                         );
                     }
                 },
@@ -312,7 +319,7 @@ address.to_string(), format_ether(alloc.balance));
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
                 mining_mode,
-                evm_config.clone(),
+                node_adapter.components.evm_config().clone(),
             )
             .build();
 
@@ -327,7 +334,7 @@ address.to_string(), format_ether(alloc.balance));
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                evm_config,
+                node_adapter.components.evm_config().clone(),
                 pipeline_exex_handle,
             )
             .await?;
@@ -350,7 +357,7 @@ address.to_string(), format_ether(alloc.balance));
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                evm_config,
+                node_adapter.components.evm_config().clone(),
                 pipeline_exex_handle,
             )
             .await?;
@@ -454,7 +461,7 @@ address.to_string(), format_ether(alloc.balance));
         });
 
         let full_node = FullNode {
-            evm_config: node_adapter.evm.clone(),
+            evm_config: node_adapter.components.evm_config().clone(),
             pool: node_adapter.components.pool().clone(),
             network: node_adapter.components.network().clone(),
             provider: node_adapter.provider.clone(),

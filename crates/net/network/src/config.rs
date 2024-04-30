@@ -12,9 +12,9 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::network_key;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
+use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{
-    mainnet_nodes, pk2id, sepolia_nodes, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord,
-    PeerId, MAINNET,
+    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};

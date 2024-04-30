@@ -73,7 +73,7 @@ fn main() {
     Cli::parse_args()
         .run(|builder, _| async move {
             let handle = builder
-                .with_types(EthereumNode::default())
+                .with_types::<EthereumNode>()
                 // Configure the components of the node
                 // use default ethereum components but use our custom payload builder
                 .with_components(

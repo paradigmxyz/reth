@@ -7,9 +7,10 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
+use reth_network_types::PeerId;
 use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
-    PeerId, SealedHeader, B256,
+    SealedHeader, B256,
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;

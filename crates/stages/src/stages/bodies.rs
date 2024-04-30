@@ -381,6 +381,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     use reth_primitives::stage::StageUnitCheckpoint;
+    use reth_provider::StaticFileProviderFactory;
     use test_utils::*;
 
     use crate::test_utils::{
@@ -632,7 +633,8 @@ mod tests {
             StaticFileSegment, TxNumber, B256,
         };
         use reth_provider::{
-            providers::StaticFileWriter, HeaderProvider, ProviderFactory, TransactionsProvider,
+            providers::StaticFileWriter, HeaderProvider, ProviderFactory,
+            StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
 

@@ -16,8 +16,7 @@ use reth_rpc_types::engine::{
     OptimismPayloadAttributes, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v3, convert_block_to_payload_field_v2,
-    convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
+    block_to_payload_v3, convert_block_to_payload_field_v2, try_block_to_payload_v1,
 };
 use revm::primitives::HandlerCfg;
 use std::sync::Arc;
@@ -54,19 +53,13 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             (payload_id_optimism(&parent, &attributes, &transactions), transactions)
         };
 
-        let withdraw = attributes.payload_attributes.withdrawals.map(|withdrawals| {
-            Withdrawals::new(
-                withdrawals.into_iter().map(convert_standalone_withdraw_to_withdrawal).collect(),
-            )
-        });
-
         let payload_attributes = EthPayloadBuilderAttributes {
             id,
             parent,
             timestamp: attributes.payload_attributes.timestamp,
             suggested_fee_recipient: attributes.payload_attributes.suggested_fee_recipient,
             prev_randao: attributes.payload_attributes.prev_randao,
-            withdrawals: withdraw.unwrap_or_default(),
+            withdrawals: attributes.payload_attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         };
 

@@ -31,7 +31,7 @@ fn basic_exex() {
     let db = create_test_rw_db();
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types(EthereumNode::default())
+        .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
         .install_exex("dummy", move |ctx| future::ok(DummyExEx { _ctx: ctx }))
         .check_launch();

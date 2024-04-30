@@ -267,7 +267,7 @@ where
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
     ) -> EthResult<GethTrace> {
-        let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let at = block_id.unwrap_or_default();
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
             opts;
         let overrides = EvmOverrides::new(state_overrides, block_overrides.map(Box::new));
@@ -420,7 +420,7 @@ where
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
-        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let target_block = block_number.unwrap_or_default();
         let ((cfg, mut block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
             self.inner.eth_api.block_by_id_with_senders(target_block),

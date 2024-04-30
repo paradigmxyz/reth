@@ -3,7 +3,7 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run --example network
+//! cargo run --release -p network
 //! ```
 
 use futures::StreamExt;

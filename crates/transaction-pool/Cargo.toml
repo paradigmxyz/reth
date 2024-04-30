@@ -20,6 +20,7 @@ reth-tasks.workspace = true
 revm.workspace = true
 alloy-rlp.workspace = true
 reth-revm = { workspace = true, optional = true }
+reth-network-types.workspace = true
 
 # async/futures
 futures-util.workspace = true
@@ -35,9 +36,9 @@ metrics.workspace = true
 aquamarine.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+rustc-hash.workspace = true
 schnellru.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
-fnv = "1.0.7"
 bitflags.workspace = true
 auto_impl.workspace = true
 smallvec.workspace = true
