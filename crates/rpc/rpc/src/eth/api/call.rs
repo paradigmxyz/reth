@@ -451,14 +451,14 @@ where
         &self,
         env_gas_limit: U256,
         mut env: EnvWithHandlerCfg,
-        mut db: &mut CacheDB<StateProviderDatabase<S>>,
+        db: &mut CacheDB<StateProviderDatabase<S>>,
     ) -> EthApiError
     where
         S: StateProvider,
     {
         let req_gas_limit = env.tx.gas_limit;
         env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
-        let (res, _) = match self.transact(&mut db, env) {
+        let (res, _) = match self.transact(db, env) {
             Ok(res) => res,
             Err(err) => return err,
         };
