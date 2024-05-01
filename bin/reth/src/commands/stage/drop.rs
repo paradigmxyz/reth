@@ -54,12 +54,12 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         let db = open_db(db_path.as_ref(), self.db.database_args())?;
         let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
         let static_file_provider = provider_factory.static_file_provider();
 
         let tool = DbTool::new(provider_factory, self.chain.clone())?;

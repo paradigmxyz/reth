@@ -202,7 +202,7 @@ mod tests {
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
         BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
-        TxKind, Withdrawal, Withdrawals, U256,
+        Withdrawal, Withdrawals, U256,
     };
     use reth_provider::AccountReader;
     use std::ops::RangeBounds;
@@ -313,7 +313,7 @@ mod tests {
             max_priority_fee_per_gas: 0x28f000fff,
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
-            to: TxKind::Call(Address::default()),
+            to: Address::default().into(),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

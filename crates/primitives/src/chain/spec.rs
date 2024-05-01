@@ -4,8 +4,9 @@ use crate::{
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis, Hardfork,
-    Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
+    Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -295,6 +296,8 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Bedrock, ForkCondition::Block(105235063)),
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
+            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
+            (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -575,6 +578,24 @@ impl ChainSpec {
     /// Get information about the chain itself
     pub fn chain(&self) -> Chain {
         self.chain
+    }
+
+    /// Returns `true` if this chain contains Ethereum configuration.
+    #[inline]
+    pub fn is_eth(&self) -> bool {
+        matches!(
+            self.chain.kind(),
+            ChainKind::Named(
+                NamedChain::Mainnet |
+                    NamedChain::Morden |
+                    NamedChain::Ropsten |
+                    NamedChain::Rinkeby |
+                    NamedChain::Goerli |
+                    NamedChain::Kovan |
+                    NamedChain::Holesky |
+                    NamedChain::Sepolia
+            )
+        )
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
@@ -2445,6 +2466,25 @@ Post-merge hard forks (timestamp based):
                 (
                     Head { number: 0, timestamp: 1708534800, ..Default::default() },
                     ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 0 },
+                ),
+            ],
+        );
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn op_mainnet_forkids() {
+        test_fork_ids(
+            &OP_MAINNET,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xca, 0xf5, 0x17, 0xed]), next: 3950000 },
+                ),
+                // TODO: complete these, see https://github.com/paradigmxyz/reth/issues/8012
+                (
+                    Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 0 },
                 ),
             ],
         );
