@@ -174,8 +174,8 @@ async fn decode_transactions<Pool: TransactionPool>(
 ) -> eyre::Result<Vec<(TransactionSigned, Address)>> {
     // Get raw transactions either from the blobs, or directly from the block data
     let raw_transactions = if matches!(tx.tx_type(), TxType::Eip4844) {
-        // Try to get blobs from the transaction pool
-        let sidecar: Vec<_> = if let Some(sidecar) = pool.get_blob(tx.hash)? {
+        let blobs: Vec<_> = if let Some(sidecar) = pool.get_blob(tx.hash)? {
+            // Try to get blobs from the transaction pool
             sidecar.blobs.into_iter().zip(sidecar.commitments).collect()
         } else {
             // If transaction is not found in the pool, try to get blobs from the Blobscan
@@ -189,33 +189,24 @@ async fn decode_transactions<Pool: TransactionPool>(
                 .collect()
         };
 
-        // Convert blob KZG commitments to versioned hashes
-        let mut blobs: Vec<_> = sidecar
-            .into_iter()
-            .map(|(blob, commitment)| (Some(blob), kzg_to_versioned_hash((*commitment).into())))
-            .collect();
-
         // Decode blob hashes from block data
         let blob_hashes = Vec::<B256>::decode(&mut block_data.as_ref())?;
 
-        // Reconstruct raw transactions from blobs
-        let blobs = blob_hashes
+        // Filter blobs that are present in the block data
+        let blobs = blobs
             .into_iter()
-            .map(|hash| {
-                blobs
-                    .iter_mut()
-                    .find_map(|(blob, blob_hash)| {
-                        // Take the blob out of `Option` and allocate it on the heap
-                        // TODO(alexey): this is ugly, how to do better?
-                        (*blob_hash == hash).then(|| Box::new(blob.take().unwrap()))
-                    })
-                    .ok_or_else(|| eyre::eyre!("blob {:?} not found", hash))
-            })
-            .collect::<eyre::Result<Vec<_>>>()?;
+            // Convert blob KZG commitments to versioned hashes
+            .map(|(blob, commitment)| (blob, kzg_to_versioned_hash((*commitment).into())))
+            // Filter only blobs that are present in the block data
+            .filter_map(|(blob, hash)| blob_hashes.contains(&hash).then_some(blob))
+            .collect::<Vec<_>>();
+        if blobs.len() != blob_hashes.len() {
+            eyre::bail!("some blobs not found")
+        }
 
         // Decode blobs and concatenate them to get the raw transactions
         let data = SimpleCoder::default()
-            .decode_all(&blobs.into_iter().map(|blob| *blob).collect::<Vec<_>>())
+            .decode_all(&blobs)
             .ok_or(eyre::eyre!("failed to decode blobs"))?
             .concat();
 
