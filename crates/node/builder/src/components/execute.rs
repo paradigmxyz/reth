@@ -9,7 +9,7 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
     type EVM: ConfigureEvm;
     // TODO(mattsse): integrate `Executor`
 
-    /// Creates the transaction pool.
+    /// Creates the EVM config.
     fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
