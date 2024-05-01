@@ -887,7 +887,7 @@ where
         for block in include_blocks.into_iter() {
             // dont fail on error, just ignore the block.
             let _ = self
-                .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
+                .try_insert_validated_block(block, BlockValidationKind::Exhaustive)
                 .map_err(|err| {
                     debug!(
                         target: "blockchain_tree", %err,
