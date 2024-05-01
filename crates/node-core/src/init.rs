@@ -296,7 +296,12 @@ pub fn insert_genesis_header<DB: Database>(
     Ok(())
 }
 
-/// Initialize chain with state at specific block, from reader of state dump.
+/// Reads account state from a [`BufRead`] reader and initializes it at the highest block that can
+/// be found on database.
+///
+/// It's similar to [`init_genesis`] but supports importing state too big to fit in memory, and can
+/// be set to the highest block present. One practical usecase is to import OP mainnet state at
+/// bedrock transition block.
 pub fn init_from_state_dump<DB: Database>(
     mut reader: impl BufRead,
     factory: ProviderFactory<DB>,
