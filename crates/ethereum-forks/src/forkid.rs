@@ -638,41 +638,6 @@ mod tests {
         assert_eq!(alloy_rlp::encode(id), &val[..]);
     }
 
-    mod eip8 {
-        use super::*;
-
-        fn junk_enr_fork_id_entry() -> Vec<u8> {
-            let mut buf = Vec::new();
-            // enr request is just an expiration
-            let fork_id = ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE };
-
-            // add some junk
-            let junk: u64 = 112233;
-
-            // rlp header encoding
-            let payload_length = fork_id.length() + junk.length();
-            alloy_rlp::Header { list: true, payload_length }.encode(&mut buf);
-
-            // fields
-            fork_id.encode(&mut buf);
-            junk.encode(&mut buf);
-
-            buf
-        }
-
-        #[test]
-        fn eip8_decode_enr_fork_id_entry() {
-            let enr_fork_id_entry_with_junk = junk_enr_fork_id_entry();
-
-            let mut buf = enr_fork_id_entry_with_junk.as_slice();
-            let decoded = EnrForkIdEntry::decode(&mut buf).unwrap();
-            assert_eq!(
-                decoded.fork_id,
-                ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE }
-            );
-        }
-    }
-
     #[test]
     fn compute_cache() {
         let b1 = 1_150_000;
@@ -718,5 +683,40 @@ mod tests {
 
         assert!(fork_filter.set_head_priv(Head { number: b2, ..Default::default() }).is_some());
         assert_eq!(fork_filter.current(), h2);
+    }
+
+    mod eip8 {
+        use super::*;
+
+        fn junk_enr_fork_id_entry() -> Vec<u8> {
+            let mut buf = Vec::new();
+            // enr request is just an expiration
+            let fork_id = ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE };
+
+            // add some junk
+            let junk: u64 = 112233;
+
+            // rlp header encoding
+            let payload_length = fork_id.length() + junk.length();
+            alloy_rlp::Header { list: true, payload_length }.encode(&mut buf);
+
+            // fields
+            fork_id.encode(&mut buf);
+            junk.encode(&mut buf);
+
+            buf
+        }
+
+        #[test]
+        fn eip8_decode_enr_fork_id_entry() {
+            let enr_fork_id_entry_with_junk = junk_enr_fork_id_entry();
+
+            let mut buf = enr_fork_id_entry_with_junk.as_slice();
+            let decoded = EnrForkIdEntry::decode(&mut buf).unwrap();
+            assert_eq!(
+                decoded.fork_id,
+                ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE }
+            );
+        }
     }
 }
