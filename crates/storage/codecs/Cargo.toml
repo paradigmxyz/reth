@@ -17,6 +17,7 @@ reth-codecs-derive = { path = "./derive", default-features = false }
 # eth
 alloy-eips = { workspace = true, optional = true }
 alloy-primitives.workspace = true
+alloy-genesis.workspace = true
 
 # misc
 bytes.workspace = true
