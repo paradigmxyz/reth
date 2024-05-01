@@ -533,7 +533,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.executor.spawn_critical("p2p txpool", txpool);
         self.executor.spawn_critical("p2p eth request handler", eth);
 
-        let default_peers_path = self.data_dir().known_peers_path();
+        let default_peers_path = self.data_dir().known_peers();
         let known_peers_file = self.config.network.persistent_peers_file(default_peers_path);
         self.executor.spawn_critical_with_graceful_shutdown_signal(
             "p2p network task",
