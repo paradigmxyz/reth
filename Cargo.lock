@@ -6582,6 +6582,7 @@ name = "reth-discv4"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
+ "assert_matches",
  "discv5",
  "enr",
  "generic-array",
