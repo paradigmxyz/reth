@@ -41,7 +41,10 @@ pub use admin::AdminApi;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
-pub use layers::{AuthLayer, AuthValidator, Claims, JwtAuthValidator, JwtError, JwtSecret};
+pub use layers::{
+    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, AuthValidator, Claims,
+    JwtAuthValidator, JwtError, JwtSecret,
+};
 pub use net::NetApi;
 pub use otterscan::OtterscanApi;
 pub use reth::RethApi;

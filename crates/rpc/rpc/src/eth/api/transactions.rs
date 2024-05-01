@@ -287,7 +287,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: FnOnce(StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
+        F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Executes the call request at the given [BlockId].
@@ -308,7 +308,7 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
-        I: Inspector<StateCacheDB> + Send + 'static;
+        I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -571,10 +571,7 @@ where
         <DB as Database>::Error: Into<EthApiError>,
         I: GetInspector<DB>,
     {
-        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(db, env, inspector);
-        let res = evm.transact()?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env))
+        self.inspect_and_return_db(db, env, inspector).map(|(res, env, _)| (res, env))
     }
 
     fn inspect_and_return_db<DB, I>(
@@ -1066,7 +1063,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: FnOnce(StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
+        F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
@@ -1085,7 +1082,7 @@ where
                     &mut db,
                     overrides,
                 )?;
-                f(db, env)
+                f(&mut db, env)
             })
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)?
@@ -1098,10 +1095,7 @@ where
         overrides: EvmOverrides,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)> {
         let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |mut db, env| {
-            this.transact(&mut db, env)
-        })
-        .await
+        self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env)).await
     }
 
     async fn spawn_inspect_call_at<I>(
@@ -1112,7 +1106,7 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
-        I: Inspector<StateCacheDB> + Send + 'static,
+        I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
     {
         let this = self.clone();
         self.spawn_with_call_at(request, at, overrides, move |db, env| {
@@ -1133,11 +1127,9 @@ where
     {
         let this = self.clone();
         self.with_state_at_block(at, |state| {
-            let db = CacheDB::new(StateProviderDatabase::new(state));
-
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(db, env, &mut inspector)?;
-
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
             f(inspector, res)
         })
     }
@@ -1155,10 +1147,9 @@ where
     {
         let this = self.clone();
         self.spawn_with_state_at_block(at, move |state| {
-            let db = CacheDB::new(StateProviderDatabase::new(state));
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _, db) = this.inspect_and_return_db(db, env, &mut inspector)?;
-
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
             f(inspector, res, db)
         })
         .await
