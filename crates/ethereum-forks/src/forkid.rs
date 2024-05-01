@@ -123,7 +123,6 @@ pub struct ForkId {
 ///
 /// for how geth implements ForkId values and forward compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable)]
-#[rlp(trailing)]
 pub struct EnrForkIdEntry {
     /// The inner forkid
     pub fork_id: ForkId,
@@ -637,6 +636,41 @@ mod tests {
         let id = ForkId::decode(&mut &val[..]).unwrap();
         assert_eq!(id, ForkId { hash: ForkHash(u32::MAX.to_be_bytes()), next: u64::MAX });
         assert_eq!(alloy_rlp::encode(id), &val[..]);
+    }
+
+    mod eip8 {
+        use super::*;
+
+        fn junk_enr_fork_id_entry() -> Vec<u8> {
+            let mut buf = Vec::new();
+            // enr request is just an expiration
+            let fork_id = ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE };
+
+            // add some junk
+            let junk: u64 = 112233;
+
+            // rlp header encoding
+            let payload_length = fork_id.length() + junk.length();
+            alloy_rlp::Header { list: true, payload_length }.encode(&mut buf);
+
+            // fields
+            fork_id.encode(&mut buf);
+            junk.encode(&mut buf);
+
+            buf
+        }
+
+        #[test]
+        fn eip8_decode_enr_fork_id_entry() {
+            let enr_fork_id_entry_with_junk = junk_enr_fork_id_entry();
+
+            let mut buf = enr_fork_id_entry_with_junk.as_slice();
+            let decoded = EnrForkIdEntry::decode(&mut buf).unwrap();
+            assert_eq!(
+                decoded.fork_id,
+                ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE }
+            );
+        }
     }
 
     #[test]
