@@ -573,7 +573,7 @@
               }
             ]
           },
-          "unit": "decbytes",
+          "unit": "bytes",
           "unitScale": true
         },
         "overrides": []
@@ -726,7 +726,7 @@
               }
             ]
           },
-          "unit": "decbytes",
+          "unit": "bytes",
           "unitScale": true
         },
         "overrides": []
@@ -858,7 +858,7 @@
               }
             ]
           },
-          "unit": "decbytes",
+          "unit": "bytes",
           "unitScale": true
         },
         "overrides": []
@@ -1638,8 +1638,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1773,8 +1772,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1904,8 +1902,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2024,8 +2021,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2144,8 +2140,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2367,8 +2362,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2487,8 +2481,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2624,8 +2617,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2793,8 +2785,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2889,8 +2880,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3032,8 +3022,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3340,8 +3329,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3425,8 +3413,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "reth - mempool",
+  "title": "Reth - Transaction Pool",
   "uid": "bee34f59-c79c-4669-a000-198057b3703d",
-  "version": 1,
+  "version": 3,
   "weekStart": ""
 }
