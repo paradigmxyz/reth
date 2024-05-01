@@ -31,7 +31,8 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 //   commit: "defa64b2"
 // }
 ///  ```
-struct ClientVersionV1<'a> {
+
+pub struct ClientVersionV1<'a> {
     code: &'a str,
     name: &'a str,
     version: &'a str,
