@@ -215,7 +215,7 @@ impl NodeEndpoint {
 }
 
 /// A [FindNode packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#findnode-packet-0x03).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct FindNode {
     /// The target node's ID, a 64-byte secp256k1 public key.
     pub id: PeerId,
@@ -223,8 +223,41 @@ pub struct FindNode {
     pub expire: u64,
 }
 
+impl Decodable for FindNode {
+    // NOTE(onbjerg): Manual implementation to satisfy EIP-8.
+    //
+    // See https://eips.ethereum.org/EIPS/eip-8
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(RlpError::UnexpectedString)
+        }
+        let started_len = b.len();
+
+        let this = Self { id: Decodable::decode(b)?, expire: Decodable::decode(b)? };
+
+        // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
+        // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
+        // just discard the remaining list items
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(RlpError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+
+        Ok(this)
+    }
+}
+
 /// A [Neighbours packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#neighbors-packet-0x04).
-#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct Neighbours {
     /// The list of nodes containing IP, UDP port, TCP port, and node ID.
     pub nodes: Vec<NodeRecord>,
@@ -232,14 +265,80 @@ pub struct Neighbours {
     pub expire: u64,
 }
 
+impl Decodable for Neighbours {
+    // NOTE(onbjerg): Manual implementation to satisfy EIP-8.
+    //
+    // See https://eips.ethereum.org/EIPS/eip-8
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(RlpError::UnexpectedString)
+        }
+        let started_len = b.len();
+
+        let this = Self { nodes: Decodable::decode(b)?, expire: Decodable::decode(b)? };
+
+        // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
+        // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
+        // just discard the remaining list items
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(RlpError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+
+        Ok(this)
+    }
+}
+
 /// A [ENRRequest packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrrequest-packet-0x05).
 ///
 /// This packet is used to request the current version of a node's Ethereum Node Record (ENR).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, RlpEncodable)]
 pub struct EnrRequest {
     /// The expiration timestamp for the request. No reply should be sent if it refers to a time in
     /// the past.
     pub expire: u64,
+}
+
+impl Decodable for EnrRequest {
+    // NOTE(onbjerg): Manual implementation to satisfy EIP-8.
+    //
+    // See https://eips.ethereum.org/EIPS/eip-8
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(RlpError::UnexpectedString)
+        }
+        let started_len = b.len();
+
+        let this = Self { expire: Decodable::decode(b)? };
+
+        // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
+        // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
+        // just discard the remaining list items
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(RlpError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+
+        Ok(this)
+    }
 }
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
