@@ -5,18 +5,18 @@ use reth::{
     providers::CanonStateNotificationStream,
     rpc::{
         api::EngineApiClient,
-        builder::auth::JwtSecretService,
         types::engine::{ForkchoiceState, PayloadStatusEnum},
     },
 };
 use reth_payload_builder::PayloadId;
 use reth_primitives::B256;
+use reth_rpc::AuthClientService;
 use std::marker::PhantomData;
 
 /// Helper for engine api operations
 pub struct EngineApiTestContext<E> {
     pub canonical_stream: CanonStateNotificationStream,
-    pub engine_api_client: HttpClient<JwtSecretService<HttpBackend>>,
+    pub engine_api_client: HttpClient<AuthClientService<HttpBackend>>,
     pub _marker: PhantomData<E>,
 }
 
