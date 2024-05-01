@@ -61,7 +61,7 @@ impl LaunchContext {
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the
     /// `config`.
     pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
-        let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config_path());
+        let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
@@ -273,7 +273,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
     /// Loads the JWT secret for the engine API
     pub fn auth_jwt_secret(&self) -> eyre::Result<JwtSecret> {
-        let default_jwt_path = self.data_dir().jwt_path();
+        let default_jwt_path = self.data_dir().jwt();
         let secret = self.node_config().rpc.auth_jwt_secret(default_jwt_path)?;
         Ok(secret)
     }
@@ -299,7 +299,7 @@ where
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
-            self.data_dir().static_files_path(),
+            self.data_dir().static_files(),
         )?
         .with_static_files_metrics();
 

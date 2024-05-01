@@ -127,7 +127,7 @@ impl ImportCommand {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = self.load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
@@ -137,13 +137,13 @@ impl ImportCommand {
             config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
         }
 
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 

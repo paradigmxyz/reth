@@ -101,7 +101,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
             )?)
             .start_network()
             .await?;
@@ -116,13 +116,13 @@ impl Command {
 
         // Add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         // Initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
@@ -146,14 +146,14 @@ impl Command {
 
         // Set up network
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
                 db.clone(),
                 network_secret_path,
-                data_dir.known_peers_path(),
+                data_dir.known_peers(),
             )
             .await?;
 

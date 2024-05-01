@@ -130,23 +130,20 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);
 
         // use the overridden db path if specified
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(
-            Arc::clone(&db),
-            self.chain.clone(),
-            data_dir.static_files_path(),
-        )?;
+        let factory =
+            ProviderFactory::new(Arc::clone(&db), self.chain.clone(), data_dir.static_files())?;
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
@@ -188,15 +185,15 @@ impl Command {
                         .network
                         .p2p_secret_key
                         .clone()
-                        .unwrap_or_else(|| data_dir.p2p_secret_path());
+                        .unwrap_or_else(|| data_dir.p2p_secret());
                     let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
-                    let default_peers_path = data_dir.known_peers_path();
+                    let default_peers_path = data_dir.known_peers();
 
                     let provider_factory = Arc::new(ProviderFactory::new(
                         db.clone(),
                         self.chain.clone(),
-                        data_dir.static_files_path(),
+                        data_dir.static_files(),
                     )?);
 
                     let network = self
