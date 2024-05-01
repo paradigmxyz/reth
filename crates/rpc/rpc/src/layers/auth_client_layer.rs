@@ -40,6 +40,7 @@ impl<S> AuthClientService<S> {
         Self { secret, inner }
     }
 }
+
 impl<S, B> Service<hyper::Request<B>> for AuthClientService<S>
 where
     S: Service<hyper::Request<B>>,
