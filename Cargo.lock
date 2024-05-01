@@ -4498,7 +4498,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -7998,7 +7998,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "8.0.0"
-source = "git+https://github.com/danipopes/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
+source = "git+https://github.com/bluealloy/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8030,7 +8030,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "4.0.0"
-source = "git+https://github.com/danipopes/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
+source = "git+https://github.com/bluealloy/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8099,7 +8099,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "6.0.0"
-source = "git+https://github.com/danipopes/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
+source = "git+https://github.com/bluealloy/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
@@ -8115,7 +8115,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "3.1.1"
-source = "git+https://github.com/danipopes/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
+source = "git+https://github.com/bluealloy/revm?rev=67c13f3daaba8620829d949b93fb0583d8f8fcd7#67c13f3daaba8620829d949b93fb0583d8f8fcd7"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
