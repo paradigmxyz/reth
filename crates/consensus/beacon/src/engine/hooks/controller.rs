@@ -138,6 +138,12 @@ impl EngineHooksController {
             return Poll::Pending
         }
 
+        // If we don't have a finalized block, we might be on an optimistic sync scenario where we
+        // cannot skip the FCU with the finalized hash, otherwise CL might misbehave.
+        if hook.db_access_level().is_read_write() && args.finalized_block_number.is_none() {
+            return Poll::Pending
+        }
+
         if let Poll::Ready(event) = hook.poll(cx, args)? {
             let result =
                 PolledHook { name: hook.name(), event, db_access_level: hook.db_access_level() };
