@@ -264,7 +264,7 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
 
 .PHONY: maxperf-op
-maxperf-op: ## Builds `reth` with the most aggressive optimisations.
+maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak,optimism --bin op-reth
 
 .PHONY: maxperf-no-asm
