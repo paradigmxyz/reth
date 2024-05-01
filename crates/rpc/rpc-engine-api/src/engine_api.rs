@@ -731,11 +731,11 @@ mod tests {
     use reth_beacon_consensus::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_interfaces::test_utils::generators::random_block;
-    use reth_node_core::CLIENTVERSIONV1;
+
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types::engine::ClientVersionV1;
+    use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -743,11 +743,12 @@ mod tests {
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
     {
         let client = ClientVersionV1 {
-            code: CLIENTVERSIONV1.code,
-            name: CLIENTVERSIONV1.name,
-            version: CLIENTVERSIONV1.version,
-            commit: CLIENTVERSIONV1.commit,
+            code: ClientCode::RH,
+            name: "Reth".to_string(),
+            version: "v0.2.0-beta.5".to_string(),
+            commit: "defa64b2".to_string(),
         };
+
         let chain_spec: Arc<ChainSpec> = MAINNET.clone();
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
