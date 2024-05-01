@@ -114,7 +114,7 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
         )?;
         let provider = factory.provider()?;
 
@@ -148,7 +148,7 @@ impl Command {
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
@@ -156,7 +156,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
             Arc::clone(&self.chain),
-            data_dir.static_files_path(),
+            data_dir.static_files(),
         )?;
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
