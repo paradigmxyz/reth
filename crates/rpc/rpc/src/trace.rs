@@ -86,7 +86,7 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
-                let (res, _, db) = this.eth_api().inspect_and_return_db(db, env, &mut inspector)?;
+                let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
                     &trace_request.trace_types,
