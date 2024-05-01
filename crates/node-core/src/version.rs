@@ -32,11 +32,12 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 // }
 ///  ```
 
+#[derive(Debug)]
 pub struct ClientVersionV1<'a> {
-    code: &'a str,
-    name: &'a str,
-    version: &'a str,
-    commit: &'a str,
+    pub code: &'a str,
+    pub name: &'a str,
+    pub version: &'a str,
+    pub commit: &'a str,
 }
 
 pub const CLIENTVERSIONV1: ClientVersionV1<'_> = ClientVersionV1 {

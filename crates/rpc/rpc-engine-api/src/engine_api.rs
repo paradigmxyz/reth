@@ -34,7 +34,7 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 pub struct EngineApi<Provider, EngineT: EngineTypes> {
     inner: Arc<EngineApiInner<Provider, EngineT>>,
 }
-
+#[allow(dead_code)]
 struct EngineApiInner<Provider, EngineT: EngineTypes> {
     /// The provider to interact with the chain.
     provider: Provider,

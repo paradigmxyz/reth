@@ -28,12 +28,12 @@ use reth_node_core::{
     exit::NodeExitFuture,
     version::CLIENTVERSIONV1,
 };
-use reth_rpc_types::engine::ClientVersionV1;
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
+use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -426,12 +426,12 @@ address.to_string(), format_ether(alloc.balance));
                 database.clone(),
             ),
         );
-        
+
         let client = ClientVersionV1 {
-            code: CLIENTVERSIONV1.code,
-            name: CLIENTVERSIONV1.name,
-            version: CLIENTVERSIONV1.version,
-            commit: CLIENTVERSIONV1.commit,
+            code: ClientCode::RH,
+            name: CLIENTVERSIONV1.name.to_string(),
+            version: CLIENTVERSIONV1.version.to_string(),
+            commit: CLIENTVERSIONV1.commit.to_string(),
         };
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
