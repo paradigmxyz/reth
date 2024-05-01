@@ -174,7 +174,6 @@ async fn decode_transactions<Pool: TransactionPool>(
 ) -> eyre::Result<Vec<(TransactionSigned, Address)>> {
     // Get raw transactions either from the blobs, or directly from the block data
     let raw_transactions = if matches!(tx.tx_type(), TxType::Eip4844) {
-        println!("hash: {:?}, blob: {:?}", tx.hash, pool.get_blob(tx.hash));
         // Try to get blobs from the transaction pool
         let sidecar: Vec<_> = if let Some(sidecar) = pool.get_blob(tx.hash)? {
             sidecar.blobs.into_iter().zip(sidecar.commitments).collect()
@@ -206,15 +205,20 @@ async fn decode_transactions<Pool: TransactionPool>(
                 blobs
                     .iter_mut()
                     .find_map(|(blob, blob_hash)| {
-                        (*blob_hash == hash).then_some(blob.take()).flatten()
+                        // Take the blob out of `Option` and allocate it on the heap
+                        // TODO(alexey): this is ugly, how to do better?
+                        (*blob_hash == hash).then(|| Box::new(blob.take().unwrap()))
                     })
-                    .ok_or(eyre::eyre!("blob {:?} not found", hash))
+                    .ok_or_else(|| eyre::eyre!("blob {:?} not found", hash))
             })
             .collect::<eyre::Result<Vec<_>>>()?;
+
+        // Decode blobs and concatenate them to get the raw transactions
         let data = SimpleCoder::default()
-            .decode_all(&blobs)
+            .decode_all(&blobs.into_iter().map(|blob| *blob).collect::<Vec<_>>())
             .ok_or(eyre::eyre!("failed to decode blobs"))?
             .concat();
+
         data.into()
     } else {
         block_data
@@ -417,14 +421,13 @@ mod tests {
         let (block_data, l1_transaction) = if use_blobs {
             let sidecar =
                 SidecarBuilder::<SimpleCoder>::from_slice(&encoded_transactions).build()?;
-            let blob_hashes = sidecar.versioned_hashes().flatten().collect();
+            let blob_hashes = alloy_rlp::encode(sidecar.versioned_hashes().collect::<Vec<_>>());
 
             let mut mock_transaction = MockTransaction::eip4844_with_sidecar(sidecar.into());
             let transaction =
                 sign_tx_with_key_pair(key_pair, Transaction::from(mock_transaction.clone()));
             mock_transaction.set_hash(transaction.hash);
-            let hash = pool.add_transaction(TransactionOrigin::Local, mock_transaction).await?;
-            println!("Transaction hash: {:?}", hash);
+            pool.add_transaction(TransactionOrigin::Local, mock_transaction).await?;
             (blob_hashes, transaction)
         } else {
             (
