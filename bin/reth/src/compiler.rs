@@ -24,7 +24,11 @@ impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CompilerExecutorBuilder {
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let compiler_config = &ctx.config().experimental.compiler;
-        assert!(compiler_config.compiler);
+        if !compiler_config.compiler {
+            tracing::debug!("EVM bytecode compiler is disabled");
+            return Ok(CompilerEvmConfig::disabled());
+        }
+        tracing::info!("starting EVM bytecode compiler");
 
         let out_dir = compiler_config
             .out_dir
@@ -53,7 +57,7 @@ impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CompilerExecutorBuilder {
 /// Ethereum EVM configuration with bytecode compiler support.
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
-pub struct CompilerEvmConfig(Arc<Mutex<CompilerEvmConfigInner>>);
+pub struct CompilerEvmConfig(Option<Arc<Mutex<CompilerEvmConfigInner>>>);
 
 struct CompilerEvmConfigInner {
     compiler_is_done: Arc<AtomicBool>,
@@ -64,16 +68,22 @@ struct CompilerEvmConfigInner {
 
 impl CompilerEvmConfig {
     fn new(compiler_is_done: Arc<AtomicBool>, out_dir: PathBuf) -> Self {
-        Self(Arc::new(Mutex::new(CompilerEvmConfigInner {
+        Self(Some(Arc::new(Mutex::new(CompilerEvmConfigInner {
             compiler_is_done,
             out_dir,
             evm_version: None,
             dll: None,
-        })))
+        }))))
+    }
+
+    fn disabled() -> Self {
+        Self(None)
     }
 
     fn make_context(&self) -> CompilerEvmContext<'_> {
-        CompilerEvmContext { config: self.0.lock().unwrap_or_else(PoisonError::into_inner) }
+        CompilerEvmContext {
+            config: self.0.as_ref().map(|c| c.lock().unwrap_or_else(PoisonError::into_inner)),
+        }
     }
 }
 
@@ -148,35 +158,35 @@ impl ConfigureEvm for CompilerEvmConfig {
         &'a self,
         db: DB,
     ) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
-        Evm::builder()
-            .with_db(db)
-            .with_external_context(self.make_context())
-            .append_handler_register(register_compiler_handler)
-            .build()
+        let builder = Evm::builder().with_db(db).with_external_context(self.make_context());
+        if self.0.is_some() {
+            builder.append_handler_register(register_compiler_handler).build()
+        } else {
+            builder.build()
+        }
     }
 }
 
 /// [`CompilerEvmConfig`] EVM context.
 #[allow(missing_debug_implementations)]
 pub struct CompilerEvmContext<'a> {
-    config: MutexGuard<'a, CompilerEvmConfigInner>,
+    config: Option<MutexGuard<'a, CompilerEvmConfigInner>>,
 }
 
 impl CompilerEvmContext<'_> {
     #[inline]
     fn get_or_load_library(&mut self, spec_id: SpecId) -> Option<&mut EvmCompilerDll> {
-        self.config.get_or_load_library(spec_id)
+        self.config.as_mut()?.get_or_load_library(spec_id)
     }
 }
 
 fn register_compiler_handler<DB: Database>(
     handler: &mut EvmHandler<'_, CompilerEvmContext<'_>, DB>,
 ) {
-    let spec_id = handler.cfg.spec_id;
     handler.execution.execute_frame = Some(Arc::new(move |frame, memory, evm| {
         let interpreter = frame.interpreter_mut();
         let hash = interpreter.contract.hash?;
-        let library = evm.context.external.get_or_load_library(spec_id)?;
+        let library = evm.context.external.get_or_load_library(evm.spec_id())?;
         let f = match library.get_function(hash) {
             Ok(f) => f?,
             // Shouldn't happen.

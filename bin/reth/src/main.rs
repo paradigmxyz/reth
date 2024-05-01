@@ -34,11 +34,6 @@ fn main() {
         }
         #[cfg(feature = "compiler")]
         {
-            if !compiler_config.compiler {
-                let node = EthereumNode::default();
-                let handle = builder.launch_node(node).await?;
-                return handle.node_exit_future.await;
-            }
             let executor_builder = reth::compiler::CompilerExecutorBuilder::default();
             let handle = builder
                 .with_types::<EthereumNode>()
