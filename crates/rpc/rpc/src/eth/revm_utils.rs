@@ -272,6 +272,9 @@ pub(crate) fn create_txn_env(
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
         optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
+        // TODO(EOF)
+        eof_initcodes: Default::default(),
+        eof_initcodes_hashed: Default::default(),
     };
 
     Ok(env)

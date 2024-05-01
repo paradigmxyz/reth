@@ -114,7 +114,7 @@ pub use alloy_primitives::{
     StorageValue, TxHash, TxIndex, TxKind, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
-pub use revm_primitives::{self, JumpMap};
+pub use revm_primitives::{self, JumpTable};
 
 #[doc(hidden)]
 #[deprecated = "use B64 instead"]

@@ -158,7 +158,7 @@ impl Database {
         for (hash, bytecode) in changeset.contracts {
             tx.execute(
                 "INSERT INTO bytecode (hash, data) VALUES (?, ?) ON CONFLICT(hash) DO NOTHING",
-                (hash.to_string(), bytecode.bytes().to_string()),
+                (hash.to_string(), bytecode.bytecode().to_string()),
             )?;
         }
 

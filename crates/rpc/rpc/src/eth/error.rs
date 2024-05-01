@@ -471,6 +471,11 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::HaltedDepositPostRegolith => RpcInvalidTransactionError::Optimism(
                 OptimismInvalidTransactionError::HaltedDepositPostRegolith,
             ),
+            // TODO(EOF)
+            InvalidTransaction::EofInitcodesNotSupported => todo!("EOF"),
+            InvalidTransaction::EofInitcodesNumberLimit => todo!("EOF"),
+            InvalidTransaction::EofInitcodesSizeLimit => todo!("EOF"),
+            InvalidTransaction::EofCrateShouldHaveToAddress => todo!("EOF"),
         }
     }
 }
