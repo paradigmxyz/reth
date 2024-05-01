@@ -14,10 +14,10 @@ use reth_downloaders::{
     receipt_file_client::ReceiptFileClient,
 };
 use reth_node_core::version::SHORT_VERSION;
-use reth_primitives::{ChainSpec, StaticFileSegment};
+use reth_primitives::{stage::StageId, ChainSpec, StaticFileSegment};
 use reth_provider::{
-    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StaticFileProviderFactory,
-    StaticFileWriter,
+    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory, StaticFileWriter,
 };
 use tracing::{debug, error, info};
 
@@ -83,10 +83,21 @@ impl ImportReceiptsCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
-        let tx = provider_factory.provider_rw()?.into_tx();
+        let provider = provider_factory.provider_rw()?;
         let static_file_provider = provider_factory.static_file_provider();
 
         let mut total_decoded_receipts = 0;
+
+        for stage in StageId::ALL {
+            let checkpoint = provider.get_stage_checkpoint(stage)?;
+            debug!(target: "reth::cli",
+                ?stage,
+                ?checkpoint,
+                "Read stage checkpoints from db"
+            );
+        }
+
+        let tx = provider.into_tx();
 
         while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
             // create a new file client from chunk read from file
