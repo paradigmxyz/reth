@@ -134,7 +134,7 @@ impl ImportCommand {
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
-            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir_path()));
         }
 
         let db_path = data_dir.db();

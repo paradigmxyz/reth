@@ -162,9 +162,7 @@ impl Command {
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = EtlConfig::new(
-            Some(
-                self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(&data_dir.data_dir_path())),
-            ),
+            Some(self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(data_dir.data_dir_path()))),
             self.etl_file_size.unwrap_or(EtlConfig::default_file_size()),
         );
 
