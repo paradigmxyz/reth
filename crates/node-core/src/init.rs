@@ -348,7 +348,7 @@ fn parse_state_root(reader: &mut impl BufRead) -> eyre::Result<B256> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
 
-    let expected_state_root = serde_json::from_str::<StateRoot>(&*line)?.root;
+    let expected_state_root = serde_json::from_str::<StateRoot>(&line)?.root;
     trace!(target: "reth::cli",
         root=%expected_state_root,
         "Read state root from file"
@@ -372,7 +372,7 @@ fn parse_accounts(
         let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
         collector.insert(address, genesis_account)?;
 
-        if collector.len() > 0 && collector.len() % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0 {
+        if !collector.is_empty() && collector.len() % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0 {
             info!(target: "reth::cli",
                 parsed_new_accounts=collector.len(),
             );
@@ -394,7 +394,7 @@ fn dump_state<DB: Database>(
     let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
     let mut total_inserted_accounts = 0;
 
-    Ok(for (index, entry) in collector.iter()?.enumerate() {
+    for (index, entry) in collector.iter()?.enumerate() {
         let (address, account) = entry?;
         let (address, _) = Address::from_compact(address.as_slice(), address.len());
         let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
@@ -434,7 +434,8 @@ fn dump_state<DB: Database>(
 
             accounts.clear();
         }
-    })
+    }
+    Ok(())
 }
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the

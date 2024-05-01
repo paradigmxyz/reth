@@ -1,6 +1,6 @@
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut},
