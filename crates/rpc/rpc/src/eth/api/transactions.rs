@@ -385,6 +385,22 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
     /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
+    async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static;
+
+    /// Retrieves the transaction if it exists and returns its trace.
+    ///
+    /// Before the transaction is traced, all previous transaction in the block are applied to the
+    /// state by executing them first.
+    /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
+    /// the database that points to the beginning of the transaction.
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
     async fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
         &self,
         hash: B256,
@@ -612,7 +628,7 @@ where
         for tx in transactions.into_iter() {
             if tx.hash() == target_tx_hash {
                 // reached the target transaction
-                break
+                break;
             }
 
             tx.try_fill_tx_env(evm.tx_mut())?;
@@ -727,7 +743,7 @@ where
         if let Some(tx) =
             self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
         {
-            return Ok(Some(tx))
+            return Ok(Some(tx));
         }
 
         self.on_blocking_task(|this| async move {
@@ -1173,6 +1189,47 @@ where
         Ok(block.map(|block| (transaction, block.seal(block_hash))))
     }
 
+    async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        let (transaction, block) = match self.transaction_and_block(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+        let (tx, tx_info) = transaction.split();
+
+        let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
+
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let parent_block = block.parent_hash;
+        let block_txs = block.into_transactions_ecrecovered();
+
+        let this = self.clone();
+        self.spawn_with_state_at_block(parent_block.into(), move |state| {
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+            // replay all transactions prior to the targeted transaction
+            this.replay_transactions_until(
+                &mut db,
+                cfg.clone(),
+                block_env.clone(),
+                block_txs,
+                tx.hash,
+            )?;
+
+            let env =
+                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+
+            let (res, _) = this.transact(&mut db, env)?;
+            f(tx_info, res, db)
+        })
+        .await
+        .map(Some)
+    }
+
     async fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
         &self,
         hash: B256,
@@ -1250,7 +1307,7 @@ where
 
         if block.body.is_empty() {
             // nothing to trace
-            return Ok(Some(Vec::new()))
+            return Ok(Some(Vec::new()));
         }
 
         // replay all transactions of the block
@@ -1512,7 +1569,7 @@ where
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                }
+                };
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -1537,7 +1594,7 @@ where
                     block_number,
                     base_fee_per_gas,
                     index.into(),
-                )))
+                )));
             }
         }
 
@@ -1551,7 +1608,7 @@ where
     ) -> EthResult<Option<Bytes>> {
         if let Some(block) = self.block_with_senders(block_id.into()).await? {
             if let Some(tx) = block.transactions().nth(index.into()) {
-                return Ok(Some(tx.envelope_encoded()))
+                return Ok(Some(tx.envelope_encoded()));
             }
         }
 
