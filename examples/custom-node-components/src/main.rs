@@ -64,7 +64,7 @@ where
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions_path();
+        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {
