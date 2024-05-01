@@ -9,9 +9,9 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord, MAINNET};
+use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
 
-use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, network_key};
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
@@ -66,7 +66,7 @@ impl ConfigBuilder {
         let Config {
             discv5_config,
             bootstrap_nodes,
-            fork: (network_key, fork_id),
+            fork,
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
@@ -78,7 +78,7 @@ impl ConfigBuilder {
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork: Some((network_key, fork_id.fork_id)),
+            fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
@@ -137,8 +137,8 @@ impl ConfigBuilder {
 
     /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
-    pub fn fork(mut self, network_key: &'static [u8], fork_id: ForkId) -> Self {
-        self.fork = Some((network_key, fork_id));
+    pub fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+        self.fork = Some((fork_key, fork_id));
         self
     }
 
@@ -202,8 +202,7 @@ impl ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let (network_key, fork_id) = fork.unwrap_or((network_key::ETH, MAINNET.latest_fork_id()));
-        let fork = (network_key, fork_id.into());
+        let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
         let bootstrap_lookup_interval =
@@ -211,8 +210,8 @@ impl ConfigBuilder {
         let bootstrap_lookup_countdown =
             bootstrap_lookup_countdown.unwrap_or(DEFAULT_COUNT_BOOTSTRAP_LOOKUPS);
 
-        let discovered_peer_filter =
-            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[network_key::ETH2]));
+        let discovered_peer_filter = discovered_peer_filter
+            .unwrap_or_else(|| MustNotIncludeKeys::new(&[NetworkStackId::ETH2]));
 
         Config {
             discv5_config,
@@ -238,7 +237,7 @@ pub struct Config {
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
     /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", [ForkId])`.
-    pub(super) fork: (&'static [u8], EnrForkIdEntry),
+    pub(super) fork: Option<(&'static [u8], EnrForkIdEntry)>,
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to

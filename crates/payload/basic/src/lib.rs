@@ -35,6 +35,7 @@ use revm::{
 };
 use std::{
     future::Future,
+    ops::Deref,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
     task::{Context, Poll},
@@ -228,6 +229,14 @@ pub struct PrecachedState {
 #[derive(Debug, Clone)]
 pub struct PayloadTaskGuard(Arc<Semaphore>);
 
+impl Deref for PayloadTaskGuard {
+    type Target = Semaphore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 // === impl PayloadTaskGuard ===
 
 impl PayloadTaskGuard {
@@ -385,7 +394,7 @@ where
                 let builder = this.builder.clone();
                 this.executor.spawn_blocking(Box::pin(async move {
                     // acquire the permit for executing the task
-                    let _permit = guard.0.acquire().await;
+                    let _permit = guard.acquire().await;
                     let args = BuildArguments {
                         client,
                         pool,

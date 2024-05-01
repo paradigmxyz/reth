@@ -19,7 +19,7 @@ fn main() {
         .run(|builder, _| async move {
             let handle = builder
                 // use the default ethereum node types
-                .with_types(EthereumNode::default())
+                .with_types::<EthereumNode>()
                 // Configure the components of the node
                 // use default ethereum components but use our custom pool
                 .with_components(EthereumNode::components().pool(CustomPoolBuilder::default()))

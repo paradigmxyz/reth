@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use reth::{
-    builder::{node::NodeTypes, NodeBuilder},
+    builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
         address,
         revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
@@ -17,9 +17,9 @@ use reth::{
     },
     tasks::TaskManager,
 };
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
+use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode};
+use reth_node_ethereum::{EthEvmConfig, EthereumNode};
 use reth_primitives::{Chain, ChainSpec, Genesis, Header, Transaction};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
@@ -81,7 +81,9 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
+    type DefaultExternalContext<'a> = ();
+
+    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
         EvmBuilder::default()
             .with_db(db)
             // add additional precompiles
@@ -104,18 +106,19 @@ impl ConfigureEvm for MyEvmConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// A regular ethereum evm and executor builder.
+#[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-struct MyCustomNode;
+pub struct MyExecutorBuilder;
 
-/// Configure the node types
-impl NodeTypes for MyCustomNode {
-    type Primitives = ();
-    type Engine = EthEngineTypes;
-    type Evm = MyEvmConfig;
+impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
+where
+    Node: FullNodeTypes,
+{
+    type EVM = MyEvmConfig;
 
-    fn evm_config(&self) -> Self::Evm {
-        Self::Evm::default()
+    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
+        Ok(MyEvmConfig::default())
     }
 }
 
@@ -140,8 +143,8 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
-        .with_types(MyCustomNode::default())
-        .with_components(EthereumNode::components())
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
         .launch()
         .await
         .unwrap();

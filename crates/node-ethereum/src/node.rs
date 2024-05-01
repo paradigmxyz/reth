@@ -4,7 +4,9 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_network::NetworkHandle;
 use reth_node_builder::{
-    components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
+    components::{
+        ComponentsBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+    },
     node::{FullNodeTypes, NodeTypes},
     BuilderContext, Node, PayloadBuilderConfig,
 };
@@ -23,8 +25,13 @@ pub struct EthereumNode;
 
 impl EthereumNode {
     /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
-    pub fn components<Node>(
-    ) -> ComponentsBuilder<Node, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetworkBuilder>
+    pub fn components<Node>() -> ComponentsBuilder<
+        Node,
+        EthereumPoolBuilder,
+        EthereumPayloadBuilder,
+        EthereumNetworkBuilder,
+        EthereumExecutorBuilder,
+    >
     where
         Node: FullNodeTypes<Engine = EthEngineTypes>,
     {
@@ -33,28 +40,45 @@ impl EthereumNode {
             .pool(EthereumPoolBuilder::default())
             .payload(EthereumPayloadBuilder::default())
             .network(EthereumNetworkBuilder::default())
+            .executor(EthereumExecutorBuilder::default())
     }
 }
 
 impl NodeTypes for EthereumNode {
     type Primitives = ();
     type Engine = EthEngineTypes;
-    type Evm = EthEvmConfig;
-
-    fn evm_config(&self) -> Self::Evm {
-        EthEvmConfig::default()
-    }
 }
 
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Engine = EthEngineTypes>,
 {
-    type ComponentsBuilder =
-        ComponentsBuilder<N, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetworkBuilder>;
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        EthereumPoolBuilder,
+        EthereumPayloadBuilder,
+        EthereumNetworkBuilder,
+        EthereumExecutorBuilder,
+    >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
         Self::components()
+    }
+}
+
+/// A regular ethereum evm and executor builder.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct EthereumExecutorBuilder;
+
+impl<Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
+where
+    Node: FullNodeTypes,
+{
+    type EVM = EthEvmConfig;
+
+    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
+        Ok(EthEvmConfig::default())
     }
 }
 

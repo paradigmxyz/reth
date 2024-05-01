@@ -55,7 +55,7 @@ pub use block::{
     ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
 pub use chain::{
-    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainSpec,
+    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainKind, ChainSpec,
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
     NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
