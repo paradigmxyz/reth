@@ -4,7 +4,8 @@ use crate::{
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
-    CoinbaseTipOrdering, PoolTransaction, ValidPoolTransaction,
+    CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
+    ValidPoolTransaction,
 };
 use paste::paste;
 use rand::{
@@ -15,11 +16,11 @@ use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
     eip4844::kzg_to_versioned_hash,
     transaction::TryFromRecoveredTransactionError,
-    AccessList, Address, BlobTransactionSidecar, Bytes, ChainId, FromRecoveredPooledTransaction,
-    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, Signature, Transaction,
-    TransactionSigned, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxEip1559,
-    TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy, TxType, B256, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError, Bytes, ChainId,
+    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
+    Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+    TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844, TxHash, TxKind, TxLegacy, TxType,
+    B256, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
@@ -730,7 +731,40 @@ impl PoolTransaction for MockTransaction {
 
     /// Returns the chain ID associated with the transaction.
     fn chain_id(&self) -> Option<u64> {
-        Some(1)
+        match self {
+            MockTransaction::Legacy { chain_id, .. } => *chain_id,
+
+            MockTransaction::Eip1559 { chain_id, .. } |
+            MockTransaction::Eip4844 { chain_id, .. } |
+            MockTransaction::Eip2930 { chain_id, .. } => Some(*chain_id),
+        }
+    }
+}
+
+impl EthPoolTransaction for MockTransaction {
+    fn take_blob(&mut self) -> EthBlobTransactionSidecar {
+        match self {
+            Self::Eip4844 { sidecar, .. } => EthBlobTransactionSidecar::Present(sidecar.clone()),
+            _ => EthBlobTransactionSidecar::None,
+        }
+    }
+
+    fn blob_count(&self) -> usize {
+        match self {
+            Self::Eip4844 { sidecar, .. } => sidecar.blobs.len(),
+            _ => 0,
+        }
+    }
+
+    fn validate_blob(
+        &self,
+        _blob: &BlobTransactionSidecar,
+        _settings: &revm::primitives::KzgSettings,
+    ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
+        match &self {
+            Self::Eip4844 { .. } => Ok(()),
+            _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
+        }
     }
 }
 
