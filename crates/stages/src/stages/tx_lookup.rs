@@ -153,18 +153,19 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                         );
                     }
 
+                    let key = RawKey::<TxHash>::from_vec(hash);
                     if append_only {
-                        txhash_cursor.append(
-                            RawKey::<TxHash>::from_vec(hash),
-                            RawValue::<TxNumber>::from_vec(number),
-                        )?;
+                        txhash_cursor.append(key, RawValue::<TxNumber>::from_vec(number))?
                     } else {
-                        txhash_cursor.insert(
-                            RawKey::<TxHash>::from_vec(hash),
-                            RawValue::<TxNumber>::from_vec(number),
-                        )?;
+                        txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))?
                     }
                 }
+
+                trace!(target: "sync::stages::transaction_lookup",
+                    total_hashes,
+                    "Transaction hashes inserted"
+                );
+
                 break
             }
         }
