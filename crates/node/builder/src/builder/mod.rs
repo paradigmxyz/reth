@@ -235,6 +235,11 @@ impl<DB> WithLaunchContext<NodeBuilder<DB>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
+    /// Returns a reference to the node builder's config.
+    pub fn config(&self) -> &NodeConfig {
+        self.builder.config()
+    }
+
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
