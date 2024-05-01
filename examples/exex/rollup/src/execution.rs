@@ -67,7 +67,8 @@ pub async fn execute_block<Pool: TransactionPool>(
     let transactions = decode_transactions(pool, tx, block_data).await?;
 
     // Configure EVM
-    let mut evm = EthEvmConfig::default().evm(
+    let evm_config = EthEvmConfig::default();
+    let mut evm = evm_config.evm(
         StateBuilder::new_with_database(
             Box::new(db) as Box<dyn reth_revm::Database<Error = eyre::Report> + Send>
         )

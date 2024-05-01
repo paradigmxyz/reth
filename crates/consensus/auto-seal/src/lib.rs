@@ -426,7 +426,7 @@ impl StorageInner {
         withdrawals: Option<Withdrawals>,
         client: &impl StateProviderFactory,
         chain_spec: Arc<ChainSpec>,
-        evm_config: EvmConfig,
+        evm_config: &EvmConfig,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
         EvmConfig: ConfigureEvm,

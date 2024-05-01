@@ -13,7 +13,7 @@ fn test_basic_setup() {
     let msg = "On components".to_string();
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types(EthereumNode::default())
+        .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();

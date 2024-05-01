@@ -50,10 +50,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// example) and then proceeds to configure the core static types of the node: [NodeTypes], these
 /// include the node's primitive types and the node's engine types.
 ///
-/// Next all stateful components of the node are configured, these include the
-/// [ConfigureEvm](reth_node_api::evm::ConfigureEvm), the database [Database] and all the
+/// Next all stateful components of the node are configured, these include all the
 /// components of the node that are downstream of those types, these include:
 ///
+///  - The EVM and Executor configuration: [ExecutorBuilder](crate::components::ExecutorBuilder)
 ///  - The transaction pool: [PoolBuilder]
 ///  - The network: [NetworkBuilder](crate::components::NetworkBuilder)
 ///  - The payload builder: [PayloadBuilder](crate::components::PayloadServiceBuilder)
@@ -71,9 +71,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// ## Components
 ///
 /// All components are configured with a [NodeComponentsBuilder] that is responsible for actually
-/// creating the node components during the launch process. The [ComponentsBuilder] is a general
-/// purpose implementation of the [NodeComponentsBuilder] trait that can be used to configure the
-/// network, transaction pool and payload builder of the node. It enforces the correct order of
+/// creating the node components during the launch process. The
+/// [ComponentsBuilder](crate::components::ComponentsBuilder) is a general purpose implementation of
+/// the [NodeComponentsBuilder] trait that can be used to configure the executor, network,
+/// transaction pool and payload builder of the node. It enforces the correct order of
 /// configuration, for example the network and the payload builder depend on the transaction pool
 /// type that is configured first.
 ///
@@ -127,8 +128,8 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// ### Limitations
 ///
 /// Currently the launch process is limited to ethereum nodes and requires all the components
-/// specified above. It also expect beacon consensus with the ethereum engine API that is configured
-/// by the builder itself during launch. This might change in the future.
+/// specified above. It also expects beacon consensus with the ethereum engine API that is
+/// configured by the builder itself during launch. This might change in the future.
 ///
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB> {
@@ -187,12 +188,11 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Configures the types of the node.
-    pub fn with_types<T>(self, types: T) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
+    pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
         T: NodeTypes,
     {
-        let types = FullNodeTypesAdapter::new(types);
-        NodeBuilderWithTypes::new(self.config, types, self.database)
+        NodeBuilderWithTypes::new(self.config, self.database)
     }
 
     /// Preconfigures the node with a specific node implementation.
@@ -205,7 +205,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder())
     }
 }
 
@@ -235,16 +235,18 @@ impl<DB> WithLaunchContext<NodeBuilder<DB>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
+    /// Returns a reference to the node builder's config.
+    pub fn config(&self) -> &NodeConfig {
+        self.builder.config()
+    }
+
     /// Configures the types of the node.
-    pub fn with_types<T>(
-        self,
-        types: T,
-    ) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
+    pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
         T: NodeTypes,
     {
         WithLaunchContext {
-            builder: self.builder.with_types(types),
+            builder: self.builder.with_types(),
             task_executor: self.task_executor,
             data_dir: self.data_dir,
         }
@@ -260,7 +262,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types(node.clone()).with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder())
     }
 
     /// Launches a preconfigured [Node]
@@ -428,8 +430,6 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) config: NodeConfig,
     /// loaded config
     pub(crate) reth_config: reth_config::Config,
-    /// EVM config of the node
-    pub(crate) evm_config: Node::Evm,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -441,19 +441,13 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
-        evm_config: Node::Evm,
     ) -> Self {
-        Self { head, provider, executor, data_dir, config, reth_config, evm_config }
+        Self { head, provider, executor, data_dir, config, reth_config }
     }
 
     /// Returns the configured provider to interact with the blockchain.
     pub fn provider(&self) -> &Node::Provider {
         &self.provider
-    }
-
-    /// Returns the configured evm.
-    pub fn evm_config(&self) -> &Node::Evm {
-        &self.evm_config
     }
 
     /// Returns the current head of the blockchain at launch.
@@ -544,7 +538,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.executor.spawn_critical("p2p txpool", txpool);
         self.executor.spawn_critical("p2p eth request handler", eth);
 
-        let default_peers_path = self.data_dir().known_peers_path();
+        let default_peers_path = self.data_dir().known_peers();
         let known_peers_file = self.config.network.persistent_peers_file(default_peers_path);
         self.executor.spawn_critical_with_graceful_shutdown_signal(
             "p2p network task",
