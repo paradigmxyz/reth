@@ -130,7 +130,7 @@ where
                     let txs: Vec<_> = notification
                         .tip()
                         .transactions()
-                        .filter(|tx| tx.is_eip4844())
+                        .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
                         .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
                         .collect();
 
@@ -203,7 +203,7 @@ where
                                 Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
                             };
 
-                            let mut blobs_bundle: BeaconBlobBundle =
+                            let mut blobs_bundle: BlobsBundleV1 =
                                 match serde_json::from_slice(&bytes) {
                                     Ok(b) => b,
                                     Err(e) => {

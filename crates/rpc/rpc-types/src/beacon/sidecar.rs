@@ -17,7 +17,7 @@ struct BlobSidecar {
     kzg_commitment: Bytes,
     kzg_proof: Bytes,
     signed_block_header: SignedBlockHeader,
-    kzg_commitment_inclusion_proof: Vec<Bytes>,
+    kzg_commitment_inclusion_proof: Vec<B256>,
 }
 
 #[serde_as]
