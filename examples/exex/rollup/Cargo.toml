@@ -25,6 +25,7 @@ futures.workspace = true
 tokio.workspace = true
 
 # misc
+alloy-consensus = { workspace = true, features = ["kzg"] }
 alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 eyre.workspace = true
