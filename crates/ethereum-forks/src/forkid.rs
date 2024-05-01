@@ -4,7 +4,7 @@
 
 use crate::Head;
 use alloy_primitives::{hex, BlockNumber, B256};
-use alloy_rlp::*;
+use alloy_rlp::{Error as RlpError, *};
 #[cfg(any(test, feature = "arbitrary"))]
 use arbitrary::Arbitrary;
 use crc::*;
@@ -116,17 +116,50 @@ pub struct ForkId {
 }
 
 /// Represents a forward-compatible ENR entry for including the forkid in a node record via
-/// EIP-868. Forward compatibility is achieved by allowing trailing fields.
+/// EIP-868. Forward compatibility is achieved via EIP-8.
 ///
 /// See:
 /// <https://github.com/ethereum/devp2p/blob/master/enr-entries/eth.md#entry-format>
 ///
 /// for how geth implements ForkId values and forward compatibility.
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable)]
 #[rlp(trailing)]
 pub struct EnrForkIdEntry {
     /// The inner forkid
     pub fork_id: ForkId,
+}
+
+impl Decodable for EnrForkIdEntry {
+    // NOTE(onbjerg): Manual implementation to satisfy EIP-8.
+    //
+    // See https://eips.ethereum.org/EIPS/eip-8
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(RlpError::UnexpectedString)
+        }
+        let started_len = b.len();
+
+        let this = Self { fork_id: Decodable::decode(b)? };
+
+        // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
+        // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
+        // just discard the remaining list items
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(RlpError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+
+        Ok(this)
+    }
 }
 
 impl From<ForkId> for EnrForkIdEntry {
