@@ -80,7 +80,7 @@ impl InitStateCommand {
 
         let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files())?;
         let etl_config = EtlConfig::new(
-            Some(EtlConfig::from_datadir(&data_dir.data_dir_path())),
+            Some(EtlConfig::from_datadir(&data_dir.data_dir())),
             EtlConfig::default_file_size(),
         );
 
