@@ -413,12 +413,12 @@ fn dump_state<DB: Database>(
 
             // use transaction to insert genesis header
             insert_genesis_hashes(
-                &*provider_rw,
+                provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
             )?;
 
             insert_history(
-                &*provider_rw,
+                provider_rw,
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
             )?;
