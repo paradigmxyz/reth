@@ -21,7 +21,7 @@ mod error;
 pub use error::*;
 
 mod evm_version;
-use evm_version::*;
+pub use evm_version::*;
 
 mod dll;
 pub use dll::*;

@@ -79,9 +79,7 @@ rand.workspace = true
 # tui
 comfy-table = "7.0"
 crossterm = "0.27.0"
-ratatui = { version = "0.26", default-features = false, features = [
-    "crossterm",
-] }
+ratatui = { version = "0.26", default-features = false, features = ["crossterm"] }
 human_bytes = "0.4.1"
 
 # async
@@ -112,7 +110,7 @@ jsonrpsee.workspace = true
 assert_matches = "1.5.0"
 
 [build-dependencies]
-revm-jit-build.workspace = true
+revm-jit-build = { workspace = true, optional = true }
 
 [features]
 default = ["jemalloc"]
@@ -138,12 +136,13 @@ optimism = [
     "reth-blockchain-tree/optimism",
     "dep:reth-node-optimism",
     "reth-node-core/optimism",
+    "reth-evm-compiler?/optimism",
 ]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
-compiler = ["dep:reth-evm-compiler"]
+compiler = ["dep:reth-evm-compiler", "dep:revm-jit-build"]
 
 [[bin]]
 name = "reth"

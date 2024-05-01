@@ -51,6 +51,9 @@ pub use dev_args::DevArgs;
 mod pruning_args;
 pub use pruning_args::PruningArgs;
 
+mod experimental;
+pub use experimental::{CompilerArgs, ExperimentalArgs};
+
 pub mod utils;
 
 pub mod types;

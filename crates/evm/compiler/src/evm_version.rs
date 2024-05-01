@@ -3,13 +3,15 @@
 use revm::primitives::{spec_to_generic, Spec, SpecId};
 use std::sync::OnceLock;
 
+/// Converts the given `SpecId` to the corresponding EVM version.
 #[inline]
-pub(crate) fn spec_id_to_evm_version(spec_id: SpecId) -> SpecId {
+pub fn spec_id_to_evm_version(spec_id: SpecId) -> SpecId {
     spec_to_generic!(spec_id, SPEC::SPEC_ID)
 }
 
+/// Returns `true` if the given `SpecId` is an EVM version.
 #[inline]
-pub(crate) fn is_evm_version(spec_id: SpecId) -> bool {
+pub fn is_evm_version(spec_id: SpecId) -> bool {
     spec_id_to_evm_version(spec_id) == spec_id
 }
 
@@ -28,6 +30,16 @@ impl EvmVersions {
                 .map(spec_id_to_evm_version)
                 .collect()
         }))
+    }
+
+    /// Returns the first EVM version.
+    pub(crate) fn first() -> SpecId {
+        Self::enabled().0.first().copied().unwrap()
+    }
+
+    /// Returns the last EVM version.
+    pub(crate) fn last() -> SpecId {
+        Self::enabled().0.last().copied().unwrap()
     }
 
     #[inline]

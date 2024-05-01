@@ -57,9 +57,12 @@ pub struct CompilerContract {
     /// The path to the deployed bytecode. Ignored if `bytecode` is set.
     #[serde(default, skip_serializing)]
     bytecode_path: Option<PathBuf>,
-    /// The first EVM version that the contract was deployed with.
-    #[serde(default = "frontier")]
-    starting_evm_version: SpecId,
+    /// The first EVM version to compile the contract with.
+    #[serde(default = "EvmVersions::first")]
+    first_evm_version: SpecId,
+    /// The last EVM version to compile the contract with.
+    #[serde(default = "EvmVersions::last")]
+    last_evm_version: SpecId,
     /// Disables stack bound checks.
     ///
     /// **WARNING**: Disabling stack checks can lead to undefined behavior at runtime if the EVM
@@ -68,10 +71,6 @@ pub struct CompilerContract {
     /// bytecode *never* overflows the stack.
     #[serde(default)]
     unsafe_no_stack_bound_checks: bool,
-}
-
-fn frontier() -> SpecId {
-    SpecId::FRONTIER
 }
 
 impl CompilerContract {
@@ -168,16 +167,16 @@ impl EvmParCompiler {
     }
 
     /// Runs the compiler until all contracts are compiled and linked.
-    pub fn run_to_end(
-        &mut self,
-        contracts: &ContractsConfig,
-    ) -> EvmCompilerResult<Vec<(SpecId, B256)>> {
+    pub fn run_to_end(&mut self, contracts: &ContractsConfig) -> EvmCompilerResult<()> {
         self.add_contracts(&contracts.contracts);
         self.compile_and_link_all()?;
         self.save()?;
-        let finalized =
-            self.metadata.contracts_at(ContractState::Linked).map(|(v, h, _)| (v, *h)).collect();
-        Ok(finalized)
+        Ok(())
+    }
+
+    /// Returns the hashes of all linked contracts.
+    pub fn linked_contracts(&self) -> impl Iterator<Item = (SpecId, &B256)> + '_ {
+        self.metadata.contracts_at(ContractState::Linked).map(|(v, h, _)| (v, h))
     }
 
     /// Adds the given contracts to the compiler. Won't overwrite existing contracts.
@@ -518,7 +517,7 @@ impl MetadataContract {
 
     fn states(&self) -> impl Iterator<Item = (SpecId, &AtomicContractState)> {
         EvmVersions::enabled()
-            .iter_starting_at(self.contract.starting_evm_version)
+            .iter_starting_at(self.contract.first_evm_version)
             .map(|spec_id| (spec_id, self.state(spec_id)))
     }
 
@@ -626,17 +625,21 @@ impl AtomicContractState {
     }
 }
 
-/// Returns the name of a generated library.
-pub(crate) fn dll_name(spec_id: &str) -> String {
-    format!("reth_evm_compiler_{spec_id}")
+/// Returns the **file** name of a generated shared library.
+pub(crate) fn dll_filename_spec_id(spec_id: SpecId) -> String {
+    format!(
+        "{prefix}reth_evm_compiler_{name:?}{suffix}",
+        prefix = std::env::consts::DLL_PREFIX,
+        name = crate::spec_id_to_evm_version(spec_id),
+        suffix = std::env::consts::DLL_SUFFIX,
+    )
 }
 
-/// Returns the **file** name of a generated library's.
-pub(crate) fn dll_filename(spec_id: &str) -> String {
+/// Returns the **file** name of a generated shared library.
+pub(crate) fn dll_filename(name: impl std::fmt::Display) -> String {
     format!(
-        "{prefix}{name}{suffix}",
+        "{prefix}reth_evm_compiler_{name}{suffix}",
         prefix = std::env::consts::DLL_PREFIX,
-        name = dll_name(spec_id),
         suffix = std::env::consts::DLL_SUFFIX,
     )
 }
@@ -665,7 +668,9 @@ mod tests {
         let root = tmp_dir.path();
 
         let contracts = ContractsConfig::default();
-        let compiled = EvmParCompiler::new(root.into()).unwrap().run_to_end(&contracts).unwrap();
+        let mut compiler = EvmParCompiler::new(root.into()).unwrap();
+        compiler.run_to_end(&contracts).unwrap();
+        let compiled = compiler.linked_contracts().collect::<Vec<_>>();
         assert!(compiled.is_empty());
 
         let meta_path = tmp_dir.path().join("meta.json");
@@ -689,12 +694,15 @@ mod tests {
         let contract = CompilerContract {
             bytecode: Bytes::from(bytecode),
             bytecode_path: None,
-            starting_evm_version: SpecId::FRONTIER_THAWING,
+            first_evm_version: SpecId::FRONTIER_THAWING,
+            last_evm_version: SpecId::CANCUN,
             unsafe_no_stack_bound_checks: false,
         };
         let contracts = ContractsConfig::new(vec![contract.clone()]);
-        let compiled = EvmParCompiler::new(root.into()).unwrap().run_to_end(&contracts).unwrap();
-        assert_eq!(compiled, EvmVersions::enabled().iter().map(|v| (v, hash)).collect::<Vec<_>>());
+        let mut compiler = EvmParCompiler::new(root.into()).unwrap();
+        compiler.run_to_end(&contracts).unwrap();
+        let compiled = compiler.linked_contracts().collect::<Vec<_>>();
+        assert_eq!(compiled, EvmVersions::enabled().iter().map(|v| (v, &hash)).collect::<Vec<_>>());
 
         let meta_path = root.join("meta.json");
         assert!(meta_path.exists());
@@ -754,13 +762,17 @@ mod tests {
         // compiler.save().unwrap();
         compiler.background_tasks = true;
         compiler.force_link = true;
-        let all = compiler.run_to_end(&contracts).unwrap();
+        compiler.run_to_end(&contracts).unwrap();
 
-        let dll_path = root.join(dll_filename(&format!("{spec_id:?}")));
+        let dll_path = root.join(dll_filename_spec_id(spec_id));
         let mut dll = unsafe { crate::EvmCompilerDll::open(&dll_path) }.unwrap();
+        let function = dll.get_function(B256::ZERO).unwrap();
+        assert!(function.is_none());
+        let function = dll.get_function(B256::with_last_byte(1)).unwrap();
+        assert!(function.is_none());
 
-        let hashes = all.iter().filter(|(v, _)| *v == spec_id).map(|(_, x)| x);
-        for hash in hashes {
+        let hashes = compiler.linked_contracts().filter(|(v, _)| *v == spec_id);
+        for (_, hash) in hashes {
             let contract = compiler.metadata.contract(hash);
             let state = contract.state(spec_id);
             assert_eq!(state.get(), ContractState::Linked);

@@ -3,8 +3,8 @@
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DebugArgs, DevArgs, ExperimentalArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
 };
@@ -108,6 +108,10 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[command(flatten)]
     pub pruning: PruningArgs,
 
+    /// All experimental arguments
+    #[command(flatten)]
+    pub experimental: ExperimentalArgs,
+
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
@@ -156,6 +160,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            experimental,
             ext,
         } = self;
 
@@ -173,6 +178,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            experimental,
         };
 
         // Register the prometheus recorder before creating the database,

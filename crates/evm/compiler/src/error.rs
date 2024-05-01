@@ -9,7 +9,7 @@ pub type EvmCompilerResult<T> = Result<T, EvmCompilerError>;
 #[derive(Debug, Error)]
 pub enum EvmCompilerError {
     /// Empty bytecode.
-    #[error("missing or empty bytecode for contract {_0}")]
+    #[error("missing or empty bytecode for contract #{0}")]
     EmptyBytecode(usize),
     /// File system error.
     #[error(transparent)]
@@ -27,6 +27,6 @@ pub enum EvmCompilerError {
     #[error(transparent)]
     Hex(#[from] reth_primitives::hex::FromHexError),
     /// Compilation error.
-    #[error("failed to compile contract with hash {_0}: {_1}")]
+    #[error("failed to compile contract with hash {0}: {1}")]
     Compile(B256, #[source] revm_jit::Error),
 }

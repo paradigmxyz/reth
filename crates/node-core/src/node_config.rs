@@ -2,8 +2,8 @@
 
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, ExperimentalArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
@@ -143,6 +143,9 @@ pub struct NodeConfig {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
+
+    /// All experimental arguments
+    pub experimental: ExperimentalArgs,
 }
 
 impl NodeConfig {
@@ -234,7 +237,7 @@ impl NodeConfig {
     /// Get the network secret from the given data dir
     pub fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         Ok(secret_key)
@@ -299,7 +302,7 @@ impl NodeConfig {
     ) -> eyre::Result<NetworkConfig<C>> {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
-        let default_peers_path = data_dir.known_peers_path();
+        let default_peers_path = data_dir.known_peers();
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
@@ -519,6 +522,7 @@ impl Default for NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
+            experimental: ExperimentalArgs::default(),
         }
     }
 }
