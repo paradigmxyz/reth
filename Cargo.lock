@@ -3108,7 +3108,7 @@ dependencies = [
 [[package]]
 name = "foundry-blob-explorers"
 version = "0.1.0"
-source = "git+https://github.com/shekhirin/block-explorers?branch=alexey/bump-alloy-serde#ad17f2a901da0c2934a50d703d0c3e70a04c263a"
+source = "git+https://github.com/foundry-rs/block-explorers#cd824d3fc53feca59ca6a2fc76f191fbb3ac2011"
 dependencies = [
  "alloy-chains",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy)",

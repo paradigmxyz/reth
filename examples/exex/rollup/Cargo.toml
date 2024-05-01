@@ -28,7 +28,7 @@ tokio.workspace = true
 alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 eyre.workspace = true
-foundry-blob-explorers = { git = "https://github.com/shekhirin/block-explorers", branch = "alexey/bump-alloy-serde" }
+foundry-blob-explorers = { git = "https://github.com/foundry-rs/block-explorers" }
 once_cell.workspace = true
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 serde_json.workspace = true
