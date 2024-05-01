@@ -1,10 +1,12 @@
 //! Reth genesis initialization utility functions.
 
+use reth_codecs::Compact;
 use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_etl::Collector;
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
     stage::StageId, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
@@ -13,9 +15,8 @@ use reth_primitives::{
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
-    DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, StaticFileProviderFactory,
+    BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
+    HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
@@ -307,72 +308,16 @@ pub fn init_from_state_dump<DB: Database>(
         "Initializing state at block"
     );
 
-    let mut total_inserted_accounts = 0;
-    let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
-    let mut chunk_total_byte_len = 0;
-    let mut line = String::new();
 
     // first line can be state root, then it can be used for verifying against computed state root
-    reader.read_line(&mut line)?;
-    let expected_state_root = serde_json::from_str::<StateRoot>(&line)?.root;
-
-    trace!(target: "reth::cli",
-        root=%expected_state_root,
-        "Read state root from file"
-    );
-
-    line.clear();
+    let expected_state_root = parse_state_root(&mut reader)?;
 
     // remaining lines are accounts
+    let collector = parse_accounts(&mut reader)?;
+
+    // write state to db
     let mut provider_rw = factory.provider_rw()?;
-    while let Ok(n) = reader.read_line(&mut line) {
-        chunk_total_byte_len += n;
-        if DEFAULT_SOFT_LIMIT_BYTE_LEN_ACCOUNTS_CHUNK <= chunk_total_byte_len || n == 0 {
-            // acc
-            total_inserted_accounts += accounts.len();
-
-            info!(target: "reth::cli",
-                chunk_total_byte_len,
-                parsed_new_accounts=accounts.len(),
-                total_inserted_accounts,
-                "Writing accounts to db"
-            );
-
-            // reset
-            chunk_total_byte_len = 0;
-
-            // use transaction to insert genesis header
-            insert_genesis_hashes(
-                &provider_rw,
-                accounts.iter().map(|(address, account)| (address, account)),
-            )?;
-            insert_history(
-                &provider_rw,
-                accounts.iter().map(|(address, account)| (address, account)),
-                block,
-            )?;
-
-            // block is already written to static files
-            let tx = provider_rw.deref_mut().tx_mut();
-            insert_state::<DB>(
-                tx,
-                accounts.len(),
-                accounts.iter().map(|(address, account)| (address, account)),
-                block,
-            )?;
-
-            accounts.clear();
-        }
-
-        if n == 0 {
-            break;
-        }
-
-        let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
-        accounts.push((address, genesis_account));
-
-        line.clear();
-    }
+    dump_state(collector, &mut provider_rw, block)?;
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(&provider_rw)?;
@@ -394,6 +339,99 @@ pub fn init_from_state_dump<DB: Database>(
     provider_rw.commit()?;
 
     Ok(hash)
+}
+
+/// Parses and returns expected state root.
+fn parse_state_root(reader: &mut impl BufRead) -> eyre::Result<B256> {
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+
+    let expected_state_root = serde_json::from_str::<StateRoot>(&*line)?.root;
+    trace!(target: "reth::cli",
+        root=%expected_state_root,
+        "Read state root from file"
+    );
+    Ok(expected_state_root)
+}
+
+/// Parses accounts and pushes them to a [`Collector`].
+fn parse_accounts(
+    mut reader: impl BufRead,
+) -> Result<Collector<Address, GenesisAccount>, eyre::Error> {
+    let mut line = String::new();
+
+    let mut collector = Collector::new(500 * 1024 * 1024, None);
+    while let Ok(n) = reader.read_line(&mut line) {
+        if n == 0 {
+            break;
+        }
+
+        let GenesisAccountWithAddress { genesis_account, address } = serde_json::from_str(&line)?;
+        collector.insert(address, genesis_account)?;
+
+        if collector.len() > 0 && collector.len() % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0 {
+            info!(target: "reth::cli",
+                parsed_new_accounts=collector.len(),
+            );
+        }
+
+        line.clear();
+    }
+
+    Ok(collector)
+}
+
+/// Takes a [`Collector`] and processes all accounts.
+fn dump_state<DB: Database>(
+    mut collector: Collector<Address, GenesisAccount>,
+    provider_rw: &mut DatabaseProviderRW<DB>,
+    block: u64,
+) -> Result<(), eyre::Error> {
+    let accounts_len = collector.len();
+    let mut accounts = Vec::with_capacity(AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP);
+    let mut total_inserted_accounts = 0;
+
+    Ok(for (index, entry) in collector.iter()?.enumerate() {
+        let (address, account) = entry?;
+        let (address, _) = Address::from_compact(address.as_slice(), address.len());
+        let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
+
+        accounts.push((address, account));
+
+        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0) ||
+            index == accounts_len - 1
+        {
+            total_inserted_accounts += accounts.len();
+
+            info!(target: "reth::cli",
+                total_inserted_accounts,
+                "Writing accounts to db"
+            );
+
+            // use transaction to insert genesis header
+            insert_genesis_hashes(
+                &*provider_rw,
+                accounts.iter().map(|(address, account)| (address, account)),
+            )?;
+
+            insert_history(
+                &*provider_rw,
+                accounts.iter().map(|(address, account)| (address, account)),
+                block,
+            )?;
+
+            // block is already written to static files
+            let tx = provider_rw.deref_mut().tx_mut();
+            insert_state::<DB>(
+                tx,
+                accounts.len(),
+                accounts.iter().map(|(address, account)| (address, account)),
+                block,
+            )?;
+
+            accounts.clear();
+        }
+    })
 }
 
 /// Computes the state root (from scratch) based on the accounts and storages present in the
