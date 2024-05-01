@@ -24,14 +24,17 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, Self::DefaultExternalContext<'a>, DB>;
+    fn evm<'a, DB: Database + 'a>(
+        &'a self,
+        db: DB,
+    ) -> Evm<'a, Self::DefaultExternalContext<'a>, DB>;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
     ///
     /// This will preserve any handler modifications
     fn evm_with_env<'a, DB: Database + 'a>(
-        &self,
+        &'a self,
         db: DB,
         env: EnvWithHandlerCfg,
     ) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
@@ -48,7 +51,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     ///
     /// This will preserve any handler modifications
     fn evm_with_env_and_inspector<'a, DB, I>(
-        &self,
+        &'a self,
         db: DB,
         env: EnvWithHandlerCfg,
         inspector: I,
@@ -68,7 +71,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Caution: This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is
     /// up to the caller to call an appropriate method to fill the transaction and block
     /// environment before executing any transactions using the provided EVM.
-    fn evm_with_inspector<'a, DB, I>(&self, db: DB, inspector: I) -> Evm<'a, I, DB>
+    fn evm_with_inspector<'a, DB, I>(&'a self, db: DB, inspector: I) -> Evm<'a, I, DB>
     where
         DB: Database + 'a,
         I: GetInspector<DB>,

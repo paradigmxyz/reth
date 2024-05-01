@@ -46,11 +46,8 @@ where
         sp: SP,
     ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a> {
         let database_state = StateProviderDatabase::new(sp);
-        let mut evm = EVMProcessor::new_with_db(
-            self.chain_spec.clone(),
-            database_state,
-            self.evm_config.clone(),
-        );
+        let mut evm =
+            EVMProcessor::new_with_db(self.chain_spec.clone(), database_state, &self.evm_config);
         if let Some(stack) = &self.stack {
             evm.set_stack(stack.clone());
         }
