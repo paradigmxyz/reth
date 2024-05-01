@@ -451,7 +451,7 @@ impl AuthServerHandle {
 }
 
 /// A layer that adds a new JWT token to every request using JwtSecretService.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct JwtSecretLayer {
     secret: JwtSecret,
 }
@@ -462,7 +462,7 @@ impl JwtSecretLayer {
     }
 }
 
-impl<S: Clone> Layer<S> for JwtSecretLayer {
+impl<S> Layer<S> for JwtSecretLayer {
     type Service = JwtSecretService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
@@ -472,19 +472,19 @@ impl<S: Clone> Layer<S> for JwtSecretLayer {
 
 /// Automatically authenticates every client request with the given `secret`.
 #[derive(Debug, Clone)]
-pub struct JwtSecretService<S: Clone> {
+pub struct JwtSecretService<S> {
     secret: JwtSecret,
     inner: S,
 }
 
-impl<S: Clone> JwtSecretService<S> {
+impl<S> JwtSecretService<S> {
     fn new(secret: JwtSecret, inner: S) -> Self {
         Self { secret, inner }
     }
 }
 impl<S, B> Service<hyper::Request<B>> for JwtSecretService<S>
 where
-    S: Clone + Service<hyper::Request<B>>,
+    S: Service<hyper::Request<B>>,
 {
     type Response = S::Response;
     type Error = S::Error;
