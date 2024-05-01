@@ -927,7 +927,7 @@ where
     ///
     /// If the newest head is not invalid, then this will trigger a new pipeline run to sync the gap
     ///
-    /// See [Self::forkchoice_updated] and [BlockchainTreeEngine::make_canonical].
+    /// See [Self::on_forkchoice_updated] and [BlockchainTreeEngine::make_canonical].
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
