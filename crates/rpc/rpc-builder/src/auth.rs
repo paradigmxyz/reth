@@ -5,7 +5,7 @@ use crate::{
     EthConfig,
 };
 
-use hyper::header::{HeaderValue, AUTHORIZATION};
+use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     core::RegisterMethodError,
@@ -28,18 +28,14 @@ use reth_rpc::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig, FeeHistoryCache,
         FeeHistoryCacheConfig,
     },
-    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
-    JwtAuthValidator, JwtSecret,
+    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, EngineEthApi, EthApi,
+    EthFilter, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::servers::*;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    task::{Context, Poll},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-use tower::{layer::util::Identity, Layer, Service};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use tower::layer::util::Identity;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
@@ -400,9 +396,11 @@ impl AuthServerHandle {
     }
 
     /// Returns a http client connected to the server.
-    pub fn http_client(&self) -> jsonrpsee::http_client::HttpClient<JwtSecretService<HttpBackend>> {
+    pub fn http_client(
+        &self,
+    ) -> jsonrpsee::http_client::HttpClient<AuthClientService<HttpBackend>> {
         // Create a middleware that adds a new JWT token to every request.
-        let secret_layer = JwtSecretLayer::new(self.secret.clone());
+        let secret_layer = AuthClientLayer::new(self.secret.clone());
         let middleware = tower::ServiceBuilder::default().layer(secret_layer);
         jsonrpsee::http_client::HttpClientBuilder::default()
             .set_http_middleware(middleware)
@@ -448,73 +446,4 @@ impl AuthServerHandle {
     pub fn ipc_endpoint(&self) -> Option<String> {
         self.ipc_endpoint.clone()
     }
-}
-
-/// A layer that adds a new JWT token to every request using JwtSecretService.
-#[derive(Debug)]
-struct JwtSecretLayer {
-    secret: JwtSecret,
-}
-
-impl JwtSecretLayer {
-    fn new(secret: JwtSecret) -> Self {
-        Self { secret }
-    }
-}
-
-impl<S> Layer<S> for JwtSecretLayer {
-    type Service = JwtSecretService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        JwtSecretService::new(self.secret.clone(), inner)
-    }
-}
-
-/// Automatically authenticates every client request with the given `secret`.
-#[derive(Debug, Clone)]
-pub struct JwtSecretService<S> {
-    secret: JwtSecret,
-    inner: S,
-}
-
-impl<S> JwtSecretService<S> {
-    fn new(secret: JwtSecret, inner: S) -> Self {
-        Self { secret, inner }
-    }
-}
-impl<S, B> Service<hyper::Request<B>> for JwtSecretService<S>
-where
-    S: Service<hyper::Request<B>>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut request: hyper::Request<B>) -> Self::Future {
-        request.headers_mut().insert(AUTHORIZATION, secret_to_bearer_header(&self.secret));
-        self.inner.call(request)
-    }
-}
-
-/// Helper function to convert a secret into a Bearer auth header value with claims according to
-/// <https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims>.
-/// The token is valid for 60 seconds.
-pub(crate) fn secret_to_bearer_header(secret: &JwtSecret) -> HeaderValue {
-    format!(
-        "Bearer {}",
-        secret
-            .encode(&Claims {
-                iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                    Duration::from_secs(60))
-                .as_secs(),
-                exp: None,
-            })
-            .unwrap()
-    )
-    .parse()
-    .unwrap()
 }
