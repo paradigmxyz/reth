@@ -121,6 +121,8 @@ impl ImportReceiptsCommand {
                 Some(static_file_producer),
                 OriginalValuesKnown::Yes,
             )?;
+
+            static_file_provider.commit()?
         }
 
         let total_imported_receipts = tx.entries::<tables::Receipts>()?;
