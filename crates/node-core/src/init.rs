@@ -1,6 +1,7 @@
 //! Reth genesis initialization utility functions.
 
 use reth_codecs::Compact;
+use reth_config::config::EtlConfig;
 use reth_db::{
     database::Database,
     tables,
@@ -15,8 +16,9 @@ use reth_primitives::{
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BundleStateWithReceipts, ChainSpecProvider, DatabaseProviderRW, HashingWriter,
-    HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory, StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
+    DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
+    ProviderFactory, StaticFileProviderFactory,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
@@ -298,6 +300,7 @@ pub fn insert_genesis_header<DB: Database>(
 pub fn init_from_state_dump<DB: Database>(
     mut reader: impl BufRead,
     factory: ProviderFactory<DB>,
+    etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     let block = factory.last_block_number()?;
     let hash = factory.block_hash(block)?.unwrap();
@@ -308,12 +311,11 @@ pub fn init_from_state_dump<DB: Database>(
         "Initializing state at block"
     );
 
-
     // first line can be state root, then it can be used for verifying against computed state root
     let expected_state_root = parse_state_root(&mut reader)?;
 
     // remaining lines are accounts
-    let collector = parse_accounts(&mut reader)?;
+    let collector = parse_accounts(&mut reader, etl_config)?;
 
     // write state to db
     let mut provider_rw = factory.provider_rw()?;
@@ -357,10 +359,11 @@ fn parse_state_root(reader: &mut impl BufRead) -> eyre::Result<B256> {
 /// Parses accounts and pushes them to a [`Collector`].
 fn parse_accounts(
     mut reader: impl BufRead,
+    etl_config: EtlConfig,
 ) -> Result<Collector<Address, GenesisAccount>, eyre::Error> {
     let mut line = String::new();
+    let mut collector = Collector::new(etl_config.file_size, etl_config.dir);
 
-    let mut collector = Collector::new(500 * 1024 * 1024, None);
     while let Ok(n) = reader.read_line(&mut line) {
         if n == 0 {
             break;
