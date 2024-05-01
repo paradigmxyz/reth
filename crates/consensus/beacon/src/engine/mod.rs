@@ -1763,7 +1763,6 @@ where
                         EngineEventOutcome::Processed => {}
                         EngineEventOutcome::ReachedMaxBlock => return Poll::Ready(Ok(())),
                     };
-                    continue
                 }
 
                 // Process one incoming message from the CL. We don't drain the messages right away,
