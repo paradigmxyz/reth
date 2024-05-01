@@ -317,7 +317,7 @@ where
         // Check if the provided range is the subset of the existing range.
         let is_current_range_subset = self.download_range.contains(range.start()) &&
             *range.end() == *self.download_range.end();
-        if is_current_range_subset && !self.is_terminated() {
+        if is_current_range_subset {
             tracing::trace!(target: "downloaders::bodies", ?range, "Download range already in progress");
             // The current range already includes requested.
             return Ok(())
@@ -815,59 +815,6 @@ mod tests {
         assert_matches!(
             downloader.next().await,
             Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
-        );
-    }
-
-    // Check that the downloader can re-download a subset of the range
-    #[tokio::test]
-    async fn can_download_existing_subset_range_after_termination() {
-        // Generate some random blocks
-        let db = create_test_rw_db();
-        let (headers, mut bodies) = generate_bodies(0..=199);
-
-        let repeated_number = 99u64;
-        let repeated_header = headers.get(repeated_number as usize).expect("exists").hash();
-        let repeated_body = bodies.get(&repeated_header).expect("exists").clone();
-        insert_headers(db.db(), &headers);
-
-        let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
-        let (_static_dir, static_dir_path) = create_test_static_files_dir();
-
-        let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
-        );
-
-        // Set and download the first range
-        downloader.set_download_range(0..=99).expect("failed to set download range");
-        assert_matches!(
-            downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
-        );
-
-        // Check that the stream is terminated
-        assert!(downloader.next().await.is_none());
-
-        // Set and download the second range
-        bodies.insert(repeated_header, repeated_body);
-        downloader.client =
-            Arc::new(Arc::new(TestBodiesClient::default().with_bodies(bodies.clone())));
-        downloader
-            .set_download_range(repeated_number..=repeated_number)
-            .expect("failed to set download range");
-        assert_matches!(
-            downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(99).take(1), &mut bodies))
-        );
-
-        // Resume with the rest
-        downloader
-            .set_download_range(repeated_number + 1..=199)
-            .expect("failed to set download range");
-        assert_matches!(
-            downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
         );
     }
 }
