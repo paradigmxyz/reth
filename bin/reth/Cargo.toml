@@ -43,7 +43,7 @@ reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-prune.workspace = true
-reth-static-file = { workspace = true, features = ["clap"] }
+reth-static-file = { workspace = true }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
@@ -79,7 +79,9 @@ rand.workspace = true
 # tui
 comfy-table = "7.0"
 crossterm = "0.27.0"
-ratatui = {  version = "0.26", default-features = false, features = ["crossterm"] }
+ratatui = { version = "0.26", default-features = false, features = [
+    "crossterm",
+] }
 human_bytes = "0.4.1"
 
 # async

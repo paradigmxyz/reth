@@ -119,9 +119,20 @@ const MIN_PACKET_SIZE: usize = 32 + 65 + 1;
 /// Concurrency factor for `FindNode` requests to pick `ALPHA` closest nodes, <https://github.com/ethereum/devp2p/blob/master/discv4.md#recursive-lookup>
 const ALPHA: usize = 3;
 
-/// Maximum number of nodes to ping at concurrently. 2 full `Neighbours` responses with 16 _new_
-/// nodes. This will apply some backpressure in recursive lookups.
+/// Maximum number of nodes to ping at concurrently.
+///
+/// This corresponds to 2 full `Neighbours` responses with 16 _new_ nodes. This will apply some
+/// backpressure in recursive lookups.
 const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
+
+/// Maximum number of pings to keep queued.
+///
+/// If we are currently sending too many pings, any new pings will be queued. To prevent unbounded
+/// growth of the queue, the queue has a maximum capacity, after which any additional pings will be
+/// discarded.
+///
+/// This corresponds to 2 full `Neighbours` responses with 16 new nodes.
+const MAX_QUEUED_PINGS: usize = 2 * MAX_NODES_PER_BUCKET;
 
 /// The size of the datagram is limited [`MAX_PACKET_SIZE`], 16 nodes, as the discv4 specifies don't
 /// fit in one datagram. The safe number of nodes that always fit in a datagram is 12, with worst
@@ -570,7 +581,7 @@ impl Discv4Service {
             _tasks: tasks,
             ingress: ingress_rx,
             egress: egress_tx,
-            queued_pings: Default::default(),
+            queued_pings: VecDeque::with_capacity(MAX_QUEUED_PINGS),
             pending_pings: Default::default(),
             pending_lookup: Default::default(),
             pending_find_nodes: Default::default(),
@@ -1131,7 +1142,7 @@ impl Discv4Service {
 
         if self.pending_pings.len() < MAX_NODES_PING {
             self.send_ping(node, reason);
-        } else {
+        } else if self.queued_pings.len() < MAX_QUEUED_PINGS {
             self.queued_pings.push_back((node, reason));
         }
     }
@@ -1376,7 +1387,16 @@ impl Discv4Service {
                 BucketEntry::SelfEntry => {
                     // we received our own node entry
                 }
-                _ => self.find_node(&closest, ctx.clone()),
+                BucketEntry::Present(mut entry, _) => {
+                    if entry.value_mut().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
+                    }
+                }
+                BucketEntry::Pending(mut entry, _) => {
+                    if entry.value().has_endpoint_proof {
+                        self.find_node(&closest, ctx.clone());
+                    }
+                }
             }
         }
     }
@@ -1421,7 +1441,7 @@ impl Discv4Service {
 
         let mut failed_lookups = Vec::new();
         self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
-            if now.duration_since(*lookup_sent_at) > self.config.ping_expiration {
+            if now.duration_since(*lookup_sent_at) > self.config.request_timeout {
                 failed_lookups.push(*node_id);
                 return false
             }
@@ -1441,7 +1461,7 @@ impl Discv4Service {
     fn evict_failed_neighbours(&mut self, now: Instant) {
         let mut failed_neighbours = Vec::new();
         self.pending_find_nodes.retain(|node_id, find_node_request| {
-            if now.duration_since(find_node_request.sent_at) > self.config.request_timeout {
+            if now.duration_since(find_node_request.sent_at) > self.config.neighbours_expiration {
                 if !find_node_request.answered {
                     // node actually responded but with fewer entries than expected, but we don't
                     // treat this as an hard error since it responded.
@@ -2549,6 +2569,7 @@ mod tests {
         let config = Discv4Config::builder()
             .request_timeout(Duration::from_millis(200))
             .ping_expiration(Duration::from_millis(200))
+            .lookup_neighbours_expiration(Duration::from_millis(200))
             .add_eip868_pair("eth", fork_id)
             .build();
         let (_disv4, mut service) = create_discv4_with_config(config).await;

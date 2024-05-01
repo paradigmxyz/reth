@@ -33,7 +33,7 @@ pub mod enr;
 pub mod error;
 pub mod filter;
 pub mod metrics;
-pub mod network_key;
+pub mod network_stack_id;
 
 pub use discv5::{self, IpMode};
 
@@ -41,6 +41,7 @@ pub use config::{BootNode, Config, ConfigBuilder};
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
 pub use filter::{FilterOutcome, MustNotIncludeKeys};
+pub use network_stack_id::NetworkStackId;
 
 use metrics::{DiscoveredPeersMetrics, Discv5Metrics};
 
@@ -75,7 +76,7 @@ pub struct Discv5 {
     /// [`IpMode`] of the the node.
     ip_mode: IpMode,
     /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
-    fork_key: &'static [u8],
+    fork_key: Option<&'static [u8]>,
     /// Filter applied to a discovered peers before passing it up to app.
     discovered_peer_filter: MustNotIncludeKeys,
     /// Metrics for underlying [`discv5::Discv5`] node and filtered discovered peers.
@@ -217,7 +218,7 @@ impl Discv5 {
     fn build_local_enr(
         sk: &SecretKey,
         config: &Config,
-    ) -> (Enr<SecretKey>, NodeRecord, &'static [u8], IpMode) {
+    ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
         let mut builder = discv5::enr::Enr::builder();
 
         let Config { discv5_config, fork, tcp_port, other_enr_kv_pairs, .. } = config;
@@ -258,8 +259,10 @@ impl Discv5 {
         };
 
         // identifies which network node is on
-        let (network, fork_value) = fork;
-        builder.add_value_rlp(network, alloy_rlp::encode(fork_value).into());
+        let network_stack_id = fork.as_ref().map(|(network_stack_id, fork_value)| {
+            builder.add_value_rlp(network_stack_id, alloy_rlp::encode(fork_value).into());
+            *network_stack_id
+        });
 
         // add other data
         for (key, value) in other_enr_kv_pairs {
@@ -273,7 +276,7 @@ impl Discv5 {
         // backwards compatible enr
         let bc_enr = NodeRecord::from_secret_key(socket, sk);
 
-        (enr, bc_enr, network, ip_mode)
+        (enr, bc_enr, network_stack_id, ip_mode)
     }
 
     /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
@@ -438,8 +441,10 @@ impl Discv5 {
             return None
         }
 
-        let fork_id =
-            (self.fork_key == network_key::ETH).then(|| self.get_fork_id(enr).ok()).flatten();
+        // todo: extend for all network stacks in reth-network rlpx logic
+        let fork_id = (self.fork_key == Some(NetworkStackId::ETH))
+            .then(|| self.get_fork_id(enr).ok())
+            .flatten();
 
         trace!(target: "net::discovery::discv5",
             ?fork_id,
@@ -483,12 +488,13 @@ impl Discv5 {
         self.discovered_peer_filter.filter(enr)
     }
 
-    /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr), if field is set.
+    /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr) w.r.t. the local node's network
+    /// stack, if field is set.
     fn get_fork_id<K: discv5::enr::EnrKey>(
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {
-        let key = self.fork_key;
+        let Some(key) = self.fork_key else { return Err(Error::NetworkStackIdNotConfigured) };
         let fork_id = enr
             .get_decodable::<EnrForkIdEntry>(key)
             .ok_or(Error::ForkMissing(key))?
@@ -519,7 +525,7 @@ impl Discv5 {
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
-    pub fn fork_key(&self) -> &[u8] {
+    pub fn fork_key(&self) -> Option<&[u8]> {
         self.fork_key
     }
 }
@@ -625,7 +631,7 @@ mod tests {
                 .unwrap(),
             ),
             ip_mode: IpMode::Ip4,
-            fork_key: b"noop",
+            fork_key: None,
             discovered_peer_filter: MustNotIncludeKeys::default(),
             metrics: Discv5Metrics::default(),
         }
@@ -831,13 +837,16 @@ mod tests {
         const TCP_PORT: u16 = 30303;
         let fork_id = MAINNET.latest_fork_id();
 
-        let config = Config::builder(TCP_PORT).fork(network_key::ETH, fork_id).build();
+        let config = Config::builder(TCP_PORT).fork(NetworkStackId::ETH, fork_id).build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = Discv5::build_local_enr(&sk, &config);
 
-        let decoded_fork_id =
-            enr.get_decodable::<EnrForkIdEntry>(network_key::ETH).unwrap().map(Into::into).unwrap();
+        let decoded_fork_id = enr
+            .get_decodable::<EnrForkIdEntry>(NetworkStackId::ETH)
+            .unwrap()
+            .map(Into::into)
+            .unwrap();
 
         assert_eq!(fork_id, decoded_fork_id);
         assert_eq!(TCP_PORT, enr.tcp4().unwrap()); // listen config is defaulting to ip mode ipv4

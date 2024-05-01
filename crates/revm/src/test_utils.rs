@@ -18,11 +18,12 @@ use std::collections::HashMap;
 #[cfg(feature = "optimism")]
 use {
     reth_primitives::revm::env::fill_op_tx_env,
-    revm::{
-        inspector_handle_register,
-        primitives::{HandlerCfg, SpecId},
-        Database, Evm, EvmBuilder, GetInspector,
-    },
+    revm::{inspector_handle_register, GetInspector},
+};
+
+use revm::{
+    primitives::{HandlerCfg, SpecId},
+    Database, Evm, EvmBuilder,
 };
 
 /// Mock state for testing
@@ -158,9 +159,13 @@ impl ConfigureEvmEnv for TestEvmConfig {
 }
 
 impl ConfigureEvm for TestEvmConfig {
-    #[cfg(feature = "optimism")]
+    type DefaultExternalContext<'a> = ();
+
     fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
+        #[cfg(feature = "optimism")]
         let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST, is_optimism: true };
+        #[cfg(not(feature = "optimism"))]
+        let handler_cfg = HandlerCfg { spec_id: SpecId::LATEST };
         EvmBuilder::default().with_db(db).with_handler_cfg(handler_cfg).build()
     }
 

@@ -14,6 +14,7 @@ use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, ChainSpec, Head, Header, Transaction, U256,
 };
+use reth_revm::{Database, EvmBuilder};
 pub mod execute;
 
 /// Ethereum-related EVM configuration.
@@ -55,7 +56,16 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvm for EthEvmConfig {}
+impl ConfigureEvm for EthEvmConfig {
+    type DefaultExternalContext<'a> = ();
+
+    fn evm<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+    ) -> reth_revm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
+        EvmBuilder::default().with_db(db).build()
+    }
+}
 
 #[cfg(test)]
 mod tests {

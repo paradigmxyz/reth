@@ -443,6 +443,7 @@ where
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }
+
     /// Executes the requests again after an out of gas error to check if the error is gas related
     /// or not
     #[inline]

@@ -25,7 +25,6 @@ tokio-stream.workspace = true
 
 # misc
 tracing.workspace = true
-clap = { workspace = true, features = ["derive"], optional = true }
 rayon.workspace = true
 parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
 
@@ -37,4 +36,3 @@ assert_matches.workspace = true
 tempfile.workspace = true
 
 [features]
-clap = ["dep:clap"]

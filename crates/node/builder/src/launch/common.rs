@@ -17,7 +17,7 @@ use reth_node_core::{
     node_config::NodeConfig,
 };
 use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, PruneModes, B256};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::PrunerBuilder;
 use reth_rpc::JwtSecret;
 use reth_static_file::StaticFileProducer;

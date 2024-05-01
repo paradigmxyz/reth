@@ -10,7 +10,9 @@ use reth_primitives::{
     BlockNumber, FinishedExExHeight, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
     PruneSegment, StaticFileSegment,
 };
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
+use reth_provider::{
+    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
+};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,

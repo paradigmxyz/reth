@@ -32,7 +32,7 @@ pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 
-pub use signature::Signature;
+pub use signature::{extract_chain_id, Signature};
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -1740,18 +1740,9 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
                         // If the transaction type is Legacy, adjust the v component of the
                         // signature according to the Ethereum specification
                         TxType::Legacy => {
-                            // Calculate the new v value based on the EIP-155 formula:
-                            // v = {0,1} + CHAIN_ID * 2 + 35
-                            !(signature.v -
-                                U256::from(if let Some(chain_id) = transaction.chain_id() {
-                                    // If CHAIN_ID is available, calculate the new v value
-                                    // accordingly
-                                    chain_id.saturating_mul(2).saturating_add(35)
-                                } else {
-                                    // If CHAIN_ID is not available, set v = {0,1} + 27
-                                    27
-                                }))
-                            .is_zero()
+                            extract_chain_id(signature.v.to())
+                                .map_err(|_| ConversionError::InvalidSignature)?
+                                .0
                         }
                         _ => !signature.v.is_zero(),
                     }
@@ -1875,9 +1866,7 @@ mod tests {
             nonce: 2,
             gas_price: 1000000000,
             gas_limit: 100000,
-            to: TxKind::Call(
-                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-            ),
+            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
@@ -1897,9 +1886,7 @@ mod tests {
             nonce: 1u64,
             gas_price: 1000000000,
             gas_limit: 100000u64,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
-            )),
+            to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(693361000000000u64),
             input: Default::default(),
         });
@@ -1918,9 +1905,7 @@ mod tests {
             nonce: 3,
             gas_price: 2000000000,
             gas_limit: 10000000,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
-            )),
+            to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
@@ -1940,9 +1925,7 @@ mod tests {
             max_priority_fee_per_gas: 1500000000,
             max_fee_per_gas: 1500000013,
             gas_limit: 21000,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("61815774383099e24810ab832a5b2a5425c154d5")[..],
-            )),
+            to: Address::from_slice(&hex!("61815774383099e24810ab832a5b2a5425c154d5")[..]).into(),
             value: U256::from(3000000000000000000u64),
             input: Default::default(),
             access_list: Default::default(),
@@ -1962,9 +1945,7 @@ mod tests {
             nonce: 15,
             gas_price: 2200000000,
             gas_limit: 34811,
-            to: TxKind::Call(Address::from_slice(
-                &hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..],
-            )),
+            to: Address::from_slice(&hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..]).into(),
             value: U256::from(1234),
             input: Bytes::default(),
         });
@@ -2251,9 +2232,7 @@ mod tests {
                 nonce: 2,
                 gas_price: 1000000000,
                 gas_limit: 100000,
-                to: TxKind::Call(
-                    Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-                ),
+                to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
                 value: U256::from(1000000000000000u64),
                 input: Bytes::from(input),
             });
@@ -2300,9 +2279,7 @@ mod tests {
             nonce: 2,
             gas_price: 1000000000,
             gas_limit: 100000,
-            to: TxKind::Call(
-                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-            ),
+            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::from(vec![3u8; 64]),
         });
