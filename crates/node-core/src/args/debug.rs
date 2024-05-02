@@ -64,7 +64,7 @@ pub struct DebugArgs {
     pub skip_fcu: Option<usize>,
 
     /// If provided, the engine will skip `n` consecutive new payloads.
-    #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
+    #[arg(long = "debug.skip-new-payload", help_heading = "Debug")]
     pub skip_new_payload: Option<usize>,
 
     /// The path to store engine API messages at.

@@ -268,7 +268,7 @@ where
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
             // Store messages _after_ skipping so that `replay-engine` command
-            // would replay the  messages that were observed by the engine
+            // would replay only the messages that were observed by the engine
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
