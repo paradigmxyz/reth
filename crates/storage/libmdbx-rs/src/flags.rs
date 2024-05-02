@@ -25,7 +25,7 @@ pub enum SyncMode {
     ///
     /// [SyncMode::UtterlyNoSync] the [SyncMode::SafeNoSync] flag disable similarly flush system
     /// buffers to disk when committing a transaction. But there is a huge difference in how
-    /// are recycled the MVCC static_files corresponding to previous "steady" transactions (see
+    /// are recycled the MVCC snapshots corresponding to previous "steady" transactions (see
     /// below).
     ///
     /// With [crate::EnvironmentKind::WriteMap] the [SyncMode::SafeNoSync] instructs MDBX to use

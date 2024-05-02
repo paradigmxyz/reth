@@ -48,6 +48,7 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
+tokio-stream.workspace = true
 
 ## misc
 aquamarine.workspace = true
