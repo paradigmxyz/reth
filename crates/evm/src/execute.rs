@@ -165,7 +165,7 @@ mod tests {
             TestExecutor(PhantomData)
         }
 
-        fn batch_executor<DB>(&self, _db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+        fn batch_executor<DB>(&self, _db: DB, _prune_modes: PruneModes) -> Self::BatchExecutor<DB>
         where
             DB: Database<Error = ProviderError>,
         {

@@ -6869,6 +6869,7 @@ dependencies = [
 name = "reth-evm"
 version = "0.2.0-beta.6"
 dependencies = [
+ "parking_lot 0.12.2",
  "reth-interfaces",
  "reth-primitives",
  "revm",

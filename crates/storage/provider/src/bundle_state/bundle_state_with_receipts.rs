@@ -43,6 +43,14 @@ impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
     }
 }
 
+// TODO(mattsse): unify the types, currently there's a cyclic dependency between
+impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
+    fn from(value: BundleStateWithReceipts) -> Self {
+        let BundleStateWithReceipts { bundle, receipts, first_block } = value;
+        Self { bundle, receipts, first_block }
+    }
+}
+
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit =
     HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;

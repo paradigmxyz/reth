@@ -14,6 +14,10 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId,
 
 pub mod execute;
 
+#[cfg(any(test, feature = "test-utils"))]
+/// test helpers for mocking executor
+pub mod test_utils;
+
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Associated type for the default external context that should be configured for the EVM.

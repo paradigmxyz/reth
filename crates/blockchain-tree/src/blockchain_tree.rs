@@ -1274,7 +1274,8 @@ mod tests {
     use linked_hash_set::LinkedHashSet;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm::test_utils::MockExecutorProvider;
+    use reth_evm_ethereum::execute::EthExecutorProvider;
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::proofs::calculate_receipt_root;
     #[cfg(feature = "optimism")]
@@ -1290,19 +1291,15 @@ mod tests {
         MAINNET,
     };
     use reth_provider::{
-        test_utils::{
-            blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
-            TestExecutorFactory,
-        },
+        test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
         ProviderFactory,
     };
-    use reth_revm::EvmProcessorFactory;
     use reth_trie::StateRoot;
     use std::collections::HashMap;
 
     fn setup_externals(
         exec_res: Vec<BundleStateWithReceipts>,
-    ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, TestExecutorFactory> {
+    ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1312,7 +1309,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory = TestExecutorFactory::default();
+        let executor_factory = MockExecutorProvider::default();
         executor_factory.extend(exec_res);
 
         TreeExternals::new(provider_factory, consensus, executor_factory)
@@ -1396,7 +1393,7 @@ mod tests {
             self
         }
 
-        fn assert<DB: Database, EF: ExecutorFactory>(self, tree: &BlockchainTree<DB, EF>) {
+        fn assert<DB: Database, E: BlockExecutorProvider>(self, tree: &BlockchainTree<DB, E>) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.state.chains.len(), chain_num);
             }
@@ -1440,8 +1437,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory =
-            EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
+        let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
 
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
