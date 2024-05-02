@@ -41,24 +41,24 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
-        let next = ready!(this.stream.poll_next_unpin(cx));
-        match next {
-            Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }) => {
-                if this.skipped < this.threshold {
-                    *this.skipped += 1;
-                    tracing::warn!(target: "engine::intercept", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
-                    let _ = tx.send(Ok(OnForkChoiceUpdated::syncing()));
-                    Poll::Pending
-                } else {
-                    *this.skipped = 0;
-                    Poll::Ready(Some(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        tx,
-                    }))
+
+        loop {
+            let next = ready!(this.stream.poll_next_unpin(cx));
+            let item = match next {
+                Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx }) => {
+                    if this.skipped < this.threshold {
+                        *this.skipped += 1;
+                        tracing::warn!(target: "engine::intercept", ?state, ?payload_attrs, threshold=this.threshold, skipped=this.skipped, "Skipping FCU");
+                        let _ = tx.send(Ok(OnForkChoiceUpdated::syncing()));
+                        continue
+                    } else {
+                        *this.skipped = 0;
+                        Some(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx })
+                    }
                 }
-            }
-            next => Poll::Ready(next),
+                next => next,
+            };
+            return Poll::Ready(item)
         }
     }
 }

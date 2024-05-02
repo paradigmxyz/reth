@@ -146,7 +146,7 @@ where
         let mut this = self.project();
         let next = ready!(this.stream.poll_next_unpin(cx));
         if let Some(msg) = &next {
-            if let Err(error) = this.store.on_message(&msg, SystemTime::now()) {
+            if let Err(error) = this.store.on_message(msg, SystemTime::now()) {
                 error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
             }
         }
