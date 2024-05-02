@@ -387,9 +387,7 @@ pub trait EthTransactions: Send + Sync {
     /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
     async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
     where
-        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R>
-            + Send
-            + 'static,
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Retrieves the transaction if it exists and returns its trace.
