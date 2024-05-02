@@ -100,7 +100,7 @@ where
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.data_dir();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
@@ -114,7 +114,7 @@ where
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, ctx.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions_path();
+        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {

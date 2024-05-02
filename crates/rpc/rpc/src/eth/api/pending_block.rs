@@ -52,8 +52,8 @@ impl PendingBlockEnv {
 
         let parent_hash = origin.build_target_hash();
         let state_provider = client.history_by_block_hash(parent_hash)?;
-        let state = StateProviderDatabase::new(&state_provider);
-        let mut db = State::builder().with_database(Box::new(state)).with_bundle_update().build();
+        let state = StateProviderDatabase::new(state_provider);
+        let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
@@ -230,6 +230,7 @@ impl PendingBlockEnv {
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
+        let state_provider = &db.database;
         let state_root = state_provider.state_root(bundle.state())?;
 
         // create the block header

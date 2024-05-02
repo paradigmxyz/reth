@@ -242,10 +242,11 @@ mod tests {
         chain_spec: Arc<ChainSpec>,
         db: StateProviderTest,
     ) -> EVMProcessor<'a, TestEvmConfig> {
+        static CONFIG: std::sync::OnceLock<TestEvmConfig> = std::sync::OnceLock::new();
         let mut executor = EVMProcessor::new_with_db(
             chain_spec,
             StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
+            CONFIG.get_or_init(TestEvmConfig::default),
         );
         executor.evm.context.evm.db.load_cache_account(L1_BLOCK_CONTRACT).unwrap();
         executor

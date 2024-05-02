@@ -1,12 +1,15 @@
 //! CLI definition and entrypoint to executable
 
+#[cfg(feature = "optimism")]
+use crate::commands::import_op;
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state, node, node::NoArgs,
+        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state,
+        node::{self, NoArgs},
         p2p, recover, stage, test_vectors,
     },
     version::{LONG_VERSION, SHORT_VERSION},
@@ -147,6 +150,8 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            #[cfg(feature = "optimism")]
+            Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
@@ -183,6 +188,10 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
+    /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
+    #[cfg(feature = "optimism")]
+    #[command(name = "import-op")]
+    ImportOp(import_op::ImportOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
