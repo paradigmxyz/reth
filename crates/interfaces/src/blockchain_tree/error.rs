@@ -88,7 +88,7 @@ impl CanonicalError {
     }
 
     /// Returns `Some(BlockNumber)` if the underlying error matches
-    /// [CanonicalError::OptimisticCanonicalRevert].
+    /// [CanonicalError::OptimisticTargetRevert].
     pub fn optimistic_revert_block_number(&self) -> Option<BlockNumber> {
         match self {
             CanonicalError::OptimisticTargetRevert(block_number) => Some(*block_number),
