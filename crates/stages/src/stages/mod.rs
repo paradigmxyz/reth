@@ -50,7 +50,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         AccountsHistory, DatabaseEnv,
     };
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
     use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
@@ -61,7 +61,6 @@ mod tests {
         providers::StaticFileWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
         StorageReader,
     };
-    use reth_revm::EvmProcessorFactory;
     use reth_stages_api::{ExecInput, Stage};
     use std::sync::Arc;
 
@@ -140,10 +139,9 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EvmProcessorFactory::new(
-                    Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
-                    EthEvmConfig::default(),
-                ),
+                EthExecutorProvider::ethereum(Arc::new(
+                    ChainSpecBuilder::mainnet().berlin_activated().build(),
+                )),
                 ExecutionStageThresholds {
                     max_blocks: Some(100),
                     max_changes: None,

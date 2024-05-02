@@ -623,7 +623,8 @@ mod tests {
     use reth_interfaces::executor::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
-        Bytecode, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry, B256, U256,
+        Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
+        B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
@@ -632,8 +633,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {
+        let executor_provider = EthExecutorProvider::ethereum(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        ));
         ExecutionStage::new(
-            EthExecutorProvider::mainnet(),
+            executor_provider,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
