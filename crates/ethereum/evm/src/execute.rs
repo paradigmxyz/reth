@@ -130,7 +130,7 @@ where
     ///
     /// It does __not__ apply post-execution changes.
     fn execute_pre_and_transactions<Ext, DB>(
-        &mut self,
+        &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
@@ -466,7 +466,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EthEvmConfig;
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},

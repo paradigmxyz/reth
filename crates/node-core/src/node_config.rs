@@ -234,7 +234,7 @@ impl NodeConfig {
     /// Get the network secret from the given data dir
     pub fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         Ok(secret_key)
@@ -262,15 +262,15 @@ impl NodeConfig {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> eyre::Result<Option<PruneConfig>> {
-        self.pruning.prune_config(Arc::clone(&self.chain))
+    pub fn prune_config(&self) -> Option<PruneConfig> {
+        self.pruning.prune_config(&self.chain)
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
     pub async fn max_block<Provider, Client>(
         &self,
-        network_client: &Client,
+        network_client: Client,
         provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
@@ -299,7 +299,7 @@ impl NodeConfig {
     ) -> eyre::Result<NetworkConfig<C>> {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
-        let default_peers_path = data_dir.known_peers_path();
+        let default_peers_path = data_dir.known_peers();
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
@@ -425,6 +425,7 @@ impl NodeConfig {
         Client: HeadersClient,
     {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
+        let mut fetch_failures = 0;
         loop {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
@@ -432,7 +433,10 @@ impl NodeConfig {
                     return Ok(tip_header);
                 }
                 Err(error) => {
-                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                    fetch_failures += 1;
+                    if fetch_failures % 20 == 0 {
+                        error!(target: "reth::cli", ?fetch_failures, %error, "Failed to fetch the tip. Retrying...");
+                    }
                 }
             }
         }

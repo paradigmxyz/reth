@@ -6,15 +6,14 @@ use reth_engine_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
-use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration, CAPABILITIES,
+    ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -293,7 +292,7 @@ where
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
-    /// Implementors should take care when acting on the input to this method, specifically
+    /// Implementers should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
     pub async fn get_payload_bodies_by_range(
@@ -662,7 +661,7 @@ where
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
-    /// Implementors should take care when acting on the input to this method, specifically
+    /// Implementers should take care when acting on the input to this method, specifically
     /// ensuring that the range is limited properly, and that the range boundaries are computed
     /// correctly and without panics.
     ///
@@ -713,8 +712,8 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::BeaconEngineMessage;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_interfaces::test_utils::generators::random_block;
-    use reth_node_ethereum::EthEngineTypes;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;

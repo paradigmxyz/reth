@@ -14,9 +14,10 @@ use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
+use reth_consensus::Consensus;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
+use reth_interfaces::p2p::full_block::FullBlockClient;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthEvmConfig;
@@ -103,7 +104,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
             )?)
             .start_network()
             .await?;
@@ -118,24 +119,24 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
         let provider_rw = factory.provider_rw()?;
 
         // Configure and build network
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
                 db.clone(),
                 network_secret_path,
-                data_dir.known_peers_path(),
+                data_dir.known_peers(),
             )
             .await?;
 

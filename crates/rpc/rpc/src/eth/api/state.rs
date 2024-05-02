@@ -84,7 +84,7 @@ where
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
         let chain_info = self.provider().chain_info()?;
-        let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = block_id.unwrap_or_default();
 
         // if we are trying to create a proof for the latest block, but have a BlockId as input
         // that is not BlockNumberOrTag::Latest, then we need to figure out whether or not the

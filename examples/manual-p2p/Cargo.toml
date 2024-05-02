@@ -6,14 +6,17 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-once_cell.workspace = true
-eyre.workspace = true
-
 reth-primitives.workspace = true
 reth-network.workspace = true
 reth-discv4.workspace = true
 reth-eth-wire.workspace = true
 reth-ecies.workspace = true
-futures.workspace = true
+reth-network-types.workspace = true
+
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+
+futures.workspace = true
 tokio.workspace = true
+
+eyre.workspace = true
+once_cell.workspace = true

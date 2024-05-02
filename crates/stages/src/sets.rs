@@ -14,6 +14,7 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! # use reth_primitives::{PruneModes, MAINNET};
 //! # use reth_evm_ethereum::EthEvmConfig;
+//! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::EtlConfig;
@@ -43,11 +44,11 @@ use crate::{
     StageSet, StageSetBuilder,
 };
 use reth_config::config::EtlConfig;
+use reth_consensus::Consensus;
 use reth_db::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
+use reth_interfaces::p2p::{
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader,
 };
 use reth_provider::{HeaderSyncGapProvider, HeaderSyncMode};
 use std::sync::Arc;

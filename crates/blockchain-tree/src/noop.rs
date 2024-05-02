@@ -22,7 +22,19 @@ use std::collections::{BTreeMap, HashSet};
 /// Caution: this is only intended for testing purposes, or for wiring components together.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct NoopBlockchainTree {}
+pub struct NoopBlockchainTree {
+    /// Broadcast channel for canon state changes notifications.
+    pub canon_state_notification_sender: Option<CanonStateNotificationSender>,
+}
+
+impl NoopBlockchainTree {
+    /// Create a new NoopBlockchainTree with a canon state notification sender.
+    pub fn with_canon_state_notifications(
+        canon_state_notification_sender: CanonStateNotificationSender,
+    ) -> Self {
+        Self { canon_state_notification_sender: Some(canon_state_notification_sender) }
+    }
+}
 
 impl BlockchainTreeEngine for NoopBlockchainTree {
     fn buffer_block(&self, _block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
@@ -127,6 +139,9 @@ impl BlockchainTreePendingStateProvider for NoopBlockchainTree {
 
 impl CanonStateSubscriptions for NoopBlockchainTree {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
-        CanonStateNotificationSender::new(1).subscribe()
+        self.canon_state_notification_sender
+            .as_ref()
+            .map(|sender| sender.subscribe())
+            .unwrap_or_else(|| CanonStateNotificationSender::new(1).subscribe())
     }
 }

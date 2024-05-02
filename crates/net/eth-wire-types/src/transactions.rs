@@ -80,8 +80,8 @@ mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        hex, PooledTransactionsElement, Signature, Transaction, TransactionKind, TransactionSigned,
-        TxEip1559, TxLegacy, U256,
+        hex, PooledTransactionsElement, Signature, Transaction, TransactionSigned, TxEip1559,
+        TxKind, TxLegacy, U256,
     };
     use std::str::FromStr;
 
@@ -130,9 +130,7 @@ mod tests {
                     nonce: 0x8u64,
                     gas_price: 0x4a817c808,
                     gas_limit: 0x2e248u64,
-                    to: TransactionKind::Call(
-                        hex!("3535353535353535353535353535353535353535").into(),
-                    ),
+                    to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x200u64),
                     input: Default::default(),
                 }),
@@ -154,9 +152,7 @@ mod tests {
                     nonce: 0x09u64,
                     gas_price: 0x4a817c809,
                     gas_limit: 0x33450u64,
-                    to: TransactionKind::Call(
-                        hex!("3535353535353535353535353535353535353535").into(),
-                    ),
+                    to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x2d9u64),
                     input: Default::default(),
                 }),
@@ -200,9 +196,7 @@ mod tests {
                     nonce: 0x8u64,
                     gas_price: 0x4a817c808,
                     gas_limit: 0x2e248u64,
-                    to: TransactionKind::Call(
-                        hex!("3535353535353535353535353535353535353535").into(),
-                    ),
+                    to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x200u64),
                     input: Default::default(),
                 }),
@@ -224,9 +218,7 @@ mod tests {
                     nonce: 0x09u64,
                     gas_price: 0x4a817c809,
                     gas_limit: 0x33450u64,
-                    to: TransactionKind::Call(
-                        hex!("3535353535353535353535353535353535353535").into(),
-                    ),
+                    to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                     value: U256::from(0x2d9u64),
                     input: Default::default(),
                 }),
@@ -271,9 +263,7 @@ mod tests {
                     nonce: 15u64,
                     gas_price: 2200000000,
                     gas_limit: 34811u64,
-                    to: TransactionKind::Call(
-                        hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into(),
-                    ),
+                    to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
@@ -296,9 +286,7 @@ mod tests {
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
                     gas_limit: 21000u64,
-                    to: TransactionKind::Call(
-                        hex!("61815774383099e24810ab832a5b2a5425c154d5").into(),
-                    ),
+                    to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
@@ -321,9 +309,7 @@ mod tests {
                     nonce: 3u64,
                     gas_price: 2000000000,
                     gas_limit: 10000000u64,
-                    to: TransactionKind::Call(
-                        hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
-                    ),
+                    to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),
@@ -345,9 +331,7 @@ mod tests {
                     nonce: 1u64,
                     gas_price: 1000000000,
                     gas_limit: 100000u64,
-                    to: TransactionKind::Call(
-                        hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
-                    ),
+                    to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(693361000000000u64),
                     input: Default::default(),
                 }),
@@ -369,9 +353,7 @@ mod tests {
                     nonce: 2u64,
                     gas_price: 1000000000,
                     gas_limit: 100000u64,
-                    to: TransactionKind::Call(
-                        hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
-                    ),
+                    to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),
@@ -420,9 +402,7 @@ mod tests {
                     nonce: 15u64,
                     gas_price: 2200000000,
                     gas_limit: 34811u64,
-                    to: TransactionKind::Call(
-                        hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into(),
-                    ),
+                    to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
                     value: U256::from(1234u64),
                     input: Default::default(),
                 }),
@@ -445,9 +425,7 @@ mod tests {
                     max_priority_fee_per_gas: 1500000000,
                     max_fee_per_gas: 1500000013,
                     gas_limit: 21000u64,
-                    to: TransactionKind::Call(
-                        hex!("61815774383099e24810ab832a5b2a5425c154d5").into(),
-                    ),
+                    to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
                     value: U256::from(3000000000000000000u64),
                     input: Default::default(),
                     access_list: Default::default(),
@@ -470,9 +448,7 @@ mod tests {
                     nonce: 3u64,
                     gas_price: 2000000000,
                     gas_limit: 10000000u64,
-                    to: TransactionKind::Call(
-                        hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
-                    ),
+                    to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),
@@ -494,9 +470,7 @@ mod tests {
                     nonce: 1u64,
                     gas_price: 1000000000,
                     gas_limit: 100000u64,
-                    to: TransactionKind::Call(
-                        hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
-                    ),
+                    to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(693361000000000u64),
                     input: Default::default(),
                 }),
@@ -518,9 +492,7 @@ mod tests {
                     nonce: 2u64,
                     gas_price: 1000000000,
                     gas_limit: 100000u64,
-                    to: TransactionKind::Call(
-                        hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into(),
-                    ),
+                    to: TxKind::Call(hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046").into()),
                     value: U256::from(1000000000000000u64),
                     input: Default::default(),
                 }),

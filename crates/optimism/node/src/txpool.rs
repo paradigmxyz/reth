@@ -202,8 +202,8 @@ pub struct OpL1BlockInfo {
 mod tests {
     use crate::txpool::OpTransactionValidator;
     use reth_primitives::{
-        Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-        TxDeposit, MAINNET, U256,
+        Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
+        MAINNET, U256,
     };
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
@@ -225,7 +225,7 @@ mod tests {
         let deposit_tx = Transaction::Deposit(TxDeposit {
             source_hash: Default::default(),
             from: signer,
-            to: TransactionKind::Create,
+            to: TxKind::Create,
             mint: None,
             value: U256::ZERO,
             gas_limit: 0u64,

@@ -28,18 +28,17 @@ reth-network.workspace = true
 reth-interfaces.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
-
+reth-evm-optimism.workspace = true
+reth-beacon-consensus.workspace = true
 revm.workspace = true
 revm-primitives.workspace = true
 
 # async
 async-trait.workspace = true
 hyper.workspace = true
-http.workspace = true
-http-body.workspace = true
-reqwest = { version = "0.11", default-features = false, features = [
-    "rustls-tls",
-]}
+reqwest = { workspace = true, default-features = false, features = [
+    "rustls-tls-native-roots",
+] }
 tracing.workspace = true
 
 # misc
@@ -54,7 +53,7 @@ jsonrpsee.workspace = true
 [dev-dependencies]
 reth.workspace = true
 reth-db.workspace = true
-reth-revm = { workspace = true, features = ["test-utils"]}
+reth-revm = { workspace = true, features = ["test-utils"] }
 reth-e2e-test-utils.workspace = true
 tokio.workspace = true
 alloy-primitives.workspace = true
@@ -66,5 +65,7 @@ optimism = [
     "reth-rpc-types-compat/optimism",
     "reth-rpc/optimism",
     "reth-revm/optimism",
+    "reth-evm-optimism/optimism",
     "reth-optimism-payload-builder/optimism",
+    "reth-beacon-consensus/optimism",
 ]

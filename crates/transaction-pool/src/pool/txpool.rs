@@ -18,7 +18,6 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use fnv::FnvHashMap;
 use itertools::Itertools;
 use reth_primitives::{
     constants::{
@@ -26,6 +25,7 @@ use reth_primitives::{
     },
     Address, TxHash, B256,
 };
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
@@ -44,7 +44,7 @@ use tracing::trace;
 /// include_mmd!("docs/mermaid/txpool.mmd")
 pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known information about the senders.
-    sender_info: FnvHashMap<SenderId, SenderInfo>,
+    sender_info: FxHashMap<SenderId, SenderInfo>,
     /// pending subpool
     ///
     /// Holds transactions that are ready to be executed on the current state.
@@ -903,7 +903,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
     txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
-    tx_counter: FnvHashMap<SenderId, usize>,
+    tx_counter: FxHashMap<SenderId, usize>,
     /// The current block number the pool keeps track of.
     last_seen_block_number: u64,
     /// The current block hash the pool keeps track of.
@@ -1766,8 +1766,8 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
     pub(crate) transaction: Arc<ValidPoolTransaction<T>>,
     /// The `SubPool` that currently contains this transaction.
     pub(crate) subpool: SubPool,
-    /// Keeps track of the current state of the transaction and therefor in which subpool it should
-    /// reside
+    /// Keeps track of the current state of the transaction and therefore in which subpool it
+    /// should reside
     pub(crate) state: TxState,
     /// The total cost all transactions before this transaction.
     ///

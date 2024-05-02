@@ -3,8 +3,8 @@ use num_traits::Zero;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
+use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
-use reth_exex::ExExManagerHandle;
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, BundleStateWithReceipts, CanonStateNotification, Chain, DatabaseProviderRW,
+    BlockReader, BundleStateWithReceipts, CanonStateNotification, Chain, DatabaseProviderRW, ExecutorFactory,
     HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader,
     TransactionVariant,
 };
@@ -255,7 +255,7 @@ where
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
-        // Check if we should send a [`CanonStateNotification`] to execution extensions.
+        // Check if we should send a [`ExExNotification`] to execution extensions.
         //
         // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
         // the `has_exexs` check here as well
@@ -271,7 +271,7 @@ where
 
             // NOTE: We can ignore the error here, since an error means that the channel is closed,
             // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(CanonStateNotification::Commit { new: chain });
+            let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
         }
 
         let time = Instant::now();
@@ -438,18 +438,17 @@ where
         // This also updates `PlainStorageState` and `PlainAccountState`.
         let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
 
-        // Construct a `CanonStateNotification` if we have ExEx's installed.
+        // Construct a `ExExNotification` if we have ExEx's installed.
         if self.exex_manager_handle.has_exexs() {
-            // Get the blocks for the unwound range. This is needed for `CanonStateNotification`.
+            // Get the blocks for the unwound range. This is needed for `ExExNotification`.
             let blocks = provider.get_take_block_range::<false>(range.clone())?;
             let chain = Chain::new(blocks, bundle_state_with_receipts, None);
 
             // NOTE: We can ignore the error here, since an error means that the channel is closed,
             // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(CanonStateNotification::Reorg {
-                old: Arc::new(chain),
-                new: Arc::new(Chain::default()),
-            });
+            let _ = self
+                .exex_manager_handle
+                .send(ExExNotification::ChainReverted { old: Arc::new(chain) });
         }
 
         // Unwind all receipts for transactions in the block range
@@ -629,7 +628,10 @@ mod tests {
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
         B256, U256,
     };
-    use reth_provider::{test_utils::create_test_provider_factory, AccountReader, ReceiptProvider};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
+        StaticFileProviderFactory,
+    };
     use reth_revm::EvmProcessorFactory;
 
     use crate::test_utils::TestStageDB;

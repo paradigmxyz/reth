@@ -8,13 +8,13 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use reth_consensus::{Consensus, ConsensusError};
 use reth_consensus_common::validation;
-use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, Chain, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
+
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
@@ -87,7 +87,7 @@ impl Consensus for BeaconConsensus {
             // is greater than its parent timestamp.
 
             // validate header extradata for all networks post merge
-            validate_header_extradata(header)?;
+            validation::validate_header_extradata(header)?;
 
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
@@ -111,7 +111,7 @@ impl Consensus for BeaconConsensus {
             //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
             //  support clique. Same goes for OP blocks below Bedrock.
             if self.chain_spec.chain != Chain::goerli() && !self.chain_spec.is_optimism() {
-                validate_header_extradata(header)?;
+                validation::validate_header_extradata(header)?;
             }
         }
 
@@ -120,17 +120,5 @@ impl Consensus for BeaconConsensus {
 
     fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         validation::validate_block_standalone(block, &self.chain_spec)
-    }
-}
-
-/// Validates the header's extradata according to the beacon consensus rules.
-///
-/// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
-/// This must be 32 bytes or fewer; formally Hx.
-fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
-    if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
-    } else {
-        Ok(())
     }
 }

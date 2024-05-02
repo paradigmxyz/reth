@@ -1,8 +1,7 @@
-use crate::ExExEvent;
+use crate::{ExExEvent, ExExNotification};
 use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives::{BlockNumber, FinishedExExHeight};
-use reth_provider::CanonStateNotification;
 use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,
@@ -24,7 +23,7 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
 struct ExExMetrics {
-    /// The total number of canonical state notifications sent to an ExEx.
+    /// The total number of notifications sent to an ExEx.
     notifications_sent_total: Counter,
     /// The total number of events an ExEx has sent to the manager.
     events_sent_total: Counter,
@@ -42,8 +41,8 @@ pub struct ExExHandle {
     /// Metrics for an ExEx.
     metrics: ExExMetrics,
 
-    /// Channel to send [`CanonStateNotification`]s to the ExEx.
-    sender: PollSender<CanonStateNotification>,
+    /// Channel to send [`ExExNotification`]s to the ExEx.
+    sender: PollSender<ExExNotification>,
     /// Channel to receive [`ExExEvent`]s from the ExEx.
     receiver: UnboundedReceiver<ExExEvent>,
     /// The ID of the next notification to send to this ExEx.
@@ -59,22 +58,22 @@ impl ExExHandle {
     /// Create a new handle for the given ExEx.
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
-    /// [`Receiver`] for [`CanonStateNotification`]s that should be given to the ExEx.
-    pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<CanonStateNotification>) {
-        let (canon_tx, canon_rx) = mpsc::channel(1);
+    /// [`Receiver`] for [`ExExNotification`]s that should be given to the ExEx.
+    pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<ExExNotification>) {
+        let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         (
             Self {
                 id: id.clone(),
                 metrics: ExExMetrics::new_with_labels(&[("exex", id)]),
-                sender: PollSender::new(canon_tx),
+                sender: PollSender::new(notification_tx),
                 receiver: event_rx,
                 next_notification_id: 0,
                 finished_height: None,
             },
             event_tx,
-            canon_rx,
+            notification_rx,
         )
     }
 
@@ -85,25 +84,53 @@ impl ExExHandle {
     fn send(
         &mut self,
         cx: &mut Context<'_>,
-        (event_id, notification): &(usize, CanonStateNotification),
-    ) -> Poll<Result<(), PollSendError<CanonStateNotification>>> {
-        // check that this notification is above the finished height of the exex if the exex has set
-        // one
+        (notification_id, notification): &(usize, ExExNotification),
+    ) -> Poll<Result<(), PollSendError<ExExNotification>>> {
         if let Some(finished_height) = self.finished_height {
-            if finished_height >= notification.tip().number {
-                self.next_notification_id = event_id + 1;
-                return Poll::Ready(Ok(()))
+            match notification {
+                ExExNotification::ChainCommitted { new } => {
+                    // Skip the chain commit notification if the finished height of the ExEx is
+                    // higher than or equal to the tip of the new notification.
+                    // I.e., the ExEx has already processed the notification.
+                    if finished_height >= new.tip().number {
+                        debug!(
+                            exex_id = %self.id,
+                            %notification_id,
+                            %finished_height,
+                            new_tip = %new.tip().number,
+                            "Skipping notification"
+                        );
+
+                        self.next_notification_id = notification_id + 1;
+                        return Poll::Ready(Ok(()))
+                    }
+                }
+                // Do not handle [ExExNotification::ChainReorged] and
+                // [ExExNotification::ChainReverted] cases and always send the
+                // notification, because the ExEx should be aware of the reorgs and reverts lower
+                // than its finished height
+                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
             }
         }
 
+        debug!(
+            exex_id = %self.id,
+            %notification_id,
+            "Reserving slot for notification"
+        );
         match self.sender.poll_reserve(cx) {
             Poll::Ready(Ok(())) => (),
             other => return other,
         }
 
+        debug!(
+            exex_id = %self.id,
+            %notification_id,
+            "Sending notification"
+        );
         match self.sender.send_item(notification.clone()) {
             Ok(()) => {
-                self.next_notification_id = event_id + 1;
+                self.next_notification_id = notification_id + 1;
                 self.metrics.notifications_sent_total.increment(1);
                 Poll::Ready(Ok(()))
             }
@@ -142,18 +169,18 @@ pub struct ExExManager {
     /// Handles to communicate with the ExEx's.
     exex_handles: Vec<ExExHandle>,
 
-    /// [`CanonStateNotification`] channel from the [`ExExManagerHandle`]s.
-    handle_rx: UnboundedReceiver<CanonStateNotification>,
+    /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
+    handle_rx: UnboundedReceiver<ExExNotification>,
 
     /// The minimum notification ID currently present in the buffer.
     min_id: usize,
-    /// Monotonically increasing ID for [`CanonStateNotification`]s.
+    /// Monotonically increasing ID for [`ExExNotification`]s.
     next_id: usize,
-    /// Internal buffer of [`CanonStateNotification`]s.
+    /// Internal buffer of [`ExExNotification`]s.
     ///
     /// The first element of the tuple is a monotonically increasing ID unique to the notification
     /// (the second element of the tuple).
-    buffer: VecDeque<(usize, CanonStateNotification)>,
+    buffer: VecDeque<(usize, ExExNotification)>,
     /// Max size of the internal state notifications buffer.
     max_capacity: usize,
     /// Current state notifications buffer capacity.
@@ -244,7 +271,7 @@ impl ExExManager {
 
     /// Pushes a new notification into the managers internal buffer, assigning the notification a
     /// unique ID.
-    fn push_notification(&mut self, notification: CanonStateNotification) {
+    fn push_notification(&mut self, notification: ExExNotification) {
         let next_id = self.next_id;
         self.buffer.push_back((next_id, notification));
         self.next_id += 1;
@@ -258,7 +285,11 @@ impl Future for ExExManager {
         // drain handle notifications
         while self.buffer.len() < self.max_capacity {
             if let Poll::Ready(Some(notification)) = self.handle_rx.poll_recv(cx) {
-                debug!("received new notification");
+                debug!(
+                    committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
+                    reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
+                    "Received new notification"
+                );
                 self.push_notification(notification);
                 continue
             }
@@ -275,12 +306,11 @@ impl Future for ExExManager {
 
             // it is a logic error for this to ever underflow since the manager manages the
             // notification IDs
-            let notification_id = exex
+            let notification_index = exex
                 .next_notification_id
                 .checked_sub(self.min_id)
                 .expect("exex expected notification ID outside the manager's range");
-            if let Some(notification) = self.buffer.get(notification_id) {
-                debug!(exex.id, notification_id, "sent notification to exex");
+            if let Some(notification) = self.buffer.get(notification_index) {
                 if let Poll::Ready(Err(err)) = exex.send(cx, notification) {
                     // the channel was closed, which is irrecoverable for the manager
                     return Poll::Ready(Err(err.into()))
@@ -291,9 +321,9 @@ impl Future for ExExManager {
         }
 
         // remove processed buffered notifications
+        debug!(%min_id, "Updating lowest notification id in buffer");
         self.buffer.retain(|&(id, _)| id >= min_id);
         self.min_id = min_id;
-        debug!(min_id, "lowest notification id in buffer updated");
 
         // update capacity
         self.update_capacity();
@@ -301,7 +331,7 @@ impl Future for ExExManager {
         // handle incoming exex events
         for exex in self.exex_handles.iter_mut() {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
-                debug!(?event, id = exex.id, "received event from exex");
+                debug!(exex_id = %exex.id, ?event, "Received event from exex");
                 exex.metrics.events_sent_total.increment(1);
                 match event {
                     ExExEvent::FinishedHeight(height) => exex.finished_height = Some(height),
@@ -334,7 +364,7 @@ impl Future for ExExManager {
 #[derive(Debug)]
 pub struct ExExManagerHandle {
     /// Channel to send notifications to the ExEx manager.
-    exex_tx: UnboundedSender<CanonStateNotification>,
+    exex_tx: UnboundedSender<ExExNotification>,
     /// The number of ExEx's running on the node.
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
@@ -376,10 +406,7 @@ impl ExExManagerHandle {
     /// Synchronously send a notification over the channel to all execution extensions.
     ///
     /// Senders should call [`Self::has_capacity`] first.
-    pub fn send(
-        &self,
-        notification: CanonStateNotification,
-    ) -> Result<(), SendError<CanonStateNotification>> {
+    pub fn send(&self, notification: ExExNotification) -> Result<(), SendError<ExExNotification>> {
         self.exex_tx.send(notification)
     }
 
@@ -389,8 +416,8 @@ impl ExExManagerHandle {
     /// capacity in the channel, the future will wait.
     pub async fn send_async(
         &mut self,
-        notification: CanonStateNotification,
-    ) -> Result<(), SendError<CanonStateNotification>> {
+        notification: ExExNotification,
+    ) -> Result<(), SendError<ExExNotification>> {
         self.ready().await;
         self.exex_tx.send(notification)
     }

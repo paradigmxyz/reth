@@ -10,7 +10,8 @@ use crate::{
 use enr::{secp256k1::SecretKey, Enr};
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_primitives::{Chain, NodeRecord, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{Chain, NodeRecord};
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 

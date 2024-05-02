@@ -4,9 +4,11 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_network::NetworkHandle;
 use reth_node_builder::{
-    components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder},
-    node::{FullNodeTypes, Node, NodeTypes},
-    BuilderContext, PayloadBuilderConfig,
+    components::{
+        ComponentsBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+    },
+    node::{FullNodeTypes, NodeTypes},
+    BuilderContext, Node, PayloadBuilderConfig,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
@@ -23,8 +25,13 @@ pub struct EthereumNode;
 
 impl EthereumNode {
     /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
-    pub fn components<Node>(
-    ) -> ComponentsBuilder<Node, EthereumPoolBuilder, EthereumPayloadBuilder, EthereumNetworkBuilder>
+    pub fn components<Node>() -> ComponentsBuilder<
+        Node,
+        EthereumPoolBuilder,
+        EthereumPayloadBuilder,
+        EthereumNetworkBuilder,
+        EthereumExecutorBuilder,
+    >
     where
         Node: FullNodeTypes<Engine = EthEngineTypes>,
     {
@@ -33,35 +40,45 @@ impl EthereumNode {
             .pool(EthereumPoolBuilder::default())
             .payload(EthereumPayloadBuilder::default())
             .network(EthereumNetworkBuilder::default())
+            .executor(EthereumExecutorBuilder::default())
     }
 }
 
 impl NodeTypes for EthereumNode {
     type Primitives = ();
     type Engine = EthEngineTypes;
-    type Evm = EthEvmConfig;
-
-    fn evm_config(&self) -> Self::Evm {
-        EthEvmConfig::default()
-    }
 }
 
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Engine = EthEngineTypes>,
 {
-    type PoolBuilder = EthereumPoolBuilder;
-    type NetworkBuilder = EthereumNetworkBuilder;
-    type PayloadBuilder = EthereumPayloadBuilder;
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        EthereumPoolBuilder,
+        EthereumPayloadBuilder,
+        EthereumNetworkBuilder,
+        EthereumExecutorBuilder,
+    >;
 
-    fn components(
-        self,
-    ) -> ComponentsBuilder<N, Self::PoolBuilder, Self::PayloadBuilder, Self::NetworkBuilder> {
-        ComponentsBuilder::default()
-            .node_types::<N>()
-            .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetworkBuilder::default())
+    fn components_builder(self) -> Self::ComponentsBuilder {
+        Self::components()
+    }
+}
+
+/// A regular ethereum evm and executor builder.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct EthereumExecutorBuilder;
+
+impl<Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
+where
+    Node: FullNodeTypes,
+{
+    type EVM = EthEvmConfig;
+
+    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
+        Ok(EthEvmConfig::default())
     }
 }
 
@@ -83,7 +100,7 @@ where
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.data_dir();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore_path(), Default::default())?;
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
@@ -97,7 +114,7 @@ where
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, ctx.pool_config());
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions_path();
+        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {

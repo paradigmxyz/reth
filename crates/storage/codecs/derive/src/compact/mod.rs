@@ -161,7 +161,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
     match ftype {
-        "TransactionKind" | "bool" | "Option" | "Signature" => 1,
+        "TransactionKind" | "TxKind" | "bool" | "Option" | "Signature" => 1,
         "TxType" => 2,
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
@@ -185,18 +185,18 @@ mod tests {
     #[test]
     fn gen() {
         let f_struct = quote! {
-            #[derive(Debug, PartialEq, Clone)]
-            pub struct TestStruct {
-                f_u64: u64,
-                f_u256: U256,
-                f_bool_t: bool,
-                f_bool_f: bool,
-                f_option_none: Option<U256>,
-                f_option_some: Option<B256>,
-                f_option_some_u64: Option<u64>,
-                f_vec_empty: Vec<U256>,
-                f_vec_some: Vec<Address>,
-            }
+             #[derive(Debug, PartialEq, Clone)]
+             pub struct TestStruct {
+                 f_u64: u64,
+                 f_u256: U256,
+                 f_bool_t: bool,
+                 f_bool_f: bool,
+                 f_option_none: Option<U256>,
+                 f_option_some: Option<B256>,
+                 f_option_some_u64: Option<u64>,
+                 f_vec_empty: Vec<U256>,
+                 f_vec_some: Vec<Address>,
+             }
         };
 
         // Generate code that will impl the `Compact` trait.
@@ -208,7 +208,15 @@ mod tests {
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
+            impl TestStruct {
+                #[doc = "Used bytes by [`TestStructFlags`]"]
+                pub const fn bitflag_encoded_bytes() -> usize {
+                    2u8 as usize
+                }
+            }
+
             pub use TestStruct_flags::TestStructFlags;
+
             #[allow(non_snake_case)]
             mod TestStruct_flags {
                 use bytes::Buf;

@@ -1,32 +1,31 @@
 //! Testing support for headers related interfaces.
 
-use crate::{
-    consensus::{self, Consensus, ConsensusError},
-    p2p::{
-        download::DownloadClient,
-        error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
-        headers::{
-            client::{HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
-            error::HeadersDownloaderResult,
-        },
-        priority::Priority,
-    },
-};
-use futures::{Future, FutureExt, Stream, StreamExt};
-use reth_primitives::{
-    Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, WithPeerId, U256,
-};
 use std::{
     fmt,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc,
     },
     task::{ready, Context, Poll},
 };
+
+use futures::{Future, FutureExt, Stream, StreamExt};
 use tokio::sync::Mutex;
+
+use crate::p2p::{
+    download::DownloadClient,
+    error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
+    headers::{
+        client::{HeadersClient, HeadersRequest},
+        downloader::{HeaderDownloader, SyncTarget},
+        error::HeadersDownloaderResult,
+    },
+    priority::Priority,
+};
+use reth_consensus::{test_utils::TestConsensus, Consensus};
+use reth_network_types::{PeerId, WithPeerId};
+use reth_primitives::{Header, HeadersDirection, SealedHeader};
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]
@@ -243,72 +242,5 @@ impl HeadersClient for TestHeadersClient {
             let with_peer_id = WithPeerId::from((PeerId::default(), resp));
             Ok(with_peer_id)
         })
-    }
-}
-
-/// Consensus engine implementation for testing
-#[derive(Debug)]
-pub struct TestConsensus {
-    /// Flag whether the header validation should purposefully fail
-    fail_validation: AtomicBool,
-}
-
-impl Default for TestConsensus {
-    fn default() -> Self {
-        Self { fail_validation: AtomicBool::new(false) }
-    }
-}
-
-impl TestConsensus {
-    /// Get the failed validation flag.
-    pub fn fail_validation(&self) -> bool {
-        self.fail_validation.load(Ordering::SeqCst)
-    }
-
-    /// Update the validation flag.
-    pub fn set_fail_validation(&self, val: bool) {
-        self.fail_validation.store(val, Ordering::SeqCst)
-    }
-}
-
-impl Consensus for TestConsensus {
-    fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn validate_header_against_parent(
-        &self,
-        _header: &SealedHeader,
-        _parent: &SealedHeader,
-    ) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn validate_header_with_total_difficulty(
-        &self,
-        _header: &Header,
-        _total_difficulty: U256,
-    ) -> Result<(), ConsensusError> {
-        if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::ConsensusError> {
-        if self.fail_validation() {
-            Err(consensus::ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
     }
 }

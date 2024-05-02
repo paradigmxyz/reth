@@ -15,12 +15,12 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-metrics.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
-rlp = "0.5.2"
 discv5 = { workspace = true, features = ["libp2p"] }
-enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
+enr.workspace = true
 multiaddr = { version = "0.18", default-features = false }
 libp2p-identity = "0.2"
 secp256k1.workspace = true

@@ -16,18 +16,16 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
-use reth_interfaces::{
-    consensus::{Consensus, ConsensusError},
-    executor::{BlockExecutionError, BlockValidationError},
-};
+use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
-    ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, Withdrawals,
+    B256, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
@@ -272,6 +270,8 @@ impl StorageInner {
     pub(crate) fn build_header_template(
         &self,
         transactions: &[TransactionSigned],
+        ommers: &[Header],
+        withdrawals: Option<&Withdrawals>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
@@ -283,12 +283,12 @@ impl StorageInner {
 
         let mut header = Header {
             parent_hash: self.best_hash,
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
+            ommers_hash: proofs::calculate_ommers_root(ommers),
             beneficiary: Default::default(),
             state_root: Default::default(),
             transactions_root: Default::default(),
             receipts_root: Default::default(),
-            withdrawals_root: None,
+            withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             logs_bloom: Default::default(),
             difficulty: U256::from(2),
             number: self.best_block + 1,
@@ -422,18 +422,30 @@ impl StorageInner {
     pub(crate) fn build_and_execute<EvmConfig>(
         &mut self,
         transactions: Vec<TransactionSigned>,
+        ommers: Vec<Header>,
+        withdrawals: Option<Withdrawals>,
         client: &impl StateProviderFactory,
         chain_spec: Arc<ChainSpec>,
-        evm_config: EvmConfig,
+        evm_config: &EvmConfig,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
         EvmConfig: ConfigureEvm,
     {
-        let header = self.build_header_template(&transactions, chain_spec.clone());
+        let header = self.build_header_template(
+            &transactions,
+            &ommers,
+            withdrawals.as_ref(),
+            chain_spec.clone(),
+        );
 
-        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None }
-            .with_recovered_senders()
-            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+        let block = Block {
+            header,
+            body: transactions,
+            ommers: ommers.clone(),
+            withdrawals: withdrawals.clone(),
+        }
+        .with_recovered_senders()
+        .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
@@ -449,7 +461,7 @@ impl StorageInner {
         let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
 
         let Block { header, body, .. } = block.block;
-        let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
+        let body = BlockBody { transactions: body, ommers, withdrawals };
 
         let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
             let mut sum_blob_gas_used = 0;

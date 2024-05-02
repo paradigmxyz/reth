@@ -7,9 +7,10 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
+use reth_network_types::PeerId;
 use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
-    PeerId, SealedHeader, B256,
+    SealedHeader, B256,
 };
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
@@ -179,12 +180,6 @@ impl FileClient {
         self.headers.get(&self.max_block()?).map(|h| h.clone().seal_slow())
     }
 
-    /// Clones and returns the lowest header of this client has or `None` if empty. Seals header
-    /// before returning.
-    pub fn start_header(&self) -> Option<SealedHeader> {
-        self.headers.get(&self.min_block()?).map(|h| h.clone().seal_slow())
-    }
-
     /// Returns true if all blocks are canonical (no gaps)
     pub fn has_canonical_blocks(&self) -> bool {
         if self.headers.is_empty() {
@@ -226,6 +221,23 @@ impl FileClient {
     /// Returns the current number of bodies in the client.
     pub fn bodies_len(&self) -> usize {
         self.bodies.len()
+    }
+
+    /// Returns an iterator over headers in the client.
+    pub fn headers_iter(&mut self) -> impl Iterator<Item = &Header> {
+        self.headers.values()
+    }
+
+    /// Returns a mutable iterator over bodies in the client.
+    pub fn bodies_iter_mut(&mut self) -> impl Iterator<Item = (&u64, &mut BlockBody)> {
+        let bodies = &mut self.bodies;
+        let headers = &self.headers;
+        headers.keys().zip(bodies.values_mut())
+    }
+
+    /// Returns the current number of transactions in the client.
+    pub fn total_transactions(&self) -> usize {
+        self.bodies.iter().flat_map(|(_, body)| &body.transactions).count()
     }
 }
 
@@ -434,12 +446,10 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use rand::Rng;
-    use reth_interfaces::{
-        p2p::{
-            bodies::downloader::BodyDownloader,
-            headers::downloader::{HeaderDownloader, SyncTarget},
-        },
-        test_utils::TestConsensus,
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_interfaces::p2p::{
+        bodies::downloader::BodyDownloader,
+        headers::downloader::{HeaderDownloader, SyncTarget},
     };
     use reth_provider::test_utils::create_test_provider_factory;
     use std::{mem, sync::Arc};

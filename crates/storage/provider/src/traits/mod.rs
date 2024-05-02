@@ -75,8 +75,14 @@ pub use prune_checkpoint::{PruneCheckpointReader, PruneCheckpointWriter};
 mod database_provider;
 pub use database_provider::DatabaseProviderFactory;
 
+mod static_file_provider;
+pub use static_file_provider::StaticFileProviderFactory;
+
 mod stats;
 pub use stats::StatsReader;
 
 mod full;
 pub use full::FullProvider;
+
+mod tree_viewer;
+pub use tree_viewer::TreeViewer;

@@ -263,6 +263,10 @@ update-book-cli: ## Update book cli documentation.
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
 
+.PHONY: maxperf-op
+maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak,optimism --bin op-reth
+
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
@@ -303,11 +307,21 @@ lint-other-targets:
 	--all-features \
 	-- -D warnings
 
+lint-codespell: ensure-codespell
+	codespell
+
+ensure-codespell:
+	@if ! command -v codespell &> /dev/null; then \
+		echo "codespell not found. Please install it by running the command `pip install codespell` or refer to the following link for more information: https://github.com/codespell-project/codespell" \
+		exit 1; \
+    fi
+
 lint:
 	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
-	make lint-other-targets
+	make lint-other-targets && \
+	make lint-codespell
 
 fix-lint-reth:
 	cargo +nightly clippy \
@@ -404,8 +418,11 @@ test:
 	make test-doc && \
 	make test-other-targets
 
+cfg-check:
+	cargo +nightly -Zcheck-cfg c
+
 pr:
-	make fmt && \
+	make cfg-check && \
 	make lint && \
 	make docs && \
 	make test

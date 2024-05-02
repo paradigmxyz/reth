@@ -7,7 +7,7 @@ use reth_primitives::revm::env::fill_op_tx_env;
 use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
     revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, B256, U256,
+    TransactionSignedEcRecovered, TxHash, TxKind, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
@@ -250,13 +250,17 @@ pub(crate) fn create_txn_env(
         )?;
 
     let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
+    let transact_to = match to {
+        Some(TxKind::Call(to)) => TransactTo::call(to),
+        _ => TransactTo::create(),
+    };
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
         nonce,
         caller: from.unwrap_or_default(),
         gas_price,
         gas_priority_fee: max_priority_fee_per_gas,
-        transact_to: to.map(TransactTo::Call).unwrap_or_else(TransactTo::create),
+        transact_to,
         value: value.unwrap_or_default(),
         data: input.try_into_unique_input()?.unwrap_or_default(),
         chain_id,
@@ -274,7 +278,10 @@ pub(crate) fn create_txn_env(
 }
 
 /// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
-pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(db: DB, env: &mut TxEnv) -> EthResult<()>
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
+    db: &mut DB,
+    env: &mut TxEnv,
+) -> EthResult<()>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
@@ -292,7 +299,7 @@ where
 ///
 /// Returns an error if the caller has insufficient funds.
 /// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
-pub(crate) fn caller_gas_allowance<DB>(mut db: DB, env: &TxEnv) -> EthResult<U256>
+pub(crate) fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,

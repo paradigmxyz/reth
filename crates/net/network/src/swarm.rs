@@ -12,7 +12,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     EthVersion, Status,
 };
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use reth_provider::{BlockNumReader, BlockReader};
 use std::{
     io,

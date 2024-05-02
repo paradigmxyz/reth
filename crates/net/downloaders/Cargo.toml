@@ -18,6 +18,8 @@ reth-primitives.workspace = true
 reth-tasks.workspace = true
 reth-provider.workspace = true
 reth-config.workspace = true
+reth-consensus.workspace = true
+reth-network-types.workspace = true
 
 # async
 futures.workspace = true
@@ -44,6 +46,7 @@ itertools.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
@@ -57,5 +60,5 @@ rand.workspace = true
 tempfile.workspace = true
 
 [features]
-test-utils = ["dep:tempfile", "reth-db/test-utils", "reth-interfaces/test-utils"]
+test-utils = ["dep:tempfile", "reth-db/test-utils", "reth-consensus/test-utils", "reth-interfaces/test-utils"]
 

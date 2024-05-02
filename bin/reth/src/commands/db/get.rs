@@ -7,6 +7,7 @@ use reth_db::{
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
 use reth_primitives::{BlockHash, Header, StaticFileSegment};
+use reth_provider::StaticFileProviderFactory;
 use tracing::error;
 
 /// The arguments for the `reth db get` command

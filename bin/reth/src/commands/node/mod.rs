@@ -11,7 +11,7 @@ use crate::{
 use clap::{value_parser, Args, Parser};
 use reth_cli_runner::CliContext;
 use reth_db::{init_db, DatabaseEnv};
-use reth_node_builder::{InitState, NodeBuilder, WithLaunchContext};
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{node_config::NodeConfig, version};
 use reth_primitives::ChainSpec;
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -136,7 +136,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
     /// closure.
     pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
@@ -180,7 +180,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let _ = node_config.install_prometheus_recorder()?;
 
         let data_dir = datadir.unwrap_or_chain_default(node_config.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
         let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
@@ -280,14 +280,14 @@ mod tests {
             NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let config_path = cmd.config.unwrap_or_else(|| data_dir.config_path());
+        let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
         let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config());
         let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
         assert!(config_path.ends_with(end), "{:?}", cmd.config);
     }
@@ -296,14 +296,14 @@ mod tests {
     fn parse_db_path() {
         let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
         assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
         let cmd =
             NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
         let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
     }
 

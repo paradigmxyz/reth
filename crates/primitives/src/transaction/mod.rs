@@ -1,6 +1,6 @@
 #[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
-use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, B256, U256};
+use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
 
 use alloy_eips::eip2718::Eip2718Error;
 use alloy_rlp::{
@@ -32,7 +32,7 @@ pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
 
-pub use signature::Signature;
+pub use signature::{extract_chain_id, Signature};
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
@@ -176,9 +176,9 @@ impl Transaction {
         }
     }
 
-    /// Gets the transaction's [`TransactionKind`], which is the address of the recipient or
-    /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> &TransactionKind {
+    /// Gets the transaction's [`TxKind`], which is the address of the recipient or
+    /// [`TxKind::Create`] if the transaction is a contract creation.
+    pub fn kind(&self) -> &TxKind {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
@@ -194,7 +194,7 @@ impl Transaction {
     ///
     /// Returns `None` if this is a `CREATE` transaction.
     pub fn to(&self) -> Option<Address> {
-        self.kind().to()
+        self.kind().to().copied()
     }
 
     /// Get the transaction's type
@@ -641,7 +641,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .gas
                         .try_into()
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     input: tx.input,
                 }))
@@ -655,7 +655,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .gas
                         .try_into()
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     input: tx.input,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
@@ -677,7 +677,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .gas
                         .try_into()
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
@@ -698,7 +698,7 @@ impl TryFrom<reth_rpc_types::Transaction> for Transaction {
                         .gas
                         .try_into()
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TransactionKind::Create, TransactionKind::Call),
+                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
@@ -825,109 +825,6 @@ impl Encodable for Transaction {
             Transaction::Eip4844(blob_tx) => blob_tx.payload_len_for_signature(),
             #[cfg(feature = "optimism")]
             Transaction::Deposit(deposit_tx) => deposit_tx.payload_len(),
-        }
-    }
-}
-
-/// Whether or not the transaction is a contract creation.
-#[derive_arbitrary(compact, rlp)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-pub enum TransactionKind {
-    /// A transaction that creates a contract.
-    #[default]
-    Create,
-    /// A transaction that calls a contract or transfer.
-    Call(Address),
-}
-
-impl TransactionKind {
-    /// Returns the address of the contract that will be called or will receive the transfer.
-    pub fn to(self) -> Option<Address> {
-        match self {
-            TransactionKind::Create => None,
-            TransactionKind::Call(to) => Some(to),
-        }
-    }
-
-    /// Returns true if the transaction is a contract creation.
-    #[inline]
-    pub fn is_create(self) -> bool {
-        matches!(self, TransactionKind::Create)
-    }
-
-    /// Returns true if the transaction is a contract call.
-    #[inline]
-    pub fn is_call(self) -> bool {
-        matches!(self, TransactionKind::Call(_))
-    }
-
-    /// Calculates a heuristic for the in-memory size of the [TransactionKind].
-    #[inline]
-    fn size(self) -> usize {
-        mem::size_of::<Self>()
-    }
-}
-
-impl Compact for TransactionKind {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        match self {
-            TransactionKind::Create => 0,
-            TransactionKind::Call(address) => {
-                address.to_compact(buf);
-                1
-            }
-        }
-    }
-
-    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        match identifier {
-            0 => (TransactionKind::Create, buf),
-            1 => {
-                let (addr, buf) = Address::from_compact(buf, buf.len());
-                (TransactionKind::Call(addr), buf)
-            }
-            _ => unreachable!("Junk data in database: unknown TransactionKind variant"),
-        }
-    }
-}
-
-impl Encodable for TransactionKind {
-    /// This encodes the `to` field of a transaction request.
-    /// If the [TransactionKind] is a [TransactionKind::Call] it will encode the inner address:
-    /// `rlp(address)`
-    ///
-    /// If the [TransactionKind] is a [TransactionKind::Create] it will encode an empty list:
-    /// `rlp([])`, which is also
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        match self {
-            TransactionKind::Call(to) => to.encode(out),
-            TransactionKind::Create => out.put_u8(EMPTY_STRING_CODE),
-        }
-    }
-
-    fn length(&self) -> usize {
-        match self {
-            TransactionKind::Call(to) => to.length(),
-            TransactionKind::Create => 1, // EMPTY_STRING_CODE is a single byte
-        }
-    }
-}
-
-impl Decodable for TransactionKind {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if let Some(&first) = buf.first() {
-            if first == EMPTY_STRING_CODE {
-                buf.advance(1);
-                Ok(TransactionKind::Create)
-            } else {
-                let addr = <Address as Decodable>::decode(buf)?;
-                Ok(TransactionKind::Call(addr))
-            }
-        } else {
-            Err(RlpError::InputTooShort)
         }
     }
 }
@@ -1829,12 +1726,27 @@ impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
     fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
 
+        let transaction: Transaction = tx.try_into()?;
+
         TransactionSigned::from_transaction_and_signature(
-            tx.try_into()?,
+            transaction.clone(),
             Signature {
                 r: signature.r,
                 s: signature.s,
-                odd_y_parity: signature.y_parity.ok_or(ConversionError::MissingYParity)?.0,
+                odd_y_parity: if let Some(y_parity) = signature.y_parity {
+                    y_parity.0
+                } else {
+                    match transaction.tx_type() {
+                        // If the transaction type is Legacy, adjust the v component of the
+                        // signature according to the Ethereum specification
+                        TxType::Legacy => {
+                            extract_chain_id(signature.v.to())
+                                .map_err(|_| ConversionError::InvalidSignature)?
+                                .0
+                        }
+                        _ => !signature.v.is_zero(),
+                    }
+                },
             },
         )
         .try_into_ecrecovered()
@@ -1847,10 +1759,10 @@ mod tests {
     use crate::{
         hex, sign_message,
         transaction::{
-            from_compact_zstd_unaware, signature::Signature, to_compact_ztd_unaware,
-            TransactionKind, TxEip1559, TxLegacy, MIN_LENGTH_EIP1559_TX_ENCODED,
-            MIN_LENGTH_EIP2930_TX_ENCODED, MIN_LENGTH_EIP4844_TX_ENCODED,
-            MIN_LENGTH_LEGACY_TX_ENCODED, PARALLEL_SENDER_RECOVERY_THRESHOLD,
+            from_compact_zstd_unaware, signature::Signature, to_compact_ztd_unaware, TxEip1559,
+            TxKind, TxLegacy, MIN_LENGTH_EIP1559_TX_ENCODED, MIN_LENGTH_EIP2930_TX_ENCODED,
+            MIN_LENGTH_EIP4844_TX_ENCODED, MIN_LENGTH_LEGACY_TX_ENCODED,
+            PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
         TransactionSignedNoHash, TxEip2930, TxEip4844, B256, U256,
@@ -1858,7 +1770,7 @@ mod tests {
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_codecs::Compact;
-    use secp256k1::{KeyPair, Secp256k1};
+    use secp256k1::{Keypair, Secp256k1};
     use std::str::FromStr;
 
     #[test]
@@ -1872,13 +1784,13 @@ mod tests {
     fn raw_kind_encoding_sanity() {
         // check the 0x80 encoding for Create
         let mut buf = Vec::new();
-        TransactionKind::Create.encode(&mut buf);
+        TxKind::Create.encode(&mut buf);
         assert_eq!(buf, vec![0x80]);
 
         // check decoding
         let buf = [0x80];
-        let decoded = TransactionKind::decode(&mut &buf[..]).unwrap();
-        assert_eq!(decoded, TransactionKind::Create);
+        let decoded = TxKind::decode(&mut &buf[..]).unwrap();
+        assert_eq!(decoded, TxKind::Create);
     }
 
     #[test]
@@ -1954,9 +1866,7 @@ mod tests {
             nonce: 2,
             gas_price: 1000000000,
             gas_limit: 100000,
-            to: TransactionKind::Call(
-                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-            ),
+            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
@@ -1976,9 +1886,7 @@ mod tests {
             nonce: 1u64,
             gas_price: 1000000000,
             gas_limit: 100000u64,
-            to: TransactionKind::Call(Address::from_slice(
-                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
-            )),
+            to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(693361000000000u64),
             input: Default::default(),
         });
@@ -1997,9 +1905,7 @@ mod tests {
             nonce: 3,
             gas_price: 2000000000,
             gas_limit: 10000000,
-            to: TransactionKind::Call(Address::from_slice(
-                &hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..],
-            )),
+            to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::default(),
         });
@@ -2019,9 +1925,7 @@ mod tests {
             max_priority_fee_per_gas: 1500000000,
             max_fee_per_gas: 1500000013,
             gas_limit: 21000,
-            to: TransactionKind::Call(Address::from_slice(
-                &hex!("61815774383099e24810ab832a5b2a5425c154d5")[..],
-            )),
+            to: Address::from_slice(&hex!("61815774383099e24810ab832a5b2a5425c154d5")[..]).into(),
             value: U256::from(3000000000000000000u64),
             input: Default::default(),
             access_list: Default::default(),
@@ -2041,9 +1945,7 @@ mod tests {
             nonce: 15,
             gas_price: 2200000000,
             gas_limit: 34811,
-            to: TransactionKind::Call(Address::from_slice(
-                &hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..],
-            )),
+            to: Address::from_slice(&hex!("cf7f9e66af820a19257a2108375b180b0ec49167")[..]).into(),
             value: U256::from(1234),
             input: Bytes::default(),
         });
@@ -2151,7 +2053,7 @@ mod tests {
                     tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
 
-                let key_pair = KeyPair::new(&secp, &mut rng);
+                let key_pair = Keypair::new(&secp, &mut rng);
 
                 let signature =
                     sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
@@ -2330,9 +2232,7 @@ mod tests {
                 nonce: 2,
                 gas_price: 1000000000,
                 gas_limit: 100000,
-                to: TransactionKind::Call(
-                    Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-                ),
+                to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
                 value: U256::from(1000000000000000u64),
                 input: Bytes::from(input),
             });
@@ -2379,9 +2279,7 @@ mod tests {
             nonce: 2,
             gas_price: 1000000000,
             gas_limit: 100000,
-            to: TransactionKind::Call(
-                Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
-            ),
+            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
             value: U256::from(1000000000000000u64),
             input: Bytes::from(vec![3u8; 64]),
         });

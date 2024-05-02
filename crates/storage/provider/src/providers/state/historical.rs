@@ -127,7 +127,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             tracing::warn!(
                 target: "provider::historical_sp",
                 target = self.block_number,
-                "Attempt to calculate state root for an old block might result in OOM, tread carefully"
+                "Attempt to calculate state root for an old block might result in OOM, treat carefully"
             );
         }
 
@@ -405,6 +405,7 @@ mod tests {
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+        StaticFileProviderFactory,
     };
     use reth_db::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},

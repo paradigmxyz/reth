@@ -131,8 +131,8 @@ mod tests {
     use crate::{message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders};
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,
-        TransactionSigned, TxLegacy, U256,
+        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction,
+        TransactionSigned, TxKind, TxLegacy, U256,
     };
     use std::str::FromStr;
 
@@ -383,7 +383,7 @@ mod tests {
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
                             gas_limit: 0x2e248u64,
-                            to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                            to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x200u64),
                             input: Default::default(),
                         }),
@@ -398,7 +398,7 @@ mod tests {
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
                             gas_limit: 0x33450u64,
-                            to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                            to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                             value: U256::from(0x2d9u64),
                             input: Default::default(),
                         }), Signature {
@@ -455,7 +455,7 @@ mod tests {
                                 nonce: 0x8u64,
                                 gas_price: 0x4a817c808,
                                 gas_limit: 0x2e248u64,
-                                to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                                to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                                 value: U256::from(0x200u64),
                                 input: Default::default(),
                             }),
@@ -471,7 +471,7 @@ mod tests {
                                 nonce: 0x9u64,
                                 gas_price: 0x4a817c809,
                                 gas_limit: 0x33450u64,
-                                to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+                                to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
                                 value: U256::from(0x2d9u64),
                                 input: Default::default(),
                             }),

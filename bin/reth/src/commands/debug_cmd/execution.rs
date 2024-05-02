@@ -14,16 +14,14 @@ use futures::{stream::select as stream_select, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
+use reth_consensus::Consensus;
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-};
+use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_core::init::init_genesis;
@@ -31,7 +29,10 @@ use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{
     fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
-use reth_provider::{BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader};
+use reth_provider::{
+    BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory,
+};
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -172,7 +173,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
             )?)
             .start_network()
             .await?;
@@ -205,17 +206,17 @@ impl Command {
         let mut config = Config::default();
 
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
-            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
         }
 
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(provider_factory.clone())?;
@@ -224,14 +225,14 @@ impl Command {
 
         // Configure and build network
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
                 db.clone(),
                 network_secret_path,
-                data_dir.known_peers_path(),
+                data_dir.known_peers(),
             )
             .await?;
 

@@ -5,6 +5,7 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_interfaces::{
@@ -12,7 +13,6 @@ use reth_interfaces::{
         error::{BlockchainTreeError, InsertBlockErrorKind},
         BlockAttachment, BlockValidationKind,
     },
-    consensus::{Consensus, ConsensusError},
     RethResult,
 };
 use reth_primitives::{

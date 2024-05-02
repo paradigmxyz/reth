@@ -2,22 +2,16 @@
 
 use std::{
     collections::HashSet,
+    fmt::Debug,
     net::{IpAddr, SocketAddr},
 };
 
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, ForkId, NodeRecord, MAINNET};
+use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
 
-use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys};
-
-/// L1 EL
-pub const ETH: &[u8] = b"eth";
-/// L1 CL
-pub const ETH2: &[u8] = b"eth2";
-/// Optimism
-pub const OPSTACK: &[u8] = b"opstack";
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
@@ -31,14 +25,18 @@ pub struct ConfigBuilder {
     discv5_config: Option<discv5::Config>,
     /// Nodes to boot from.
     bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
+    /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
+    /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", ForkId)`.
+    ///
+    /// Defaults to L1 mainnet if not set.
     fork: Option<(&'static [u8], ForkId)>,
     /// RLPx TCP port to advertise. Note: so long as `reth_network` handles [`NodeRecord`]s as
     /// opposed to [`Enr`](enr::Enr)s, TCP is limited to same IP address as UDP, since
     /// [`NodeRecord`] doesn't supply an extra field for and alternative TCP address.
     tcp_port: u16,
-    /// Additional kv-pairs that should be advertised to peers by including in local node record.
-    other_enr_data: Vec<(&'static str, Bytes)>,
+    /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
+    /// (in addition to tcp port, udp port and fork).
+    other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     lookup_interval: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
@@ -52,9 +50,9 @@ impl ConfigBuilder {
         let Config {
             discv5_config,
             bootstrap_nodes,
-            fork: fork_id,
+            fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         } = discv5_config;
@@ -62,9 +60,9 @@ impl ConfigBuilder {
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork: Some(fork_id),
+            fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
             discovered_peer_filter: Some(discovered_peer_filter),
         }
@@ -117,9 +115,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Set [`ForkId`], and key used to identify it, to set in local [`Enr`](discv5::enr::Enr).
-    pub fn fork(mut self, key: &'static [u8], value: ForkId) -> Self {
-        self.fork = Some((key, value));
+    /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
+    /// network know which chain this node belongs to.
+    pub fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+        self.fork = Some((fork_key, fork_id));
         self
     }
 
@@ -129,9 +128,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr).
-    pub fn add_enr_kv_pair(mut self, kv_pair: (&'static str, Bytes)) -> Self {
-        self.other_enr_data.push(kv_pair);
+    /// Adds an additional kv-pair to include in the local [`Enr`](discv5::enr::Enr). Takes the key
+    /// to use for the kv-pair and the rlp encoded value.
+    pub fn add_enr_kv_pair(mut self, key: &'static [u8], value: Bytes) -> Self {
+        self.other_enr_kv_pairs.push((key, value));
         self
     }
 
@@ -152,7 +152,7 @@ impl ConfigBuilder {
             bootstrap_nodes,
             fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         } = self;
@@ -160,19 +160,19 @@ impl ConfigBuilder {
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let fork = fork.unwrap_or((ETH, MAINNET.latest_fork_id()));
+        let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
 
-        let discovered_peer_filter =
-            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[ETH2]));
+        let discovered_peer_filter = discovered_peer_filter
+            .unwrap_or_else(|| MustNotIncludeKeys::new(&[NetworkStackId::ETH2]));
 
         Config {
             discv5_config,
             bootstrap_nodes,
             fork,
             tcp_port,
-            other_enr_data,
+            other_enr_kv_pairs,
             lookup_interval,
             discovered_peer_filter,
         }
@@ -187,12 +187,14 @@ pub struct Config {
     pub(super) discv5_config: discv5::Config,
     /// Nodes to boot from.
     pub(super) bootstrap_nodes: HashSet<BootNode>,
-    /// [`ForkId`] to set in local node record.
-    pub(super) fork: (&'static [u8], ForkId),
+    /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
+    /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", [ForkId])`.
+    pub(super) fork: Option<(&'static [u8], EnrForkIdEntry)>,
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
-    /// Additional kv-pairs to include in local node record.
-    pub(super) other_enr_data: Vec<(&'static str, Bytes)>,
+    /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
+    /// peers by including in local node record.
+    pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
     pub(super) lookup_interval: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be

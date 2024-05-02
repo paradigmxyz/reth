@@ -7,7 +7,7 @@ use revm::{
     primitives::{CfgEnvWithHandlerCfg, ResultAndState},
     Evm, State,
 };
-use std::{sync::Arc, time::Instant};
+use std::{marker::PhantomData, sync::Arc, time::Instant};
 #[cfg(not(feature = "optimism"))]
 use tracing::{debug, trace};
 
@@ -59,7 +59,7 @@ pub struct EVMProcessor<'a, EvmConfig> {
     /// Execution stats
     pub(crate) stats: BlockExecutorStats,
     /// The type that is able to configure the EVM environment.
-    _evm_config: EvmConfig,
+    _phantom: PhantomData<EvmConfig>,
 }
 
 impl<'a, EvmConfig> EVMProcessor<'a, EvmConfig>
@@ -75,7 +75,7 @@ where
     pub fn new_with_db<DB: StateProvider + 'a>(
         chain_spec: Arc<ChainSpec>,
         db: StateProviderDatabase<DB>,
-        evm_config: EvmConfig,
+        evm_config: &'a EvmConfig,
     ) -> Self {
         let state = State::builder()
             .with_database_boxed(Box::new(db))
@@ -89,7 +89,7 @@ where
     pub fn new_with_state(
         chain_spec: Arc<ChainSpec>,
         revm_state: StateDBBox<'a, ProviderError>,
-        evm_config: EvmConfig,
+        evm_config: &'a EvmConfig,
     ) -> Self {
         let stack = InspectorStack::new(InspectorStackConfig::default());
         let evm = evm_config.evm_with_inspector(revm_state, stack);
@@ -98,7 +98,7 @@ where
             evm,
             batch_record: BlockBatchRecord::default(),
             stats: BlockExecutorStats::default(),
-            _evm_config: evm_config,
+            _phantom: PhantomData,
         }
     }
 
@@ -466,7 +466,7 @@ mod tests {
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, EIP1559_INITIAL_BASE_FEE, SYSTEM_ADDRESS},
         keccak256, Account, Bytes, ChainSpecBuilder, ForkCondition, Signature, Transaction,
-        TransactionKind, TxEip1559, MAINNET,
+        TxEip1559, MAINNET,
     };
     use revm::{Database, TransitionState};
     use std::collections::HashMap;
@@ -507,11 +507,9 @@ mod tests {
         );
 
         // execute invalid header (no parent beacon block root)
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let evm_config = TestEvmConfig::default();
+        let mut executor =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db), &evm_config);
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
@@ -599,11 +597,9 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let evm_config = TestEvmConfig::default();
+        let mut executor =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db), &evm_config);
         executor.init_env(&header, U256::ZERO);
 
         // get the env
@@ -648,11 +644,9 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let evm_config = TestEvmConfig::default();
+        let mut executor =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db), &evm_config);
 
         // construct the header for block one
         let header = Header {
@@ -702,11 +696,9 @@ mod tests {
 
         let mut header = chain_spec.genesis_header();
 
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let evm_config = TestEvmConfig::default();
+        let mut executor =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db), &evm_config);
         executor.init_env(&header, U256::ZERO);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
@@ -781,11 +773,9 @@ mod tests {
         );
 
         // execute header
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let evm_config = TestEvmConfig::default();
+        let mut executor =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db), &evm_config);
         executor.init_env(&header, U256::ZERO);
 
         // ensure that the env is configured with a base fee
@@ -843,11 +833,9 @@ mod tests {
         let chain_id = chain_spec.chain.id();
 
         // execute header
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let evm_config = TestEvmConfig::default();
+        let mut executor =
+            EVMProcessor::new_with_db(chain_spec, StateProviderDatabase::new(db), &evm_config);
 
         // Create a test transaction that gonna fail
         let transaction = TransactionSigned::from_transaction_and_signature(
@@ -855,7 +843,7 @@ mod tests {
                 chain_id,
                 nonce: 1,
                 gas_limit: 21_000,
-                to: TransactionKind::Call(Address::ZERO),
+                to: Address::ZERO.into(),
                 max_fee_per_gas: EIP1559_INITIAL_BASE_FEE as u128,
                 ..Default::default()
             }),

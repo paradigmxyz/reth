@@ -1,11 +1,12 @@
 //! Blockchain tree externals.
 
+use reth_consensus::Consensus;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_interfaces::RethResult;
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
-use reth_provider::{ProviderFactory, StatsReader};
+use reth_provider::{ProviderFactory, StaticFileProviderFactory, StatsReader};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// A container for external components.

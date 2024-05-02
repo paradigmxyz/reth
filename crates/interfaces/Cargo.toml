@@ -12,9 +12,10 @@ workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
-reth-rpc-types.workspace = true
 reth-network-api.workspace = true
 reth-eth-wire-types.workspace = true
+reth-consensus.workspace = true
+reth-network-types.workspace = true
 
 # async
 futures.workspace = true
@@ -34,12 +35,14 @@ parking_lot = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-consensus = { workspace = true, features = ["test-utils"] }
+
 parking_lot.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["full"] }
 secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
-test-utils = ["secp256k1", "rand", "parking_lot"]
+test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
 cli = ["clap"]
 optimism = ["reth-eth-wire-types/optimism"]
