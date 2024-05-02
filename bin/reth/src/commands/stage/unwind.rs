@@ -14,7 +14,6 @@ use reth_node_core::{
     args::{get_secret_key, NetworkArgs},
     dirs::ChainPath,
 };
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,

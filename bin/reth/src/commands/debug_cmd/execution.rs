@@ -26,7 +26,6 @@ use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::Header
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_core::init::init_genesis;
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{
     fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };

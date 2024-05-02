@@ -5,7 +5,6 @@ use reth_config::config::EtlConfig;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, PruneModes};
 use reth_provider::ProviderFactory;
 use reth_stages::{
