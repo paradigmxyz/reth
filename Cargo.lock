@@ -6900,6 +6900,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "revm",
  "revm-primitives",
  "tracing",
 ]

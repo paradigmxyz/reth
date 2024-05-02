@@ -24,10 +24,6 @@ pub mod eth_dao_fork;
 /// used in the main Reth executor.
 pub mod stack;
 
-/// Optimism-specific implementation and utilities for the executor
-#[cfg(feature = "optimism")]
-pub mod optimism;
-
 /// Common test helpers
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

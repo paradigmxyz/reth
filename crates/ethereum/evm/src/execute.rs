@@ -1,6 +1,6 @@
 //! Ethereum block executor.
 
-use crate::EthEvmConfig;
+use crate::{verify::verify_receipts, EthEvmConfig};
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -30,7 +30,6 @@ use revm_primitives::{
 };
 use std::sync::Arc;
 use tracing::debug;
-use crate::verify::verify_receipt;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -315,9 +314,11 @@ where
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec().is_byzantium_active_at_block(block.header.number) {
-            if let Err(error) =
-                verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
-            {
+            if let Err(error) = verify_receipts(
+                block.header.receipts_root,
+                block.header.logs_bloom,
+                receipts.iter(),
+            ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
