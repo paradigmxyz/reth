@@ -195,12 +195,10 @@ where
             // create the launch context for the exex
             let context = ExExContext {
                 head,
-                provider: blockchain_db.clone(),
-                task_executor: ctx.task_executor().clone(),
                 data_dir: ctx.data_dir().clone(),
                 config: ctx.node_config().clone(),
                 reth_config: ctx.toml_config().clone(),
-                pool: node_adapter.components.pool().clone(),
+                components: node_adapter.clone(),
                 events,
                 notifications,
             };
@@ -265,8 +263,9 @@ where
         let node_config = ctx.node_config();
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
-            // Store messages _after_ skipping messages so that `replay-engine` command
-            // would replay the exact same messages that were observed by the engine
+            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            // Store messages _after_ skipping so that `replay-engine` command
+            // would replay only the messages that were observed by the engine
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 

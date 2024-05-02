@@ -22,7 +22,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// A simple Rplx subprotocol for
+/// A simple Rlpx subprotocol that sends pings and pongs
 mod proto {
     use super::*;
     use reth_eth_wire::capability::Capability;
