@@ -44,6 +44,8 @@ discv5.workspace = true
 
 # async
 tokio.workspace = true
+tokio-util.workspace = true
+pin-project.workspace = true
 
 # metrics
 metrics-exporter-prometheus = "0.12.1"
