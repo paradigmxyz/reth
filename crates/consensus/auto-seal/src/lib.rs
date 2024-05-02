@@ -378,20 +378,21 @@ impl StorageInner {
         Ok(header)
     }
 
-    /// Builds and executes a new block with the given transactions, on the provided [EVMProcessor].
+    /// Builds and executes a new block with the given transactions, on the provided executor.
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
-    pub(crate) fn build_and_execute<Executor>(
+    pub(crate) fn build_and_execute<Provider, Executor>(
         &mut self,
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
         withdrawals: Option<Withdrawals>,
-        client: &impl StateProviderFactory,
+        provider: &Provider,
         chain_spec: Arc<ChainSpec>,
         executor: &Executor,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
         Executor: BlockExecutorProvider,
+        Provider: StateProviderFactory,
     {
         let header = self.build_header_template(
             &transactions,
@@ -411,8 +412,9 @@ impl StorageInner {
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-        let db =
-            StateProviderDatabase::new(client.latest().map_err(BlockExecutionError::LatestBlock)?);
+        let db = StateProviderDatabase::new(
+            provider.latest().map_err(BlockExecutionError::LatestBlock)?,
+        );
         // now execute the block
         let BlockExecutionOutput { state, receipts, gas_used } =
             executor.executor(db).execute((&block, U256::ZERO).into())?;
@@ -443,7 +445,7 @@ impl StorageInner {
         let header = self.complete_header(
             header,
             &bundle_state,
-            client,
+            provider,
             gas_used,
             blob_gas_used,
             #[cfg(feature = "optimism")]
