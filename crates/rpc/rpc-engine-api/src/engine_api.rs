@@ -34,7 +34,7 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 pub struct EngineApi<Provider, EngineT: EngineTypes> {
     inner: Arc<EngineApiInner<Provider, EngineT>>,
 }
-#[allow(dead_code)]
+
 struct EngineApiInner<Provider, EngineT: EngineTypes> {
     /// The provider to interact with the chain.
     provider: Provider,
@@ -77,7 +77,14 @@ where
         });
         Self { inner }
     }
-
+    
+    /// Fetches the client version.
+    async fn get_client_version_v1(
+        &self,
+        client: ClientVersionV1,
+    ) -> EngineApiResult<Vec<ClientVersionV1>> {
+        Ok(vec![self.inner.client.clone()])
+    } 
     /// Fetches the attributes for the payload with the given id.
     async fn get_payload_attributes(
         &self,
@@ -702,7 +709,6 @@ where
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
         trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
-        let _start = Instant::now();
         let res = EngineApi::get_client_version_v1(self, client).await;
 
         Ok(res?)
@@ -766,6 +772,19 @@ mod tests {
         (handle, api)
     }
 
+    #[tokio::test]
+    async fn engine_client_version_v1() {
+        let client = ClientVersionV1 {
+            code: ClientCode::RH,
+            name: "Reth".to_string(),
+            version: "v0.2.0-beta.5".to_string(),
+            commit: "defa64b2".to_string(),
+        };
+        let (_, api) = setup_engine_api();
+        let res = api.get_client_version_v1(client.clone()).await;
+        assert_eq!(res.unwrap(), vec![client]);
+    }
+    
     struct EngineApiTestHandle {
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
