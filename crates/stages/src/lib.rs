@@ -16,7 +16,7 @@
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestHeadersClient};
-//! # use reth_revm::EvmProcessorFactory;
+//! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! # use reth_primitives::{MAINNET, B256, PruneModes};
 //! # use reth_network_types::PeerId;
 //! # use reth_stages::Pipeline;
@@ -31,7 +31,6 @@
 //! # use reth_config::config::EtlConfig;
 //! # use reth_consensus::Consensus;
 //! # use reth_consensus::test_utils::TestConsensus;
-//! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());

@@ -318,7 +318,7 @@ address.to_string(), format_ether(alloc.balance));
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
                 mining_mode,
-                node_adapter.components.evm_config().clone(),
+                node_adapter.components.block_executor().clone(),
             )
             .build();
 

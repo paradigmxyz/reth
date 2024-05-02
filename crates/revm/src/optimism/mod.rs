@@ -10,9 +10,6 @@ use revm::{
 use std::sync::Arc;
 use tracing::trace;
 
-/// Optimism-specific processor implementation for the `EVMProcessor`
-pub mod processor;
-
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
 /// The codehash of the create2 deployer contract.

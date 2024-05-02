@@ -18,23 +18,18 @@
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
-    ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, Withdrawals,
-    B256, U256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec, Header,
+    ReceiptWithBloom, Receipts, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
+    U256,
 };
 use reth_provider::{
-    BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
-    StateProviderFactory,
+    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
 };
-use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
-    processor::EVMProcessor, State,
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::HashMap,
@@ -50,6 +45,7 @@ mod task;
 
 pub use crate::client::AutoSealClient;
 pub use mode::{FixedBlockTimeMiner, MiningMode, ReadyTransactionMiner};
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 pub use task::MiningTask;
 
 /// A consensus implementation intended for local development and testing purposes.
@@ -334,40 +330,6 @@ impl StorageInner {
         header
     }
 
-    /// Executes the block with the given block and senders, on the provided [EVMProcessor].
-    ///
-    /// This returns the poststate from execution and post-block changes, as well as the gas used.
-    pub(crate) fn execute<EvmConfig>(
-        &mut self,
-        block: &BlockWithSenders,
-        executor: &mut EVMProcessor<'_, EvmConfig>,
-    ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
-    where
-        EvmConfig: ConfigureEvm,
-    {
-        trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
-        // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
-        // call the 4788 beacon contract
-
-        // set the first block to find the correct index in bundle state
-        executor.set_first_block(block.number);
-
-        let (receipts, gas_used) = executor.execute_transactions(block, U256::ZERO)?;
-
-        // Save receipts.
-        executor.save_receipts(receipts)?;
-
-        // add post execution state change
-        // Withdrawals, rewards etc.
-        executor.apply_post_execution_state_change(block, U256::ZERO)?;
-
-        // merge transitions
-        executor.db_mut().merge_transitions(BundleRetention::Reverts);
-
-        // apply post block changes
-        Ok((executor.take_output_state(), gas_used))
-    }
-
     /// Fills in the post-execution header fields based on the given BundleState and gas used.
     /// In doing this, the state root is calculated and the final header is returned.
     pub(crate) fn complete_header<S: StateProviderFactory>(
@@ -419,17 +381,17 @@ impl StorageInner {
     /// Builds and executes a new block with the given transactions, on the provided [EVMProcessor].
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
-    pub(crate) fn build_and_execute<EvmConfig>(
+    pub(crate) fn build_and_execute<Executor>(
         &mut self,
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
         withdrawals: Option<Withdrawals>,
         client: &impl StateProviderFactory,
         chain_spec: Arc<ChainSpec>,
-        evm_config: &EvmConfig,
+        executor: &Executor,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvm,
+        Executor: BlockExecutorProvider,
     {
         let header = self.build_header_template(
             &transactions,
@@ -449,16 +411,16 @@ impl StorageInner {
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
+        let db =
+            StateProviderDatabase::new(client.latest().map_err(BlockExecutionError::LatestBlock)?);
         // now execute the block
-        let db = State::builder()
-            .with_database_boxed(Box::new(StateProviderDatabase::new(
-                client.latest().map_err(BlockExecutionError::LatestBlock)?,
-            )))
-            .with_bundle_update()
-            .build();
-        let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);
-
-        let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
+        let BlockExecutionOutput { state, receipts, gas_used } =
+            executor.executor(db).execute((&block, U256::ZERO).into()).map_err(Into::into)?;
+        let bundle_state = BundleStateWithReceipts::new(
+            state,
+            Receipts::from_block_receipt(receipts),
+            block.number,
+        );
 
         let Block { header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers, withdrawals };

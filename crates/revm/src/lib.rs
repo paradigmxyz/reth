@@ -11,19 +11,10 @@
 /// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
 
-/// revm implementation of reth block and transaction executors.
-mod factory;
-
 pub mod batch;
-
-/// new revm account state executor
-pub mod processor;
 
 /// State changes that are not related to transactions.
 pub mod state_change;
-
-/// revm executor factory.
-pub use factory::EvmProcessorFactory;
 
 /// Ethereum DAO hardfork state change data.
 pub mod eth_dao_fork;
