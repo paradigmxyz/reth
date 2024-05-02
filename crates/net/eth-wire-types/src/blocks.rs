@@ -296,6 +296,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         }.encode(&mut data);
@@ -330,6 +331,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         };
@@ -430,6 +432,7 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,
@@ -504,6 +507,7 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,

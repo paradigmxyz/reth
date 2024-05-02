@@ -51,6 +51,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         blob_gas_used: None,
         excess_blob_gas: None,
         parent_beacon_block_root: None,
+        requests_root: None,
         extra_data: payload.extra_data,
         // Defaults
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -58,7 +59,13 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         nonce: Default::default(),
     };
 
-    Ok(Block { header, body: transactions, withdrawals: None, ommers: Default::default() })
+    Ok(Block {
+        header,
+        body: transactions,
+        ommers: Default::default(),
+        withdrawals: None,
+        requests: None,
+    })
 }
 
 /// Converts [ExecutionPayloadV2] to [Block]
@@ -86,17 +93,22 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 
 /// Converts [ExecutionPayloadV4] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    // this performs the same conversion as the underlying V3 payload.
-    //
-    // the new request lists (`deposit_requests`, `withdrawal_requests`) are EL -> CL only, so we do
-    // not do anything special here to handle them
-    try_payload_v3_to_block(payload.payload_inner)
+    // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
+    // used and excess blob gas
+    let mut base_block = try_payload_v3_to_block(payload.payload_inner)?;
+
+    base_block.header.requests_root = None;
+    base_block.requests = None;
+    todo!();
+
+    Ok(base_block)
 }
 
 /// Converts [SealedBlock] to [ExecutionPayload]
 pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
-    // todo(onbjerg): check for requests_root here and return payload v4
-    if value.header.parent_beacon_block_root.is_some() {
+    if value.header.requests_root.is_some() {
+        ExecutionPayload::V4(block_to_payload_v4(value))
+    } else if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
     } else if value.withdrawals.is_some() {
@@ -179,6 +191,39 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
                 transactions,
             },
             withdrawals: value.withdrawals.unwrap_or_default().into_inner(),
+        },
+    }
+}
+
+/// Converts [SealedBlock] to [ExecutionPayloadV4]
+pub fn block_to_payload_v4(value: SealedBlock) -> ExecutionPayloadV4 {
+    let transactions = value.raw_transactions();
+
+    ExecutionPayloadV4 {
+        deposit_requests: todo!(),
+        withdrawal_requests: todo!(),
+        payload_inner: ExecutionPayloadV3 {
+            payload_inner: ExecutionPayloadV2 {
+                payload_inner: ExecutionPayloadV1 {
+                    parent_hash: value.parent_hash,
+                    fee_recipient: value.beneficiary,
+                    state_root: value.state_root,
+                    receipts_root: value.receipts_root,
+                    logs_bloom: value.logs_bloom,
+                    prev_randao: value.mix_hash,
+                    block_number: value.number,
+                    gas_limit: value.gas_limit,
+                    gas_used: value.gas_used,
+                    timestamp: value.timestamp,
+                    extra_data: value.extra_data.clone(),
+                    base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
+                    block_hash: value.hash(),
+                    transactions,
+                },
+                withdrawals: value.withdrawals.unwrap_or_default().into_inner(),
+            },
+            blob_gas_used: value.blob_gas_used.unwrap_or_default(),
+            excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
         },
     }
 }

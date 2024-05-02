@@ -18,7 +18,8 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH,
+        EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
     proofs,
@@ -165,6 +166,12 @@ where
             blob_gas_used = Some(0);
         }
 
+        let requests_root = if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+            Some(EMPTY_ROOT_HASH)
+        } else {
+            None
+        };
+
         let header = Header {
             parent_hash: parent_block.hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -186,6 +193,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            requests_root,
         };
 
         let block = Block { header, body: vec![], ommers: vec![], withdrawals };
@@ -445,6 +453,9 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        // todo: what do we do here pre-fork?
+        // todo: encode withdrawals etc
+        requests_root: None,
     };
 
     // seal the block

@@ -1,0 +1,39 @@
+//! Native Compact codec impl for EIP-7685 requests.
+
+use crate::Compact;
+use alloy_consensus::Request;
+use alloy_eips::eip7685::{Decodable7685, Encodable7685};
+use bytes::BufMut;
+
+impl Compact for Request {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: BufMut + AsMut<[u8]>,
+    {
+        let encoded = self.encoded_7685();
+        buf.put(encoded.as_ref());
+        encoded.len()
+    }
+
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let (raw, buf) = <Vec<u8> as Compact>::from_compact(buf, buf.len());
+
+        (Request::decode_7685(&mut raw.as_slice()).expect("invalid eip-7685 request in db"), buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::proptest;
+
+    proptest! {
+        #[test]
+        fn roundtrip(log: Request) {
+            let mut buf = Vec::<u8>::new();
+            let len = log.clone().to_compact(&mut buf);
+            let (decoded, _) = Request::from_compact(&buf, len);
+            assert_eq!(log, decoded);
+        }
+    }
+}

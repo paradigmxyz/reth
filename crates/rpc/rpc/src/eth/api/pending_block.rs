@@ -265,6 +265,8 @@ impl PendingBlockEnv {
             excess_blob_gas: block_env.get_blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root,
+            // todo
+            requests_root: None,
         };
 
         // seal the block

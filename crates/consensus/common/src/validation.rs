@@ -11,6 +11,8 @@ use reth_primitives::{
 };
 use reth_provider::{HeaderProvider, WithdrawalsProvider};
 
+// todo: validate requests root
+
 /// Validate header standalone
 pub fn validate_header_standalone(
     header: &SealedHeader,
@@ -351,6 +353,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None
         };
         // size: 0x9b5
 

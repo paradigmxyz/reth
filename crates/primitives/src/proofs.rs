@@ -10,6 +10,7 @@ use crate::{
 use alloy_rlp::Encodable;
 use bytes::BufMut;
 use itertools::Itertools;
+use revm_primitives::Bytes;
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -70,6 +71,11 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
+/// Calculate EIP-7685 requests root.
+pub fn calculate_requests_root(requests: &[Bytes]) -> B256 {
+    ordered_trie_root(requests)
 }
 
 /// Calculates the receipt root for a header.

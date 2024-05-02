@@ -1,5 +1,5 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
+    Address, Bytes, GotExpected, Header, Requests, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
@@ -45,6 +45,12 @@ pub struct Block {
         proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
     pub withdrawals: Option<Withdrawals>,
+    /// Block requests.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Requests>())")
+    )]
+    pub requests: Option<Requests>,
 }
 
 impl Block {
@@ -55,6 +61,7 @@ impl Block {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
@@ -67,6 +74,7 @@ impl Block {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
@@ -257,14 +265,20 @@ pub struct SealedBlock {
         proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
     pub withdrawals: Option<Withdrawals>,
+    /// Block requests.
+    #[cfg_attr(
+        any(test, feature = "arbitrary"),
+        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Requests>())")
+    )]
+    pub requests: Option<Requests>,
 }
 
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
     pub fn new(header: SealedHeader, body: BlockBody) -> Self {
-        let BlockBody { transactions, ommers, withdrawals } = body;
-        Self { header, body: transactions, ommers, withdrawals }
+        let BlockBody { transactions, ommers, withdrawals, requests } = body;
+        Self { header, body: transactions, ommers, withdrawals, requests }
     }
 
     /// Header hash.
@@ -288,6 +302,7 @@ impl SealedBlock {
                 transactions: self.body,
                 ommers: self.ommers,
                 withdrawals: self.withdrawals,
+                requests: self.requests,
             },
         )
     }
@@ -343,6 +358,7 @@ impl SealedBlock {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
@@ -514,16 +530,20 @@ pub struct BlockBody {
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
+    /// Requests in the block.
+    pub requests: Option<Requests>,
 }
 
 impl BlockBody {
     /// Create a [`Block`] from the body and its header.
+    // todo(onbjerg): should this not just take `self`? its used in one place
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,
             body: self.transactions.clone(),
             ommers: self.ommers.clone(),
             withdrawals: self.withdrawals.clone(),
+            requests: self.requests.clone(),
         }
     }
 
@@ -558,7 +578,12 @@ impl BlockBody {
 
 impl From<Block> for BlockBody {
     fn from(block: Block) -> Self {
-        Self { transactions: block.body, ommers: block.ommers, withdrawals: block.withdrawals }
+        Self {
+            transactions: block.body,
+            ommers: block.ommers,
+            withdrawals: block.withdrawals,
+            requests: block.requests,
+        }
     }
 }
 
