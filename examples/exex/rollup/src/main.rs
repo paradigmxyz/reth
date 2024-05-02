@@ -27,8 +27,8 @@ sol!(RollupContract, "rollup_abi.json");
 use RollupContract::{RollupContractCalls, RollupContractEvents};
 
 const DATABASE_PATH: &str = "rollup.db";
-const ROLLUP_CONTRACT_ADDRESS: Address = address!("74ae65DF20cB0e3BF8c022051d0Cdd79cc60890C");
-const ROLLUP_SUBMITTER_ADDRESS: Address = address!("B01042Db06b04d3677564222010DF5Bd09C5A947");
+const ROLLUP_CONTRACT_ADDRESS: Address = address!("97C0E40c6B5bb5d4fa3e2AA1C6b8bC7EA5ECAe31");
+const ROLLUP_SUBMITTER_ADDRESS: Address = address!("5b0517Dc94c413a5871536872605522E54C85a03");
 const CHAIN_ID: u64 = 17001;
 static CHAIN_SPEC: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     Arc::new(

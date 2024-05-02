@@ -198,7 +198,8 @@ async fn decode_transactions<Pool: TransactionPool>(
             // Convert blob KZG commitments to versioned hashes
             .map(|(blob, commitment)| (blob, kzg_to_versioned_hash((*commitment).into())))
             // Filter only blobs that are present in the block data
-            .filter_map(|(blob, hash)| blob_hashes.contains(&hash).then_some(blob))
+            .filter(|(_, hash)| blob_hashes.contains(&hash))
+            .map(|(blob, _)| blob)
             .collect::<Vec<_>>();
         if blobs.len() != blob_hashes.len() {
             eyre::bail!("some blobs not found")
