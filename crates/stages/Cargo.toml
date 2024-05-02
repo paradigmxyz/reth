@@ -82,7 +82,6 @@ test-utils = [
     "reth-stages-api/test-utils",
     "dep:tempfile",
 ]
-optimism = ["reth-primitives/optimism"]
 
 [[bench]]
 name = "criterion"
