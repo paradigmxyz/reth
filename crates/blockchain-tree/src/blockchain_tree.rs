@@ -1252,7 +1252,7 @@ where
             // with unfinalized data. The only scenario where canonical reverts go past the highest
             // static file is when an optimistic sync occured and unfinalized data was written to
             // static files.
-            return Err(CanonicalError::OptimisticCanonicalRevert(revert_until))
+            return Err(CanonicalError::OptimisticTargetRevert(revert_until))
         }
 
         // read data that is needed for new sidechain

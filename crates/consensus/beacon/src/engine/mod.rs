@@ -976,7 +976,7 @@ where
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
             }
-            CanonicalError::OptimisticCanonicalRevert(block_number) => {
+            CanonicalError::OptimisticTargetRevert(block_number) => {
                 self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(*block_number));
                 return PayloadStatus::from_status(PayloadStatusEnum::Syncing)
             }
@@ -1444,7 +1444,7 @@ where
                         // TODO: do not ignore this
                         let _ = self.blockchain.make_canonical(*target_hash.as_ref());
                     }
-                } else if let Some(block_number) = err.is_optimistic_revert() {
+                } else if let Some(block_number) = err.optimistic_revert_block_number() {
                     self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(block_number));
                 }
 
@@ -1760,7 +1760,7 @@ where
                                 Err(BeaconOnNewPayloadError::Internal(Box::new(error.clone())));
                             let _ = tx.send(response);
                             return Err(RethError::Canonical(error))
-                        } else if error.is_optimistic_revert().is_some() {
+                        } else if error.optimistic_revert_block_number().is_some() {
                             // engine already set the pipeline unwind target on
                             // `try_make_sync_target_canonical`
                             PayloadStatus::new(PayloadStatusEnum::Syncing, None)
