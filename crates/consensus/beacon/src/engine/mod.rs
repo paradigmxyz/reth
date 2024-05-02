@@ -1,18 +1,10 @@
-use crate::{
-    engine::{
-        forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker},
-        metrics::EngineMetrics,
-    },
-    hooks::{EngineHookContext, EngineHooksController},
-    sync::{EngineSyncController, EngineSyncEvent},
-};
-use futures::{Future, StreamExt};
+use futures::{stream::BoxStream, Future, StreamExt};
 use reth_db::database::Database;
 use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
+        BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
     },
     executor::BlockValidationError,
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
@@ -21,6 +13,7 @@ use reth_interfaces::{
     RethError, RethResult,
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
     SealedHeader, B256,
@@ -43,7 +36,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    mpsc::{self, UnboundedSender},
     oneshot,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -68,18 +61,19 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-use crate::hooks::{EngineHookEvent, EngineHooks, PolledHook};
 pub use forkchoice::ForkchoiceStatus;
-use reth_interfaces::blockchain_tree::BlockValidationKind;
-use reth_payload_validator::ExecutionPayloadValidator;
+use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
 
 mod metrics;
+use metrics::EngineMetrics;
 
 pub(crate) mod sync;
+use sync::{EngineSyncController, EngineSyncEvent};
 
 /// Hooks for running during the main loop of
 /// [consensus engine][`crate::engine::BeaconConsensusEngine`].
 pub mod hooks;
+use hooks::{EngineHookContext, EngineHookEvent, EngineHooks, EngineHooksController, PolledHook};
 
 #[cfg(test)]
 pub mod test_utils;
@@ -180,7 +174,7 @@ where
     /// Used for emitting updates about whether the engine is syncing or not.
     sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
-    engine_message_rx: UnboundedReceiverStream<BeaconEngineMessage<EngineT>>,
+    engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
     /// A clone of the handle
     handle: BeaconConsensusEngineHandle<EngineT>,
     /// Tracks the received forkchoice state updates received by the CL.
@@ -254,7 +248,7 @@ where
             target,
             pipeline_run_threshold,
             to_engine,
-            rx,
+            Box::pin(UnboundedReceiverStream::from(rx)),
             hooks,
         )
     }
@@ -284,7 +278,7 @@ where
         target: Option<B256>,
         pipeline_run_threshold: u64,
         to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
-        rx: UnboundedReceiver<BeaconEngineMessage<EngineT>>,
+        engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
         let handle = BeaconConsensusEngineHandle { to_engine };
@@ -303,7 +297,7 @@ where
             payload_validator: ExecutionPayloadValidator::new(blockchain.chain_spec()),
             blockchain,
             sync_state_updater,
-            engine_message_rx: UnboundedReceiverStream::new(rx),
+            engine_message_stream,
             handle: handle.clone(),
             forkchoice_state_tracker: Default::default(),
             payload_builder,
@@ -1770,7 +1764,7 @@ where
                 //
                 // These messages can affect the state of the SyncController and they're also time
                 // sensitive, hence they are polled first.
-                if let Poll::Ready(Some(msg)) = this.engine_message_rx.poll_next_unpin(cx) {
+                if let Poll::Ready(Some(msg)) = this.engine_message_stream.poll_next_unpin(cx) {
                     match msg {
                         BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                             this.on_forkchoice_updated(state, payload_attrs, tx);

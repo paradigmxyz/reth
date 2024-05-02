@@ -7194,6 +7194,7 @@ dependencies = [
  "reth-transaction-pool",
  "tempfile",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -7216,6 +7217,7 @@ dependencies = [
  "metrics-process",
  "metrics-util",
  "once_cell",
+ "pin-project",
  "procfs",
  "proptest",
  "rand 0.8.5",
@@ -7252,6 +7254,7 @@ dependencies = [
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
+ "tokio-util",
  "tracing",
  "vergen",
 ]
