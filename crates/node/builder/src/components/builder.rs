@@ -7,9 +7,9 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
+use reth_evm::execute::BlockExecutorProvider;
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
-use reth_evm::execute::BlockExecutorProvider;
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///

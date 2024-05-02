@@ -7,6 +7,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_interfaces::p2p::{
     bodies::{client::BodiesClient, downloader::BodyDownloader},
@@ -31,7 +32,6 @@ use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;
 use std::sync::Arc;
 use tokio::sync::watch;
-use reth_evm::execute::BlockExecutorProvider;
 
 /// Constructs a [Pipeline] that's wired to the network
 #[allow(clippy::too_many_arguments)]
@@ -112,21 +112,6 @@ where
     }
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-
-    // let stack_config = InspectorStackConfig {
-    //     use_printer_tracer: node_config.debug.print_inspector,
-    //     hook: if let Some(hook_block) = node_config.debug.hook_block {
-    //         Hook::Block(hook_block)
-    //     } else if let Some(tx) = node_config.debug.hook_transaction {
-    //         Hook::Transaction(tx)
-    //     } else if node_config.debug.hook_all {
-    //         Hook::All
-    //     } else {
-    //         Hook::None
-    //     },
-    // };
-    //
-    // let factory = factory.with_stack_config(stack_config);
 
     let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 

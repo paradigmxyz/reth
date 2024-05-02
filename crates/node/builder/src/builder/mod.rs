@@ -27,6 +27,7 @@ use reth_node_core::{
 };
 use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
+use reth_revm::stack::{InspectorStack, InspectorStackConfig};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 pub use states::*;
@@ -458,6 +459,28 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config of the node.
     pub fn config(&self) -> &NodeConfig {
         &self.config
+    }
+
+    /// Returns an inspector stack if configured.
+    ///
+    /// This can be used to debug block execution.
+    pub fn inspector_stack(&self) -> Option<InspectorStack> {
+        use reth_revm::stack::Hook;
+        let stack_config = InspectorStackConfig {
+            use_printer_tracer: self.config.debug.print_inspector,
+            hook: if let Some(hook_block) = self.config.debug.hook_block {
+                Hook::Block(hook_block)
+            } else if let Some(tx) = self.config.debug.hook_transaction {
+                Hook::Transaction(tx)
+            } else if self.config.debug.hook_all {
+                Hook::All
+            } else {
+                // no inspector
+                return None
+            },
+        };
+
+        Some(InspectorStack::new(stack_config))
     }
 
     /// Returns the data dir of the node.

@@ -1,8 +1,8 @@
 //! EVM component for the node builder.
 use crate::{BuilderContext, FullNodeTypes};
+use reth_evm::execute::BlockExecutorProvider;
 use reth_node_api::ConfigureEvm;
 use std::future::Future;
-use reth_evm::execute::BlockExecutorProvider;
 
 /// A type that knows how to build the executor types.
 pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
@@ -12,8 +12,6 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
     type EVM: ConfigureEvm;
 
     /// The type that knows how to execute blocks.
-    ///
-    ///
     type Executor: BlockExecutorProvider;
 
     /// Creates the EVM config.

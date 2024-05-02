@@ -92,7 +92,7 @@ where
     }
 
     fn block_executor(&self) -> &Self::Executor {
-       &self.executor
+        &self.executor
     }
 
     fn network(&self) -> &NetworkHandle {
