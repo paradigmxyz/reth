@@ -486,18 +486,19 @@ impl DataReader {
         // SAFETY: File is read-only and its descriptor is kept alive as long as the mmap handle.
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
-        Ok(Self {
-            data_file,
-            data_mmap,
-            offset_file,
-            // First byte is the size of one offset in bytes
-            offset_size: offset_mmap[0] as u64,
-            offset_mmap,
-        })
+        // First byte is the size of one offset in bytes
+        let offset_size = offset_mmap[0] as u64;
+
+        // Ensure that the size of an offset is at most 8 bytes.
+        if offset_size > 8 {
+            return Err(NippyJarError::OffsetSizeTooBig { offset_size })
+        }
+
+        Ok(Self { data_file, data_mmap, offset_file, offset_size, offset_mmap })
     }
 
     /// Returns the offset for the requested data index
-    pub fn offset(&self, index: usize) -> u64 {
+    pub fn offset(&self, index: usize) -> Result<u64, NippyJarError> {
         // + 1 represents the offset_len u8 which is in the beginning of the file
         let from = index * self.offset_size as usize + 1;
 
@@ -511,7 +512,7 @@ impl DataReader {
         if offsets_file_size > 1 {
             let from = offsets_file_size - self.offset_size as usize * (index + 1);
 
-            Ok(self.offset_at(from))
+            self.offset_at(from)
         } else {
             Ok(0)
         }
@@ -524,11 +525,16 @@ impl DataReader {
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
-    fn offset_at(&self, index: usize) -> u64 {
+    fn offset_at(&self, index: usize) -> Result<u64, NippyJarError> {
         let mut buffer: [u8; 8] = [0; 8];
-        buffer[..self.offset_size as usize]
-            .copy_from_slice(&self.offset_mmap[index..(index + self.offset_size as usize)]);
-        u64::from_le_bytes(buffer)
+
+        let offset_end = index + self.offset_size as usize;
+        if offset_end > self.offset_mmap.len() {
+            return Err(NippyJarError::OffsetOutOfBounds { index });
+        }
+
+        buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
+        Ok(u64::from_le_bytes(buffer))
     }
 
     /// Returns number of bytes that represent one offset.
@@ -1291,7 +1297,7 @@ mod tests {
             let data_reader = nippy.open_data_reader().unwrap();
             // there are only two valid offsets. so index 2 actually represents the expected file
             // data size.
-            assert_eq!(data_reader.offset(2), expected_data_size as u64);
+            assert_eq!(data_reader.offset(2).unwrap(), expected_data_size as u64);
         }
 
         // This should prune from the ondisk offset list and clear the jar.

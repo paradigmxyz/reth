@@ -108,9 +108,9 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         let db_args = self.db.database_args();
-        let static_files_path = data_dir.static_files_path();
+        let static_files_path = data_dir.static_files();
 
         match self.command {
             // TODO: We'll need to add this on the DB trait.

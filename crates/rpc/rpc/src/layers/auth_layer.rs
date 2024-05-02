@@ -44,11 +44,7 @@ pub struct AuthLayer<V> {
     validator: V,
 }
 
-impl<V> AuthLayer<V>
-where
-    V: AuthValidator,
-    V::ResponseBody: Body,
-{
+impl<V> AuthLayer<V> {
     /// Creates an instance of [`AuthLayer`].
     /// `validator` is a generic trait able to validate requests (see [`AuthValidator`]).
     pub fn new(validator: V) -> Self {

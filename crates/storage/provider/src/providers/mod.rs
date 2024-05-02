@@ -89,6 +89,13 @@ impl<DB> BlockchainProvider<DB> {
     ) -> Self {
         Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
+
+    /// Sets the treeviewer for the provider.
+    #[doc(hidden)]
+    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
+        self.tree = tree;
+        self
+    }
 }
 
 impl<DB> BlockchainProvider<DB>

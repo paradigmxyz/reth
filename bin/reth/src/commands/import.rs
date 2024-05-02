@@ -14,7 +14,7 @@ use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
-use reth_db::{database::Database, init_db};
+use reth_db::{database::Database, init_db, tables, transaction::DbTx};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
@@ -30,8 +30,8 @@ use reth_node_ethereum::EthEvmConfig;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{
-    BlockNumReader, HeaderProvider, HeaderSyncMode, ProviderError, ProviderFactory,
-    StageCheckpointReader, StaticFileProviderFactory,
+    BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
+    ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_stages::{
     prelude::*,
@@ -41,7 +41,7 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Stages that require state.
 const STATE_STAGES: &[StageId] = &[
@@ -87,11 +87,6 @@ pub struct ImportCommand {
     #[arg(long, verbatim_doc_comment)]
     no_state: bool,
 
-    /// Import OP Mainnet chain below Bedrock. Caution! Flag must be set as env var, since the env
-    /// var is read by another process too, in order to make below Bedrock import work.
-    #[arg(long, verbatim_doc_comment, env = "OP_RETH_MAINNET_BELOW_BEDROCK")]
-    op_mainnet_below_bedrock: bool,
-
     /// Chunk byte length.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
@@ -109,41 +104,37 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(mut self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
-        if self.op_mainnet_below_bedrock {
-            self.no_state = true;
-            debug!(target: "reth::cli", "Importing OP mainnet below bedrock");
-        }
-
         if self.no_state {
-            debug!(target: "reth::cli", "Stages requiring state disabled");
+            info!(target: "reth::cli", "Disabled stages requiring state");
         }
 
         debug!(target: "reth::cli",
-            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking chain import"
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE),
+            "Chunking chain import"
         );
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
-        let mut config: Config = self.load_config(config_path.clone())?;
+        let mut config: Config = load_config(config_path.clone())?;
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
-            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
         }
 
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -155,6 +146,9 @@ impl ImportCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
+        let mut total_decoded_blocks = 0;
+        let mut total_decoded_txns = 0;
+
         while let Some(file_client) = reader.next_chunk().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
@@ -164,20 +158,22 @@ impl ImportCommand {
             let tip = file_client.tip().ok_or(eyre::eyre!("file client has no tip"))?;
             info!(target: "reth::cli", "Chain file chunk read");
 
-            let (mut pipeline, events) = self
-                .build_import_pipeline(
-                    &config,
+            total_decoded_blocks += file_client.headers_len();
+            total_decoded_txns += file_client.total_transactions();
+
+            let (mut pipeline, events) = build_import_pipeline(
+                &config,
+                provider_factory.clone(),
+                &consensus,
+                Arc::new(file_client),
+                StaticFileProducer::new(
                     provider_factory.clone(),
-                    &consensus,
-                    Arc::new(file_client),
-                    StaticFileProducer::new(
-                        provider_factory.clone(),
-                        provider_factory.static_file_provider(),
-                        PruneModes::default(),
-                    ),
-                    self.no_state,
-                )
-                .await?;
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+                true,
+            )
+            .await?;
 
             // override the tip
             pipeline.set_tip(tip);
@@ -202,104 +198,129 @@ impl ImportCommand {
             }
         }
 
-        info!(target: "reth::cli", "Chain file imported");
-        Ok(())
-    }
+        let provider = provider_factory.provider()?;
 
-    async fn build_import_pipeline<DB, C>(
-        &self,
-        config: &Config,
-        provider_factory: ProviderFactory<DB>,
-        consensus: &Arc<C>,
-        file_client: Arc<FileClient>,
-        static_file_producer: StaticFileProducer<DB>,
-        no_state: bool,
-    ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
-    where
-        DB: Database + Clone + Unpin + 'static,
-        C: Consensus + 'static,
-    {
-        if !file_client.has_canonical_blocks() {
-            eyre::bail!("unable to import non canonical blocks");
+        let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
+        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+
+        if total_decoded_blocks != total_imported_blocks ||
+            total_decoded_txns != total_imported_txns
+        {
+            error!(target: "reth::cli",
+                total_decoded_blocks,
+                total_imported_blocks,
+                total_decoded_txns,
+                total_imported_txns,
+                "Chain was partially imported"
+            );
         }
 
-        // Retrieve latest header found in the database.
-        let last_block_number = provider_factory.last_block_number()?;
-        let local_head = provider_factory
-            .sealed_header(last_block_number)?
-            .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
+        info!(target: "reth::cli",
+            total_imported_blocks,
+            total_imported_txns,
+            "Chain file imported"
+        );
 
-        let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(file_client.clone(), consensus.clone())
-            .into_task();
-        // TODO: The pipeline should correctly configure the downloader on its own.
-        // Find the possibility to remove unnecessary pre-configuration.
-        header_downloader.update_local_head(local_head);
-        header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
+        Ok(())
+    }
+}
 
-        let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(file_client.clone(), consensus.clone(), provider_factory.clone())
-            .into_task();
-        // TODO: The pipeline should correctly configure the downloader on its own.
-        // Find the possibility to remove unnecessary pre-configuration.
-        body_downloader
-            .set_download_range(file_client.min_block().unwrap()..=file_client.max_block().unwrap())
-            .expect("failed to set download range");
+/// Builds import pipeline.
+///
+/// If configured to execute, all stages will run. Otherwise, only stages that don't require state
+/// will run.
+pub async fn build_import_pipeline<DB, C>(
+    config: &Config,
+    provider_factory: ProviderFactory<DB>,
+    consensus: &Arc<C>,
+    file_client: Arc<FileClient>,
+    static_file_producer: StaticFileProducer<DB>,
+    should_exec: bool,
+) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
+where
+    DB: Database + Clone + Unpin + 'static,
+    C: Consensus + 'static,
+{
+    if !file_client.has_canonical_blocks() {
+        eyre::bail!("unable to import non canonical blocks");
+    }
 
-        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory =
-            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
+    // Retrieve latest header found in the database.
+    let last_block_number = provider_factory.last_block_number()?;
+    let local_head = provider_factory
+        .sealed_header(last_block_number)?
+        .ok_or(ProviderError::HeaderNotFound(last_block_number.into()))?;
 
-        let max_block = file_client.max_block().unwrap_or(0);
+    let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
+        .build(file_client.clone(), consensus.clone())
+        .into_task();
+    // TODO: The pipeline should correctly configure the downloader on its own.
+    // Find the possibility to remove unnecessary pre-configuration.
+    header_downloader.update_local_head(local_head);
+    header_downloader.update_sync_target(SyncTarget::Tip(file_client.tip().unwrap()));
 
-        let mut pipeline = Pipeline::builder()
-            .with_tip_sender(tip_tx)
-            // we want to sync all blocks the file client provides or 0 if empty
-            .with_max_block(max_block)
-            .add_stages(
-                DefaultStages::new(
-                    provider_factory.clone(),
-                    HeaderSyncMode::Tip(tip_rx),
-                    consensus.clone(),
-                    header_downloader,
-                    body_downloader,
-                    factory.clone(),
-                    config.stages.etl.clone(),
-                )
-                .set(SenderRecoveryStage {
-                    commit_threshold: config.stages.sender_recovery.commit_threshold,
-                })
-                .set(ExecutionStage::new(
-                    factory,
-                    ExecutionStageThresholds {
-                        max_blocks: config.stages.execution.max_blocks,
-                        max_changes: config.stages.execution.max_changes,
-                        max_cumulative_gas: config.stages.execution.max_cumulative_gas,
-                        max_duration: config.stages.execution.max_duration,
-                    },
-                    config
-                        .stages
-                        .merkle
-                        .clean_threshold
-                        .max(config.stages.account_hashing.clean_threshold)
-                        .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
-                    ExExManagerHandle::empty(),
-                ))
-                .disable_all_if(STATE_STAGES, || no_state),
+    let mut body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
+        .build(file_client.clone(), consensus.clone(), provider_factory.clone())
+        .into_task();
+    // TODO: The pipeline should correctly configure the downloader on its own.
+    // Find the possibility to remove unnecessary pre-configuration.
+    body_downloader
+        .set_download_range(file_client.min_block().unwrap()..=file_client.max_block().unwrap())
+        .expect("failed to set download range");
+
+    let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
+    let factory =
+        reth_revm::EvmProcessorFactory::new(provider_factory.chain_spec(), EthEvmConfig::default());
+
+    let max_block = file_client.max_block().unwrap_or(0);
+
+    let mut pipeline = Pipeline::builder()
+        .with_tip_sender(tip_tx)
+        // we want to sync all blocks the file client provides or 0 if empty
+        .with_max_block(max_block)
+        .add_stages(
+            DefaultStages::new(
+                provider_factory.clone(),
+                HeaderSyncMode::Tip(tip_rx),
+                consensus.clone(),
+                header_downloader,
+                body_downloader,
+                factory.clone(),
+                config.stages.etl.clone(),
             )
-            .build(provider_factory, static_file_producer);
+            .set(SenderRecoveryStage {
+                commit_threshold: config.stages.sender_recovery.commit_threshold,
+            })
+            .set(ExecutionStage::new(
+                factory,
+                ExecutionStageThresholds {
+                    max_blocks: config.stages.execution.max_blocks,
+                    max_changes: config.stages.execution.max_changes,
+                    max_cumulative_gas: config.stages.execution.max_cumulative_gas,
+                    max_duration: config.stages.execution.max_duration,
+                },
+                config
+                    .stages
+                    .merkle
+                    .clean_threshold
+                    .max(config.stages.account_hashing.clean_threshold)
+                    .max(config.stages.storage_hashing.clean_threshold),
+                config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
+                ExExManagerHandle::empty(),
+            ))
+            .disable_all_if(STATE_STAGES, || should_exec),
+        )
+        .build(provider_factory, static_file_producer);
 
-        let events = pipeline.events().map(Into::into);
+    let events = pipeline.events().map(Into::into);
 
-        Ok((pipeline, events))
-    }
+    Ok((pipeline, events))
+}
 
-    /// Loads the reth config
-    fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
-        confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {config_path:?}"))
-    }
+/// Loads the reth config
+pub fn load_config(config_path: PathBuf) -> eyre::Result<Config> {
+    confy::load_path::<Config>(config_path.clone())
+        .wrap_err_with(|| format!("Could not load config file {config_path:?}"))
 }
 
 #[cfg(test)]

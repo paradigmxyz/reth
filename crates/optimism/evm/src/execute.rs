@@ -137,7 +137,7 @@ where
     ///
     /// It does __not__ apply post-execution changes.
     fn execute_pre_and_transactions<Ext, DB>(
-        &mut self,
+        &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
@@ -539,7 +539,7 @@ mod tests {
     use super::*;
     use reth_primitives::{
         b256, Account, Address, Block, ChainSpecBuilder, Signature, StorageKey, StorageValue,
-        Transaction, TransactionSigned, TxEip1559, TxKind, BASE_MAINNET,
+        Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
@@ -609,7 +609,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TxKind::Call(addr),
+                to: addr.into(),
                 ..Default::default()
             }),
             Signature::default(),
@@ -618,7 +618,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TxKind::Call(addr),
+                to: addr.into(),
                 gas_limit: 21_000,
                 ..Default::default()
             }),
@@ -689,7 +689,7 @@ mod tests {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: 21_000,
-                to: TxKind::Call(addr),
+                to: addr.into(),
                 ..Default::default()
             }),
             Signature::default(),
@@ -698,7 +698,7 @@ mod tests {
         let tx_deposit = TransactionSigned::from_transaction_and_signature(
             Transaction::Deposit(reth_primitives::TxDeposit {
                 from: addr,
-                to: TxKind::Call(addr),
+                to: addr.into(),
                 gas_limit: 21_000,
                 ..Default::default()
             }),

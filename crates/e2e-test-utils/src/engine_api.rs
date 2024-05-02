@@ -1,5 +1,5 @@
 use crate::traits::PayloadEnvelopeExt;
-use jsonrpsee::http_client::HttpClient;
+use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth::{
     api::{EngineTypes, PayloadBuilderAttributes},
     providers::CanonStateNotificationStream,
@@ -10,12 +10,13 @@ use reth::{
 };
 use reth_payload_builder::PayloadId;
 use reth_primitives::B256;
+use reth_rpc::AuthClientService;
 use std::marker::PhantomData;
 
 /// Helper for engine api operations
 pub struct EngineApiTestContext<E> {
     pub canonical_stream: CanonStateNotificationStream,
-    pub engine_api_client: HttpClient,
+    pub engine_api_client: HttpClient<AuthClientService<HttpBackend>>,
     pub _marker: PhantomData<E>,
 }
 

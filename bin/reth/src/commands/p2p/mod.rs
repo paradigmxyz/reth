@@ -105,7 +105,7 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
@@ -119,7 +119,7 @@ impl Command {
 
         config.peers.trusted_nodes_only = self.trusted_only;
 
-        let default_secret_key_path = data_dir.p2p_secret_path();
+        let default_secret_key_path = data_dir.p2p_secret();
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
 
@@ -133,12 +133,19 @@ impl Command {
         let mut network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
             noop_db,
             self.chain.clone(),
-            data_dir.static_files_path(),
+            data_dir.static_files(),
         )?));
 
         if self.discovery.enable_discv5_discovery {
             network_config = network_config.discovery_v5_with_config_builder(|builder| {
-                let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.discovery;
+                let DiscoveryArgs {
+                    discv5_addr,
+                    discv5_port,
+                    discv5_lookup_interval,
+                    discv5_bootstrap_lookup_interval,
+                    discv5_bootstrap_lookup_countdown,
+                    ..
+                } = self.discovery;
                 builder
                     .discv5_config(
                         discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
@@ -147,6 +154,9 @@ impl Command {
                         ))))
                         .build(),
                     )
+                    .lookup_interval(discv5_lookup_interval)
+                    .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                    .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
                     .build()
             });
         }
