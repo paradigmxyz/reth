@@ -470,7 +470,9 @@ impl NodeConfig {
 
         let config = cfg_builder.build(client);
 
-        if !self.network.discovery.enable_discv5_discovery {
+        if self.network.discovery.disable_discovery ||
+            !self.network.discovery.enable_discv5_discovery
+        {
             return config
         }
         // work around since discv5 config builder can't be integrated into network config builder
