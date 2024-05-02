@@ -126,6 +126,7 @@ impl Command {
         let mut network_config_builder = config
             .network_config(self.nat, None, p2p_secret_key)
             .chain_spec(self.chain.clone())
+            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .boot_nodes(self.chain.bootnodes().unwrap_or_default());
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);

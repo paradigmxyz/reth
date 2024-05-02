@@ -462,6 +462,7 @@ impl NodeConfig {
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
             ))
+            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 // set discovery port based on instance number
@@ -476,6 +477,7 @@ impl NodeConfig {
         {
             return config
         }
+
         // work around since discv5 config builder can't be integrated into network config builder
         // due to unsatisfied trait bounds
         config.discovery_v5_with_config_builder(|builder| {
