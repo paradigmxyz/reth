@@ -2,7 +2,7 @@
 //! processing deposits and storing all related data in an SQLite database.
 //!
 //! The rollup contract accepts blocks of transactions and deposits of ETH and is deployed on
-//! Holesky at [ROLLUP_CONTRACT_ADDRESS], see <https://github.com/init4tech/zenith/blob/3a9a742a2497653b16fb3e947bcd118562c3356c/src/CalldataZenith.sol>.
+//! Holesky at [ROLLUP_CONTRACT_ADDRESS], see <https://github.com/init4tech/zenith/blob/e0481e930947513166881a83e276b316c2f38502/src/Zenith.sol>.
 
 use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use db::Database;
