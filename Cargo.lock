@@ -7224,6 +7224,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
+ "reth-discv5",
  "reth-engine-primitives",
  "reth-evm",
  "reth-interfaces",
