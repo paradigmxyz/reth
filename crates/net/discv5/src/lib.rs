@@ -38,8 +38,9 @@ pub mod network_stack_id;
 pub use discv5::{self, IpMode};
 
 pub use config::{
-    BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
-    DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
+    BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
+    DEFAULT_DISCOVERY_V5_PORT, DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
+    DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 pub use enr::enr_to_discv4_id;
 pub use error::Error;

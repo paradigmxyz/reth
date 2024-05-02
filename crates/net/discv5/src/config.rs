@@ -3,7 +3,7 @@
 use std::{
     collections::HashSet,
     fmt::Debug,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
 use derive_more::Display;
@@ -12,6 +12,16 @@ use multiaddr::{Multiaddr, Protocol};
 use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
+
+/// The default address for discv5 via UDP.
+///
+/// Default is 0.0.0.0, all interfaces. See [`discv5::ListenConfig`] default.
+pub const DEFAULT_DISCOVERY_V5_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
+/// The default port for discv5 via UDP.
+///
+/// Default is port 9000. See [`discv5::ListenConfig`] default.
+pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9000;
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
