@@ -14,7 +14,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
-
+reth-chainspec.workspace = true
 # misc
 serde.workspace = true
 thiserror.workspace = true

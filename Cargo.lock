@@ -6497,6 +6497,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-ethereum-forks",
+ "reth-primitives",
  "reth-rpc-types",
  "revm",
  "revm-primitives",
@@ -6663,6 +6664,7 @@ dependencies = [
  "metrics",
  "multiaddr",
  "rand 0.8.5",
+ "reth-chainspec",
  "reth-metrics",
  "reth-network-types",
  "reth-primitives",
@@ -6795,6 +6797,7 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "0.2.0-beta.6"
 dependencies = [
+ "reth-chainspec",
  "reth-primitives",
  "reth-rpc-types",
  "serde",
@@ -6864,6 +6867,7 @@ name = "reth-ethereum-engine-primitives"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
+ "reth-chainspec",
  "reth-engine-primitives",
  "reth-primitives",
  "reth-rpc-types",
@@ -7520,6 +7524,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "rayon",
+ "reth-chainspec",
  "reth-codecs",
  "reth-db",
  "reth-evm",

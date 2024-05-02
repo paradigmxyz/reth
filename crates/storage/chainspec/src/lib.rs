@@ -15,11 +15,11 @@ pub(crate) use spec::{OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS};
 mod spec;
 // The chain info module.
 mod info;
-
+mod net;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::U256;
+    use reth_primitives::U256;
     use alloy_rlp::Encodable;
     use std::str::FromStr;
 

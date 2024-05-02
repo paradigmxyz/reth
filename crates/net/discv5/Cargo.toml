@@ -16,7 +16,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-metrics.workspace = true
 reth-network-types.workspace = true
-
+reth-chainspec.workspace = true
 # ethereum
 alloy-rlp.workspace = true
 discv5 = { workspace = true, features = ["libp2p"] }
