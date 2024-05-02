@@ -6467,6 +6467,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-chainspec"
+version = "0.2.0-beta.6"
+dependencies = [
+ "alloy-chains",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "arbitrary",
+ "assert_matches",
+ "byteorder",
+ "bytes",
+ "c-kzg",
+ "clap",
+ "criterion",
+ "derive_more",
+ "hash-db",
+ "itertools 0.12.1",
+ "modular-bitfield",
+ "nybbles",
+ "once_cell",
+ "plain_hasher",
+ "pprof",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "rayon",
+ "reth-codecs",
+ "reth-ethereum-forks",
+ "reth-rpc-types",
+ "revm",
+ "revm-primitives",
+ "roaring",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "strum",
+ "sucds",
+ "tempfile",
+ "test-fuzz",
+ "thiserror",
+ "toml",
+ "triehash",
+ "zstd",
+]
+
+[[package]]
 name = "reth-cli-runner"
 version = "0.2.0-beta.6"
 dependencies = [
