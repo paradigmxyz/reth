@@ -93,7 +93,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     {
                         match execute_block(
                             &mut self.db,
-                            &self.ctx.pool,
+                            self.ctx.pool(),
                             tx,
                             &header,
                             blockData,
