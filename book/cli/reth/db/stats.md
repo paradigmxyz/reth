@@ -18,7 +18,7 @@ Options:
           
           [default: default]
 
-      --only-total-size
+      --detailed-sizes
           Show only the total size for static files
 
       --chain <CHAIN_OR_PATH>
@@ -30,8 +30,15 @@ Options:
           
           [default: mainnet]
 
-      --summary
-          Show only the summary per static file segment
+      --detailed-segments
+          Show detailed information per static file segment
+
+      --checksum
+          Show a checksum of each table in the database.
+          
+          WARNING: this option will take a long time to run, as it needs to traverse and hash the entire database.
+          
+          For individual table checksums, use the `reth db checksum` command.
 
       --instance <INSTANCE>
           Add a new instance of a node.
