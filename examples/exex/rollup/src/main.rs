@@ -75,7 +75,6 @@ impl<Node: FullNodeComponents> Rollup<Node> {
         let events = decode_chain_into_rollup_events(chain);
 
         for (_, tx, event) in events {
-            let tx_hash = tx.recalculate_hash();
             match event {
                 // A new block is submitted to the rollup contract.
                 // The block is executed on top of existing rollup state and committed into the
@@ -106,7 +105,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                                 let block = block.seal_slow();
                                 self.db.insert_block_with_bundle(&block, bundle)?;
                                 info!(
-                                    %tx_hash,
+                                    tx_hash = %tx.recalculate_hash(),
                                     chain_id = %header.rollupChainId,
                                     sequence = %header.sequence,
                                     transactions = block.body.len(),
@@ -116,7 +115,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                             Err(err) => {
                                 error!(
                                     %err,
-                                    %tx_hash,
+                                    tx_hash = %tx.recalculate_hash(),
                                     chain_id = %header.rollupChainId,
                                     sequence = %header.sequence,
                                     "Failed to execute block"
@@ -134,11 +133,11 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     amount,
                 }) => {
                     if rollupChainId != U256::from(CHAIN_ID) {
-                        error!(%tx_hash, "Invalid rollup chain ID");
+                        error!(tx_hash = %tx.recalculate_hash(), "Invalid rollup chain ID");
                         continue
                     }
                     if token != Address::ZERO {
-                        error!(%tx_hash, "Only ETH deposits are supported");
+                        error!(tx_hash = %tx.recalculate_hash(), "Only ETH deposits are supported");
                         continue
                     }
 
@@ -149,7 +148,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     })?;
 
                     info!(
-                        %tx_hash,
+                        tx_hash = %tx.recalculate_hash(),
                         %amount,
                         recipient = %rollupRecipient,
                         "Deposit",
@@ -172,7 +171,6 @@ impl<Node: FullNodeComponents> Rollup<Node> {
         events.reverse();
 
         for (_, tx, event) in events {
-            let tx_hash = tx.recalculate_hash();
             match event {
                 // The block is reverted from the database.
                 RollupContractEvents::BlockSubmitted(_) => {
@@ -185,7 +183,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     {
                         self.db.revert_tip_block(header.sequence)?;
                         info!(
-                            %tx_hash,
+                            tx_hash = %tx.recalculate_hash(),
                             chain_id = %header.rollupChainId,
                             sequence = %header.sequence,
                             "Block reverted"
@@ -200,11 +198,11 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     amount,
                 }) => {
                     if rollupChainId != U256::from(CHAIN_ID) {
-                        error!(%tx_hash, "Invalid rollup chain ID");
+                        error!(tx_hash = %tx.recalculate_hash(), "Invalid rollup chain ID");
                         continue
                     }
                     if token != Address::ZERO {
-                        error!(%tx_hash, "Only ETH deposits are supported");
+                        error!(tx_hash = %tx.recalculate_hash(), "Only ETH deposits are supported");
                         continue
                     }
 
@@ -215,7 +213,7 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                     })?;
 
                     info!(
-                        %tx_hash,
+                        tx_hash = %tx.recalculate_hash(),
                         %amount,
                         recipient = %rollupRecipient,
                         "Deposit reverted",

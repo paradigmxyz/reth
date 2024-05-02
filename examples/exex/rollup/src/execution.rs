@@ -199,7 +199,6 @@ fn execute_transactions(
     header: &Header,
     transactions: Vec<(TransactionSigned, Address)>,
 ) -> eyre::Result<(Vec<TransactionSigned>, Vec<Receipt>, Vec<ExecutionResult>)> {
-    // Execute transactions
     let mut receipts = Vec::with_capacity(transactions.len());
     let mut executed_txs = Vec::with_capacity(transactions.len());
     let mut results = Vec::with_capacity(transactions.len());
