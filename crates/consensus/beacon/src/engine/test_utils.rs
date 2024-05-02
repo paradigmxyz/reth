@@ -1,8 +1,7 @@
-use crate::{
-    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine,
-    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
+use std::{collections::VecDeque, sync::Arc};
+
+use tokio::sync::{oneshot, watch};
+
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
@@ -14,9 +13,9 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm::{either::EitherExecutor, test_utils::MockExecutorProvider};
+use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_interfaces::{
-    executor::BlockExecutionError,
     p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
     sync::NoopSyncStateUpdater,
     test_utils::NoopFullBlockClient,
@@ -24,21 +23,22 @@ use reth_interfaces::{
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
 use reth_provider::{
-    providers::BlockchainProvider,
-    test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
-    BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, PrunableBlockExecutor,
-    StaticFileProviderFactory,
+    providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    BundleStateWithReceipts, HeaderSyncMode, StaticFileProviderFactory,
 };
 use reth_prune::Pruner;
-use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
 use reth_stages::{sets::DefaultStages, test_utils::TestStages, ExecOutput, Pipeline, StageError};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TokioTaskExecutor;
-use std::{collections::VecDeque, sync::Arc};
-use tokio::sync::{oneshot, watch};
+
+use crate::{
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
+    BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
+};
 
 type DatabaseEnv = TempDatabase<DE>;
 
@@ -152,31 +152,6 @@ enum TestExecutorConfig {
 impl Default for TestExecutorConfig {
     fn default() -> Self {
         Self::Test(Vec::new())
-    }
-}
-
-/// A type that represents one of two possible executor factories.
-#[derive(Debug, Clone)]
-pub enum EitherExecutorFactory<A: ExecutorFactory, B: ExecutorFactory> {
-    /// The first factory variant
-    Left(A),
-    /// The second factory variant
-    Right(B),
-}
-
-impl<A, B> ExecutorFactory for EitherExecutorFactory<A, B>
-where
-    A: ExecutorFactory,
-    B: ExecutorFactory,
-{
-    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
-        &'a self,
-        sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a> {
-        match self {
-            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
-            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
-        }
     }
 }
 
@@ -366,13 +341,12 @@ where
         // use either test executor or real executor
         let executor_factory = match self.base_config.executor_config {
             TestExecutorConfig::Test(results) => {
-                let executor_factory = TestExecutorFactory::default();
+                let executor_factory = MockExecutorProvider::default();
                 executor_factory.extend(results);
-                EitherExecutorFactory::Left(executor_factory)
+                EitherExecutor::Left(executor_factory)
             }
-            TestExecutorConfig::Real => EitherExecutorFactory::Right(EvmProcessorFactory::new(
+            TestExecutorConfig::Real => EitherExecutor::Right(EthExecutorProvider::ethereum(
                 self.base_config.chain_spec.clone(),
-                EthEvmConfig::default(),
             )),
         };
 
