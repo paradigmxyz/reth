@@ -297,6 +297,11 @@ impl ForkFilter {
         self.cache.fork_id
     }
 
+    /// Set the current fork id
+    pub fn set_fork_id(&mut self, fork_id: ForkId) {
+        self.cache.fork_id = fork_id;
+    }
+
     /// Check whether the provided `ForkId` is compatible based on the validation rules in
     /// `EIP-2124`.
     ///

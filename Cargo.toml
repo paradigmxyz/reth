@@ -91,6 +91,7 @@ members = [
     "examples/exex/op-bridge/",
     "examples/exex/rollup/",
     "examples/db-access",
+    "examples/bsc-p2p",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]

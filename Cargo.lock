@@ -1353,6 +1353,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bsc-p2p"
+version = "0.0.0"
+dependencies = [
+ "reth-discv4",
+ "reth-network",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tracing",
+ "secp256k1",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "bstr"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
