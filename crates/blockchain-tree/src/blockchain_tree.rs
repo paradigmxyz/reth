@@ -1437,7 +1437,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
+        let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
 
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
@@ -1545,7 +1545,7 @@ mod tests {
             mock_block(3, Some(sidechain_block_1.hash()), Vec::from([mock_tx(2)]), 3);
 
         let mut tree = BlockchainTree::new(
-            TreeExternals::new(provider_factory, consensus, executor_factory),
+            TreeExternals::new(provider_factory, consensus, executor_provider),
             BlockchainTreeConfig::default(),
             None,
         )
