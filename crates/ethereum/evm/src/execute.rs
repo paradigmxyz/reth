@@ -394,8 +394,8 @@ where
         let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, gas_used) = self.execute_and_verify(block, total_difficulty)?;
 
-        // prepare the state for extraction
-        self.state.merge_transitions(BundleRetention::PlainState);
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
     }
