@@ -3,11 +3,10 @@ use reth_db::models::client_version::ClientVersion;
 use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 
 // The client code for Reth
-#[allow(missing_docs)]
 pub const CLIENT_CODE: ClientCode = ClientCode::RH;
+
 // The human readable name of the client
-#[allow(missing_docs)]
-pub const NAME_CLIENT: &str = "reth";
+pub const NAME_CLIENT: String = String::from("reth");
 
 /// The latest version from Cargo.toml.
 pub const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -36,7 +35,7 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 ///  ```
 pub const CLIENT_VERSION_V1: ClientVersionV1 = ClientVersionV1 {
     code: CLIENT_CODE,
-    name: NAME_CLIENT.to_string(),
+    name: NAME_CLIENT,
     version: const_str::concat!(env!("CARGO_PKG_VERSION"), env!("RETH_VERSION_SUFFIX")).to_string(),
     commit: env!("VERGEN_GIT_SHA").to_string(),
 };
