@@ -63,6 +63,10 @@ pub struct DebugArgs {
     #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
     pub skip_fcu: Option<usize>,
 
+    /// If provided, the engine will skip `n` consecutive new payloads.
+    #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
+    pub skip_new_payload: Option<usize>,
+
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages
     /// will be written to specified location.
