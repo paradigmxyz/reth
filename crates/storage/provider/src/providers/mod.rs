@@ -4,8 +4,8 @@ use crate::{
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
-    WithdrawalsProvider,
+    StateProviderFactory, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    TreeViewer, WithdrawalsProvider,
 };
 use reth_db::{
     database::Database,
@@ -89,6 +89,13 @@ impl<DB> BlockchainProvider<DB> {
     ) -> Self {
         Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
     }
+
+    /// Sets the treeviewer for the provider.
+    #[doc(hidden)]
+    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
+        self.tree = tree;
+        self
+    }
 }
 
 impl<DB> BlockchainProvider<DB>
@@ -139,6 +146,12 @@ where
 {
     fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         self.database.provider()
+    }
+}
+
+impl<DB> StaticFileProviderFactory for BlockchainProvider<DB> {
+    fn static_file_provider(&self) -> StaticFileProvider {
+        self.database.static_file_provider()
     }
 }
 

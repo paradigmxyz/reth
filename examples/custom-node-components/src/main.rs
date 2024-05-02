@@ -19,7 +19,7 @@ fn main() {
         .run(|builder, _| async move {
             let handle = builder
                 // use the default ethereum node types
-                .with_types(EthereumNode::default())
+                .with_types::<EthereumNode>()
                 // Configure the components of the node
                 // use default ethereum components but use our custom pool
                 .with_components(EthereumNode::components().pool(CustomPoolBuilder::default()))
@@ -64,7 +64,7 @@ where
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions_path();
+        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {

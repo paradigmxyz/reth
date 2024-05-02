@@ -9,17 +9,18 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
-use reth_discv5::network_key;
+use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NamedChain, NodeRecord, MAINNET,
+    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+
 // re-export for convenience
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use secp256k1::SecretKey;
@@ -121,20 +122,16 @@ impl<C> NetworkConfig<C> {
         f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::Config,
     ) -> Self {
         let rlpx_port = self.listener_addr.port();
-        let chain = self.chain_spec.chain;
+        let network_stack_id = NetworkStackId::id(&self.chain_spec);
         let fork_id = self.chain_spec.latest_fork_id();
         let boot_nodes = self.boot_nodes.clone();
 
         let mut builder =
             reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter());
 
-        if chain.named() == Some(NamedChain::Mainnet) {
-            builder = builder.fork(network_key::ETH, fork_id)
+        if let Some(id) = network_stack_id {
+            builder = builder.fork(id, fork_id);
         }
-        // todo: set op EL fork id
-        /*if chain.is_optimism() {
-            builder = builder.fork(network_key::, fork_id)
-        }*/
 
         self.set_discovery_v5(f(builder))
     }

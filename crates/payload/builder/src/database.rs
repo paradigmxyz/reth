@@ -61,10 +61,13 @@ impl CachedReads {
     }
 }
 
+/// A [Database] that caches reads inside [CachedReads].
 #[derive(Debug)]
-struct CachedReadsDbMut<'a, DB> {
-    cached: &'a mut CachedReads,
-    db: DB,
+pub struct CachedReadsDbMut<'a, DB> {
+    /// The cache of reads.
+    pub cached: &'a mut CachedReads,
+    /// The underlying database.
+    pub db: DB,
 }
 
 impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
@@ -126,7 +129,8 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
 /// `revm::db::State` for repeated payload build jobs.
 #[derive(Debug)]
 pub struct CachedReadsDBRef<'a, DB> {
-    inner: RefCell<CachedReadsDbMut<'a, DB>>,
+    /// The inner cache reads db mut.
+    pub inner: RefCell<CachedReadsDbMut<'a, DB>>,
 }
 
 impl<'a, DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'a, DB> {

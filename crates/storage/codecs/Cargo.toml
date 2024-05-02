@@ -16,6 +16,7 @@ reth-codecs-derive = { path = "./derive", default-features = false }
 
 # eth
 alloy-eips = { workspace = true, optional = true }
+alloy-genesis = { workspace = true, optional = true } 
 alloy-primitives.workspace = true
 
 # misc
@@ -36,5 +37,5 @@ proptest-derive.workspace = true
 [features]
 default = ["std", "alloy"]
 std = ["alloy-primitives/std", "bytes/std"]
-alloy = ["dep:alloy-eips", "dep:modular-bitfield"]
+alloy = ["dep:alloy-eips", "dep:alloy-genesis", "dep:modular-bitfield"]
 optimism = ["reth-codecs-derive/optimism"]

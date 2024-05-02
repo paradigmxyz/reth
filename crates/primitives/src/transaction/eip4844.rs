@@ -291,7 +291,7 @@ impl TxEip4844 {
         TxType::Eip4844
     }
 
-    /// Encodes the legacy transaction in RLP for signing.
+    /// Encodes the EIP-4844 transaction in RLP for signing.
     ///
     /// This encodes the transaction as:
     /// `tx_type || rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to,

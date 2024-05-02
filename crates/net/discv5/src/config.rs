@@ -9,14 +9,25 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord, MAINNET};
+use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
 
-use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, network_key};
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
 /// Default is 60 seconds.
-const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
+pub const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
+
+/// Default number of times to do pulse lookup queries, at bootstrap (pulse intervals, defaulting
+/// to 5 seconds).
+///
+/// Default is 100 counts.
+pub const DEFAULT_COUNT_BOOTSTRAP_LOOKUPS: u64 = 100;
+
+/// Default duration of look up interval, for pulse look ups at bootstrap.
+///
+/// Default is 5 seconds.
+pub const DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL: u64 = 5;
 
 /// Builds a [`Config`].
 #[derive(Debug, Default)]
@@ -39,6 +50,11 @@ pub struct ConfigBuilder {
     other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     lookup_interval: Option<u64>,
+    /// Interval in seconds at which to run pulse lookup queries at bootstrap to boost kbucket
+    /// population.
+    bootstrap_lookup_interval: Option<u64>,
+    /// Number of times to run boost lookup queries at start up.
+    bootstrap_lookup_countdown: Option<u64>,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     discovered_peer_filter: Option<MustNotIncludeKeys>,
@@ -50,20 +66,24 @@ impl ConfigBuilder {
         let Config {
             discv5_config,
             bootstrap_nodes,
-            fork: (network_key, fork_id),
+            fork,
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
+            bootstrap_lookup_interval,
+            bootstrap_lookup_countdown,
             discovered_peer_filter,
         } = discv5_config;
 
         Self {
             discv5_config: Some(discv5_config),
             bootstrap_nodes,
-            fork: Some((network_key, fork_id.fork_id)),
+            fork: fork.map(|(key, fork_id)| (key, fork_id.fork_id)),
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval: Some(lookup_interval),
+            bootstrap_lookup_interval: Some(bootstrap_lookup_interval),
+            bootstrap_lookup_countdown: Some(bootstrap_lookup_countdown),
             discovered_peer_filter: Some(discovered_peer_filter),
         }
     }
@@ -117,8 +137,8 @@ impl ConfigBuilder {
 
     /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
-    pub fn fork(mut self, network_key: &'static [u8], fork_id: ForkId) -> Self {
-        self.fork = Some((network_key, fork_id));
+    pub fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+        self.fork = Some((fork_key, fork_id));
         self
     }
 
@@ -132,6 +152,26 @@ impl ConfigBuilder {
     /// to use for the kv-pair and the rlp encoded value.
     pub fn add_enr_kv_pair(mut self, key: &'static [u8], value: Bytes) -> Self {
         self.other_enr_kv_pairs.push((key, value));
+        self
+    }
+
+    /// Sets the interval at which to run lookup queries, in order to fill kbuckets. Lookup queries
+    /// are done periodically at the given interval for the whole run of the program.
+    pub fn lookup_interval(mut self, seconds: u64) -> Self {
+        self.lookup_interval = Some(seconds);
+        self
+    }
+
+    /// Sets the interval at which to run boost lookup queries at start up. Queries will be started
+    /// at this interval for the configured number of times after start up.
+    pub fn bootstrap_lookup_interval(mut self, seconds: u64) -> Self {
+        self.bootstrap_lookup_interval = Some(seconds);
+        self
+    }
+
+    /// Sets the the number of times at which to run boost lookup queries to bootstrap the node.
+    pub fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
+        self.bootstrap_lookup_countdown = Some(counts);
         self
     }
 
@@ -154,19 +194,24 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
+            bootstrap_lookup_interval,
+            bootstrap_lookup_countdown,
             discovered_peer_filter,
         } = self;
 
         let discv5_config = discv5_config
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
-        let (network_key, fork_id) = fork.unwrap_or((network_key::ETH, MAINNET.latest_fork_id()));
-        let fork = (network_key, fork_id.into());
+        let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
         let lookup_interval = lookup_interval.unwrap_or(DEFAULT_SECONDS_LOOKUP_INTERVAL);
+        let bootstrap_lookup_interval =
+            bootstrap_lookup_interval.unwrap_or(DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL);
+        let bootstrap_lookup_countdown =
+            bootstrap_lookup_countdown.unwrap_or(DEFAULT_COUNT_BOOTSTRAP_LOOKUPS);
 
-        let discovered_peer_filter =
-            discovered_peer_filter.unwrap_or_else(|| MustNotIncludeKeys::new(&[network_key::ETH2]));
+        let discovered_peer_filter = discovered_peer_filter
+            .unwrap_or_else(|| MustNotIncludeKeys::new(&[NetworkStackId::ETH2]));
 
         Config {
             discv5_config,
@@ -175,6 +220,8 @@ impl ConfigBuilder {
             tcp_port,
             other_enr_kv_pairs,
             lookup_interval,
+            bootstrap_lookup_interval,
+            bootstrap_lookup_countdown,
             discovered_peer_filter,
         }
     }
@@ -190,7 +237,7 @@ pub struct Config {
     pub(super) bootstrap_nodes: HashSet<BootNode>,
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
     /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", [ForkId])`.
-    pub(super) fork: (&'static [u8], EnrForkIdEntry),
+    pub(super) fork: Option<(&'static [u8], EnrForkIdEntry)>,
     /// RLPx TCP port to advertise.
     pub(super) tcp_port: u16,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
@@ -198,6 +245,11 @@ pub struct Config {
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
     /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
     pub(super) lookup_interval: u64,
+    /// Interval in seconds at which to run pulse lookup queries at bootstrap to boost kbucket
+    /// population.
+    pub(super) bootstrap_lookup_interval: u64,
+    /// Number of times to run boost lookup queries at start up.
+    pub(super) bootstrap_lookup_countdown: u64,
     /// Custom filter rules to apply to a discovered peer in order to determine if it should be
     /// passed up to rlpx or dropped.
     pub(super) discovered_peer_filter: MustNotIncludeKeys,

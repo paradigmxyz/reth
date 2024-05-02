@@ -157,7 +157,7 @@ impl TxEip2930 {
         TxType::Eip2930
     }
 
-    /// Encodes the legacy transaction in RLP for signing.
+    /// Encodes the EIP-2930 transaction in RLP for signing.
     ///
     /// This encodes the transaction as:
     /// `tx_type || rlp(chain_id, nonce, gas_price, gas_limit, to, value, input, access_list)`
@@ -225,7 +225,7 @@ mod tests {
             nonce: 0,
             gas_price: 1,
             gas_limit: 2,
-            to: TxKind::Call(Address::default()),
+            to: Address::default().into(),
             value: U256::from(3),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

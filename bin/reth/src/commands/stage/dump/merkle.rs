@@ -24,7 +24,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
 ) -> Result<()> {
-    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db_path(), db_tool)?;
+    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::Headers, _>(
@@ -46,11 +46,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
 
     if should_run {
         dry_run(
-            ProviderFactory::new(
-                output_db,
-                db_tool.chain.clone(),
-                output_datadir.static_files_path(),
-            )?,
+            ProviderFactory::new(output_db, db_tool.chain.clone(), output_datadir.static_files())?,
             to,
             from,
         )

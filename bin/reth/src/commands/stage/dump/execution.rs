@@ -20,7 +20,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
 ) -> Result<()> {
-    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db_path(), db_tool)?;
+    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     import_tables_with_range(&output_db, db_tool, from, to)?;
 
@@ -28,11 +28,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 
     if should_run {
         dry_run(
-            ProviderFactory::new(
-                output_db,
-                db_tool.chain.clone(),
-                output_datadir.static_files_path(),
-            )?,
+            ProviderFactory::new(output_db, db_tool.chain.clone(), output_datadir.static_files())?,
             to,
             from,
         )

@@ -21,7 +21,8 @@ use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
 use reth_provider::{
     AccountExtReader, ExecutorFactory, HashingWriter, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StorageReader,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+    StorageReader,
 };
 use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};
@@ -93,7 +94,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
             )?)
             .start_network()
             .await?;
@@ -108,12 +109,12 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
         let provider = factory.provider()?;
 
         // Look up merkle checkpoint
@@ -125,14 +126,14 @@ impl Command {
 
         // Configure and build network
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
                 db.clone(),
                 network_secret_path,
-                data_dir.known_peers_path(),
+                data_dir.known_peers(),
             )
             .await?;
 

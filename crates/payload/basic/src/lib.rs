@@ -35,6 +35,7 @@ use revm::{
 };
 use std::{
     future::Future,
+    ops::Deref,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
     task::{Context, Poll},
@@ -53,9 +54,9 @@ mod metrics;
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
-    /// txpool
+    /// The transaction pool to pull transactions from.
     pool: Pool,
-    /// How to spawn building tasks
+    /// The task executor to spawn payload building tasks on.
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
@@ -228,6 +229,14 @@ pub struct PrecachedState {
 #[derive(Debug, Clone)]
 pub struct PayloadTaskGuard(Arc<Semaphore>);
 
+impl Deref for PayloadTaskGuard {
+    type Target = Semaphore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 // === impl PayloadTaskGuard ===
 
 impl PayloadTaskGuard {
@@ -385,7 +394,7 @@ where
                 let builder = this.builder.clone();
                 this.executor.spawn_blocking(Box::pin(async move {
                     // acquire the permit for executing the task
-                    let _permit = guard.0.acquire().await;
+                    let _permit = guard.acquire().await;
                     let args = BuildArguments {
                         client,
                         pool,
