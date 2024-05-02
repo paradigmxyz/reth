@@ -110,12 +110,23 @@ impl<'a, Block> From<(&'a Block, U256)> for BlockExecutionInput<'a, Block> {
 /// A type that can create a new executor for block execution.
 pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// An executor that can execute a single block given a database.
+    ///
+    /// # Verification
+    ///
+    /// The on [Executor::execute] the executor is expected to validate the execution output of the
+    /// input, this includes:
+    /// - Cumulative gas used must match the input's gas used.
+    /// - Receipts must match the input's receipts root.
+    ///
+    /// It is not expected to validate the state trie root, this must be done by the caller using
+    /// the returned state.
     type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BlockExecutionOutput<Receipt>,
         Error = BlockExecutionError,
     >;
+
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
         DB,
