@@ -1508,6 +1508,22 @@ where
             return Ok(())
         }
 
+        let set_canonical_head = || {
+            let max_block = ctrl.block_number().unwrap_or_default();
+            let max_header = self.blockchain.sealed_header(max_block)
+            .inspect_err(|error| {
+                error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
+            })?
+            .ok_or_else(|| ProviderError::HeaderNotFound(max_block.into()))?;
+            self.blockchain.set_canonical_head(max_header);
+            Ok::<(), RethError>(())
+        };
+
+        // update the canon chain if continuous is enabled
+        if self.sync.run_pipeline_continuously() {
+            set_canonical_head()?;
+        }
+
         let sync_target_state = match self.forkchoice_state_tracker.sync_target_state() {
             Some(current_state) => current_state,
             None => {
@@ -1518,19 +1534,8 @@ where
             }
         };
 
-        // update the canon chain if continuous is enabled
-        if self.sync.run_pipeline_continuously() || sync_target_state.finalized_block_hash.is_zero()
-        {
-            let max_block = ctrl.block_number().unwrap_or_default();
-            let max_header = self.blockchain.sealed_header(max_block)
-            .inspect_err(|error| {
-                error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
-            })?
-            .ok_or_else(|| ProviderError::HeaderNotFound(max_block.into()))?;
-            self.blockchain.set_canonical_head(max_header);
-        }
-
         if sync_target_state.finalized_block_hash.is_zero() {
+            set_canonical_head()?;
             self.blockchain.update_block_hashes_and_clear_buffered()?;
             self.blockchain.connect_buffered_blocks_to_canonical_hashes()?;
             // We are on a optimistic syncing process, better to wait for the next FCU to handle
