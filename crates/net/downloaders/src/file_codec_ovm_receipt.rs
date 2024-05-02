@@ -1,6 +1,6 @@
 //! Codec for reading raw receipts from a file.
 
-use alloy_rlp::{Decodable, RlpDecodable, RlpDecodableWrapper};
+use alloy_rlp::{Decodable, RlpDecodable};
 use reth_primitives::{
     bytes::{Buf, BytesMut},
     Address, Bloom, Bytes, Log, Receipt, TxType, B256,
@@ -30,7 +30,7 @@ impl Decoder for ReceiptFileCodec {
     type Error = FileClientError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.is_empty() || src.len() == 1 {
+        if src.is_empty() {
             return Ok(None)
         }
 
@@ -43,9 +43,6 @@ impl Decoder for ReceiptFileCodec {
         Ok(Some(receipt.try_into().map_err(FileClientError::from)?))
     }
 }
-
-#[derive(Debug, PartialEq, Eq, RlpDecodableWrapper)]
-struct Logs(Vec<Log>);
 
 /// See <https://github.com/testinprod-io/op-geth/pull/1>
 #[derive(Debug, PartialEq, Eq, RlpDecodable)]
@@ -80,15 +77,13 @@ impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
         } = exported_receipt;
 
         #[allow(clippy::needless_update)]
-        let mut receipt = Receipt {
+        let receipt = Receipt {
             tx_type: TxType::try_from(tx_type.to_be_bytes()[0])?,
             success: status != 0,
             cumulative_gas_used,
+            logs,
             ..Default::default()
         };
-        // #[allow(clippy::needless_update)] not recognised, ..Default::default() needed so optimism
-        // feature must not be brought into scope
-        receipt.logs = logs;
 
         Ok(Self { receipt, number })
     }
@@ -119,7 +114,7 @@ mod test {
             l1_gas_price: 1,
             l1_gas_used: 4802,
             l1_fee: 7203,
-            fee_scalar: String::from("1.5") 
+            fee_scalar: String::from("1.5")
         }
     }
 

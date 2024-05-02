@@ -1,3 +1,4 @@
+use alloy_rlp::EMPTY_LIST_CODE;
 use futures::Future;
 use reth_primitives::{Receipt, Receipts};
 use tokio::io::AsyncReadExt;
@@ -65,7 +66,16 @@ impl FromReader for ReceiptFileClient {
                             bytes_len=bytes.len(),
                             "partial receipt returned from decoding chunk"
                         );
-                        remaining_bytes = bytes;
+
+                        // Empty list code indicates no receipts for the block, and no other receipt
+                        // info
+                        if !bytes.is_empty() && bytes[0] == EMPTY_LIST_CODE {
+                            // empty list, so no receipts, just advance
+                            remaining_bytes = bytes[1..].into();
+                        } else {
+                            remaining_bytes = bytes;
+                        }
+
                         break
                     }
                     Err(err) => return Err(err),
@@ -117,8 +127,12 @@ impl FromReader for ReceiptFileClient {
             trace!(target: "downloaders::file",
                 blocks = receipts.len(),
                 total_receipts,
+                ?receipts_for_block,
                 "Initialized receipt file client"
             );
+
+            // we need to push the last receipts, if any
+            receipts.push(receipts_for_block);
 
             Ok((
                 Self { receipts, first_block: first_block.unwrap(), total_receipts },

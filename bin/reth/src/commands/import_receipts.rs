@@ -8,7 +8,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{database::Database, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
@@ -66,27 +66,22 @@ impl ImportReceiptsCommand {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         debug!(target: "reth::cli",
-            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking chain import"
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking receipts import"
         );
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
 
         let db_path = data_dir.db();
-
         info!(target: "reth::cli", path = ?db_path, "Opening database");
+
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
-        // open file
-        let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
-
         let provider = provider_factory.provider_rw()?;
         let static_file_provider = provider_factory.static_file_provider();
-
-        let mut total_decoded_receipts = 0;
 
         for stage in StageId::ALL {
             let checkpoint = provider.get_stage_checkpoint(stage)?;
@@ -97,37 +92,75 @@ impl ImportReceiptsCommand {
             );
         }
 
+        // prepare the tx for `write_to_storage`
         let tx = provider.into_tx();
+        let mut total_decoded_receipts = 0;
+
+        // open file
+        let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
         while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
             // create a new file client from chunk read from file
+            let ReceiptFileClient {
+                mut receipts,
+                mut first_block,
+                total_receipts: total_receipts_chunk,
+            } = file_client;
+
+            // mark these as decoded
+            total_decoded_receipts += total_receipts_chunk;
+
             info!(target: "reth::cli",
+                first_receipts_block=?first_block,
+                total_receipts_chunk,
                 "Importing receipt file chunk"
             );
 
-            let ReceiptFileClient { receipts, first_block, total_receipts: total_receipts_chunk } =
-                file_client;
+            // It is possible for the first receipt returned by the file client to be block #1
+            // rather than the genesis block. In this case, we just prepend empty receipts to the
+            // current list of receipts. When initially writing to static files, the provider
+            // expects the first block to be block zero. So, if the first block returned by the file
+            // client is block #1, we insert empty receipts for the genesis block.
+            if first_block == 1 {
+                // prepend the first empty receipts
+                receipts.insert(0, vec![]);
+                // this ensures the bundle state and static file producer start at zero
+                first_block = 0;
+                // we count this as decoded so the partial import check later does not error if this
+                // branch is executed
+                total_decoded_receipts += 1;
+            }
 
-            total_decoded_receipts += total_receipts_chunk;
-
+            // We're reusing receipt writing code internal to
+            // `BundleStateWithReceipts::write_to_storage`, so we just use a default empty
+            // `BundleState`.
             let bundled_state =
                 BundleStateWithReceipts::new(Default::default(), receipts, first_block);
 
             let static_file_producer =
                 static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
+            // finally, write the receipts
             bundled_state.write_to_storage::<<DatabaseEnv as Database>::TXMut>(
                 &tx,
                 Some(static_file_producer),
                 OriginalValuesKnown::Yes,
             )?;
 
-            static_file_provider.commit()?
+            static_file_provider.commit()?;
         }
 
-        let total_imported_receipts = tx.entries::<tables::Receipts>()?;
+        if total_decoded_receipts == 0 {
+            error!(target: "reth::cli", "No receipts were imported, ensure the receipt file is valid and not empty");
+            return Ok(())
+        }
 
-        if total_imported_receipts != total_decoded_receipts {
+        // compare the highest static file block to the number of receipts we decoded
+        let total_imported_receipts = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Receipts)
+            .expect("static files must exist after ensuring we decoded more than zero");
+
+        if total_imported_receipts != total_decoded_receipts as u64 {
             error!(target: "reth::cli",
                 total_decoded_receipts,
                 total_imported_receipts,
@@ -135,9 +168,7 @@ impl ImportReceiptsCommand {
             );
         }
 
-        tx.commit()?;
-
-        info!(target: "reth::cli", "Receipt file imported");
+        info!(target: "reth::cli", total_imported_receipts, "Receipt file imported");
 
         Ok(())
     }
