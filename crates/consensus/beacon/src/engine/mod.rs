@@ -719,6 +719,7 @@ where
                         //
                         // However, optimism chains will do this. The risk of a reorg is however
                         // low.
+                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic pipeline target.");
                         return Some(state.head_block_hash)
                     }
                     Ok(Some(_)) => {

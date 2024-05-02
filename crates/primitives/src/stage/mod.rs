@@ -22,17 +22,17 @@ pub enum PipelineTarget {
 
 impl PipelineTarget {
     /// Target for forward synchronization.
-    pub fn sync_target(&self) -> Option<BlockHash> {
+    pub fn sync_target(self) -> Option<BlockHash> {
         match self {
-            PipelineTarget::Sync(hash) => Some(*hash),
+            PipelineTarget::Sync(hash) => Some(hash),
             PipelineTarget::Unwind(_) => None,
         }
     }
     /// Target for backward unwinding.
-    pub fn unwind_target(&self) -> Option<BlockNumber> {
+    pub fn unwind_target(self) -> Option<BlockNumber> {
         match self {
             PipelineTarget::Sync(_) => None,
-            PipelineTarget::Unwind(number) => Some(*number),
+            PipelineTarget::Unwind(number) => Some(number),
         }
     }
 }

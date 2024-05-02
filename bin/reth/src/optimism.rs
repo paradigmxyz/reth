@@ -24,7 +24,7 @@ fn main() {
     }
 
     if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
-        let NodeHandle { node: _node, node_exit_future } = builder
+        let handle = builder
             .node(OptimismNode::new(rollup_args.clone()))
             .extend_rpc_modules(move |ctx| {
                 // register sequencer tx forwarder
@@ -39,7 +39,7 @@ fn main() {
             .launch()
             .await?;
 
-        node_exit_future.await
+        handle.node_exit_future.await
     }) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);

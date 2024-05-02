@@ -1229,6 +1229,11 @@ where
             .unwrap_or_default() >
             revert_until
         {
+            trace!(
+                target: "blockchain_tree",
+                "Reverting optimistic canonical chain to block {}",
+                revert_until
+            );
             // This should only happen when an optimistic sync target was re-orged.
             //
             // Static files generally contain finalized data. The blockchain tree only deals
