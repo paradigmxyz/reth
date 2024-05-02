@@ -219,7 +219,8 @@ impl Discv5 {
         ))
     }
 
-    fn build_local_enr(
+    /// Builds the local ENR with the supplied key.
+    pub fn build_local_enr(
         sk: &SecretKey,
         config: &Config,
     ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
@@ -284,7 +285,7 @@ impl Discv5 {
     }
 
     /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
-    async fn bootstrap(
+    pub async fn bootstrap(
         bootstrap_nodes: HashSet<BootNode>,
         discv5: &Arc<discv5::Discv5>,
     ) -> Result<(), Error> {
@@ -321,7 +322,7 @@ impl Discv5 {
     }
 
     /// Backgrounds regular look up queries, in order to keep kbuckets populated.
-    fn spawn_populate_kbuckets_bg(
+    pub fn spawn_populate_kbuckets_bg(
         lookup_interval: u64,
         bootstrap_lookup_interval: u64,
         bootstrap_lookup_countdown: u64,
@@ -416,7 +417,7 @@ impl Discv5 {
     }
 
     /// Processes a discovered peer. Returns `true` if peer is added to
-    fn on_discovered_peer(
+    pub fn on_discovered_peer(
         &mut self,
         enr: &discv5::Enr,
         socket: SocketAddr,
@@ -467,7 +468,7 @@ impl Discv5 {
     ///
     ///  Note: [`discv5::Discv5`] won't initiate a session with any peer with a malformed node
     /// record, that advertises a reserved IP address on a WAN network.
-    fn try_into_reachable(
+    pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
         socket: SocketAddr,
@@ -490,13 +491,13 @@ impl Discv5 {
 
     /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
     /// passed up to app, and [`Ignore`](FilterOutcome::Ignore) if peer should instead be dropped.
-    fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
+    pub fn filter_discovered_peer(&self, enr: &discv5::Enr) -> FilterOutcome {
         self.discovered_peer_filter.filter(enr)
     }
 
     /// Returns the [`ForkId`] of the given [`Enr`](discv5::Enr) w.r.t. the local node's network
     /// stack, if field is set.
-    fn get_fork_id<K: discv5::enr::EnrKey>(
+    pub fn get_fork_id<K: discv5::enr::EnrKey>(
         &self,
         enr: &discv5::enr::Enr<K>,
     ) -> Result<ForkId, Error> {

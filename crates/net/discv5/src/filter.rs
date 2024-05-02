@@ -40,7 +40,8 @@ impl MustIncludeKey {
         FilterOutcome::Ok
     }
 
-    fn ignore_reason(&self) -> String {
+    /// Returns the message explaining why an [Enr](discv5::Enr) is filtered out.
+    pub fn ignore_reason(&self) -> String {
         format!("{} fork required", String::from_utf8_lossy(self.key))
     }
 }
@@ -76,7 +77,8 @@ impl MustNotIncludeKeys {
         FilterOutcome::Ok
     }
 
-    fn ignore_reason(&self) -> String {
+    /// Returns the message explaining why an [Enr](discv5::Enr) is filtered out.
+    pub fn ignore_reason(&self) -> String {
         format!(
             "{} forks not allowed",
             self.keys.iter().map(|key| String::from_utf8_lossy(key.key)).format(",")

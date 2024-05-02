@@ -143,7 +143,7 @@ impl ConfigBuilder {
     }
 
     /// Sets the tcp port to advertise in the local [`Enr`](discv5::enr::Enr).
-    fn tcp_port(mut self, port: u16) -> Self {
+    pub fn tcp_port(mut self, port: u16) -> Self {
         self.tcp_port = port;
         self
     }
