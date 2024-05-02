@@ -471,7 +471,8 @@ impl NodeConfig {
         let config = cfg_builder.build(client);
 
         if self.network.discovery.disable_discovery ||
-            !self.network.discovery.enable_discv5_discovery
+            !self.network.discovery.enable_discv5_discovery &&
+                !config.chain_spec.chain.is_optimism()
         {
             return config
         }
