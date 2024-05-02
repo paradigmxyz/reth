@@ -1687,6 +1687,9 @@ where
                         let _ = tx.send(Err(RethError::Canonical(error.clone())));
                         if error.is_fatal() {
                             return Err(RethError::Canonical(error))
+                        } else if let Some(block_number) = error.is_optimistic_revert() {
+                            self.sync
+                                .set_pipeline_sync_target(PipelineTarget::Unwind(block_number));
                         }
                     }
                 };
