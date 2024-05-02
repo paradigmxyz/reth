@@ -150,7 +150,9 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::ImportReceipts(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::ImportReceipts(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute())
+            }
             #[cfg(feature = "optimism")]
             Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
