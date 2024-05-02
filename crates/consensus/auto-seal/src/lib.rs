@@ -415,7 +415,7 @@ impl StorageInner {
             StateProviderDatabase::new(client.latest().map_err(BlockExecutionError::LatestBlock)?);
         // now execute the block
         let BlockExecutionOutput { state, receipts, gas_used } =
-            executor.executor(db).execute((&block, U256::ZERO).into()).map_err(Into::into)?;
+            executor.executor(db).execute((&block, U256::ZERO).into())?;
         let bundle_state = BundleStateWithReceipts::new(
             state,
             Receipts::from_block_receipt(receipts),
