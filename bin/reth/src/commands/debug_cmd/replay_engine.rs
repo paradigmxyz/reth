@@ -5,6 +5,7 @@ use crate::{
         DatabaseArgs, NetworkArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
 };
 use clap::Parser;
 use eyre::Context;
@@ -20,15 +21,12 @@ use reth_db::{init_db, DatabaseEnv};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_core::engine_api_store::{EngineApiStore, StoredEngineApiMessage};
-#[cfg(not(feature = "optimism"))]
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{fs, ChainSpec, PruneModes};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory,
     StaticFileProviderFactory,
 };
-use reth_revm::EvmProcessorFactory;
 use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -126,18 +124,11 @@ impl Command {
 
         let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
-        #[cfg(not(feature = "optimism"))]
-        let evm_config = EthEvmConfig::default();
-
-        #[cfg(feature = "optimism")]
-        let evm_config = reth_node_optimism::OptimismEvmConfig::default();
+        let executor = block_executor!(self.chain.clone());
 
         // Configure blockchain tree
-        let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
-            Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone(), evm_config),
-        );
+        let tree_externals =
+            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 

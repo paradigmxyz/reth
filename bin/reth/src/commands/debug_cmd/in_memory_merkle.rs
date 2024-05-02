@@ -28,6 +28,8 @@ use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
+use reth_revm::database::StateProviderDatabase;
+use crate::macros::block_executor;
 
 /// `reth debug in-memory-merkle` command
 /// This debug routine requires that the node is positioned at the block before the target.
@@ -162,24 +164,25 @@ impl Command {
             )
             .await?;
 
-        let executor_factory =
-            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
-        let mut executor = executor_factory.with_state(LatestStateProviderRef::new(
+        let db = StateProviderDatabase::new(LatestStateProviderRef::new(
             provider.tx_ref(),
             factory.static_file_provider(),
         ));
 
+        let block_executor = block_executor!(self.chain.clone());
+
+        let mut executor = block_executor.executor(db);
+
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        executor.execute_and_verify_receipt(
-            &block
+        let block_state =  executor.execute(
+            (&block
                 .clone()
                 .unseal()
                 .with_recovered_senders()
                 .ok_or(BlockValidationError::SenderRecoveryError)?,
-            merkle_block_td + block.difficulty,
-        )?;
-        let block_state = executor.take_output_state();
+            merkle_block_td + block.difficulty).into(),
+        )?.state;
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) =

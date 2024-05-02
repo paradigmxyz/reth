@@ -31,6 +31,7 @@
 
 pub mod cli;
 pub mod commands;
+mod macros;
 pub mod utils;
 
 /// Re-exported payload related types
