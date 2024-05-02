@@ -1274,7 +1274,7 @@ mod tests {
     use linked_hash_set::LinkedHashSet;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
-    use reth_node_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::EthEvmConfig;
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::proofs::calculate_receipt_root;
     #[cfg(feature = "optimism")]
