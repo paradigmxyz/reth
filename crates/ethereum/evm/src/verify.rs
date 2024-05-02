@@ -1,3 +1,5 @@
+//! Helpers for verifying the receipts.
+
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{Bloom, GotExpected, Receipt, ReceiptWithBloom, B256};
 
