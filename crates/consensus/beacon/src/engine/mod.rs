@@ -734,10 +734,12 @@ where
             }
         }
 
+        let valid_parent_hash =
+            self.latest_valid_hash_for_invalid_payload(parent_hash, None).unwrap_or_default();
         PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
-        .with_latest_valid_hash(parent_hash)
+        .with_latest_valid_hash(valid_parent_hash)
     }
 
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
