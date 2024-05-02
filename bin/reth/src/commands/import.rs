@@ -160,7 +160,7 @@ impl ImportCommand {
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
-                true,
+                self.no_state,
             )
             .await?;
 
