@@ -1502,11 +1502,9 @@ where
         )
     }
 
-    /// Builds [OptimismTxMeta](crate::eth::api::optimism::OptimismTxMeta) object using the provided
-    /// [TransactionSigned], [L1BlockInfo] and `block_timestamp`. The
-    /// [L1BlockInfo](reth_evm_optimism::L1BlockInfo) is used to calculate the l1 fee and l1
-    /// data gas for the transaction. If the [L1BlockInfo] is not provided, the
-    /// [OptimismTxMeta](crate::eth::api::optimism::OptimismTxMeta) will be empty.
+    /// Builds op metadata object using the provided [TransactionSigned], L1 block info and
+    /// `block_timestamp`. The L1BlockInfo is used to calculate the l1 fee and l1 data gas for the
+    /// transaction. If the L1BlockInfo is not provided, the meta info will be empty.
     #[cfg(feature = "optimism")]
     pub(crate) fn build_op_tx_meta(
         &self,
