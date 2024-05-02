@@ -28,18 +28,18 @@ impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CompilerExecutorBuilder {
             tracing::debug!("EVM bytecode compiler is disabled");
             return Ok(CompilerEvmConfig::disabled());
         }
-        tracing::info!("starting EVM bytecode compiler");
+        tracing::info!("EVM bytecode compiler initialized");
 
         let out_dir = compiler_config
             .out_dir
             .clone()
-            .unwrap_or_else(|| ctx.data_dir().data_dir_path().join("compiled_contracts"));
+            .unwrap_or_else(|| ctx.data_dir().compiler().join("artifacts"));
         let mut compiler = EvmParCompiler::new(out_dir.clone())?;
 
         let contracts_path = compiler_config
             .contracts_file
             .clone()
-            .unwrap_or_else(|| ctx.data_dir().data_dir_path().join("contracts.toml"));
+            .unwrap_or_else(|| ctx.data_dir().compiler().join("contracts.toml"));
         let contracts_config = ContractsConfig::load(&contracts_path)?;
 
         let done = Arc::new(AtomicBool::new(false));

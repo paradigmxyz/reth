@@ -21,11 +21,10 @@ fn main() {
     }
 
     if let Err(err) = Cli::parse_args().run(|builder, _| async {
-        let compiler_config = &builder.config().experimental.compiler;
         #[cfg(not(feature = "compiler"))]
         {
             eyre::ensure!(
-                !compiler_config.compiler,
+                !builder.config().experimental.compiler.compiler,
                 "`experimental.compiler` is set, but reth was not compiled with the `compiler` feature enabled"
             );
             let node = EthereumNode::default();

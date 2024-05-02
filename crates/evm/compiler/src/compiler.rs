@@ -26,7 +26,6 @@ const OBJ_NAME: &str = if cfg!(windows) { "object.obj" } else { "object.o" };
 #[serde(deny_unknown_fields)]
 pub struct ContractsConfig {
     /// The contracts to compile.
-    #[serde(rename = "contract")]
     pub contracts: Vec<CompilerContract>,
 }
 
@@ -41,7 +40,7 @@ impl ContractsConfig {
         let mut this: Self = confy::load_path(path)?;
         let dir = path.parent().unwrap();
         for (i, contract) in this.contracts.iter_mut().enumerate() {
-            contract.load(i, dir)?;
+            contract.load_and_validate(i, dir)?;
         }
         Ok(this)
     }
@@ -74,7 +73,7 @@ pub struct CompilerContract {
 }
 
 impl CompilerContract {
-    fn load(&mut self, i: usize, config_dir: &Path) -> EvmCompilerResult<()> {
+    fn load_and_validate(&mut self, i: usize, config_dir: &Path) -> EvmCompilerResult<()> {
         if let Some(path) = &self.bytecode_path {
             if self.bytecode.is_empty() {
                 let mut bytecode = fs::read(config_dir.join(path))?;
@@ -90,6 +89,18 @@ impl CompilerContract {
         if self.bytecode.is_empty() {
             return Err(EvmCompilerError::EmptyBytecode(i));
         }
+
+        if !is_evm_version(self.first_evm_version) || self.first_evm_version > EvmVersions::last() {
+            return Err(EvmCompilerError::InvalidEvmVersion(i, self.first_evm_version));
+        }
+        if !is_evm_version(self.last_evm_version) || self.last_evm_version > EvmVersions::last() {
+            return Err(EvmCompilerError::InvalidEvmVersion(i, self.last_evm_version));
+        }
+
+        if self.first_evm_version > self.last_evm_version {
+            return Err(EvmCompilerError::InvalidEvmVersionRange(i));
+        }
+
         Ok(())
     }
 }
@@ -428,10 +439,12 @@ impl Metadata {
     }
 
     fn load(path: &Path) -> fs::Result<Self> {
+        debug!(?path, "loading metadata");
         fs::read_json_file(path)
     }
 
     fn save(&self, path: &Path) -> fs::Result<()> {
+        debug!(?path, "saving metadata");
         fs::write_json_file(path, self)
     }
 
@@ -518,6 +531,7 @@ impl MetadataContract {
     fn states(&self) -> impl Iterator<Item = (SpecId, &AtomicContractState)> {
         EvmVersions::enabled()
             .iter_starting_at(self.contract.first_evm_version)
+            .filter(|spec_id| *spec_id <= self.contract.last_evm_version)
             .map(|spec_id| (spec_id, self.state(spec_id)))
     }
 

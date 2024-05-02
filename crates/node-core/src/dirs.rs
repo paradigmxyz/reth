@@ -291,9 +291,9 @@ impl<D> ChainPath<D> {
 
     /// Returns the path to the compiler directory for this chain.
     ///
-    /// `<DIR>/<CHAIN_ID>/compiled_contracts`
+    /// `<DIR>/<CHAIN_ID>/compiler`
     pub fn compiler(&self) -> PathBuf {
-        self.data_dir().join("compiled_contracts")
+        self.data_dir().join("compiler")
     }
 
     /// Returns the path to the reth p2p secret key for this chain.

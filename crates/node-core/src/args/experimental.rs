@@ -26,12 +26,12 @@ pub struct CompilerArgs {
     pub end_block: u64,
     /// Path to a file that contains all the contracts to compile.
     ///
-    /// Defaults to `<datadir>/contracts.toml`.
+    /// Defaults to `<datadir>/compiler/contracts.toml`.
     #[arg(long = "experimental.compiler.contracts-file")]
     pub contracts_file: Option<PathBuf>,
     /// Directory in which intermediate artifacts, metadata, and results are stored.
     ///
-    /// Defaults to `<datadir>/compiled_contracts/`.
+    /// Defaults to `<datadir>/compiler/artifacts/`.
     #[arg(long = "experimental.compiler.out-dir")]
     pub out_dir: Option<PathBuf>,
     /// Which C compiler to use for linking.

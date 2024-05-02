@@ -1,4 +1,5 @@
 use reth_primitives::{fs, B256};
+use revm::primitives::SpecId;
 use std::io;
 use thiserror::Error;
 
@@ -9,8 +10,14 @@ pub type EvmCompilerResult<T> = Result<T, EvmCompilerError>;
 #[derive(Debug, Error)]
 pub enum EvmCompilerError {
     /// Empty bytecode.
-    #[error("missing or empty bytecode for contract #{0}")]
+    #[error("TOML contract {0}: missing or empty bytecode")]
     EmptyBytecode(usize),
+    /// Invalid EVM version.
+    #[error("TOML contract {0}: {1:?} is not supported as an EVM version")]
+    InvalidEvmVersion(usize, SpecId),
+    /// Invalid EVM version range.
+    #[error("TOML contract {0}: starting EVM version is greater than ending EVM version")]
+    InvalidEvmVersionRange(usize),
     /// File system error.
     #[error(transparent)]
     Fs(#[from] fs::FsPathError),
