@@ -17,8 +17,8 @@ Arguments:
           - execution:       The execution stage within the pipeline
           - account-hashing: The account hashing stage within the pipeline
           - storage-hashing: The storage hashing stage within the pipeline
-          - hashing:         The hashing stage within the pipeline
-          - merkle:          The Merkle stage within the pipeline
+          - hashing:         The account and storage hashing stages within the pipeline
+          - merkle:          The merkle stage within the pipeline
           - tx-lookup:       The transaction lookup stage within the pipeline
           - account-history: The account history stage within the pipeline
           - storage-history: The storage history stage within the pipeline
@@ -96,15 +96,43 @@ Networking:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
+      --enable-discv5-discovery
+          Enable Discv5 discovery
+
       --discovery.addr <DISCOVERY_ADDR>
-          The UDP address to use for P2P discovery/networking
+          The UDP address to use for devp2p peer discovery version 4
           
           [default: 0.0.0.0]
 
       --discovery.port <DISCOVERY_PORT>
-          The UDP port to use for P2P discovery/networking
+          The UDP port to use for devp2p peer discovery version 4
           
           [default: 30303]
+
+      --discovery.v5.addr <DISCOVERY_V5_ADDR>
+          The UDP address to use for devp2p peer discovery version 5
+          
+          [default: 0.0.0.0]
+
+      --discovery.v5.port <DISCOVERY_V5_PORT>
+          The UDP port to use for devp2p peer discovery version 5
+          
+          [default: 9000]
+
+      --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
+          The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
+          
+          [default: 60]
+
+      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
+          The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
+          
+          [default: 5]
+
+      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
+          The number of times to carry out boost lookup queries at bootstrap
+          
+          [default: 100]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
@@ -126,7 +154,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
           
-          [default: reth/<VERSION>-<SHA>/<ARCH>-gnu]
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
