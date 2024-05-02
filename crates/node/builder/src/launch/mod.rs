@@ -33,7 +33,7 @@ use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
 use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, info, warn};
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
@@ -131,7 +131,11 @@ where
         // Configure the blockchain tree for the node
         let tree_config = BlockchainTreeConfig::default();
 
-        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to
+        // the components builder because there's a cyclic dependency between the blockchain
+        // provider and the tree component.
+        // This will be removed once the Blockchain provider no longer depends on an instance of the
+        // tree: <https://github.com/paradigmxyz/reth/issues/7154>
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
 
@@ -150,6 +154,10 @@ where
             ctx.node_config().clone(),
             ctx.toml_config().clone(),
         );
+
+        if builder_ctx.config().experimental.any_is_enabled() {
+            warn!(target: "reth::cli", "experimental features are enabled, please do not use in production!");
+        }
 
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;

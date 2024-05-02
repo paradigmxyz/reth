@@ -10,6 +10,13 @@ pub struct ExperimentalArgs {
     pub compiler: CompilerArgs,
 }
 
+impl ExperimentalArgs {
+    /// Returns `true` if any experimental feature is enabled.
+    pub fn any_is_enabled(&self) -> bool {
+        self.compiler.compiler
+    }
+}
+
 /// Experimental EVM bytecode compiler arguments.
 #[derive(Clone, Debug, Parser)]
 #[command(next_help_heading = "Compiler")]
