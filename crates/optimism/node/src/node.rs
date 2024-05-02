@@ -224,8 +224,7 @@ where
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
             // no extradata for OP
-            .extradata(Default::default())
-            .max_gas_limit(conf.max_gas_limit());
+            .extradata(Default::default());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
