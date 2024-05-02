@@ -236,8 +236,9 @@ impl Discv5 {
                 None
             }
             discv5::Event::SessionEstablished(enr, remote_socket) => {
-                // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)`
-                // and `DiscoveryUpdate::DiscoveredAtCapacity(_)
+                // this branch is semantically similar to branches of 
+                // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
+                // `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
                 // peer has been discovered as part of query, or, by incoming session (peer has
                 // discovered us)
@@ -251,8 +252,9 @@ impl Discv5 {
                 socket,
                 node_id: _,
             } => {
-                // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)`
-                // and `DiscoveryUpdate::DiscoveredAtCapacity(_)
+                // this branch is semantically similar to branches of 
+                // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
+                // `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
                 // peer has been discovered as part of query, or, by an outgoing session (but peer 
                 // is behind NAT and responds from a different socket)
