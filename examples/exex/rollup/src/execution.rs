@@ -16,7 +16,7 @@ use reth_primitives::{
 };
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
-    DatabaseCommit, StateBuilder,
+    DBBox, DatabaseCommit, Evm, StateBuilder, StateDBBox,
 };
 use reth_tracing::tracing::debug;
 
@@ -36,12 +36,38 @@ pub async fn execute_block<Pool: TransactionPool>(
         eyre::bail!("Invalid rollup chain ID")
     }
 
-    let block_number = u64::try_from(header.sequence)?;
+    // Construct header
+    let header = construct_header(db, header)?;
+
+    // Decode transactions
+    let transactions = decode_transactions(pool, tx, block_data, block_data_hash).await?;
+
+    // Configure EVM
+    let evm_config = EthEvmConfig::default();
+    let mut evm = configure_evm(&evm_config, db, &header);
+
+    // Execute transactions
+    let (executed_txs, receipts, results) = execute_transactions(&mut evm, &header, transactions)?;
+
+    // Construct block and recover senders
+    let block = Block { header, body: executed_txs, ..Default::default() }
+        .with_recovered_senders()
+        .ok_or_eyre("failed to recover senders")?;
+
+    let bundle = evm.db_mut().take_bundle();
+
+    Ok((block, bundle, receipts, results))
+}
+
+/// Construct header from the given rollup header.
+fn construct_header(db: &Database, header: &RollupContract::BlockHeader) -> eyre::Result<Header> {
     let parent_block = if !header.sequence.is_zero() {
         db.get_block(header.sequence - U256::from(1))?
     } else {
         None
     };
+
+    let block_number = u64::try_from(header.sequence)?;
 
     // Calculate base fee per gas for EIP-1559 transactions
     let base_fee_per_gas = if CHAIN_SPEC.fork(Hardfork::London).transitions_at_block(block_number) {
@@ -56,28 +82,27 @@ pub async fn execute_block<Pool: TransactionPool>(
     };
 
     // Construct header
-    let header = Header {
+    Ok(Header {
         parent_hash: parent_block.map(|block| block.header.hash()).unwrap_or_default(),
         number: block_number,
         gas_limit: u64::try_from(header.gasLimit)?,
         timestamp: u64::try_from(header.confirmBy)?,
         base_fee_per_gas: Some(base_fee_per_gas),
         ..Default::default()
-    };
+    })
+}
 
-    // Decode transactions
-    let transactions = decode_transactions(pool, tx, block_data, block_data_hash).await?;
-
-    // Configure EVM
-    let evm_config = EthEvmConfig::default();
-    let mut evm = evm_config.evm(
-        StateBuilder::new_with_database(
-            Box::new(db) as Box<dyn reth_revm::Database<Error = eyre::Report> + Send>
-        )
-        .with_bundle_update()
-        .build(),
+/// Configure EVM with the given database and header.
+fn configure_evm<'a>(
+    config: &'a EthEvmConfig,
+    db: &'a mut Database,
+    header: &Header,
+) -> Evm<'a, (), StateDBBox<'a, eyre::Report>> {
+    let mut evm = config.evm(
+        StateBuilder::new_with_database(Box::new(db) as DBBox<'_, eyre::Report>)
+            .with_bundle_update()
+            .build(),
     );
-
     evm.db_mut().set_state_clear_flag(
         CHAIN_SPEC.fork(Hardfork::SpuriousDragon).active_at_block(header.number),
     );
@@ -87,82 +112,12 @@ pub async fn execute_block<Pool: TransactionPool>(
         &mut cfg,
         evm.block_mut(),
         &CHAIN_SPEC,
-        &header,
+        header,
         U256::ZERO,
     );
     *evm.cfg_mut() = cfg.cfg_env;
 
-    // Execute transactions
-    let mut receipts = Vec::with_capacity(transactions.len());
-    let mut executed_txs = Vec::with_capacity(transactions.len());
-    let mut results = Vec::with_capacity(transactions.len());
-    if !transactions.is_empty() {
-        let mut cumulative_gas_used = 0;
-        for (transaction, sender) in transactions {
-            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block’s gasLimit.
-            let block_available_gas = header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
-            }
-            // Execute transaction.
-            // Fill revm structure.
-            fill_tx_env(evm.tx_mut(), &transaction, sender);
-
-            let ResultAndState { result, state } = match evm.transact() {
-                Ok(result) => result,
-                Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            // if the transaction is invalid, we can skip it
-                            debug!(%err, ?transaction, "Skipping invalid transaction");
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            eyre::bail!(err)
-                        }
-                    }
-                }
-            };
-
-            debug!(?transaction, ?result, ?state, "Executed transaction");
-
-            evm.db_mut().commit(state);
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            #[allow(clippy::needless_update)] // side-effect of optimism fields
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.logs().iter().cloned().map(Into::into).collect(),
-                ..Default::default()
-            });
-
-            // append transaction to the list of executed transactions
-            executed_txs.push(transaction);
-            results.push(result);
-        }
-
-        evm.db_mut().merge_transitions(BundleRetention::Reverts);
-    }
-
-    // Construct block and recover senders
-    let block = Block { header, body: executed_txs, ..Default::default() }
-        .with_recovered_senders()
-        .ok_or_eyre("failed to recover senders")?;
-
-    let bundle = evm.db_mut().take_bundle();
-
-    Ok((block, bundle, receipts, results))
+    evm
 }
 
 /// Decode transactions from the block data and recover senders.
@@ -235,6 +190,79 @@ async fn decode_transactions<Pool: TransactionPool>(
         .collect::<eyre::Result<_>>()?;
 
     Ok(transactions)
+}
+
+/// Execute transactions and return the list of executed transactions, receipts and
+/// execution results.
+fn execute_transactions(
+    evm: &mut Evm<'_, (), StateDBBox<'_, eyre::Report>>,
+    header: &Header,
+    transactions: Vec<(TransactionSigned, Address)>,
+) -> eyre::Result<(Vec<TransactionSigned>, Vec<Receipt>, Vec<ExecutionResult>)> {
+    // Execute transactions
+    let mut receipts = Vec::with_capacity(transactions.len());
+    let mut executed_txs = Vec::with_capacity(transactions.len());
+    let mut results = Vec::with_capacity(transactions.len());
+    if !transactions.is_empty() {
+        let mut cumulative_gas_used = 0;
+        for (transaction, sender) in transactions {
+            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = header.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                }
+                .into())
+            }
+            // Execute transaction.
+            // Fill revm structure.
+            fill_tx_env(evm.tx_mut(), &transaction, sender);
+
+            let ResultAndState { result, state } = match evm.transact() {
+                Ok(result) => result,
+                Err(err) => {
+                    match err {
+                        EVMError::Transaction(err) => {
+                            // if the transaction is invalid, we can skip it
+                            debug!(%err, ?transaction, "Skipping invalid transaction");
+                            continue
+                        }
+                        err => {
+                            // this is an error that we should treat as fatal for this attempt
+                            eyre::bail!(err)
+                        }
+                    }
+                }
+            };
+
+            debug!(?transaction, ?result, ?state, "Executed transaction");
+
+            evm.db_mut().commit(state);
+
+            // append gas used
+            cumulative_gas_used += result.gas_used();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.logs().iter().cloned().map(Into::into).collect(),
+                ..Default::default()
+            });
+
+            // append transaction to the list of executed transactions
+            executed_txs.push(transaction);
+            results.push(result);
+        }
+
+        evm.db_mut().merge_transitions(BundleRetention::Reverts);
+    }
+
+    Ok((executed_txs, receipts, results))
 }
 
 #[cfg(test)]
