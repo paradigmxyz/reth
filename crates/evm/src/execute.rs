@@ -114,7 +114,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BlockExecutionOutput<Receipt>,
-        Error: Into<BlockExecutionError>,
+        Error = BlockExecutionError,
     >;
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
@@ -122,7 +122,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         // TODO: change to bundle state with receipts
         Output = BatchBlockExecutionOutput,
-        Error: Into<BlockExecutionError>,
+        Error = BlockExecutionError,
     >;
 
     /// Creates a new executor for single block execution.

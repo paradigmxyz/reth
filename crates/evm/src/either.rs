@@ -54,13 +54,13 @@ where
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BlockExecutionOutput<Receipt>,
-        Error: Into<BlockExecutionError>,
+        Error = BlockExecutionError,
     >,
     B: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BlockExecutionOutput<Receipt>,
-        Error: Into<BlockExecutionError>,
+        Error = BlockExecutionError,
     >,
     DB: Database<Error = ProviderError>,
 {
@@ -70,8 +70,8 @@ where
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         match self {
-            EitherExecutor::Left(a) => a.execute(input).map_err(Into::into),
-            EitherExecutor::Right(b) => b.execute(input).map_err(Into::into),
+            EitherExecutor::Left(a) => a.execute(input),
+            EitherExecutor::Right(b) => b.execute(input),
         }
     }
 }
@@ -82,13 +82,13 @@ where
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BatchBlockExecutionOutput,
-        Error: Into<BlockExecutionError>,
+        Error = BlockExecutionError,
     >,
     B: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BatchBlockExecutionOutput,
-        Error: Into<BlockExecutionError>,
+        Error = BlockExecutionError,
     >,
     DB: Database<Error = ProviderError>,
 {
@@ -98,8 +98,8 @@ where
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         match self {
-            EitherExecutor::Left(a) => a.execute_one(input).map_err(Into::into),
-            EitherExecutor::Right(b) => b.execute_one(input).map_err(Into::into),
+            EitherExecutor::Left(a) => a.execute_one(input),
+            EitherExecutor::Right(b) => b.execute_one(input),
         }
     }
 
