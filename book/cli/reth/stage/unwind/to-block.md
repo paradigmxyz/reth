@@ -1,6 +1,6 @@
 # reth stage unwind to-block
 
-Unwinds the database until the given block number (range is inclusive)
+Unwinds the database from the latest block, until the given block number or hash has been reached, that block is not included
 
 ```bash
 $ reth stage unwind to-block --help
