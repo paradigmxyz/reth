@@ -78,6 +78,13 @@ pub struct BatchBlockExecutionOutput {
     pub first_block: BlockNumber,
 }
 
+impl BatchBlockExecutionOutput {
+    /// Create Bundle State.
+    pub fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
+        Self { bundle, receipts, first_block }
+    }
+}
+
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
 #[derive(Debug)]
 pub struct BlockExecutionInput<'a, Block> {

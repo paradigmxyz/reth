@@ -4,6 +4,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_evm::execute::BatchBlockExecutionOutput;
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
@@ -32,6 +33,14 @@ pub struct BundleStateWithReceipts {
     receipts: Receipts,
     /// First block of bundle state.
     first_block: BlockNumber,
+}
+
+// TODO(mattsse): unify the types, currently there's a cyclic dependency between
+impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
+    fn from(value: BatchBlockExecutionOutput) -> Self {
+        let BatchBlockExecutionOutput { bundle, receipts, first_block } = value;
+        Self { bundle, receipts, first_block }
+    }
 }
 
 /// Type used to initialize revms bundle state.

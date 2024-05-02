@@ -3,7 +3,8 @@
 use crate::EthEvmConfig;
 use reth_evm::{
     execute::{
-        BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
+        BlockExecutorProvider, Executor,
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
@@ -15,7 +16,6 @@ use reth_primitives::{
     BlockNumber, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt,
     Receipts, Withdrawals, MAINNET, U256,
 };
-use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
@@ -431,7 +431,7 @@ where
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BundleStateWithReceipts;
+    type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
@@ -451,7 +451,7 @@ where
     fn finalize(mut self) -> Self::Output {
         self.stats.log_debug();
 
-        BundleStateWithReceipts::new(
+        BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
@@ -473,7 +473,7 @@ mod tests {
     use reth_primitives::{
         bytes,
         constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-        keccak256, Account, Block, Bytes, ChainSpecBuilder, ForkCondition, B256, MAINNET,
+        keccak256, Account, Block, Bytes, ChainSpecBuilder, ForkCondition, B256,
     };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,

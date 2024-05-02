@@ -6882,7 +6882,6 @@ dependencies = [
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
- "reth-provider",
  "reth-revm",
  "revm-primitives",
  "tracing",

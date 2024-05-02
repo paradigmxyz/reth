@@ -17,7 +17,6 @@ use reth_primitives::{
     ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt, ReceiptWithBloom, Receipts,
     TxType, Withdrawals, B256, U256,
 };
-use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
@@ -472,7 +471,7 @@ where
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BundleStateWithReceipts;
+    type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
@@ -490,10 +489,9 @@ where
     }
 
     fn finalize(mut self) -> Self::Output {
-        // TODO: track stats
         self.stats.log_debug();
 
-        BundleStateWithReceipts::new(
+        BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
