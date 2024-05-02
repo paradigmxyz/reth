@@ -167,7 +167,7 @@ pub async fn execute_block<Pool: TransactionPool>(
 
 /// Decode transactions from the block data and recover senders.
 /// - If the transaction is a blob-carrying one, decode the blobs either using the local transaction
-///   pool, or querying the Blobscan.
+///   pool, or querying Blobscan.
 /// - If the transaction is a regular one, decode the block data directly.
 async fn decode_transactions<Pool: TransactionPool>(
     pool: &Pool,
@@ -181,7 +181,7 @@ async fn decode_transactions<Pool: TransactionPool>(
             // Try to get blobs from the transaction pool
             sidecar.blobs.into_iter().zip(sidecar.commitments).collect()
         } else {
-            // If transaction is not found in the pool, try to get blobs from the Blobscan
+            // If transaction is not found in the pool, try to get blobs from Blobscan
             let blobscan_client = foundry_blob_explorers::Client::holesky();
             let sidecar = blobscan_client.transaction(tx.hash).await?.blob_sidecar();
             sidecar
