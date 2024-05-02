@@ -80,7 +80,10 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                 // A new block is submitted to the rollup contract.
                 // The block is executed on top of existing rollup state and committed into the
                 // database.
-                RollupContractEvents::BlockSubmitted(_) => {
+                RollupContractEvents::BlockSubmitted(RollupContract::BlockSubmitted {
+                    blockDataHash,
+                    ..
+                }) => {
                     let call = RollupContractCalls::abi_decode(tx.input(), true)?;
 
                     if let RollupContractCalls::submitBlock(RollupContract::submitBlockCall {
@@ -89,8 +92,15 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                         ..
                     }) = call
                     {
-                        match execute_block(&mut self.db, &self.ctx.pool, tx, &header, blockData)
-                            .await
+                        match execute_block(
+                            &mut self.db,
+                            &self.ctx.pool,
+                            tx,
+                            &header,
+                            blockData,
+                            blockDataHash,
+                        )
+                        .await
                         {
                             Ok((block, bundle, _, _)) => {
                                 let block = block.seal_slow();

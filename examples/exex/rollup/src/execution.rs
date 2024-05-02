@@ -8,6 +8,7 @@ use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{
     constants,
     eip4844::kzg_to_versioned_hash,
+    keccak256,
     revm::env::fill_tx_env,
     revm_primitives::{CfgEnvWithHandlerCfg, EVMError, ExecutionResult, ResultAndState},
     Address, Block, BlockWithSenders, Bytes, Hardfork, Header, Receipt, TransactionSigned, TxType,
@@ -29,6 +30,7 @@ pub async fn execute_block<Pool: TransactionPool>(
     tx: &TransactionSigned,
     header: &RollupContract::BlockHeader,
     block_data: Bytes,
+    block_data_hash: B256,
 ) -> eyre::Result<(BlockWithSenders, BundleState, Vec<Receipt>, Vec<ExecutionResult>)> {
     if header.rollupChainId != U256::from(CHAIN_ID) {
         eyre::bail!("Invalid rollup chain ID")
@@ -64,7 +66,7 @@ pub async fn execute_block<Pool: TransactionPool>(
     };
 
     // Decode transactions
-    let transactions = decode_transactions(pool, tx, block_data).await?;
+    let transactions = decode_transactions(pool, tx, block_data, block_data_hash).await?;
 
     // Configure EVM
     let evm_config = EthEvmConfig::default();
@@ -171,6 +173,7 @@ async fn decode_transactions<Pool: TransactionPool>(
     pool: &Pool,
     tx: &TransactionSigned,
     block_data: Bytes,
+    block_data_hash: B256,
 ) -> eyre::Result<Vec<(TransactionSigned, Address)>> {
     // Get raw transactions either from the blobs, or directly from the block data
     let raw_transactions = if matches!(tx.tx_type(), TxType::Eip4844) {
@@ -198,7 +201,7 @@ async fn decode_transactions<Pool: TransactionPool>(
             // Convert blob KZG commitments to versioned hashes
             .map(|(blob, commitment)| (blob, kzg_to_versioned_hash((*commitment).into())))
             // Filter only blobs that are present in the block data
-            .filter(|(_, hash)| blob_hashes.contains(&hash))
+            .filter(|(_, hash)| blob_hashes.contains(hash))
             .map(|(blob, _)| blob)
             .collect::<Vec<_>>();
         if blobs.len() != blob_hashes.len() {
@@ -215,6 +218,11 @@ async fn decode_transactions<Pool: TransactionPool>(
     } else {
         block_data
     };
+
+    let raw_transaction_hash = keccak256(&raw_transactions);
+    if raw_transaction_hash != block_data_hash {
+        eyre::bail!("block data hash mismatch")
+    }
 
     // Decode block data, filter only transactions with the correct chain ID and recover senders
     let transactions = Vec::<TransactionSigned>::decode(&mut raw_transactions.as_ref())?
@@ -243,7 +251,7 @@ mod tests {
     use reth_primitives::{
         bytes,
         constants::ETH_TO_WEI,
-        public_key_to_address,
+        keccak256, public_key_to_address,
         revm_primitives::{AccountInfo, ExecutionResult, Output, TransactTo, TxEnv},
         BlockNumber, Receipt, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
     };
@@ -412,6 +420,7 @@ mod tests {
         };
         let encoded_transactions =
             alloy_rlp::encode(vec![sign_tx_with_key_pair(key_pair, tx).envelope_encoded()]);
+        let block_data_hash = keccak256(&encoded_transactions);
 
         let pool = testing_pool();
 
@@ -435,9 +444,15 @@ mod tests {
         };
 
         // Execute block and insert into database
-        let (block, bundle, receipts, results) =
-            execute_block(database, &pool, &l1_transaction, &block_header, block_data.into())
-                .await?;
+        let (block, bundle, receipts, results) = execute_block(
+            database,
+            &pool,
+            &l1_transaction,
+            &block_header,
+            block_data.into(),
+            block_data_hash,
+        )
+        .await?;
         let block = block.seal_slow();
         database.insert_block_with_bundle(&block, bundle)?;
 
