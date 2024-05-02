@@ -1,7 +1,6 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use revm::inspectors::NoOpInspector;
 use revm_inspectors::transfer::{TransferInspector, TransferKind};
 use revm_primitives::ExecutionResult;
 
@@ -81,14 +80,10 @@ where
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
         let maybe_revert = self
             .eth
-            .spawn_trace_transaction_in_block_with_inspector(
-                tx_hash,
-                NoOpInspector,
-                |_tx_info, _inspector, res, _| match res.result {
-                    ExecutionResult::Revert { output, .. } => Ok(Some(output)),
-                    _ => Ok(None),
-                },
-            )
+            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| match res.result {
+                ExecutionResult::Revert { output, .. } => Ok(Some(output)),
+                _ => Ok(None),
+            })
             .await
             .map(Option::flatten)?;
         Ok(maybe_revert)
