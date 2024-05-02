@@ -20,14 +20,14 @@ use reth_consensus::{Consensus, ConsensusError};
 use reth_engine_primitives::EngineTypes;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
+    constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Bloom, ChainSpec, Header,
-    ReceiptWithBloom, Receipts, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
-    U256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header,
+    Receipts, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
+    StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
@@ -277,6 +277,18 @@ impl StorageInner {
             parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
         });
 
+        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(timestamp) {
+            let mut sum_blob_gas_used = 0;
+            for tx in transactions {
+                if let Some(blob_tx) = tx.transaction.as_eip4844() {
+                    sum_blob_gas_used += blob_tx.blob_gas();
+                }
+            }
+            Some(sum_blob_gas_used)
+        } else {
+            None
+        };
+
         let mut header = Header {
             parent_hash: self.best_hash,
             ommers_hash: proofs::calculate_ommers_root(ommers),
@@ -294,7 +306,7 @@ impl StorageInner {
             mix_hash: Default::default(),
             nonce: 0,
             base_fee_per_gas,
-            blob_gas_used: None,
+            blob_gas_used,
             excess_blob_gas: None,
             extra_data: Default::default(),
             parent_beacon_block_root: None,
@@ -330,54 +342,6 @@ impl StorageInner {
         header
     }
 
-    /// Fills in the post-execution header fields based on the given BundleState and gas used.
-    /// In doing this, the state root is calculated and the final header is returned.
-    pub(crate) fn complete_header<S: StateProviderFactory>(
-        &self,
-        mut header: Header,
-        bundle_state: &BundleStateWithReceipts,
-        client: &S,
-        gas_used: u64,
-        blob_gas_used: Option<u64>,
-        #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
-    ) -> Result<Header, BlockExecutionError> {
-        let receipts = bundle_state.receipts_by_block(header.number);
-        header.receipts_root = if receipts.is_empty() {
-            EMPTY_RECEIPTS
-        } else {
-            let receipts_with_bloom = receipts
-                .iter()
-                .map(|r| (*r).clone().expect("receipts have not been pruned").into())
-                .collect::<Vec<ReceiptWithBloom>>();
-            header.logs_bloom =
-                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            #[cfg(feature = "optimism")]
-            {
-                proofs::calculate_receipt_root_optimism(
-                    &receipts_with_bloom,
-                    chain_spec,
-                    header.timestamp,
-                )
-            }
-            #[cfg(not(feature = "optimism"))]
-            {
-                proofs::calculate_receipt_root(&receipts_with_bloom)
-            }
-        };
-
-        header.gas_used = gas_used;
-        header.blob_gas_used = blob_gas_used;
-
-        // calculate the state root
-        let state_root = client
-            .latest()
-            .map_err(BlockExecutionError::LatestBlock)?
-            .state_root(bundle_state.state())
-            .unwrap();
-        header.state_root = state_root;
-        Ok(header)
-    }
-
     /// Builds and executes a new block with the given transactions, on the provided executor.
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
@@ -394,14 +358,10 @@ impl StorageInner {
         Executor: BlockExecutorProvider,
         Provider: StateProviderFactory,
     {
-        let header = self.build_header_template(
-            &transactions,
-            &ommers,
-            withdrawals.as_ref(),
-            chain_spec.clone(),
-        );
+        let header =
+            self.build_header_template(&transactions, &ommers, withdrawals.as_ref(), chain_spec);
 
-        let block = Block {
+        let mut block = Block {
             header,
             body: transactions,
             ommers: ommers.clone(),
@@ -412,46 +372,46 @@ impl StorageInner {
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-        let db = StateProviderDatabase::new(
+        let mut db = StateProviderDatabase::new(
             provider.latest().map_err(BlockExecutionError::LatestBlock)?,
         );
+
+        // TODO(mattsse): At this point we don't know certain fields of the header, so we first
+        // execute it and then update the header this can be improved by changing the executor
+        // input, for now we intercept the errors and retry
+        loop {
+            match executor.executor(&mut db).execute((&block, U256::ZERO).into()) {
+                Err(BlockExecutionError::Validation(BlockValidationError::BlockGasUsed {
+                    gas,
+                    ..
+                })) => {
+                    block.block.header.gas_used = gas.got;
+                }
+                Err(BlockExecutionError::Validation(BlockValidationError::ReceiptRootDiff(
+                    err,
+                ))) => {
+                    block.block.header.receipts_root = err.got;
+                }
+                _ => break,
+            };
+        }
+
         // now execute the block
-        let BlockExecutionOutput { state, receipts, gas_used } =
-            executor.executor(db).execute((&block, U256::ZERO).into())?;
+        let BlockExecutionOutput { state, receipts, .. } =
+            executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let bundle_state = BundleStateWithReceipts::new(
             state,
             Receipts::from_block_receipt(receipts),
             block.number,
         );
 
-        let Block { header, body, .. } = block.block;
+        let Block { mut header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers, withdrawals };
-
-        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            let mut sum_blob_gas_used = 0;
-            for tx in &body.transactions {
-                if let Some(blob_tx) = tx.transaction.as_eip4844() {
-                    sum_blob_gas_used += blob_tx.blob_gas();
-                }
-            }
-            Some(sum_blob_gas_used)
-        } else {
-            None
-        };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
-        // fill in the rest of the fields
-        let header = self.complete_header(
-            header,
-            &bundle_state,
-            provider,
-            gas_used,
-            blob_gas_used,
-            #[cfg(feature = "optimism")]
-            chain_spec.as_ref(),
-        )?;
-
+        // calculate the state root
+        header.state_root = db.state_root(bundle_state.state())?;
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage
