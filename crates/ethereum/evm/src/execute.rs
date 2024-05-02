@@ -3,8 +3,7 @@
 use crate::EthEvmConfig;
 use reth_evm::{
     execute::{
-        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, Executor,
+        BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
@@ -14,7 +13,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     BlockNumber, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt,
-    Receipts, Withdrawals, U256,
+    Receipts, Withdrawals, MAINNET, U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
@@ -35,16 +34,21 @@ use tracing::debug;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
-pub struct EthExecutorProvider<EvmConfig> {
+pub struct EthExecutorProvider<EvmConfig = EthEvmConfig> {
     chain_spec: Arc<ChainSpec>,
     evm_config: EvmConfig,
     inspector: Option<InspectorStack>,
 }
 
-impl EthExecutorProvider<EthEvmConfig> {
+impl EthExecutorProvider {
     /// Creates a new default ethereum executor provider.
     pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
         Self::new(chain_spec, Default::default())
+    }
+
+    /// Returns a new provider for the mainnet.
+    pub fn mainnet() -> Self {
+        Self::ethereum(MAINNET.clone())
     }
 }
 

@@ -61,20 +61,20 @@ impl<Types, DB, Provider> Default for FullNodeTypesAdapter<Types, DB, Provider> 
 }
 
 impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
-    where
-        Types: NodeTypes,
-        DB: Send + Sync + 'static,
-        Provider: Send + Sync + 'static,
+where
+    Types: NodeTypes,
+    DB: Send + Sync + 'static,
+    Provider: Send + Sync + 'static,
 {
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
 }
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
-    where
-        Types: NodeTypes,
-        Provider: FullProvider<DB>,
-        DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+where
+    Types: NodeTypes,
+    Provider: FullProvider<DB>,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     type DB = DB;
     type Provider = Provider;

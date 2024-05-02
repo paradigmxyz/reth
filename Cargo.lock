@@ -7153,7 +7153,6 @@ dependencies = [
  "reth-evm",
  "reth-network",
  "reth-payload-builder",
- "reth-primitives",
  "reth-provider",
  "reth-tasks",
  "reth-transaction-pool",

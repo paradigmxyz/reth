@@ -3,8 +3,8 @@ use num_traits::Zero;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
-use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
+use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
@@ -13,9 +13,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, BundleStateWithReceipts, CanonStateNotification, Chain, DatabaseProviderRW, ExecutorFactory,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader,
-    TransactionVariant,
+    BlockReader, BundleStateWithReceipts, Chain, DatabaseProviderRW, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -65,7 +64,7 @@ use tracing::*;
 pub struct ExecutionStage<E> {
     metrics_tx: Option<MetricEventsSender>,
     /// The stage's internal block executor
-    executor_factory: E,
+    executor_provider: E,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -82,7 +81,7 @@ pub struct ExecutionStage<E> {
 impl<E> ExecutionStage<E> {
     /// Create new execution stage with specified config.
     pub fn new(
-        executor_factory: E,
+        executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
@@ -91,19 +90,19 @@ impl<E> ExecutionStage<E> {
         Self {
             metrics_tx: None,
             external_clean_threshold,
-            executor_factory,
+            executor_provider,
             thresholds,
             prune_modes,
             exex_manager_handle,
         }
     }
 
-    /// Create an execution stage with the provided executor factory.
+    /// Create an execution stage with the provided executor.
     ///
     /// The commit threshold will be set to 10_000.
-    pub fn new_with_executor(executor_factory: E) -> Self {
+    pub fn new_with_executor(executor_provider: E) -> Self {
         Self::new(
-            executor_factory,
+            executor_provider,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
@@ -179,7 +178,7 @@ where
             provider.tx_ref(),
             provider.static_file_provider().clone(),
         ));
-        let mut executor = self.executor_factory.batch_executor(db, prune_modes);
+        let mut executor = self.executor_provider.batch_executor(db, prune_modes);
         executor.set_tip(max_block);
 
         // Progress tracking
@@ -615,36 +614,26 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
+    use super::*;
+    use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-
     use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_interfaces::executor::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
-        Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
-        B256, U256,
+        Bytecode, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry, B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
         StaticFileProviderFactory,
     };
-    use reth_revm::EvmProcessorFactory;
+    use std::collections::BTreeMap;
 
-    use crate::test_utils::TestStageDB;
-
-    use super::*;
-
-    fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
-        let executor_factory = EvmProcessorFactory::new(
-            Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
-            EthEvmConfig::default(),
-        );
+    fn stage() -> ExecutionStage<EthExecutorProvider> {
         ExecutionStage::new(
-            executor_factory,
+            EthExecutorProvider::mainnet(),
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
@@ -879,7 +868,7 @@ mod tests {
                 mode.receipts_log_filter = random_filter.clone();
             }
 
-            let mut execution_stage: ExecutionStage<EvmProcessorFactory<EthEvmConfig>> = stage();
+            let mut execution_stage = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
 
             let output = execution_stage.execute(&provider, input).unwrap();

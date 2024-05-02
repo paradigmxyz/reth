@@ -1,7 +1,6 @@
 //! Optimism block executor.
 
 use crate::OptimismEvmConfig;
-use alloy_primitives::BlockNumber;
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -14,9 +13,9 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom, Bytes, ChainSpec,
-    GotExpected, Hardfork, Header, PruneModes, Receipt, ReceiptWithBloom, Receipts, TxType,
-    Withdrawals, B256, U256,
+    proofs::calculate_receipt_root_optimism, BlockNumber, BlockWithSenders, Bloom, Bytes,
+    ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt, ReceiptWithBloom, Receipts,
+    TxType, Withdrawals, B256, U256,
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
@@ -37,13 +36,13 @@ use tracing::{debug, trace};
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
-pub struct OpExecutorProvider<EvmConfig> {
+pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
     chain_spec: Arc<ChainSpec>,
     evm_config: EvmConfig,
     inspector: Option<InspectorStack>,
 }
 
-impl OpExecutorProvider<OptimismEvmConfig> {
+impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
         Self::new(chain_spec, Default::default())
