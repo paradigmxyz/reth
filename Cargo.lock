@@ -6406,6 +6406,7 @@ dependencies = [
  "reth-downloaders",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
+ "reth-evm",
  "reth-evm-ethereum",
  "reth-interfaces",
  "reth-metrics",

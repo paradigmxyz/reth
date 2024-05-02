@@ -13,6 +13,7 @@ use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
 pub mod execute;
+pub mod either;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
