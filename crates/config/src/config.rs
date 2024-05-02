@@ -6,9 +6,12 @@ use reth_primitives::PruneModes;
 use secp256k1::SecretKey;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
+    ffi::OsStr,
     path::{Path, PathBuf},
     time::Duration,
 };
+
+const EXTENSION: &str = "toml";
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -46,6 +49,22 @@ impl Config {
             .sessions_config(self.sessions.clone())
             .peer_config(peer_config)
             .discovery(discv4)
+    }
+
+    /// Save the configuration to toml file.
+    pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+        if path.extension() != Some(OsStr::new(EXTENSION)) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("reth config file extension must be '{EXTENSION}'"),
+            ));
+        }
+        confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
+
+    /// Sets the pruning configuration.
+    pub fn update_prune_confing(&mut self, prune_config: PruneConfig) {
+        self.prune = Some(prune_config);
     }
 }
 
@@ -325,10 +344,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, EXTENSION};
     use std::time::Duration;
-
-    const EXTENSION: &str = "toml";
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -344,6 +361,14 @@ mod tests {
         with_tempdir("config-store-test", |config_path| {
             let config = Config::default();
             confy::store_path(config_path, config).expect("Failed to store config");
+        })
+    }
+
+    #[test]
+    fn test_store_config_method() {
+        with_tempdir("config-store-test-method", |config_path| {
+            let config = Config::default();
+            config.save(config_path).expect("Failed to store config");
         })
     }
 
