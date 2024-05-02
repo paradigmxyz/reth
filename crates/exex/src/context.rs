@@ -43,11 +43,6 @@ pub struct ExExContext<Node: FullNodeComponents> {
 impl<Node: FullNodeComponents> NodeTypes for ExExContext<Node> {
     type Primitives = Node::Primitives;
     type Engine = Node::Engine;
-    type Evm = Node::Evm;
-
-    fn evm_config(&self) -> Self::Evm {
-        self.components.evm_config()
-    }
 }
 
 impl<Node: FullNodeComponents> FullNodeTypes for ExExContext<Node> {
@@ -57,6 +52,7 @@ impl<Node: FullNodeComponents> FullNodeTypes for ExExContext<Node> {
 
 impl<Node: FullNodeComponents> FullNodeComponents for ExExContext<Node> {
     type Pool = Node::Pool;
+    type Evm = Node::Evm;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -76,5 +72,9 @@ impl<Node: FullNodeComponents> FullNodeComponents for ExExContext<Node> {
 
     fn task_executor(&self) -> &TaskExecutor {
         self.components.task_executor()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.components.evm_config()
     }
 }
