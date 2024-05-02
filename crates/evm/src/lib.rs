@@ -12,8 +12,8 @@ use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Tra
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
-pub mod execute;
 pub mod either;
+pub mod execute;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
