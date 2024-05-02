@@ -1,9 +1,10 @@
 //! Version information for reth.
 use reth_db::models::client_version::ClientVersion;
+use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 
 // The client code for Reth
 #[allow(missing_docs)]
-pub const CLIENT_CODE: &str = "RH";
+pub const CLIENT_CODE: ClientCode = ClientCode::RH;
 // The human readable name of the client
 #[allow(missing_docs)]
 pub const NAME_CLIENT: &str = "reth";
@@ -33,21 +34,11 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 //   commit: "defa64b2"
 // }
 ///  ```
-
-#[derive(Debug)]
-#[allow(missing_docs)]
-pub struct ClientVersionV1<'a> {
-    pub code: &'a str,
-    pub name: &'a str,
-    pub version: &'a str,
-    pub commit: &'a str,
-}
-#[allow(missing_docs)]
-pub const CLIENTVERSIONV1: ClientVersionV1<'_> = ClientVersionV1 {
+pub const CLIENT_VERSION_V1: ClientVersionV1 = ClientVersionV1 {
     code: CLIENT_CODE,
-    name: NAME_CLIENT,
-    version: const_str::concat!(env!("CARGO_PKG_VERSION"), env!("RETH_VERSION_SUFFIX")),
-    commit: env!("VERGEN_GIT_SHA"),
+    name: NAME_CLIENT.to_string(),
+    version: const_str::concat!(env!("CARGO_PKG_VERSION"), env!("RETH_VERSION_SUFFIX")).to_string(),
+    commit: env!("VERGEN_GIT_SHA").to_string(),
 };
 
 /// The short version information for reth.

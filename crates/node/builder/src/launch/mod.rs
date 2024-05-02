@@ -26,7 +26,7 @@ use reth_node_core::{
     engine_api_store::EngineApiStore,
     engine_skip_fcu::EngineApiSkipFcu,
     exit::NodeExitFuture,
-    version::CLIENTVERSIONV1,
+    version::CLIENT_VERSION_V1,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
@@ -429,9 +429,9 @@ address.to_string(), format_ether(alloc.balance));
 
         let client = ClientVersionV1 {
             code: ClientCode::RH,
-            name: CLIENTVERSIONV1.name.to_string(),
-            version: CLIENTVERSIONV1.version.to_string(),
-            commit: CLIENTVERSIONV1.commit.to_string(),
+            name: CLIENT_VERSION_V1.name.to_string(),
+            version: CLIENT_VERSION_V1.version.to_string(),
+            commit: CLIENT_VERSION_V1.commit.to_string(),
         };
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
