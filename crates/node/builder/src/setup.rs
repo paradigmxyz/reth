@@ -1,6 +1,5 @@
 //! Helpers for setting up parts of the node.
 
-use crate::ConfigureEvm;
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db::database::Database;
@@ -18,7 +17,6 @@ use reth_node_core::{
     primitives::{BlockNumber, B256},
 };
 use reth_provider::{HeaderSyncMode, ProviderFactory};
-use reth_revm::stack::{Hook, InspectorStackConfig};
 use reth_stages::{
     prelude::DefaultStages,
     stages::{
