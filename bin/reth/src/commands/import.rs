@@ -297,7 +297,7 @@ where
                 config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
                 ExExManagerHandle::empty(),
             ))
-            .disable_all_if(STATE_STAGES, || should_exec),
+            .disable_all_if(&StageId::STATE_REQUIRED, || should_exec),
         )
         .build(provider_factory, static_file_producer);
 
