@@ -485,6 +485,10 @@ where
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
 
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
         Ok(())
     }
 

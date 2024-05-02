@@ -31,6 +31,7 @@
 //! # use reth_config::config::EtlConfig;
 //! # use reth_consensus::Consensus;
 //! # use reth_consensus::test_utils::TestConsensus;
+//! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! #
 //! # let chain_spec = MAINNET.clone();
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -45,7 +46,7 @@
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
+//! # let executor_provider = EthExecutorProvider::mainnet();
 //! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
 //! #    provider_factory.static_file_provider(),
@@ -55,17 +56,15 @@
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
-//!     .add_stages(
-//!         DefaultStages::new(
-//!             provider_factory.clone(),
-//!             HeaderSyncMode::Tip(tip_rx),
-//!             consensus,
-//!             headers_downloader,
-//!             bodies_downloader,
-//!             executor_factory,
-//!             EtlConfig::default(),
-//!         )
-//!     )
+//!     .add_stages(DefaultStages::new(
+//!         provider_factory.clone(),
+//!         HeaderSyncMode::Tip(tip_rx),
+//!         consensus,
+//!         headers_downloader,
+//!         bodies_downloader,
+//!         executor_provider,
+//!         EtlConfig::default(),
+//!     ))
 //!     .build(provider_factory, static_file_producer);
 //! ```
 //!
