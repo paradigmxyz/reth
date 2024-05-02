@@ -27,6 +27,7 @@ reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
 reth-config.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-api.workspace = true
 reth-evm.workspace = true
@@ -35,6 +36,8 @@ reth-tasks.workspace = true
 reth-trie.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
+reth-etl.workspace = true
+reth-codecs.workspace = true
 
 # ethereum
 discv5.workspace = true

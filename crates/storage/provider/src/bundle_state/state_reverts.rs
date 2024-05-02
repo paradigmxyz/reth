@@ -1,6 +1,6 @@
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut},
@@ -75,30 +75,16 @@ impl StateReverts {
         tracing::trace!(target: "provider::reverts", "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
 
-        // append entries if key is new
-        let should_append_accounts =
-            account_changeset_cursor.last()?.map_or(true, |(block_number, _)| {
-                block_number < first_block || block_number == first_block && block_number == 0
-            });
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
 
             for (address, info) in account_block_reverts {
-                if should_append_accounts {
-                    account_changeset_cursor.append_dup(
-                        block_number,
-                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                    )?;
-                } else {
-                    // upsert on dupsort tables will append to subkey. see implementation of
-                    // DbCursorRW::upsert for reth_db::implementation::mdbx::cursor::Cursor<RW, _>
-                    account_changeset_cursor.upsert(
-                        block_number,
-                        AccountBeforeTx { address, info: info.map(into_reth_acc) },
-                    )?;
-                }
+                account_changeset_cursor.append_dup(
+                    block_number,
+                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                )?;
             }
         }
 
