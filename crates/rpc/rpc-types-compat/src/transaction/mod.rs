@@ -1,9 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
 
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
-use reth_primitives::{
-    BlockNumber, TransactionSignedEcRecovered, TxKind as PrimitiveTransactionKind, TxType, B256,
-};
+use reth_primitives::{BlockNumber, TransactionSignedEcRecovered, TxKind, TxType, B256};
 use reth_rpc_types::Transaction;
 use signature::from_primitive_signature;
 pub use typed::*;
@@ -45,8 +43,8 @@ fn fill(
     let signed_tx = tx.into_signed();
 
     let to = match signed_tx.kind() {
-        PrimitiveTransactionKind::Create => None,
-        PrimitiveTransactionKind::Call(to) => Some(*to),
+        TxKind::Create => None,
+        TxKind::Call(to) => Some(*to),
     };
 
     #[allow(unreachable_patterns)]

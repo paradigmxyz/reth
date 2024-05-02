@@ -157,6 +157,23 @@ impl FileClient {
     pub fn bodies_len(&self) -> usize {
         self.bodies.len()
     }
+
+    /// Returns an iterator over headers in the client.
+    pub fn headers_iter(&mut self) -> impl Iterator<Item = &Header> {
+        self.headers.values()
+    }
+
+    /// Returns a mutable iterator over bodies in the client.
+    pub fn bodies_iter_mut(&mut self) -> impl Iterator<Item = (&u64, &mut BlockBody)> {
+        let bodies = &mut self.bodies;
+        let headers = &self.headers;
+        headers.keys().zip(bodies.values_mut())
+    }
+
+    /// Returns the current number of transactions in the client.
+    pub fn total_transactions(&self) -> usize {
+        self.bodies.iter().flat_map(|(_, body)| &body.transactions).count()
+    }
 }
 
 impl FromReader for FileClient {

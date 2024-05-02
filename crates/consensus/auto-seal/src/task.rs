@@ -145,7 +145,7 @@ where
                         withdrawals.clone(),
                         &client,
                         chain_spec,
-                        evm_config,
+                        &evm_config,
                     ) {
                         Ok((new_header, bundle_state)) => {
                             // clear all transactions from pool

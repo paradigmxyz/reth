@@ -47,6 +47,7 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
+tokio-stream.workspace = true
 
 ## misc
 aquamarine.workspace = true
@@ -54,3 +55,6 @@ eyre.workspace = true
 fdlimit.workspace = true
 confy.workspace = true
 rayon.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

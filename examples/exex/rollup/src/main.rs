@@ -298,7 +298,8 @@ fn execute_block(
     )
     .with_bundle_update()
     .build();
-    let mut evm = EthEvmConfig::default().evm(state);
+    let evm_config = EthEvmConfig::default();
+    let mut evm = evm_config.evm(state);
 
     // Set state clear flag.
     evm.db_mut().set_state_clear_flag(
