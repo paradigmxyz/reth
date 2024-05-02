@@ -1310,9 +1310,6 @@ where
                                     error,
                                     hash
                                 )
-                            } else if let Some(block_number) = error.is_optimistic_revert() {
-                                self.sync
-                                    .set_pipeline_sync_target(PipelineTarget::Unwind(block_number));
                             }
                         }
                     }
@@ -1687,9 +1684,6 @@ where
                         let _ = tx.send(Err(RethError::Canonical(error.clone())));
                         if error.is_fatal() {
                             return Err(RethError::Canonical(error))
-                        } else if let Some(block_number) = error.is_optimistic_revert() {
-                            self.sync
-                                .set_pipeline_sync_target(PipelineTarget::Unwind(block_number));
                         }
                     }
                 };
@@ -1766,16 +1760,20 @@ where
                                 Err(BeaconOnNewPayloadError::Internal(Box::new(error.clone())));
                             let _ = tx.send(response);
                             return Err(RethError::Canonical(error))
+                        } else if error.is_optimistic_revert().is_some() {
+                            // engine already set the pipeline unwind target on
+                            // `try_make_sync_target_canonical`
+                            PayloadStatus::new(PayloadStatusEnum::Syncing, None)
+                        } else {
+                            // If we could not make the sync target block canonical,
+                            // we should return the error as an invalid payload status.
+                            PayloadStatus::new(
+                                PayloadStatusEnum::Invalid { validation_error: error.to_string() },
+                                // TODO: return a proper latest valid hash
+                                // See: <https://github.com/paradigmxyz/reth/issues/7146>
+                                self.forkchoice_state_tracker.last_valid_head(),
+                            )
                         }
-
-                        // If we could not make the sync target block canonical,
-                        // we should return the error as an invalid payload status.
-                        PayloadStatus::new(
-                            PayloadStatusEnum::Invalid { validation_error: error.to_string() },
-                            // TODO: return a proper latest valid hash
-                            // See: <https://github.com/paradigmxyz/reth/issues/7146>
-                            self.forkchoice_state_tracker.last_valid_head(),
-                        )
                     }
                 };
 
