@@ -20,7 +20,6 @@ use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    processor::verify_receipt,
     stack::InspectorStack,
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
     Evm, State,
@@ -31,6 +30,7 @@ use revm_primitives::{
 };
 use std::sync::Arc;
 use tracing::debug;
+use crate::verify::verify_receipt;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
