@@ -2,7 +2,6 @@
 
 use clap::Parser;
 use reth::cli::Cli;
-use reth_node_builder::NodeHandle;
 use reth_node_optimism::{args::RollupArgs, rpc::SequencerClient, OptimismNode};
 use std::sync::Arc;
 
