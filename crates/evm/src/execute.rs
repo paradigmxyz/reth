@@ -108,7 +108,7 @@ impl<'a, Block> From<(&'a Block, U256)> for BlockExecutionInput<'a, Block> {
 }
 
 /// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider: Send + Sync + Clone + 'static {
+pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// An executor that can execute a single block given a database.
     type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
         DB,

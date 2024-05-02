@@ -13,6 +13,7 @@ pub use execute::*;
 pub use network::*;
 pub use payload::*;
 pub use pool::*;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
@@ -35,11 +36,17 @@ pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Send + Sync + 'stati
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     type Evm: ConfigureEvm;
 
+    /// The type that knows how to execute blocks.
+    type Executor: BlockExecutorProvider;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> &Self::Evm;
+
+    /// Returns the node's executor type.
+    fn block_executor(&self) -> &Self::Executor;
 
     /// Returns the handle to the network
     fn network(&self) -> &NetworkHandle;
@@ -52,25 +59,29 @@ pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Send + Sync + 'stati
 ///
 /// This provides access to all the components of the node.
 #[derive(Debug)]
-pub struct Components<Node: FullNodeTypes, Pool, EVM> {
+pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor> {
     /// The transaction pool of the node.
     pub transaction_pool: Pool,
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     pub evm_config: EVM,
+    /// The node's executor type used to execute individual blocks and batches of blocks.
+    pub executor: Executor,
     /// The network implementation of the node.
     pub network: NetworkHandle,
     /// The handle to the payload builder service.
     pub payload_builder: PayloadBuilderHandle<Node::Engine>,
 }
 
-impl<Node, Pool, EVM> NodeComponents<Node> for Components<Node, Pool, EVM>
+impl<Node, Pool, EVM, Executor> NodeComponents<Node> for Components<Node, Pool, EVM, Executor>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm,
+    Executor: BlockExecutorProvider,
 {
     type Pool = Pool;
     type Evm = EVM;
+    type Executor = Executor;
 
     fn pool(&self) -> &Self::Pool {
         &self.transaction_pool
@@ -78,6 +89,10 @@ where
 
     fn evm_config(&self) -> &Self::Evm {
         &self.evm_config
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+       &self.executor
     }
 
     fn network(&self) -> &NetworkHandle {
@@ -89,16 +104,18 @@ where
     }
 }
 
-impl<Node, Pool, EVM> Clone for Components<Node, Pool, EVM>
+impl<Node, Pool, EVM, Executor> Clone for Components<Node, Pool, EVM, Executor>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
     EVM: ConfigureEvm,
+    Executor: BlockExecutorProvider,
 {
     fn clone(&self) -> Self {
         Self {
             transaction_pool: self.transaction_pool.clone(),
             evm_config: self.evm_config.clone(),
+            executor: self.executor.clone(),
             network: self.network.clone(),
             payload_builder: self.payload_builder.clone(),
         }

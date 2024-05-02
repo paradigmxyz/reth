@@ -33,10 +33,11 @@ use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;
 use std::sync::Arc;
 use tokio::sync::watch;
+use reth_evm::execute::BlockExecutorProvider;
 
 /// Constructs a [Pipeline] that's wired to the network
 #[allow(clippy::too_many_arguments)]
-pub async fn build_networked_pipeline<DB, Client, EvmConfig>(
+pub async fn build_networked_pipeline<DB, Client, Executor>(
     node_config: &NodeConfig,
     config: &StageConfig,
     client: Client,
@@ -47,13 +48,13 @@ pub async fn build_networked_pipeline<DB, Client, EvmConfig>(
     prune_config: Option<PruneConfig>,
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<DB>,
-    evm_config: EvmConfig,
+    executor: Executor,
     exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Unpin + Clone + 'static,
     Client: HeadersClient + BodiesClient + Clone + 'static,
-    EvmConfig: ConfigureEvm + Clone + 'static,
+    Executor: BlockExecutorProvider,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -75,7 +76,7 @@ where
         metrics_tx,
         prune_config,
         static_file_producer,
-        evm_config,
+        executor,
         exex_manager_handle,
     )
     .await?;
@@ -85,7 +86,7 @@ where
 
 /// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
 #[allow(clippy::too_many_arguments)]
-pub async fn build_pipeline<DB, H, B, EvmConfig>(
+pub async fn build_pipeline<DB, H, B, Executor>(
     node_config: &NodeConfig,
     provider_factory: ProviderFactory<DB>,
     stage_config: &StageConfig,
@@ -96,14 +97,14 @@ pub async fn build_pipeline<DB, H, B, EvmConfig>(
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,
     static_file_producer: StaticFileProducer<DB>,
-    evm_config: EvmConfig,
+    executor: Executor,
     exex_manager_handle: ExExManagerHandle,
 ) -> eyre::Result<Pipeline<DB>>
 where
     DB: Database + Clone + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
-    EvmConfig: ConfigureEvm + Clone + 'static,
+    Executor: BlockExecutorProvider,
 {
     let mut builder = Pipeline::builder();
 
@@ -113,22 +114,21 @@ where
     }
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-    let factory = reth_revm::EvmProcessorFactory::new(node_config.chain.clone(), evm_config);
 
-    let stack_config = InspectorStackConfig {
-        use_printer_tracer: node_config.debug.print_inspector,
-        hook: if let Some(hook_block) = node_config.debug.hook_block {
-            Hook::Block(hook_block)
-        } else if let Some(tx) = node_config.debug.hook_transaction {
-            Hook::Transaction(tx)
-        } else if node_config.debug.hook_all {
-            Hook::All
-        } else {
-            Hook::None
-        },
-    };
-
-    let factory = factory.with_stack_config(stack_config);
+    // let stack_config = InspectorStackConfig {
+    //     use_printer_tracer: node_config.debug.print_inspector,
+    //     hook: if let Some(hook_block) = node_config.debug.hook_block {
+    //         Hook::Block(hook_block)
+    //     } else if let Some(tx) = node_config.debug.hook_transaction {
+    //         Hook::Transaction(tx)
+    //     } else if node_config.debug.hook_all {
+    //         Hook::All
+    //     } else {
+    //         Hook::None
+    //     },
+    // };
+    //
+    // let factory = factory.with_stack_config(stack_config);
 
     let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
@@ -147,7 +147,7 @@ where
                 Arc::clone(&consensus),
                 header_downloader,
                 body_downloader,
-                factory.clone(),
+                executor.clone(),
                 stage_config.etl.clone(),
             )
             .set(SenderRecoveryStage {
@@ -155,7 +155,7 @@ where
             })
             .set(
                 ExecutionStage::new(
-                    factory,
+                    executor,
                     ExecutionStageThresholds {
                         max_blocks: stage_config.execution.max_blocks,
                         max_changes: stage_config.execution.max_changes,

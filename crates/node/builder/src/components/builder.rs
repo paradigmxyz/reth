@@ -9,6 +9,7 @@ use crate::{
 };
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
+use reth_evm::execute::BlockExecutorProvider;
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///
@@ -232,7 +233,7 @@ where
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
     ExecB: ExecutorBuilder<Node>,
 {
-    type Components = Components<Node, PoolB::Pool, ExecB::EVM>;
+    type Components = Components<Node, PoolB::Pool, ExecB::EVM, ExecB::Executor>;
 
     async fn build_components(
         self,
@@ -246,12 +247,12 @@ where
             _marker,
         } = self;
 
-        let evm_config = evm_builder.build_evm(context).await?;
+        let (evm_config, executor) = evm_builder.build_evm(context).await?;
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder = payload_builder.spawn_payload_service(context, pool.clone()).await?;
 
-        Ok(Components { transaction_pool: pool, evm_config, network, payload_builder })
+        Ok(Components { transaction_pool: pool, evm_config, network, payload_builder, executor })
     }
 }
 
@@ -287,15 +288,16 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
 
-impl<Node, F, Fut, Pool, EVM> NodeComponentsBuilder<Node> for F
+impl<Node, F, Fut, Pool, EVM, Executor> NodeComponentsBuilder<Node> for F
 where
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM>>> + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm,
+    Executor: BlockExecutorProvider,
 {
-    type Components = Components<Node, Pool, EVM>;
+    type Components = Components<Node, Pool, EVM, Executor>;
 
     fn build_components(
         self,
