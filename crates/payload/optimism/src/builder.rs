@@ -303,7 +303,7 @@ where
     // blocks will always have at least a single transaction in them (the L1 info transaction),
     // so we can safely assume that this will always be triggered upon the transition and that
     // the above check for empty blocks will never be hit on OP chains.
-    reth_revm::optimism::ensure_create2_deployer(
+    reth_evm_optimism::ensure_create2_deployer(
         chain_spec.clone(),
         attributes.payload_attributes.timestamp,
         &mut db,

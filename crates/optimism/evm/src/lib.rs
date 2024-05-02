@@ -20,6 +20,8 @@ use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspect
 mod execute;
 pub use execute::*;
 pub mod l1;
+pub use l1::*;
+
 pub mod verify;
 
 /// Optimism-related EVM configuration.
