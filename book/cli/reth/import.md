@@ -30,6 +30,12 @@ Options:
           
           [default: mainnet]
 
+      --no-state
+          Disables stages that require state.
+
+      --chunk-len <CHUNK_LEN>
+          Chunk byte length.
+
       --instance <INSTANCE>
           Add a new instance of a node.
           

@@ -19,7 +19,7 @@ use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_core::engine_api_store::{EngineApiStore, StoredEngineApiMessage};
+use reth_node_core::engine::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 #[cfg(not(feature = "optimism"))]
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
@@ -34,7 +34,7 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tracing::*;
 
 /// `reth debug replay-engine` command
@@ -191,8 +191,7 @@ impl Command {
 
         // Configure the consensus engine
         let network_client = network.fetch_client().await?;
-        let (consensus_engine_tx, consensus_engine_rx) = mpsc::unbounded_channel();
-        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
+        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::new(
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
@@ -210,8 +209,6 @@ impl Command {
             payload_builder,
             None,
             u64::MAX,
-            consensus_engine_tx,
-            consensus_engine_rx,
             EngineHooks::new(),
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
@@ -224,7 +221,7 @@ impl Command {
             let _ = tx.send(res);
         });
 
-        let engine_api_store = EngineApiStore::new(self.engine_api_store.clone());
+        let engine_api_store = EngineMessageStore::new(self.engine_api_store.clone());
         for filepath in engine_api_store.engine_messages_iter()? {
             let contents =
                 fs::read(&filepath).wrap_err(format!("failed to read: {}", filepath.display()))?;

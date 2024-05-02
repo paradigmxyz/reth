@@ -6667,6 +6667,7 @@ name = "reth-discv4"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
+ "assert_matches",
  "discv5",
  "enr",
  "generic-array",
@@ -6993,8 +6994,10 @@ dependencies = [
  "metrics",
  "reth-config",
  "reth-metrics",
+ "reth-network",
  "reth-node-api",
  "reth-node-core",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
@@ -7279,6 +7282,7 @@ dependencies = [
  "reth-transaction-pool",
  "tempfile",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -7301,6 +7305,7 @@ dependencies = [
  "metrics-process",
  "metrics-util",
  "once_cell",
+ "pin-project",
  "procfs",
  "proptest",
  "rand 0.8.5",
@@ -7339,6 +7344,7 @@ dependencies = [
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
+ "tokio-util",
  "tracing",
  "vergen",
 ]
