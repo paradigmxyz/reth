@@ -242,13 +242,24 @@ impl Discv5 {
                 // peer has been discovered as part of query, or, by incoming session (peer has
                 // discovered us)
 
-                self.metrics.discovered_peers_advertised_networks.increment_once_by_network_type(&enr);
-
                 self.metrics.discovered_peers.increment_established_sessions_raw(1);
 
                 self.on_discovered_peer(&enr, remote_socket)
             }
-            _ => None,
+            discv5::Event::UnverifiableEnr {
+                enr,
+                socket,
+                node_id: _,
+            } => {
+                // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)`
+                // and `DiscoveryUpdate::DiscoveredAtCapacity(_)
+
+                // peer has been discovered as part of query, or, by an outgoing session (but peer 
+                // is behind NAT and responds from a different socket)
+
+                self.on_discovered_peer(&enr, socket)
+            }
+            _ => None
         }
     }
 
@@ -258,6 +269,8 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Option<DiscoveredPeer> {
+        self.metrics.discovered_peers_advertised_networks.increment_once_by_network_type(enr);
+
         let node_record = match self.try_into_reachable(enr, socket) {
             Ok(enr_bc) => enr_bc,
             Err(err) => {
@@ -299,11 +312,11 @@ impl Discv5 {
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local [`IpMode`]. Tries the socket from which the ENR was sent, if socket is missing
-    /// from ENR.
+    /// w.r.t. local [`IpMode`]. Uses source socket as udp socket.
     ///
-    ///  Note: [`discv5::Discv5`] won't initiate a session with any peer with a malformed node
-    /// record, that advertises a reserved IP address on a WAN network.
+    ///  Note: [`discv5::Discv5`] won't initiate a session with any peer with an unverifiable node
+    /// record, for example one that advertises a reserved LAN IP address on a WAN network. This is
+    /// in order to prevent DoS attacks, where some malicious peers may advertise a victim's socket.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
@@ -311,7 +324,8 @@ impl Discv5 {
     ) -> Result<NodeRecord, Error> {
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        let udp_socket = self.ip_mode().get_contactable_addr(enr).unwrap_or(socket);
+        // todo: when impl ipv6 support in rlpx, favour advertised socket if ipv6 wrt to local ip
+        // mode
 
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
         // too
@@ -322,7 +336,7 @@ impl Discv5 {
             return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
         };
 
-        Ok(NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id })
+        Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
     }
 
     /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
