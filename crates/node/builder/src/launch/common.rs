@@ -192,7 +192,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     pub fn ensure_etl_datadir(mut self) -> Self {
         if self.toml_config_mut().stages.etl.dir.is_none() {
             self.toml_config_mut().stages.etl.dir =
-                Some(EtlConfig::from_datadir(self.data_dir().data_dir_path()))
+                Some(EtlConfig::from_datadir(self.data_dir().data_dir()))
         }
 
         self

@@ -271,7 +271,7 @@ impl<D> ChainPath<D> {
     /// Returns the path to the reth data directory for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>`
-    pub fn data_dir_path(&self) -> &Path {
+    pub fn data_dir(&self) -> &Path {
         self.0.as_ref()
     }
 
@@ -279,35 +279,35 @@ impl<D> ChainPath<D> {
     ///
     /// `<DIR>/<CHAIN_ID>/db`
     pub fn db(&self) -> PathBuf {
-        self.data_dir_path().join("db")
+        self.data_dir().join("db")
     }
 
     /// Returns the path to the static_files directory for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/static_files`
     pub fn static_files(&self) -> PathBuf {
-        self.data_dir_path().join("static_files")
+        self.data_dir().join("static_files")
     }
 
     /// Returns the path to the compiler directory for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/compiled_contracts`
     pub fn compiler(&self) -> PathBuf {
-        self.data_dir_path().join("compiled_contracts")
+        self.data_dir().join("compiled_contracts")
     }
 
     /// Returns the path to the reth p2p secret key for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/discovery-secret`
     pub fn p2p_secret(&self) -> PathBuf {
-        self.data_dir_path().join("discovery-secret")
+        self.data_dir().join("discovery-secret")
     }
 
     /// Returns the path to the known peers file for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/known-peers.json`
     pub fn known_peers(&self) -> PathBuf {
-        self.data_dir_path().join("known-peers.json")
+        self.data_dir().join("known-peers.json")
     }
 
     /// Returns the path to the blobstore directory for this chain where blobs of unfinalized
@@ -315,28 +315,28 @@ impl<D> ChainPath<D> {
     ///
     /// `<DIR>/<CHAIN_ID>/blobstore`
     pub fn blobstore(&self) -> PathBuf {
-        self.data_dir_path().join("blobstore")
+        self.data_dir().join("blobstore")
     }
 
     /// Returns the path to the local transactions backup file
     ///
     /// `<DIR>/<CHAIN_ID>/txpool-transactions-backup.rlp`
     pub fn txpool_transactions(&self) -> PathBuf {
-        self.data_dir_path().join("txpool-transactions-backup.rlp")
+        self.data_dir().join("txpool-transactions-backup.rlp")
     }
 
     /// Returns the path to the config file for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/reth.toml`
     pub fn config(&self) -> PathBuf {
-        self.data_dir_path().join("reth.toml")
+        self.data_dir().join("reth.toml")
     }
 
     /// Returns the path to the jwtsecret file for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/jwt.hex`
     pub fn jwt(&self) -> PathBuf {
-        self.data_dir_path().join("jwt.hex")
+        self.data_dir().join("jwt.hex")
     }
 }
 
