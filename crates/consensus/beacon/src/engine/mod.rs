@@ -1763,7 +1763,7 @@ where
                         } else if error.optimistic_revert_block_number().is_some() {
                             // engine already set the pipeline unwind target on
                             // `try_make_sync_target_canonical`
-                            PayloadStatus::new(PayloadStatusEnum::Syncing, None)
+                            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
                         } else {
                             // If we could not make the sync target block canonical,
                             // we should return the error as an invalid payload status.
