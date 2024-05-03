@@ -11,7 +11,7 @@ use clap::Parser;
 use reth_db::{database::Database, init_db, DatabaseEnv};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
-    receipt_file_client::ReceiptFileClient,
+    receipt_file_client::HackReceiptFileClient,
 };
 use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::{stage::StageId, ChainSpec, StaticFileSegment};
@@ -99,9 +99,9 @@ impl ImportReceiptsCommand {
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
-        while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
+        while let Some(file_client) = reader.next_chunk::<HackReceiptFileClient>().await? {
             // create a new file client from chunk read from file
-            let ReceiptFileClient {
+            let HackReceiptFileClient {
                 mut receipts,
                 mut first_block,
                 total_receipts: total_receipts_chunk,

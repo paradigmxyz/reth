@@ -1,4 +1,3 @@
-use alloy_rlp::EMPTY_LIST_CODE;
 use futures::Future;
 use reth_primitives::{Receipt, Receipts};
 use tokio::io::AsyncReadExt;
@@ -14,7 +13,7 @@ use crate::{
 /// File client for reading RLP encoded receipts from file. Receipts in file must be in sequential
 /// order w.r.t. block number.
 #[derive(Debug)]
-pub struct ReceiptFileClient {
+pub struct HackReceiptFileClient {
     /// The buffered receipts, read from file, as nested lists. One list per block number.
     pub receipts: Receipts,
     /// First (lowest) block number read from file.
@@ -23,7 +22,7 @@ pub struct ReceiptFileClient {
     pub total_receipts: usize,
 }
 
-impl FromReader for ReceiptFileClient {
+impl FromReader for HackReceiptFileClient {
     type Error = FileClientError;
 
     /// Initialize the [`ReceiptFileClient`] from bytes that have been read from file.
@@ -67,14 +66,7 @@ impl FromReader for ReceiptFileClient {
                             "partial receipt returned from decoding chunk"
                         );
 
-                        // Empty list code indicates no receipts for the block, and no other receipt
-                        // info
-                        if !bytes.is_empty() && bytes[0] == EMPTY_LIST_CODE {
-                            // empty list, so no receipts, just advance
-                            remaining_bytes = bytes[1..].into();
-                        } else {
-                            remaining_bytes = bytes;
-                        }
+                        remaining_bytes = bytes;
 
                         break
                     }
@@ -83,21 +75,37 @@ impl FromReader for ReceiptFileClient {
 
                 total_receipts += 1;
 
-                let ReceiptWithBlockNumber { receipt, number } = receipt;
+                match receipt {
+                    Some(ReceiptWithBlockNumber { receipt, number }) => {
+                        if first_block.is_none() {
+                            first_block = Some(number);
+                            block_number = number;
+                        }
 
-                if first_block.is_none() {
-                    first_block = Some(number);
-                    block_number = number;
-                }
+                        if block_number == number {
+                            receipts_for_block.push(Some(receipt));
+                        } else {
+                            receipts.push(receipts_for_block);
 
-                if block_number == number {
-                    receipts_for_block.push(Some(receipt));
-                } else {
-                    receipts.push(receipts_for_block);
+                            // next block
+                            block_number = number;
+                            receipts_for_block = vec![Some(receipt)];
+                        }
+                    }
+                    None => {
+                        match first_block {
+                            Some(num) => {
+                                receipts.push(receipts_for_block);
+                                block_number = num + receipts.len() as u64;
+                            }
+                            None => {
+                                first_block = Some(0);
+                                block_number = 0;
+                            }
+                        }
 
-                    // next block
-                    block_number = number;
-                    receipts_for_block = vec![Some(receipt)];
+                        receipts_for_block = vec![None];
+                    }
                 }
 
                 if log_interval == 0 {
@@ -124,18 +132,17 @@ impl FromReader for ReceiptFileClient {
                 "read receipts from file"
             );
 
+            // we need to push the last receipts
+            receipts.push(receipts_for_block);
+
             trace!(target: "downloaders::file",
                 blocks = receipts.len(),
                 total_receipts,
-                ?receipts_for_block,
                 "Initialized receipt file client"
             );
 
-            // we need to push the last receipts, if any
-            receipts.push(receipts_for_block);
-
             Ok((
-                Self { receipts, first_block: first_block.unwrap(), total_receipts },
+                Self { receipts, first_block: first_block.unwrap_or_default(), total_receipts },
                 remaining_bytes,
             ))
         }
@@ -149,4 +156,46 @@ pub struct ReceiptWithBlockNumber {
     pub receipt: Receipt,
     /// Block number.
     pub number: u64,
+}
+
+#[cfg(test)]
+mod test {
+    use reth_primitives::hex;
+    use reth_tracing::init_test_tracing;
+
+    use crate::file_codec_ovm_receipt::test::{
+        receipt_block_1 as op_mainnet_receipt_block_1,
+        receipt_block_2 as op_mainnet_receipt_block_2,
+        HACK_RECEIPT_ENCODED_BLOCK_1_AND_BLOCK_2 as HACK_RECEIPT_ENCODED_BLOCK_1_AND_BLOCK_2_OP_MAINNET,
+    };
+
+    use super::*;
+
+    /// No receipts for genesis block
+    const HACK_RECEIPT_BLOCK_NO_TRANSACTIONS: &[u8] = &hex!("c0");
+
+    #[tokio::test]
+    async fn receipt_file_client_ovm_codec() {
+        init_test_tracing();
+
+        // genesis block has no hack receipts
+        let mut encoded_receipts = HACK_RECEIPT_BLOCK_NO_TRANSACTIONS.to_vec();
+        // one receipt each for block 1 and 2
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_1_AND_BLOCK_2_OP_MAINNET);
+        // no receipt for block 4
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_BLOCK_NO_TRANSACTIONS);
+
+        let encoded_byte_len = encoded_receipts.len() as u64;
+        let reader = &mut &encoded_receipts[..];
+
+        let (HackReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
+            HackReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
+
+        assert_eq!(4, total_receipts);
+        assert_eq!(0, first_block);
+        assert_eq!(None, receipts[0][0].clone());
+        assert_eq!(op_mainnet_receipt_block_1().receipt, receipts[1][0].clone().unwrap());
+        assert_eq!(op_mainnet_receipt_block_2().receipt, receipts[2][0].clone().unwrap());
+        assert_eq!(None, receipts[3][0].clone());
+    }
 }
