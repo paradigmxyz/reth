@@ -232,7 +232,7 @@ impl<DB> NodeState<DB> {
         }
     }
 
-    fn handle_network_event(&mut self, _: NetworkEvent) {
+    fn handle_network_event(&self, _: NetworkEvent) {
         // NOTE(onbjerg): This used to log established/disconnecting sessions, but this is already
         // logged in the networking component. I kept this stub in case we want to catch other
         // networking events later on.
