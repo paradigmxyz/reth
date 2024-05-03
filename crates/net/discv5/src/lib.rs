@@ -67,7 +67,7 @@ pub struct Discv5 {
     /// sigp/discv5 node.
     discv5: Arc<discv5::Discv5>,
     /// [`IpMode`] of the the node.
-    ip_mode: IpMode,
+    rlpx_ip_mode: IpMode,
     /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
     fork_key: Option<&'static [u8]>,
     /// Filter applied to a discovered peers before passing it up to app.
@@ -162,7 +162,7 @@ impl Discv5 {
         //
         // 1. make local enr from listen config
         //
-        let (enr, bc_enr, fork_key, ip_mode) = build_local_enr(sk, &discv5_config);
+        let (enr, bc_enr, fork_key, rlpx_ip_mode) = build_local_enr(sk, &discv5_config);
 
         trace!(target: "net::discv5",
             ?enr,
@@ -214,7 +214,7 @@ impl Discv5 {
         );
 
         Ok((
-            Self { discv5, ip_mode, fork_key, discovered_peer_filter, metrics },
+            Self { discv5, rlpx_ip_mode, fork_key, discovered_peer_filter, metrics },
             discv5_updates,
             bc_enr,
         ))
@@ -338,11 +338,12 @@ impl Discv5 {
 
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
         // too
-        let Some(tcp_port) = (match self.ip_mode() {
-            IpMode::Ip4 | IpMode::DualStack => enr.tcp4(),
+        let Some(tcp_port) = (match self.rlpx_ip_mode {
+            IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
+            _ => unimplemented!("dual-stack support not implemented for rlpx"),
         }) else {
-            return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
+            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode))
         };
 
         Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
@@ -387,7 +388,7 @@ impl Discv5 {
 
     /// Returns the [`IpMode`] of the local node.
     pub fn ip_mode(&self) -> IpMode {
-        self.ip_mode
+        self.rlpx_ip_mode
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
@@ -420,7 +421,7 @@ pub fn build_local_enr(
 
     let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
 
-    let (ip_mode, socket) = match discv5_config.listen_config {
+    let socket = match discv5_config.listen_config {
         ListenConfig::Ipv4 { ip, port } => {
             if ip != Ipv4Addr::UNSPECIFIED {
                 builder.ip4(ip);
@@ -428,7 +429,7 @@ pub fn build_local_enr(
             builder.udp4(port);
             builder.tcp4(tcp_socket.port());
 
-            (IpMode::Ip4, (ip, port).into())
+            (ip, port).into()
         }
         ListenConfig::Ipv6 { ip, port } => {
             if ip != Ipv6Addr::UNSPECIFIED {
@@ -437,7 +438,7 @@ pub fn build_local_enr(
             builder.udp6(port);
             builder.tcp6(tcp_socket.port());
 
-            (IpMode::Ip6, (ip, port).into())
+            (ip, port).into()
         }
         ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
             if ipv4 != Ipv4Addr::UNSPECIFIED {
@@ -451,9 +452,11 @@ pub fn build_local_enr(
             }
             builder.udp6(ipv6_port);
 
-            (IpMode::DualStack, (ipv6, ipv6_port).into())
+            (ipv6, ipv6_port).into()
         }
     };
+
+    let rlpx_ip_mode = if tcp_socket.is_ipv4() { IpMode::Ip4 } else { IpMode::Ip6 };
 
     // identifies which network node is on
     let network_stack_id = fork.as_ref().map(|(network_stack_id, fork_value)| {
@@ -473,7 +476,7 @@ pub fn build_local_enr(
     // backwards compatible enr
     let bc_enr = NodeRecord::from_secret_key(socket, sk);
 
-    (enr, bc_enr, network_stack_id, ip_mode)
+    (enr, bc_enr, network_stack_id, rlpx_ip_mode)
 }
 
 /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
@@ -660,7 +663,7 @@ mod test {
                 )
                 .unwrap(),
             ),
-            ip_mode: IpMode::Ip4,
+            rlpx_ip_mode: IpMode::Ip4,
             fork_key: None,
             discovered_peer_filter: MustNotIncludeKeys::default(),
             metrics: Discv5Metrics::default(),
