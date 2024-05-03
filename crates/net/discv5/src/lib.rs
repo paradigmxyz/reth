@@ -220,7 +220,7 @@ impl Discv5 {
     }
 
     /// Process an event from the underlying [`discv5::Discv5`] node.
-    pub fn on_discv5_update(&mut self, update: discv5::Event) -> Option<DiscoveredPeer> {
+    pub fn on_discv5_update(&self, update: discv5::Event) -> Option<DiscoveredPeer> {
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
@@ -259,6 +259,19 @@ impl Discv5 {
                 // peer has been discovered as part of query, or, by an outgoing session (but peer 
                 // is behind NAT and responds from a different socket)
 
+                // NOTE: `discv5::Discv5` won't initiate a session with any peer with an
+                // unverifiable node record, for example one that advertises a reserved LAN IP
+                // address on a WAN network. This is in order to prevent DoS attacks, where some
+                // malicious peers may advertise a victim's socket. We will still try and connect
+                // to them over RLPx, to be compatible with EL discv5 implementations that don't
+                // enforce this security measure.
+
+                trace!(target: "net::discv5",
+                    ?enr,
+                    %socket,
+                    "discovered unverifiable enr, source socket doesn't match socket advertised in ENR"
+                );
+
                 self.on_discovered_peer(&enr, socket)
             }
             _ => None
@@ -267,7 +280,7 @@ impl Discv5 {
 
     /// Processes a discovered peer. Returns `true` if peer is added to
     pub fn on_discovered_peer(
-        &mut self,
+        &self,
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Option<DiscoveredPeer> {
@@ -276,7 +289,7 @@ impl Discv5 {
         let node_record = match self.try_into_reachable(enr, socket) {
             Ok(enr_bc) => enr_bc,
             Err(err) => {
-                trace!(target: "net::discovery::discv5",
+                trace!(target: "net::discv5",
                     %err,
                     ?enr,
                     "discovered peer is unreachable"
@@ -288,7 +301,7 @@ impl Discv5 {
             }
         };
         if let FilterOutcome::Ignore { reason } = self.filter_discovered_peer(enr) {
-            trace!(target: "net::discovery::discv5",
+            trace!(target: "net::discv5",
                 ?enr,
                 reason,
                 "filtered out discovered peer"
@@ -304,7 +317,7 @@ impl Discv5 {
             .then(|| self.get_fork_id(enr).ok())
             .flatten();
 
-        trace!(target: "net::discovery::discv5",
+        trace!(target: "net::discv5",
             ?fork_id,
             ?enr,
             "discovered peer"
@@ -315,10 +328,6 @@ impl Discv5 {
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
     /// w.r.t. local [`IpMode`]. Uses source socket as udp socket.
-    ///
-    ///  Note: [`discv5::Discv5`] won't initiate a session with any peer with an unverifiable node
-    /// record, for example one that advertises a reserved LAN IP address on a WAN network. This is
-    /// in order to prevent DoS attacks, where some malicious peers may advertise a victim's socket.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
@@ -632,7 +641,7 @@ pub async fn lookup(
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
     use reth_primitives::MAINNET;
@@ -686,7 +695,7 @@ mod tests {
         let (node_2, mut stream_2, _) = start_discovery_node(30355).await;
         let node_2_enr = node_2.with_discv5(|discv5| discv5.local_enr());
 
-        trace!(target: "net::discovery::tests",
+        trace!(target: "net::discv5::test",
             node_1_node_id=format!("{:#}", node_1_enr.node_id()),
             node_2_node_id=format!("{:#}", node_2_enr.node_id()),
             "started nodes"
@@ -737,7 +746,7 @@ mod tests {
         let remote_key = CombinedKey::generate_secp256k1();
         let remote_enr = Enr::builder().tcp4(REMOTE_RLPX_PORT).build(&remote_key).unwrap();
 
-        let mut discv5 = discv5_noop();
+        let discv5 = discv5_noop();
 
         // test
         let filtered_peer = discv5.on_discovered_peer(&remote_enr, remote_socket);
