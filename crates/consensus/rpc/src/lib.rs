@@ -146,7 +146,7 @@ fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification
     let versioned_hashes = transactions
         .iter()
-        .flat_map(|tx| (&tx.blob_versioned_hashes).clone().unwrap_or_default())
+        .flat_map(|tx| tx.blob_versioned_hashes.clone().unwrap_or_default())
         .collect();
 
     // TODO: Do we want to handle errors more gracefully here or this is fine?
@@ -159,13 +159,13 @@ fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
                 receipts_root: block.header.receipts_root,
                 logs_bloom: block.header.logs_bloom,
                 prev_randao: block.header.mix_hash.unwrap(),
-                block_number: block.header.number.unwrap().try_into().unwrap(),
+                block_number: block.header.number.unwrap(),
                 gas_limit: block.header.gas_limit.try_into().unwrap(),
                 gas_used: block.header.gas_used.try_into().unwrap(),
-                timestamp: block.header.timestamp.try_into().unwrap(),
+                timestamp: block.header.timestamp,
                 extra_data: block.header.extra_data.clone(),
                 base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
-                block_hash: block.header.hash.unwrap().into(),
+                block_hash: block.header.hash.unwrap(),
                 transactions: transactions
                     .into_iter()
                     .map(|tx| {
@@ -176,7 +176,7 @@ fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
                     })
                     .collect(),
             },
-            withdrawals: (&block.withdrawals).clone().unwrap(),
+            withdrawals: block.withdrawals.clone().unwrap(),
         },
         blob_gas_used: block.header.blob_gas_used.unwrap().try_into().unwrap(),
         excess_blob_gas: block.header.excess_blob_gas.unwrap().try_into().unwrap(),
