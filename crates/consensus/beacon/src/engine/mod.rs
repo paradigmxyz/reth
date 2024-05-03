@@ -1601,7 +1601,7 @@ where
         Ok(())
     }
 
-    fn set_canonical_head(&mut self, max_block: BlockNumber) -> RethResult<()> {
+    fn set_canonical_head(&self, max_block: BlockNumber) -> RethResult<()> {
         let max_header = self.blockchain.sealed_header(max_block)
         .inspect_err(|error| {
             error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
