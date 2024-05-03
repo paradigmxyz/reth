@@ -1075,7 +1075,7 @@ impl From<ChainSpec> for AllGenesisFormats {
 
 impl From<Arc<ChainSpec>> for AllGenesisFormats {
     fn from(genesis: Arc<ChainSpec>) -> Self {
-        Arc::try_unwrap(genesis).unwrap_or_else(|arc| (*arc).clone()).into()
+        Self::Reth(Arc::unwrap_or_clone(genesis))
     }
 }
 

@@ -2,7 +2,7 @@
 
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext};
-use reth_node_ethereum::EthEvmConfig;
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::B256;
 use reth_revm::{
     handler::register::EvmHandler,
@@ -27,12 +27,20 @@ pub struct CompilerExecutorBuilder;
 
 impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CompilerExecutorBuilder {
     type EVM = CompilerEvmConfig;
+    type Executor = EthExecutorProvider<Self::EVM>;
 
-    async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let mk_return = |config: Self::EVM| {
+            (config.clone(), EthExecutorProvider::new(ctx.chain_spec(), config))
+        };
+
         let compiler_config = &ctx.config().experimental.compiler;
         if !compiler_config.compiler {
             tracing::debug!("EVM bytecode compiler is disabled");
-            return Ok(CompilerEvmConfig::disabled());
+            return Ok(mk_return(CompilerEvmConfig::disabled()));
         }
         tracing::info!("EVM bytecode compiler initialized");
 
@@ -56,7 +64,7 @@ impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CompilerExecutorBuilder {
             }
             done2.store(true, Ordering::Relaxed);
         });
-        Ok(CompilerEvmConfig::new(done, out_dir))
+        Ok(mk_return(CompilerEvmConfig::new(done, out_dir)))
     }
 }
 
@@ -95,23 +103,28 @@ impl CompilerEvmConfig {
 
 impl CompilerEvmConfigInner {
     fn get_or_load_library(&mut self, spec_id: SpecId) -> Option<&mut EvmCompilerDll> {
+        self.maybe_load_library(spec_id);
+        self.dll.as_mut()
+    }
+
+    fn maybe_load_library(&mut self, spec_id: SpecId) {
         if !self.compiler_is_done.load(Ordering::Relaxed) {
-            return None;
+            return;
         }
 
         let evm_version = spec_id_to_evm_version(spec_id);
         if let Some(v) = self.evm_version {
             if v == evm_version {
-                return self.dll.as_mut();
+                return;
             }
         }
 
-        self.load_library(evm_version)
+        self.load_library(evm_version);
     }
 
     #[cold]
     #[inline(never)]
-    fn load_library(&mut self, evm_version: SpecId) -> Option<&mut EvmCompilerDll> {
+    fn load_library(&mut self, evm_version: SpecId) {
         if let Some(dll) = self.dll.take() {
             if let Err(err) = dll.close() {
                 tracing::error!(%err, ?self.evm_version, "failed to close shared library");
@@ -120,12 +133,12 @@ impl CompilerEvmConfigInner {
         self.evm_version = Some(evm_version);
         self.dll = match unsafe { EvmCompilerDll::open_in(&self.out_dir, evm_version) } {
             Ok(library) => Some(library),
+            // TODO: This can happen if the library is not found, but we should handle it better.
             Err(err) => {
-                tracing::error!(%err, ?evm_version, "failed to load shared library");
+                tracing::warn!(%err, ?evm_version, "failed to load shared library");
                 None
             }
         };
-        self.dll.as_mut()
     }
 }
 
