@@ -140,10 +140,6 @@ impl ExecutionPayloadValidator {
                 return Err(PayloadError::PreCancunWithCancunFields)
             }
         } else {
-            if !sealed_block.has_blob_transactions() {
-                // cancun active but blob transactions not present
-                return Err(PayloadError::PostCancunBlockWithoutBlobTransactions)
-            }
             if sealed_block.header.blob_gas_used.is_none() {
                 // cancun active but blob gas used not present
                 return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
