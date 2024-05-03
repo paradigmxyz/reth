@@ -1216,7 +1216,7 @@ where
     ///
     /// The block, `revert_until`, is __non-inclusive__, i.e. `revert_until` stays in the database.
     fn revert_canonical_from_database(
-        &mut self,
+        &self,
         revert_until: BlockNumber,
     ) -> Result<Option<Chain>, CanonicalError> {
         // read data that is needed for new sidechain
@@ -1239,7 +1239,7 @@ where
         }
     }
 
-    fn update_reorg_metrics(&mut self, reorg_depth: f64) {
+    fn update_reorg_metrics(&self, reorg_depth: f64) {
         self.metrics.reorgs.increment(1);
         self.metrics.latest_reorg_depth.set(reorg_depth);
     }

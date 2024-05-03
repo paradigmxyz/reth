@@ -42,7 +42,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
 
     /// Generates 20 random developer accounts.
     /// Used in DEV mode.
-    pub fn with_dev_accounts(&mut self) {
+    pub fn with_dev_accounts(&self) {
         let mut signers = self.inner.signers.write();
         *signers = DevSigner::random_signers(20);
     }

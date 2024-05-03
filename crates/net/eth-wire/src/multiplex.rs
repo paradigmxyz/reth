@@ -239,7 +239,7 @@ impl<St> MultiplexInner<St> {
     }
 
     /// Delegates a message to the matching protocol.
-    fn delegate_message(&mut self, cap: &SharedCapability, msg: BytesMut) -> bool {
+    fn delegate_message(&self, cap: &SharedCapability, msg: BytesMut) -> bool {
         for proto in &self.protocols {
             if proto.shared_cap == *cap {
                 proto.send_raw(msg);

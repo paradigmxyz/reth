@@ -67,13 +67,13 @@ pub struct DnsDiscoveryHandle {
 
 impl DnsDiscoveryHandle {
     /// Starts syncing the given link to a tree.
-    pub fn sync_tree(&mut self, link: &str) -> Result<(), ParseDnsEntryError> {
+    pub fn sync_tree(&self, link: &str) -> Result<(), ParseDnsEntryError> {
         self.sync_tree_with_link(link.parse()?);
         Ok(())
     }
 
     /// Starts syncing the given link to a tree.
-    pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
+    pub fn sync_tree_with_link(&self, link: LinkEntry) {
         let _ = self.to_service.send(DnsDiscoveryCommand::SyncTree(link));
     }
 
