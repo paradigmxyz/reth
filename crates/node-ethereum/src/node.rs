@@ -86,7 +86,7 @@ where
         let chain_spec = ctx.chain_spec();
         let evm_config = EthEvmConfig::default();
         let executor =
-            EthExecutorProvider::new(chain_spec, evm_config).with_inspector(ctx.inspector_stack());
+            EthExecutorProvider::new(chain_spec, evm_config);
 
         Ok((evm_config, executor))
     }

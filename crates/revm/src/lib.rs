@@ -19,11 +19,6 @@ pub mod state_change;
 /// Ethereum DAO hardfork state change data.
 pub mod eth_dao_fork;
 
-/// An inspector stack abstracting the implementation details of
-/// each inspector and allowing to hook on block/transaction execution,
-/// used in the main Reth executor.
-pub mod stack;
-
 /// Common test helpers
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
