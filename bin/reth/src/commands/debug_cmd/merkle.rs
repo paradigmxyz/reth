@@ -229,7 +229,7 @@ impl Command {
             );
 
             if incremental_result.is_ok() {
-                debug!(target: "reth::cli", block_number, "Successfully computer incremental root for block");
+                debug!(target: "reth::cli", block_number, "Successfully computed incremental root");
                 continue
             }
 
@@ -337,6 +337,8 @@ impl Command {
                 "Mismatched trie nodes"
             );
         }
+
+        info!(target: "reth::cli", ?block_range, "Successfully validated incremental roots");
 
         Ok(())
     }
