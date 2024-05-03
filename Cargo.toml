@@ -190,7 +190,7 @@ opt-level = 3
 lto = "thin"
 
 [profile.release]
-lto = "thin"
+# lto = "thin"
 strip = "debuginfo"
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
@@ -409,7 +409,11 @@ test-fuzz = "5"
 walkdir = "2"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
+# revm = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
+# revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
+# revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
+# revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
+revm = { path = "../../danipopes/revm/crates/revm" }
+revm-interpreter = { path = "../../danipopes/revm/crates/interpreter" }
+revm-precompile = { path = "../../danipopes/revm/crates/precompile" }
+revm-primitives = { path = "../../danipopes/revm/crates/primitives" }

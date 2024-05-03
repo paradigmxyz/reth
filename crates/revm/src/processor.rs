@@ -229,25 +229,25 @@ where
 
         let hash = transaction.hash_ref();
         let should_inspect = self.evm.context.external.should_inspect(self.evm.env(), hash);
-        let out = if should_inspect {
-            // push inspector handle register.
-            self.evm.handler.append_handler_register_plain(inspector_handle_register);
-            let output = self.evm.transact();
-            tracing::trace!(
-                target: "evm",
-                %hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
-                "Executed transaction"
-            );
-            // pop last handle register
-            self.evm.handler.pop_handle_register();
-            output
-        } else {
-            // Main execution without needing the hash
-            self.evm.transact()
-        };
+        tracing::trace!(should_inspect);
 
-        out.map_err(move |e| {
-            // Ensure hash is calculated for error log, if not already done
+        let output;
+        if should_inspect {
+            self.evm.handler.append_handler_register_plain(inspector_handle_register);
+            output = self.evm.transact();
+            self.evm.handler.pop_handle_register();
+        } else {
+            output = self.evm.transact();
+        }
+
+        tracing::trace!(
+            target: "evm",
+            %hash, ?output, ?transaction, env = ?self.evm.context.evm.env,
+            "Executed transaction"
+        );
+
+        output.map_err(move |e| {
+            // Ensure hash is calculated for error log, if not already done.
             BlockValidationError::EVM { hash: transaction.recalculate_hash(), error: e.into() }
                 .into()
         })

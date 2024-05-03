@@ -56,6 +56,10 @@ pub struct CompilerContract {
     /// The path to the deployed bytecode. Ignored if `bytecode` is set.
     #[serde(default, skip_serializing)]
     bytecode_path: Option<PathBuf>,
+    /// The EVM version to compile the contract with. Takes priority over `first_evm_version` and
+    /// `last_evm_version`.
+    #[serde(default)]
+    evm_version: Option<SpecId>,
     /// The first EVM version to compile the contract with.
     #[serde(default = "EvmVersions::first")]
     first_evm_version: SpecId,
@@ -88,6 +92,12 @@ impl CompilerContract {
         }
         if self.bytecode.is_empty() {
             return Err(EvmCompilerError::EmptyBytecode(i));
+        }
+
+        if let Some(evm_version) = self.evm_version {
+            if !is_evm_version(evm_version) {
+                return Err(EvmCompilerError::InvalidEvmVersion(i, evm_version));
+            }
         }
 
         if !is_evm_version(self.first_evm_version) || self.first_evm_version > EvmVersions::last() {
@@ -229,7 +239,7 @@ impl EvmParCompiler {
                         let start = Instant::now();
                         self.compile_one(evm_version, hash, &contract.contract)?;
                         let elapsed = start.elapsed();
-                        let _ = tx.send(BgNotification::CompiledOne(*hash, elapsed));
+                        let _ = tx.send(BgNotification::CompiledOne(evm_version, *hash, elapsed));
                         Ok(())
                     })
                     .collect::<EvmCompilerResult<()>>()
@@ -374,10 +384,13 @@ impl EvmParCompiler {
                 let start = Instant::now();
                 loop {
                     match rx.recv_timeout(BG_INTERVAL) {
-                        Ok(BgNotification::CompiledOne(hash, elapsed)) => {
+                        Ok(BgNotification::CompiledOne(evm_version, hash, elapsed)) => {
                             durations.push(elapsed);
                             n += 1;
-                            info!("({n: >max_n$}/{total}) compiled contract {hash} in {elapsed:?}");
+                            info!(
+                                "({n: >max_n$}/{total}) compiled contract {hash} \
+                                 for EVM version {evm_version:?} in {elapsed:?}"
+                            );
                             save()?;
                             if n == total {
                                 break;
@@ -422,7 +435,7 @@ impl Drop for EvmParCompiler {
 }
 
 enum BgNotification {
-    CompiledOne(B256, Duration),
+    CompiledOne(SpecId, B256, Duration),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -529,9 +542,11 @@ impl MetadataContract {
     }
 
     fn states(&self) -> impl Iterator<Item = (SpecId, &AtomicContractState)> {
+        let first = self.contract.evm_version.unwrap_or(self.contract.first_evm_version);
+        let last = self.contract.evm_version.unwrap_or(self.contract.last_evm_version);
         EvmVersions::enabled()
-            .iter_starting_at(self.contract.first_evm_version)
-            .filter(|spec_id| *spec_id <= self.contract.last_evm_version)
+            .iter_starting_at(first)
+            .filter(move |spec_id| *spec_id <= last)
             .map(|spec_id| (spec_id, self.state(spec_id)))
     }
 
@@ -708,6 +723,7 @@ mod tests {
         let contract = CompilerContract {
             bytecode: Bytes::from(bytecode),
             bytecode_path: None,
+            evm_version: None,
             first_evm_version: SpecId::FRONTIER_THAWING,
             last_evm_version: SpecId::CANCUN,
             unsafe_no_stack_bound_checks: false,

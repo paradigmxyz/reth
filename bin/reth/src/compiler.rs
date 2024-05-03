@@ -3,7 +3,13 @@
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext};
 use reth_node_ethereum::EthEvmConfig;
-use reth_revm::{handler::register::EvmHandler, primitives::SpecId, Database, Evm};
+use reth_primitives::B256;
+use reth_revm::{
+    handler::register::EvmHandler,
+    interpreter::{InterpreterAction, SharedMemory},
+    primitives::SpecId,
+    Database, Evm, Frame,
+};
 use std::{
     path::PathBuf,
     sync::{
@@ -104,6 +110,7 @@ impl CompilerEvmConfigInner {
     }
 
     #[cold]
+    #[inline(never)]
     fn load_library(&mut self, evm_version: SpecId) -> Option<&mut EvmCompilerDll> {
         if let Some(dll) = self.dll.take() {
             if let Err(err) = dll.close() {
@@ -176,30 +183,61 @@ pub struct CompilerEvmContext<'a> {
 impl CompilerEvmContext<'_> {
     #[inline]
     fn get_or_load_library(&mut self, spec_id: SpecId) -> Option<&mut EvmCompilerDll> {
-        self.config.as_mut()?.get_or_load_library(spec_id)
+        match self.config.as_mut() {
+            Some(config) => config.get_or_load_library(spec_id),
+            None => unreachable_misconfigured(),
+        }
     }
 }
 
 fn register_compiler_handler<DB: Database>(
     handler: &mut EvmHandler<'_, CompilerEvmContext<'_>, DB>,
 ) {
-    handler.execution.execute_frame = Some(Arc::new(move |frame, memory, evm| {
-        let interpreter = frame.interpreter_mut();
-        let hash = interpreter.contract.hash?;
-        let library = evm.context.external.get_or_load_library(evm.spec_id())?;
-        let f = match library.get_function(hash) {
-            Ok(f) => f?,
-            // Shouldn't happen.
-            Err(err) => {
-                tracing::error!(%err, %hash, "failed getting function from shared library");
-                return None;
-            }
-        };
+    handler.execution.execute_frame = Some(Arc::new(execute_frame));
+}
 
-        interpreter.shared_memory =
-            std::mem::replace(memory, reth_revm::interpreter::EMPTY_SHARED_MEMORY);
-        let r = unsafe { f.call_with_interpreter(interpreter, evm) };
-        *memory = interpreter.take_memory();
-        Some(r)
-    }));
+fn execute_frame<DB: Database>(
+    frame: &mut Frame,
+    memory: &mut SharedMemory,
+    evm: &mut Evm<'_, CompilerEvmContext<'_>, DB>,
+) -> Option<InterpreterAction> {
+    let library = evm.context.external.get_or_load_library(evm.spec_id())?;
+    let interpreter = frame.interpreter_mut();
+    let hash = match interpreter.contract.hash {
+        Some(hash) => hash,
+        None => unreachable_no_hash(),
+    };
+    let f = match library.get_function(hash) {
+        Ok(Some(f)) => f,
+        Ok(None) => return None,
+        // Shouldn't happen.
+        Err(err) => {
+            unlikely_log_get_function_error(err, &hash);
+            return None;
+        }
+    };
+
+    interpreter.shared_memory =
+        std::mem::replace(memory, reth_revm::interpreter::EMPTY_SHARED_MEMORY);
+    let r = unsafe { f.call_with_interpreter(interpreter, evm) };
+    *memory = interpreter.take_memory();
+    Some(r)
+}
+
+#[cold]
+#[inline(never)]
+const fn unreachable_no_hash() -> ! {
+    panic!("unreachable: bytecode hash is not set in the interpreter")
+}
+
+#[cold]
+#[inline(never)]
+const fn unreachable_misconfigured() -> ! {
+    panic!("unreachable: AOT EVM is misconfigured")
+}
+
+#[cold]
+#[inline(never)]
+fn unlikely_log_get_function_error(err: impl std::error::Error, hash: &B256) {
+    tracing::error!(%err, %hash, "failed getting function from shared library");
 }
