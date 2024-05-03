@@ -68,6 +68,7 @@ impl RpcConsensusClient {
                 .unwrap()
                 .json()
                 .await
+                // TODO: Handle errors gracefully and do not stop the loop
                 .unwrap();
 
             // Sleep if no new block is available
