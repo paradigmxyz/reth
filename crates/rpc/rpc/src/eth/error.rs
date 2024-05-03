@@ -43,7 +43,7 @@ pub enum EthApiError {
     /// op-node uses case sensitive string comparison to parse this error:
     /// <https://github.com/ethereum-optimism/optimism/blob/0913776869f6cb2c1218497463d7377cf4de16de/op-service/sources/l2_client.go#L105>
     ///
-    ///  Temporary, until a version of <https://github.com/ethereum-optimism/optimism/pull/10071> is pushed through that doesn't require this to figure out the EL sync status.
+    ///  TODO(#8045): Temporary, until a version of <https://github.com/ethereum-optimism/optimism/pull/10071> is pushed through that doesn't require this to figure out the EL sync status.
     #[error("Unknown block")]
     UnknownSafeOrFinalizedBlock,
     /// Thrown when an unknown block or transaction index is encountered
