@@ -16,9 +16,6 @@ pub mod batch;
 /// State changes that are not related to transactions.
 pub mod state_change;
 
-/// Ethereum DAO hardfork state change data.
-pub mod eth_dao_fork;
-
 /// Common test helpers
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
