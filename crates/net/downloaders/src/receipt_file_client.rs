@@ -13,7 +13,7 @@ use crate::{
 /// File client for reading RLP encoded receipts from file. Receipts in file must be in sequential
 /// order w.r.t. block number.
 #[derive(Debug)]
-pub struct HackReceiptFileClient {
+pub struct ReceiptFileClient {
     /// The buffered receipts, read from file, as nested lists. One list per block number.
     pub receipts: Receipts,
     /// First (lowest) block number read from file.
@@ -22,7 +22,7 @@ pub struct HackReceiptFileClient {
     pub total_receipts: usize,
 }
 
-impl FromReader for HackReceiptFileClient {
+impl FromReader for ReceiptFileClient {
     type Error = FileClientError;
 
     /// Initialize the [`ReceiptFileClient`] from bytes that have been read from file.
@@ -189,8 +189,8 @@ mod test {
         let encoded_byte_len = encoded_receipts.len() as u64;
         let reader = &mut &encoded_receipts[..];
 
-        let (HackReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
-            HackReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
+        let (ReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
+            ReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
 
         assert_eq!(4, total_receipts);
         assert_eq!(0, first_block);
