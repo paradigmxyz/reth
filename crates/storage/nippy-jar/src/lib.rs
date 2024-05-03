@@ -366,7 +366,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all data and configuration to a file and the offset index to another.
     pub fn freeze(
-        mut self,
+        self,
         columns: Vec<impl IntoIterator<Item = ColumnResult<Vec<u8>>>>,
         total_rows: u64,
     ) -> Result<Self, NippyJarError> {
@@ -392,7 +392,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Freezes [`PerfectHashingFunction`], [`InclusionFilter`] and the offset index to file.
-    fn freeze_filters(&mut self) -> Result<(), NippyJarError> {
+    fn freeze_filters(&self) -> Result<(), NippyJarError> {
         debug!(target: "nippy-jar", path=?self.index_path(), "Writing offsets and offsets index to file.");
 
         let mut file = File::create(self.index_path())?;
@@ -405,7 +405,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Safety checks before creating and returning a [`File`] handle to write data to.
     fn check_before_freeze(
-        &mut self,
+        &self,
         columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<(), NippyJarError> {
         if columns.len() != self.columns {
@@ -427,7 +427,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Writes all necessary configuration to file.
-    fn freeze_config(&mut self) -> Result<(), NippyJarError> {
+    fn freeze_config(&self) -> Result<(), NippyJarError> {
         Ok(bincode::serialize_into(File::create(self.config_path())?, &self)?)
     }
 }

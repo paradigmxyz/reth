@@ -992,7 +992,7 @@ impl Discv4Service {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
+    pub(crate) fn send_packet(&self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target: "discv4", r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
@@ -1277,7 +1277,7 @@ impl Discv4Service {
 
     /// Handler for incoming `EnrRequest` message
     fn on_enr_request(
-        &mut self,
+        &self,
         msg: EnrRequest,
         remote_addr: SocketAddr,
         id: PeerId,
