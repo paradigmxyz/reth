@@ -49,17 +49,9 @@ use revm::{
 };
 use std::future::Future;
 
-#[cfg(feature = "optimism")]
-use crate::eth::api::optimism::OptimismTxMeta;
-#[cfg(feature = "optimism")]
-use crate::eth::optimism::OptimismEthApiError;
 use crate::eth::revm_utils::FillableTransaction;
 #[cfg(feature = "optimism")]
-use reth_revm::optimism::RethL1BlockInfo;
-#[cfg(feature = "optimism")]
 use reth_rpc_types::OptimismTransactionReceiptFields;
-#[cfg(feature = "optimism")]
-use revm::L1BlockInfo;
 use revm_primitives::db::{Database, DatabaseRef};
 
 /// Helper alias type for the state's [CacheDB]
@@ -1498,7 +1490,7 @@ where
             .ok_or(EthApiError::UnknownBlockNumber)?;
 
         let block = block.unseal();
-        let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();
+        let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
         build_transaction_receipt_with_block_receipts(
@@ -1510,17 +1502,19 @@ where
         )
     }
 
-    /// Builds [OptimismTxMeta] object using the provided [TransactionSigned],
-    /// [L1BlockInfo] and `block_timestamp`. The [L1BlockInfo] is used to calculate
-    /// the l1 fee and l1 data gas for the transaction.
-    /// If the [L1BlockInfo] is not provided, the [OptimismTxMeta] will be empty.
+    /// Builds op metadata object using the provided [TransactionSigned], L1 block info and
+    /// `block_timestamp`. The L1BlockInfo is used to calculate the l1 fee and l1 data gas for the
+    /// transaction. If the L1BlockInfo is not provided, the meta info will be empty.
     #[cfg(feature = "optimism")]
     pub(crate) fn build_op_tx_meta(
         &self,
         tx: &TransactionSigned,
-        l1_block_info: Option<L1BlockInfo>,
+        l1_block_info: Option<revm::L1BlockInfo>,
         block_timestamp: u64,
-    ) -> EthResult<OptimismTxMeta> {
+    ) -> EthResult<crate::eth::api::optimism::OptimismTxMeta> {
+        use crate::eth::{api::optimism::OptimismTxMeta, optimism::OptimismEthApiError};
+        use reth_evm_optimism::RethL1BlockInfo;
+
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
         let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
@@ -1711,7 +1705,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
-    #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
+    #[cfg(feature = "optimism")] optimism_tx_meta: crate::eth::api::optimism::OptimismTxMeta,
 ) -> EthResult<AnyTransactionReceipt> {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
     // we don't need to check for pre EIP-2

@@ -225,7 +225,7 @@ impl StaticFileProviderRW {
     /// Verifies if the incoming block number matches the next expected block number
     /// for a static file. This ensures data continuity when adding new blocks.
     fn check_next_block_number(
-        &mut self,
+        &self,
         expected_block_number: u64,
         segment: StaticFileSegment,
     ) -> ProviderResult<()> {

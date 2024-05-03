@@ -1041,12 +1041,12 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
     /// Instantiates AdminApi
-    pub fn admin_api(&mut self) -> AdminApi<Network> {
+    pub fn admin_api(&self) -> AdminApi<Network> {
         AdminApi::new(self.network.clone(), self.provider.chain_spec())
     }
 
     /// Instantiates Web3Api
-    pub fn web3_api(&mut self) -> Web3Api<Network> {
+    pub fn web3_api(&self) -> Web3Api<Network> {
         Web3Api::new(self.network.clone())
     }
 
@@ -1443,7 +1443,7 @@ where
     }
 
     /// Instantiates RethApi
-    pub fn reth_api(&mut self) -> RethApi<Provider> {
+    pub fn reth_api(&self) -> RethApi<Provider> {
         RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
     }
 }

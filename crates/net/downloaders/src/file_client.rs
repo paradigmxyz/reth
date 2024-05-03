@@ -224,7 +224,7 @@ impl FileClient {
     }
 
     /// Returns an iterator over headers in the client.
-    pub fn headers_iter(&mut self) -> impl Iterator<Item = &Header> {
+    pub fn headers_iter(&self) -> impl Iterator<Item = &Header> {
         self.headers.values()
     }
 

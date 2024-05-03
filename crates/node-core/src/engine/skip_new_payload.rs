@@ -44,7 +44,14 @@ where
                 Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx }) => {
                     if this.skipped < this.threshold {
                         *this.skipped += 1;
-                        tracing::warn!(target: "engine::intercept", ?payload, ?cancun_fields, threshold=this.threshold, skipped=this.skipped, "Skipping new payload");
+                        tracing::warn!(
+                            target: "engine::intercept",
+                            block_number = payload.block_number(),
+                            block_hash = %payload.block_hash(),
+                            ?cancun_fields,
+                            threshold=this.threshold,
+                            skipped=this.skipped, "Skipping new payload"
+                        );
                         let _ = tx.send(Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
                         continue
                     } else {
