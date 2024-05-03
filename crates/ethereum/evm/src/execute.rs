@@ -275,8 +275,8 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
 
         let (receipts, gas_used) = {
-                let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-                self.executor.execute_pre_and_transactions(block, evm)
+            let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+            self.executor.execute_pre_and_transactions(block, evm)
         }?;
 
         // 3. apply post execution changes

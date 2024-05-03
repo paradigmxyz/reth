@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for debugging purposes
 
 use clap::Args;
-use reth_primitives::{B256};
+use reth_primitives::B256;
 use std::path::PathBuf;
 
 /// Parameters for debugging purposes
