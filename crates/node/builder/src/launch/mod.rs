@@ -40,6 +40,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub mod common;
 pub use common::LaunchContext;
+use reth_consensus_rpc::RpcConsensusClient;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
@@ -442,6 +443,24 @@ where
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
+
+        if ctx.node_config().debug.etherscan {
+            let chain = ctx.node_config().chain.chain;
+            let rpc_consensus_client = RpcConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                chain
+                    .etherscan_api_key()
+                    .expect("etherscan api key not found for rpc consensus client"),
+                chain
+                    .etherscan_urls()
+                    .expect("etherscan urls not found for rpc consensus client")
+                    .0
+                    .to_owned(),
+            );
+            ctx.task_executor().spawn_critical("rpc consensus client", async move {
+                rpc_consensus_client.spawn::<T::Engine>().await
+            });
+        }
 
         let full_node = FullNode {
             evm_config: node_adapter.components.evm_config().clone(),

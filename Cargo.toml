@@ -9,6 +9,7 @@ members = [
     "crates/consensus/beacon-core/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
+    "crates/consensus/rpc/",
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/etl/",
@@ -217,6 +218,7 @@ reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
+reth-consensus-rpc = { path = "crates/consensus/rpc" }
 reth-db = { path = "crates/storage/db" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
