@@ -7,7 +7,7 @@ use tracing::trace;
 
 use crate::{
     file_client::{FileClientError, FromReader},
-    file_codec_ovm_receipt::ReceiptFileCodec,
+    file_codec_ovm_receipt::HackReceiptFileCodec,
 };
 
 /// File client for reading RLP encoded receipts from file. Receipts in file must be in sequential
@@ -36,12 +36,13 @@ impl FromReader for HackReceiptFileClient {
         let mut receipts = Receipts::new();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream = FramedRead::with_capacity(reader, ReceiptFileCodec, num_bytes as usize);
+        let mut stream =
+            FramedRead::with_capacity(reader, HackReceiptFileCodec, num_bytes as usize);
 
         trace!(target: "downloaders::file",
             target_num_bytes=num_bytes,
             capacity=stream.read_buffer().capacity(),
-            coded=?ReceiptFileCodec,
+            coded=?HackReceiptFileCodec,
             "init decode stream"
         );
 

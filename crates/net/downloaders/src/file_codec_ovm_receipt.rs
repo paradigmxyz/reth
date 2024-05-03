@@ -23,9 +23,9 @@ use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockN
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
 #[derive(Debug)]
-pub struct ReceiptFileCodec;
+pub struct HackReceiptFileCodec;
 
-impl Decoder for ReceiptFileCodec {
+impl Decoder for HackReceiptFileCodec {
     type Item = Option<ReceiptWithBlockNumber>;
     type Error = FileClientError;
 
@@ -270,7 +270,7 @@ pub(super) mod test {
 
         let encoded = &mut BytesMut::from(HACK_RECEIPT_ENCODED_BLOCK_1_AND_BLOCK_2);
 
-        let mut codec = ReceiptFileCodec;
+        let mut codec = HackReceiptFileCodec;
 
         // test
 
