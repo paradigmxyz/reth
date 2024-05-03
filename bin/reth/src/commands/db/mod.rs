@@ -159,7 +159,7 @@ impl Command {
                 let provider_factory =
                     ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
 
-                let mut tool = DbTool::new(provider_factory, self.chain.clone())?;
+                let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {

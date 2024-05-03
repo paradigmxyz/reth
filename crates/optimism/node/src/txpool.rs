@@ -1,8 +1,9 @@
 //! OP transaction pool types
 use parking_lot::RwLock;
+use reth_evm_optimism::RethL1BlockInfo;
 use reth_primitives::{Block, ChainSpec, GotExpected, InvalidTransactionError, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use reth_revm::{optimism::RethL1BlockInfo, L1BlockInfo};
+use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
     CoinbaseTipOrdering, EthPoolTransaction, EthPooledTransaction, EthTransactionValidator, Pool,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -75,7 +76,7 @@ where
     /// Update the L1 block info.
     fn update_l1_block_info(&self, block: &Block) {
         self.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
-        if let Ok(cost_addition) = reth_revm::optimism::extract_l1_info(block) {
+        if let Ok(cost_addition) = reth_evm_optimism::extract_l1_info(block) {
             *self.block_info.l1_block_info.write() = cost_addition;
         }
     }

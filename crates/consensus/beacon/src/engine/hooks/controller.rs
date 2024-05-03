@@ -124,7 +124,7 @@ impl EngineHooksController {
     }
 
     fn poll_next_hook_inner(
-        &mut self,
+        &self,
         cx: &mut Context<'_>,
         hook: &mut Box<dyn EngineHook>,
         args: EngineHookContext,

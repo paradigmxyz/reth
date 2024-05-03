@@ -171,7 +171,7 @@ impl<S> MuxDemuxStream<S> {
 
     /// Checks if all clones of this shared stream have been dropped, if true then returns //
     /// function to drop the stream.
-    fn can_drop(&mut self) -> bool {
+    fn can_drop(&self) -> bool {
         for tx in self.demux.values() {
             if !tx.is_closed() {
                 return false

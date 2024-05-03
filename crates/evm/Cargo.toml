@@ -17,3 +17,11 @@ revm-primitives.workspace = true
 revm.workspace = true
 reth-interfaces.workspace = true
 
+futures-util.workspace = true
+parking_lot = { workspace = true, optional = true }
+
+[dev-dependencies]
+parking_lot.workspace = true
+
+[features]
+test-utils = ["dep:parking_lot"]

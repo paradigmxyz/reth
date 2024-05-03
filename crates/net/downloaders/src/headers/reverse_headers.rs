@@ -536,7 +536,7 @@ where
     /// Handles the error of a bad response
     ///
     /// This will re-submit the request.
-    fn on_headers_error(&mut self, err: Box<HeadersResponseError>) {
+    fn on_headers_error(&self, err: Box<HeadersResponseError>) {
         let HeadersResponseError { request, peer_id, error } = *err;
 
         self.penalize_peer(peer_id, &error);
@@ -581,7 +581,7 @@ where
     }
 
     /// Starts a request future
-    fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+    fn submit_request(&self, request: HeadersRequest, priority: Priority) {
         trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
         self.metrics.in_flight_requests.increment(1.);

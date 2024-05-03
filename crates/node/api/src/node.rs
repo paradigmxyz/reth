@@ -5,6 +5,7 @@ use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
+use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
@@ -88,11 +89,17 @@ pub trait FullNodeComponents: FullNodeTypes + 'static {
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
     type Evm: ConfigureEvm;
 
+    /// The type that knows how to execute blocks.
+    type Executor: BlockExecutorProvider;
+
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
     /// Returns the node's evm config.
     fn evm_config(&self) -> &Self::Evm;
+
+    /// Returns the node's executor type.
+    fn block_executor(&self) -> &Self::Executor;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;

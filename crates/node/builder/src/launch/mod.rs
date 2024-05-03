@@ -30,7 +30,6 @@ use reth_node_core::{
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
-use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -157,7 +156,7 @@ where
         let tree_externals = TreeExternals::new(
             ctx.provider_factory().clone(),
             consensus.clone(),
-            EvmProcessorFactory::new(ctx.chain_spec(), components.evm_config().clone()),
+            components.block_executor().clone(),
         );
         let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
             .with_sync_metrics_tx(sync_metrics_tx.clone())
@@ -196,12 +195,10 @@ where
             // create the launch context for the exex
             let context = ExExContext {
                 head,
-                provider: blockchain_db.clone(),
-                task_executor: ctx.task_executor().clone(),
                 data_dir: ctx.data_dir().clone(),
                 config: ctx.node_config().clone(),
                 reth_config: ctx.toml_config().clone(),
-                pool: node_adapter.components.pool().clone(),
+                components: node_adapter.clone(),
                 events,
                 notifications,
             };
@@ -305,7 +302,7 @@ where
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
                 mining_mode,
-                node_adapter.components.evm_config().clone(),
+                node_adapter.components.block_executor().clone(),
             )
             .build();
 
@@ -320,7 +317,7 @@ where
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                node_adapter.components.evm_config().clone(),
+                node_adapter.components.block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
@@ -343,7 +340,7 @@ where
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                node_adapter.components.evm_config().clone(),
+                node_adapter.components.block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
