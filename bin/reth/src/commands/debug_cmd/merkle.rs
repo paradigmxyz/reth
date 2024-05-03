@@ -207,26 +207,20 @@ impl Command {
 
             let mut account_hashing_done = false;
             while !account_hashing_done {
-                let output = account_hashing_stage.execute(
-                    &provider_rw,
-                    ExecInput { target: Some(block_number), checkpoint: checkpoint.clone() },
-                )?;
+                let output = account_hashing_stage
+                    .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint })?;
                 account_hashing_done = output.done;
             }
 
             let mut storage_hashing_done = false;
             while !storage_hashing_done {
-                let output = storage_hashing_stage.execute(
-                    &provider_rw,
-                    ExecInput { target: Some(block_number), checkpoint: checkpoint.clone() },
-                )?;
+                let output = storage_hashing_stage
+                    .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint })?;
                 storage_hashing_done = output.done;
             }
 
-            let incremental_result = merkle_stage.execute(
-                &provider_rw,
-                ExecInput { target: Some(block_number), checkpoint: checkpoint.clone() },
-            );
+            let incremental_result = merkle_stage
+                .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint });
 
             if incremental_result.is_ok() {
                 debug!(target: "reth::cli", block_number, "Successfully computed incremental root");
