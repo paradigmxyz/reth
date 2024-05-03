@@ -47,8 +47,7 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes())
-            .max_gas_limit(conf.max_gas_limit());
+            .extradata(conf.extradata_bytes());
 
         let payload_generator = EmptyBlockPayloadJobGenerator::with_builder(
             ctx.provider().clone(),

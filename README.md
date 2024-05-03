@@ -45,7 +45,7 @@ We actively recommend professional node operators to switch to Reth in productio
 While we are aware of parties running Reth staking nodes in production, we do *not* encourage usage in production staking environments by non-professionals until our audits are done, and the 1.0 version of Reth is released, but we are available to support without warranty or liability. 
 
 More historical context below:
-* We are releasing 1.0 "production-ready" stable Reth once our Reth & Revm audits are done. ETA ~April 2024.
+* We are releasing 1.0 "production-ready" stable Reth once our Reth & Revm audits are done. ETA ~May 2024.
     * Reth is currently undergoing an audit with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation.
     * Revm (the EVM used in Reth) is undergoing an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)).
 * We are releasing [beta](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.1) on Monday March 4th 2024, our first breaking change to the database model, providing faster query speed, smaller database footprint, and allowing "history" to be mounted on separate drives.

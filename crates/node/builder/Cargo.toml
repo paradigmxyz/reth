@@ -17,6 +17,7 @@ reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-blockchain-tree.workspace = true
 reth-exex.workspace = true
+reth-evm.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
 reth-db.workspace = true
@@ -47,6 +48,7 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
+tokio-stream.workspace = true
 
 ## misc
 aquamarine.workspace = true
@@ -54,3 +56,6 @@ eyre.workspace = true
 fdlimit.workspace = true
 confy.workspace = true
 rayon.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

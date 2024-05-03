@@ -68,8 +68,8 @@ Database:
           - execution:       The execution stage within the pipeline
           - account-hashing: The account hashing stage within the pipeline
           - storage-hashing: The storage hashing stage within the pipeline
-          - hashing:         The hashing stage within the pipeline
-          - merkle:          The Merkle stage within the pipeline
+          - hashing:         The account and storage hashing stages within the pipeline
+          - merkle:          The merkle stage within the pipeline
           - tx-lookup:       The transaction lookup stage within the pipeline
           - account-history: The account history stage within the pipeline
           - storage-history: The storage history stage within the pipeline

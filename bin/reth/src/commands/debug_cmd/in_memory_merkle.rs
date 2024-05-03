@@ -7,6 +7,7 @@ use crate::{
         DatabaseArgs, NetworkArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
@@ -14,16 +15,17 @@ use clap::Parser;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec};
+use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec, Receipts};
 use reth_provider::{
-    AccountExtReader, ExecutorFactory, HashingWriter, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
-    StorageReader,
+    AccountExtReader, BundleStateWithReceipts, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory, StorageReader,
 };
+use reth_revm::database::StateProviderDatabase;
 use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -162,24 +164,31 @@ impl Command {
             )
             .await?;
 
-        let executor_factory =
-            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
-        let mut executor = executor_factory.with_state(LatestStateProviderRef::new(
+        let db = StateProviderDatabase::new(LatestStateProviderRef::new(
             provider.tx_ref(),
             factory.static_file_provider(),
         ));
 
+        let executor = block_executor!(self.chain.clone()).executor(db);
+
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        executor.execute_and_verify_receipt(
-            &block
-                .clone()
-                .unseal()
-                .with_recovered_senders()
-                .ok_or(BlockValidationError::SenderRecoveryError)?,
-            merkle_block_td + block.difficulty,
+        let BlockExecutionOutput { state, receipts, .. } = executor.execute(
+            (
+                &block
+                    .clone()
+                    .unseal()
+                    .with_recovered_senders()
+                    .ok_or(BlockValidationError::SenderRecoveryError)?,
+                merkle_block_td + block.difficulty,
+            )
+                .into(),
         )?;
-        let block_state = executor.take_output_state();
+        let block_state = BundleStateWithReceipts::new(
+            state,
+            Receipts::from_block_receipt(receipts),
+            block.number,
+        );
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) =

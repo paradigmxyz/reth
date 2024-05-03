@@ -2,6 +2,7 @@
 
 use crate::{EthEngineTypes, EthEvmConfig};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_node_builder::{
     components::{
@@ -76,9 +77,18 @@ where
     Node: FullNodeTypes,
 {
     type EVM = EthEvmConfig;
+    type Executor = EthExecutorProvider<Self::EVM>;
 
-    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(EthEvmConfig::default())
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let chain_spec = ctx.chain_spec();
+        let evm_config = EthEvmConfig::default();
+        let executor =
+            EthExecutorProvider::new(chain_spec, evm_config).with_inspector(ctx.inspector_stack());
+
+        Ok((evm_config, executor))
     }
 }
 
@@ -175,8 +185,7 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes())
-            .max_gas_limit(conf.max_gas_limit());
+            .extradata(conf.extradata_bytes());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),

@@ -33,6 +33,7 @@ pub mod cli;
 pub mod commands;
 #[cfg(feature = "compiler")]
 pub mod compiler;
+mod macros;
 pub mod utils;
 
 /// Re-exported payload related types

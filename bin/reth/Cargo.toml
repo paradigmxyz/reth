@@ -19,6 +19,7 @@ reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-exex.workspace = true
 reth-provider = { workspace = true }
+reth-evm.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
 reth-interfaces = { workspace = true, features = ["clap"] }
