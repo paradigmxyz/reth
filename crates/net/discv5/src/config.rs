@@ -260,7 +260,7 @@ pub struct Config {
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
     /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", [ForkId])`.
     pub(super) fork: Option<(&'static [u8], EnrForkIdEntry)>,
-    /// RLPx TCP port to advertise, and the tcp socket's [`IpMode`].
+    /// RLPx TCP socket to advertise.
     ///
     /// NOTE: IP address of RLPx socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
