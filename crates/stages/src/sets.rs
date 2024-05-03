@@ -20,20 +20,20 @@
 //! # use reth_config::config::EtlConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
 //!
-//! fn create(exec: impl BlockExecutorProvider) {
+//! # fn create(exec: impl BlockExecutorProvider) {
 //!
-//! # let provider_factory = create_test_provider_factory();
-//! # let static_file_producer =  StaticFileProducer::new(
+//! let provider_factory = create_test_provider_factory();
+//! let static_file_producer = StaticFileProducer::new(
 //!     provider_factory.clone(),
 //!     provider_factory.static_file_provider(),
 //!     PruneModes::default(),
 //! );
 //! // Build a pipeline with all offline stages.
-//! # let pipeline = Pipeline::builder()
+//! let pipeline = Pipeline::builder()
 //!     .add_stages(OfflineStages::new(exec, EtlConfig::default()))
 //!     .build(provider_factory, static_file_producer);
 //!
-//! }
+//! # }
 //! ```
 use crate::{
     stages::{

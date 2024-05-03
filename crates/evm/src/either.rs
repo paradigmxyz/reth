@@ -8,32 +8,25 @@ use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
 use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
 use revm_primitives::db::Database;
 
-/// A type that represents one of two possible executor factories.
-#[derive(Debug, Clone)]
-pub enum EitherExecutor<A, B> {
-    /// The first executor provider variant
-    Left(A),
-    /// The first executor provider variant
-    Right(B),
-}
+// re-export Either
+pub use futures_util::future::Either;
 
-impl<A, B> BlockExecutorProvider for EitherExecutor<A, B>
+impl<A, B> BlockExecutorProvider for Either<A, B>
 where
     A: BlockExecutorProvider,
     B: BlockExecutorProvider,
 {
-    type Executor<DB: Database<Error = ProviderError>> =
-        EitherExecutor<A::Executor<DB>, B::Executor<DB>>;
+    type Executor<DB: Database<Error = ProviderError>> = Either<A::Executor<DB>, B::Executor<DB>>;
     type BatchExecutor<DB: Database<Error = ProviderError>> =
-        EitherExecutor<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
+        Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error = ProviderError>,
     {
         match self {
-            EitherExecutor::Left(a) => EitherExecutor::Left(a.executor(db)),
-            EitherExecutor::Right(b) => EitherExecutor::Right(b.executor(db)),
+            Either::Left(a) => Either::Left(a.executor(db)),
+            Either::Right(b) => Either::Right(b.executor(db)),
         }
     }
 
@@ -42,13 +35,13 @@ where
         DB: Database<Error = ProviderError>,
     {
         match self {
-            EitherExecutor::Left(a) => EitherExecutor::Left(a.batch_executor(db, prune_modes)),
-            EitherExecutor::Right(b) => EitherExecutor::Right(b.batch_executor(db, prune_modes)),
+            Either::Left(a) => Either::Left(a.batch_executor(db, prune_modes)),
+            Either::Right(b) => Either::Right(b.batch_executor(db, prune_modes)),
         }
     }
 }
 
-impl<A, B, DB> Executor<DB> for EitherExecutor<A, B>
+impl<A, B, DB> Executor<DB> for Either<A, B>
 where
     A: for<'a> Executor<
         DB,
@@ -70,13 +63,13 @@ where
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         match self {
-            EitherExecutor::Left(a) => a.execute(input),
-            EitherExecutor::Right(b) => b.execute(input),
+            Either::Left(a) => a.execute(input),
+            Either::Right(b) => b.execute(input),
         }
     }
 }
 
-impl<A, B, DB> BatchExecutor<DB> for EitherExecutor<A, B>
+impl<A, B, DB> BatchExecutor<DB> for Either<A, B>
 where
     A: for<'a> BatchExecutor<
         DB,
@@ -98,29 +91,29 @@ where
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         match self {
-            EitherExecutor::Left(a) => a.execute_one(input),
-            EitherExecutor::Right(b) => b.execute_one(input),
+            Either::Left(a) => a.execute_one(input),
+            Either::Right(b) => b.execute_one(input),
         }
     }
 
     fn finalize(self) -> Self::Output {
         match self {
-            EitherExecutor::Left(a) => a.finalize(),
-            EitherExecutor::Right(b) => b.finalize(),
+            Either::Left(a) => a.finalize(),
+            Either::Right(b) => b.finalize(),
         }
     }
 
     fn set_tip(&mut self, tip: BlockNumber) {
         match self {
-            EitherExecutor::Left(a) => a.set_tip(tip),
-            EitherExecutor::Right(b) => b.set_tip(tip),
+            Either::Left(a) => a.set_tip(tip),
+            Either::Right(b) => b.set_tip(tip),
         }
     }
 
     fn size_hint(&self) -> Option<usize> {
         match self {
-            EitherExecutor::Left(a) => a.size_hint(),
-            EitherExecutor::Right(b) => b.size_hint(),
+            Either::Left(a) => a.size_hint(),
+            Either::Right(b) => b.size_hint(),
         }
     }
 }
