@@ -19,7 +19,7 @@ pub mod execute;
 pub mod verify;
 
 /// Ethereum DAO hardfork state change data.
-pub mod eth_dao_fork;
+pub mod dao_fork;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]

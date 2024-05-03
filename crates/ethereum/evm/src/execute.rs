@@ -1,7 +1,7 @@
 //! Ethereum block executor.
 
 use crate::{
-    eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
+    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     verify::verify_receipts,
     EthEvmConfig,
 };
