@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for debugging purposes
 
 use clap::Args;
-use reth_primitives::{TxHash, B256};
+use reth_primitives::B256;
 use std::path::PathBuf;
 
 /// Parameters for debugging purposes
@@ -28,40 +28,13 @@ pub struct DebugArgs {
     #[arg(long = "debug.max-block", help_heading = "Debug")]
     pub max_block: Option<u64>,
 
-    /// Print opcode level traces directly to console during execution.
-    #[arg(long = "debug.print-inspector", help_heading = "Debug")]
-    pub print_inspector: bool,
-
-    /// Hook on a specific block during execution.
-    #[arg(
-        long = "debug.hook-block",
-        help_heading = "Debug",
-        conflicts_with = "hook_transaction",
-        conflicts_with = "hook_all"
-    )]
-    pub hook_block: Option<u64>,
-
-    /// Hook on a specific transaction during execution.
-    #[arg(
-        long = "debug.hook-transaction",
-        help_heading = "Debug",
-        conflicts_with = "hook_block",
-        conflicts_with = "hook_all"
-    )]
-    pub hook_transaction: Option<TxHash>,
-
-    /// Hook on every transaction in a block.
-    #[arg(
-        long = "debug.hook-all",
-        help_heading = "Debug",
-        conflicts_with = "hook_block",
-        conflicts_with = "hook_transaction"
-    )]
-    pub hook_all: bool,
-
     /// If provided, the engine will skip `n` consecutive FCUs.
     #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
     pub skip_fcu: Option<usize>,
+
+    /// If provided, the engine will skip `n` consecutive new payloads.
+    #[arg(long = "debug.skip-new-payload", help_heading = "Debug")]
+    pub skip_new_payload: Option<usize>,
 
     /// The path to store engine API messages at.
     /// If specified, all of the intercepted engine API messages

@@ -132,7 +132,7 @@ impl<DB: Database> DbTool<DB> {
 
     /// Drops the database and the static files at the given path.
     pub fn drop(
-        &mut self,
+        &self,
         db_path: impl AsRef<Path>,
         static_files_path: impl AsRef<Path>,
     ) -> Result<()> {
@@ -149,7 +149,7 @@ impl<DB: Database> DbTool<DB> {
     }
 
     /// Drops the provided table from the database.
-    pub fn drop_table<T: Table>(&mut self) -> Result<()> {
+    pub fn drop_table<T: Table>(&self) -> Result<()> {
         self.provider_factory.db_ref().update(|tx| tx.clear::<T>())??;
         Ok(())
     }

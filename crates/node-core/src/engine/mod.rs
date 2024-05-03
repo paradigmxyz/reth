@@ -12,6 +12,9 @@ use engine_store::EngineStoreStream;
 pub mod skip_fcu;
 use skip_fcu::EngineSkipFcu;
 
+pub mod skip_new_payload;
+use skip_new_payload::EngineSkipNewPayload;
+
 /// The collection of stream extensions for engine API message stream.
 pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     Stream<Item = BeaconEngineMessage<Engine>>
@@ -33,6 +36,31 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     {
         if let Some(count) = maybe_count {
             Either::Left(self.skip_fcu(count))
+        } else {
+            Either::Right(self)
+        }
+    }
+
+    /// Skips the specified number of [BeaconEngineMessage::NewPayload] messages from the
+    /// engine message stream.
+    fn skip_new_payload(self, count: usize) -> EngineSkipNewPayload<Self>
+    where
+        Self: Sized,
+    {
+        EngineSkipNewPayload::new(self, count)
+    }
+
+    /// If the count is [Some], returns the stream that skips the specified number of
+    /// [BeaconEngineMessage::NewPayload] messages. Otherwise, returns `Self`.
+    fn maybe_skip_new_payload(
+        self,
+        maybe_count: Option<usize>,
+    ) -> Either<EngineSkipNewPayload<Self>, Self>
+    where
+        Self: Sized,
+    {
+        if let Some(count) = maybe_count {
+            Either::Left(self.skip_new_payload(count))
         } else {
             Either::Right(self)
         }

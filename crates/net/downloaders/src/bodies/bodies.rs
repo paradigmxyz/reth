@@ -68,7 +68,7 @@ where
     Provider: HeaderProvider + Unpin + 'static,
 {
     /// Returns the next contiguous request.
-    fn next_headers_request(&mut self) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader>>> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
             Some(num) => num + 1,
             None => *self.download_range.start(),

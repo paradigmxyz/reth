@@ -9,6 +9,7 @@ use crate::{
         DatabaseArgs, NetworkArgs, StageEnum,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
     prometheus_exporter,
     version::SHORT_VERSION,
 };
@@ -19,7 +20,6 @@ use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
@@ -224,13 +224,10 @@ impl Command {
                 }
                 StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
                 StageEnum::Execution => {
-                    let factory = reth_revm::EvmProcessorFactory::new(
-                        self.chain.clone(),
-                        EthEvmConfig::default(),
-                    );
+                    let executor = block_executor!(self.chain.clone());
                     (
                         Box::new(ExecutionStage::new(
-                            factory,
+                            executor,
                             ExecutionStageThresholds {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,

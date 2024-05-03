@@ -1,4 +1,4 @@
-//! Stores engine API messages to disk for later inspection and replay.
+//! Stream wrapper that skips specified number of FCUs.
 
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconEngineMessage, OnForkChoiceUpdated};
