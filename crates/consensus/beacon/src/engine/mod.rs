@@ -446,7 +446,7 @@ where
     ///
     /// Returns `true` if the head needs to be updated.
     fn on_head_already_canonical(
-        &mut self,
+        &self,
         header: &SealedHeader,
         attrs: &mut Option<EngineT::PayloadAttributes>,
     ) -> bool {
@@ -804,7 +804,7 @@ where
     /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
     /// consistent with the head block.
     fn ensure_consistent_forkchoice_state(
-        &mut self,
+        &self,
         state: ForkchoiceState,
     ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
         // Ensure that the finalized block, if not zero, is known and in the canonical chain

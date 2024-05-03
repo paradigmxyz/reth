@@ -220,7 +220,7 @@ impl Discv5 {
     }
 
     /// Process an event from the underlying [`discv5::Discv5`] node.
-    pub fn on_discv5_update(&mut self, update: discv5::Event) -> Option<DiscoveredPeer> {
+    pub fn on_discv5_update(&self, update: discv5::Event) -> Option<DiscoveredPeer> {
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
@@ -254,7 +254,7 @@ impl Discv5 {
 
     /// Processes a discovered peer. Returns `true` if peer is added to
     pub fn on_discovered_peer(
-        &mut self,
+        &self,
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Option<DiscoveredPeer> {
