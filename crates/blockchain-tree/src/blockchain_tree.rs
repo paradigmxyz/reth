@@ -850,6 +850,21 @@ where
         Ok(last_canonical_hashes)
     }
 
+    /// Update all block hashes. iterate over present and new list of canonical hashes and compare
+    /// them. Remove all mismatches, disconnect them, removes all chains and clears all buffered
+    /// blocks before the tip.
+    pub fn update_block_hashes_and_clear_buffered(
+        &mut self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        let chain = self.update_block_hashes()?;
+
+        if let Some((block, _)) = chain.last_key_value() {
+            self.remove_old_blocks(*block);
+        }
+
+        Ok(chain)
+    }
+
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
