@@ -20,7 +20,6 @@ use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    stack::InspectorStack,
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
     Evm, State,
 };
@@ -36,7 +35,6 @@ use tracing::debug;
 pub struct EthExecutorProvider<EvmConfig = EthEvmConfig> {
     chain_spec: Arc<ChainSpec>,
     evm_config: EvmConfig,
-    inspector: Option<InspectorStack>,
 }
 
 impl EthExecutorProvider {
@@ -54,13 +52,7 @@ impl EthExecutorProvider {
 impl<EvmConfig> EthExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { chain_spec, evm_config, inspector: None }
-    }
-
-    /// Configures an optional inspector stack for debugging.
-    pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
-        self.inspector = inspector;
-        self
+        Self { chain_spec, evm_config }
     }
 }
 
@@ -78,7 +70,6 @@ where
             self.evm_config.clone(),
             State::builder().with_database(db).with_bundle_update().without_state_clear().build(),
         )
-        .with_inspector(self.inspector.clone())
     }
 }
 
@@ -221,20 +212,12 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
     executor: EthEvmExecutor<EvmConfig>,
     /// The state to use for execution
     state: State<DB>,
-    /// Optional inspector stack for debugging
-    inspector: Option<InspectorStack>,
 }
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None }
-    }
-
-    /// Sets the inspector stack for debugging.
-    pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
-        self.inspector = inspector;
-        self
+        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state }
     }
 
     #[inline]
@@ -292,19 +275,9 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
 
         let (receipts, gas_used) = {
-            if let Some(inspector) = self.inspector.as_mut() {
-                let evm = self.executor.evm_config.evm_with_env_and_inspector(
-                    &mut self.state,
-                    env,
-                    inspector,
-                );
-                self.executor.execute_pre_and_transactions(block, evm)?
-            } else {
-                let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-
-                self.executor.execute_pre_and_transactions(block, evm)?
-            }
-        };
+            let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+            self.executor.execute_pre_and_transactions(block, evm)
+        }?;
 
         // 3. apply post execution changes
         self.post_execution(block, total_difficulty)?;
@@ -507,7 +480,7 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> EthExecutorProvider<EthEvmConfig> {
-        EthExecutorProvider { chain_spec, evm_config: Default::default(), inspector: None }
+        EthExecutorProvider { chain_spec, evm_config: Default::default() }
     }
 
     #[test]
