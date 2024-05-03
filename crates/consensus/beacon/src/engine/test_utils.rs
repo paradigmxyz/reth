@@ -14,7 +14,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_evm::{either::EitherExecutor, test_utils::MockExecutorProvider};
+use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_interfaces::{
     p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
@@ -340,11 +340,11 @@ where
             TestExecutorConfig::Test(results) => {
                 let executor_factory = MockExecutorProvider::default();
                 executor_factory.extend(results);
-                EitherExecutor::Left(executor_factory)
+                Either::Left(executor_factory)
             }
-            TestExecutorConfig::Real => EitherExecutor::Right(EthExecutorProvider::ethereum(
-                self.base_config.chain_spec.clone(),
-            )),
+            TestExecutorConfig::Real => {
+                Either::Right(EthExecutorProvider::ethereum(self.base_config.chain_spec.clone()))
+            }
         };
 
         let static_file_producer = StaticFileProducer::new(
