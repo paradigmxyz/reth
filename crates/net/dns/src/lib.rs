@@ -73,7 +73,7 @@ impl DnsDiscoveryHandle {
     }
 
     /// Starts syncing the given link to a tree.
-    pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
+    pub fn sync_tree_with_link(&self, link: LinkEntry) {
         let _ = self.to_service.send(DnsDiscoveryCommand::SyncTree(link));
     }
 
