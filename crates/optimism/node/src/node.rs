@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_evm::ConfigureEvm;
-use reth_evm_optimism::OptimismEvmConfig;
+use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
     components::{
@@ -97,9 +97,18 @@ where
     Node: FullNodeTypes,
 {
     type EVM = OptimismEvmConfig;
+    type Executor = OpExecutorProvider<Self::EVM>;
 
-    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(OptimismEvmConfig::default())
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let chain_spec = ctx.chain_spec();
+        let evm_config = OptimismEvmConfig::default();
+        let executor =
+            OpExecutorProvider::new(chain_spec, evm_config).with_inspector(ctx.inspector_stack());
+
+        Ok((evm_config, executor))
     }
 }
 

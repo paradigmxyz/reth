@@ -16,6 +16,7 @@ use reth_primitives::{
 };
 use reth_revm::{Database, EvmBuilder};
 pub mod execute;
+pub mod verify;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]

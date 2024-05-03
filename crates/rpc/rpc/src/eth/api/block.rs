@@ -84,7 +84,7 @@ where
 
             #[cfg(feature = "optimism")]
             let (block_timestamp, l1_block_info) = {
-                let body = reth_revm::optimism::extract_l1_info(&block);
+                let body = reth_evm_optimism::extract_l1_info(&block);
                 (block.timestamp, body.ok())
             };
 

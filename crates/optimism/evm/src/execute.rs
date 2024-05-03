@@ -1,10 +1,10 @@
 //! Optimism block executor.
 
-use crate::OptimismEvmConfig;
+use crate::{l1::ensure_create2_deployer, verify::verify_receipts, OptimismEvmConfig};
 use reth_evm::{
     execute::{
-        BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
-        ExecutorProvider,
+        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
+        BlockExecutorProvider, Executor,
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
@@ -13,16 +13,12 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom, Bytes, ChainSpec,
-    GotExpected, Hardfork, Header, PruneModes, Receipt, ReceiptWithBloom, Receipts, TxType,
-    Withdrawals, B256, U256,
+    BlockNumber, BlockWithSenders, Bytes, ChainSpec, GotExpected, Hardfork, Header, PruneModes,
+    Receipt, Receipts, TxType, Withdrawals, U256,
 };
-use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    optimism::ensure_create2_deployer,
-    processor::compare_receipts_root_and_logs_bloom,
     stack::InspectorStack,
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
     Evm, State,
@@ -36,14 +32,13 @@ use tracing::{debug, trace};
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
-pub struct OpExecutorProvider<EvmConfig> {
+pub struct OpExecutorProvider<EvmConfig = OptimismEvmConfig> {
     chain_spec: Arc<ChainSpec>,
     evm_config: EvmConfig,
     inspector: Option<InspectorStack>,
-    prune_modes: PruneModes,
 }
 
-impl OpExecutorProvider<OptimismEvmConfig> {
+impl OpExecutorProvider {
     /// Creates a new default optimism executor provider.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
         Self::new(chain_spec, Default::default())
@@ -53,18 +48,12 @@ impl OpExecutorProvider<OptimismEvmConfig> {
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { chain_spec, evm_config, inspector: None, prune_modes: PruneModes::none() }
+        Self { chain_spec, evm_config, inspector: None }
     }
 
     /// Configures an optional inspector stack for debugging.
     pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
         self.inspector = inspector;
-        self
-    }
-
-    /// Configures the prune modes for the executor.
-    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
-        self.prune_modes = prune_modes;
         self
     }
 }
@@ -87,7 +76,7 @@ where
     }
 }
 
-impl<EvmConfig> ExecutorProvider for OpExecutorProvider<EvmConfig>
+impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
@@ -102,14 +91,14 @@ where
         self.op_executor(db)
     }
 
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error = ProviderError>,
     {
         let executor = self.op_executor(db);
         OpBatchExecutor {
             executor,
-            batch_record: BlockBatchRecord::new(self.prune_modes.clone()),
+            batch_record: BlockBatchRecord::new(prune_modes),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -370,7 +359,7 @@ where
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec().is_byzantium_active_at_block(block.header.number) {
-            if let Err(error) = verify_receipt_optimism(
+            if let Err(error) = verify_receipts(
                 block.header.receipts_root,
                 block.header.logs_bloom,
                 receipts.iter(),
@@ -424,8 +413,8 @@ where
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError>,
 {
-    type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-    type Output = EthBlockOutput<Receipt>;
+    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
     /// Executes the block and commits the state changes.
@@ -436,13 +425,13 @@ where
     ///
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let EthBlockExecutionInput { block, total_difficulty } = input;
+        let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, gas_used) = self.execute_and_verify(block, total_difficulty)?;
 
-        // prepare the state for extraction
-        self.state.merge_transitions(BundleRetention::PlainState);
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(EthBlockOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
     }
 }
 
@@ -478,12 +467,12 @@ where
     EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError>,
 {
-    type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BundleStateWithReceipts;
+    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<BatchBlockOutput, Self::Error> {
-        let EthBlockExecutionInput { block, total_difficulty } = input;
+    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, _gas_used) = self.executor.execute_and_verify(block, total_difficulty)?;
 
         // prepare the state according to the prune mode
@@ -493,45 +482,30 @@ where
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
 
-        Ok(BatchBlockOutput { size_hint: Some(self.executor.state.bundle_size_hint()) })
+        if self.batch_record.first_block().is_none() {
+            self.batch_record.set_first_block(block.number);
+        }
+
+        Ok(())
     }
 
     fn finalize(mut self) -> Self::Output {
-        // TODO: track stats
         self.stats.log_debug();
 
-        BundleStateWithReceipts::new(
+        BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
         )
     }
-}
 
-/// Verify the calculated receipts root against the expected receipts root.
-pub fn verify_receipt_optimism<'a>(
-    expected_receipts_root: B256,
-    expected_logs_bloom: Bloom,
-    receipts: impl Iterator<Item = &'a Receipt> + Clone,
-    chain_spec: &ChainSpec,
-    timestamp: u64,
-) -> Result<(), BlockExecutionError> {
-    // Calculate receipts root.
-    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root =
-        calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
+    fn set_tip(&mut self, tip: BlockNumber) {
+        self.batch_record.set_tip(tip);
+    }
 
-    // Create header log bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-
-    compare_receipts_root_and_logs_bloom(
-        receipts_root,
-        logs_bloom,
-        expected_receipts_root,
-        expected_logs_bloom,
-    )?;
-
-    Ok(())
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.executor.state.bundle_state.size_hint())
+    }
 }
 
 #[cfg(test)]
@@ -574,12 +548,7 @@ mod tests {
     }
 
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> OpExecutorProvider<OptimismEvmConfig> {
-        OpExecutorProvider {
-            chain_spec,
-            evm_config: Default::default(),
-            inspector: None,
-            prune_modes: Default::default(),
-        }
+        OpExecutorProvider { chain_spec, evm_config: Default::default(), inspector: None }
     }
 
     #[test]
@@ -626,7 +595,8 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         executor.state_mut().load_cache_account(L1_BLOCK_CONTRACT).unwrap();
 
@@ -706,7 +676,8 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         executor.state_mut().load_cache_account(L1_BLOCK_CONTRACT).unwrap();
 
