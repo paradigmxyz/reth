@@ -19,6 +19,7 @@ reth-interfaces.workspace = true
 reth-provider.workspace = true
 
 # Optimism
+revm.workspace = true
 revm-primitives.workspace = true
 
 # misc

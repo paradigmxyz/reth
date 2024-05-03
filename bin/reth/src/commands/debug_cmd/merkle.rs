@@ -7,6 +7,7 @@ use crate::{
         DatabaseArgs, NetworkArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
@@ -20,7 +21,6 @@ use reth_exex::ExExManagerHandle;
 use reth_interfaces::p2p::full_block::FullBlockClient;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{
     fs,
     stage::{StageCheckpoint, StageId},
@@ -201,10 +201,9 @@ impl Command {
                         checkpoint.stage_checkpoint.is_some()
                 });
 
-        let factory =
-            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
+        let executor = block_executor!(self.chain.clone());
         let mut execution_stage = ExecutionStage::new(
-            factory,
+            executor,
             ExecutionStageThresholds {
                 max_blocks: Some(1),
                 max_changes: None,

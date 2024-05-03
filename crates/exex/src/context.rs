@@ -53,9 +53,18 @@ impl<Node: FullNodeComponents> FullNodeTypes for ExExContext<Node> {
 impl<Node: FullNodeComponents> FullNodeComponents for ExExContext<Node> {
     type Pool = Node::Pool;
     type Evm = Node::Evm;
+    type Executor = Node::Executor;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.components.evm_config()
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        self.components.block_executor()
     }
 
     fn provider(&self) -> &Self::Provider {
@@ -72,9 +81,5 @@ impl<Node: FullNodeComponents> FullNodeComponents for ExExContext<Node> {
 
     fn task_executor(&self) -> &TaskExecutor {
         self.components.task_executor()
-    }
-
-    fn evm_config(&self) -> &Self::Evm {
-        self.components.evm_config()
     }
 }
