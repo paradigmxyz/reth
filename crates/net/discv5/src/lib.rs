@@ -39,8 +39,8 @@ pub use discv5::{self, IpMode};
 
 pub use config::{
     BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
-    DEFAULT_DISCOVERY_V5_PORT, DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
-    DEFAULT_SECONDS_LOOKUP_INTERVAL,
+    DEFAULT_DISCOVERY_V5_ADDR_IPV6, DEFAULT_DISCOVERY_V5_PORT,
+    DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
@@ -418,7 +418,7 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config { discv5_config, fork, tcp_port, other_enr_kv_pairs, .. } = config;
+    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
 
     let (ip_mode, socket) = match discv5_config.listen_config {
         ListenConfig::Ipv4 { ip, port } => {
@@ -426,7 +426,7 @@ pub fn build_local_enr(
                 builder.ip4(ip);
             }
             builder.udp4(port);
-            builder.tcp4(*tcp_port);
+            builder.tcp4(tcp_socket.port());
 
             (IpMode::Ip4, (ip, port).into())
         }
@@ -435,7 +435,7 @@ pub fn build_local_enr(
                 builder.ip6(ip);
             }
             builder.udp6(port);
-            builder.tcp6(*tcp_port);
+            builder.tcp6(tcp_socket.port());
 
             (IpMode::Ip6, (ip, port).into())
         }
@@ -444,7 +444,7 @@ pub fn build_local_enr(
                 builder.ip4(ipv4);
             }
             builder.udp4(ipv4_port);
-            builder.tcp4(*tcp_port);
+            builder.tcp4(tcp_socket.port());
 
             if ipv6 != Ipv6Addr::UNSPECIFIED {
                 builder.ip6(ipv6);
@@ -675,7 +675,7 @@ mod test {
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
 
         let discv5_listen_config = ListenConfig::from(discv5_addr);
-        let discv5_config = Config::builder(30303)
+        let discv5_config = Config::builder((Ipv4Addr::UNSPECIFIED, 30303).into())
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 
@@ -867,7 +867,9 @@ mod test {
         const TCP_PORT: u16 = 30303;
         let fork_id = MAINNET.latest_fork_id();
 
-        let config = Config::builder(TCP_PORT).fork(NetworkStackId::ETH, fork_id).build();
+        let config = Config::builder((Ipv4Addr::UNSPECIFIED, TCP_PORT).into())
+            .fork(NetworkStackId::ETH, fork_id)
+            .build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = build_local_enr(&sk, &config);
