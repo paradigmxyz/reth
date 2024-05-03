@@ -500,4 +500,34 @@ mod test {
             assert!(bootstrap_nodes.contains(&node.to_string()));
         }
     }
+
+    #[test]
+    fn overwrite_ipv4_addr() {
+        let rlpx_addr: Ipv4Addr = "192.168.0.1".parse().unwrap();
+
+        let listen_config = ListenConfig::default();
+
+        let amended_config = amend_listen_config_wrt_rlpx(rlpx_addr.into(), &listen_config);
+
+        let config_socket_ipv4 = ipv4(&amended_config).unwrap();
+
+        assert_eq!(*config_socket_ipv4.ip(), rlpx_addr);
+        assert_eq!(config_socket_ipv4.port(), DEFAULT_DISCOVERY_V5_PORT);
+        assert_eq!(ipv6(&amended_config), None);
+    }
+
+    #[test]
+    fn overwrite_ipv6_addr() {
+        let rlpx_addr: Ipv6Addr = "fe80::1".parse().unwrap();
+
+        let listen_config = ListenConfig::default();
+
+        let amended_config = amend_listen_config_wrt_rlpx(rlpx_addr.into(), &listen_config);
+
+        let config_socket_ipv6 = ipv6(&amended_config).unwrap();
+
+        assert_eq!(*config_socket_ipv6.ip(), rlpx_addr);
+        assert_eq!(config_socket_ipv6.port(), DEFAULT_DISCOVERY_V5_PORT);
+        assert_eq!(ipv4(&amended_config), None);
+    }
 }
