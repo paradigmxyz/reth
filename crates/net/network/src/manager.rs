@@ -403,7 +403,7 @@ where
     }
 
     /// Handle an incoming request from the peer
-    fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
+    fn on_eth_request(&self, peer_id: PeerId, req: PeerRequest) {
         match req {
             PeerRequest::GetBlockHeaders { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetBlockHeaders {
