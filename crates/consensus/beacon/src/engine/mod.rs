@@ -725,9 +725,12 @@ where
                 current_header = self.invalid_headers.get(&current_hash);
 
                 // If current_header is None, then the current_hash does not have an invalid
-                // ancestor in the cache
+                // ancestor in the cache, check its presence in blockchain tree
                 if current_header.is_none() {
-                    return Some(current_hash);
+                    match self.blockchain.find_block_by_hash(current_hash, BlockSource::Any) {
+                        Ok(Some(_)) => return Some(current_hash),
+                        _ => return None,
+                    }
                 }
             }
             None
