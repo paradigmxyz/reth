@@ -1200,7 +1200,7 @@ mod tests {
     fn append_two_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
         // Create and add 1 row
         {
-            let mut nippy = NippyJar::new_without_header(num_columns, file_path);
+            let nippy = NippyJar::new_without_header(num_columns, file_path);
             nippy.freeze_config().unwrap();
             assert_eq!(nippy.max_row_size, 0);
             assert_eq!(nippy.rows, 0);

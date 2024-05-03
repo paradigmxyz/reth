@@ -724,7 +724,7 @@ mod tests {
         let remote_key = CombinedKey::generate_secp256k1();
         let remote_enr = Enr::builder().tcp4(REMOTE_RLPX_PORT).build(&remote_key).unwrap();
 
-        let mut discv5 = discv5_noop();
+        let discv5 = discv5_noop();
 
         // test
         let filtered_peer = discv5.on_discovered_peer(&remote_enr, remote_socket);
