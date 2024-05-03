@@ -127,15 +127,15 @@ impl ExecutionPayloadValidator {
                 // cancun not active but blob transactions present
                 return Err(PayloadError::PreCancunBlockWithBlobTransactions)
             }
-            if let Some(_) = sealed_block.header.blob_gas_used {
+            if sealed_block.header.blob_gas_used.is_some() {
                 // cancun not active but blob gas used present
                 return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
             }
-            if let Some(_) = sealed_block.header.excess_blob_gas {
+            if sealed_block.header.excess_blob_gas.is_some() {
                 // cancun not active but excess blob gas present
                 return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
             }
-            if let Some(_) = cancun_fields.into_inner() {
+            if cancun_fields.clone().into_inner().is_some() {
                 // cancun not active but cancun fields present
                 return Err(PayloadError::PreCancunWithCancunFields)
             }
@@ -144,15 +144,15 @@ impl ExecutionPayloadValidator {
                 // cancun active but blob transactions not present
                 return Err(PayloadError::PostCancunBlockWithoutBlobTransactions)
             }
-            if let None = sealed_block.header.blob_gas_used {
+            if sealed_block.header.blob_gas_used.is_none() {
                 // cancun active but blob gas used not present
                 return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
             }
-            if let None = sealed_block.header.excess_blob_gas {
+            if sealed_block.header.excess_blob_gas.is_none() {
                 // cancun active but excess blob gas not present
                 return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
             }
-            if let None = cancun_fields.into_inner() {
+            if cancun_fields.clone().into_inner().is_none() {
                 // cancun active but cancun fields not present
                 return Err(PayloadError::PostCancunWithoutCancunFields)
             }
@@ -160,13 +160,13 @@ impl ExecutionPayloadValidator {
 
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
         if !shanghai_active {
-            if let Some(_) = sealed_block.withdrawals {
+            if sealed_block.withdrawals.is_some() {
                 // shanghai not active but withdrawals present
-                return Err(PayloadError::PreShanghaiBlockWithWithdrawals);
+                return Err(PayloadError::PreShanghaiBlockWithWitdrawals);
             }
-        } else if let None = sealed_block.withdrawals {
+        } else if sealed_block.withdrawals.is_some() {
             // shanghai active but withdrawals not present
-            return Err(PayloadError::PostShanghaiBlockWithoutWithdrawals);
+            return Err(PayloadError::PostShanghaiBlockWithoutWitdrawals);
         }
 
         // EIP-4844 checks
