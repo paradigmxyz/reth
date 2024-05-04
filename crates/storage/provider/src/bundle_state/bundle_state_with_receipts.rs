@@ -177,7 +177,7 @@ impl BundleStateWithReceipts {
     pub fn optimism_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        chain_spec: &ChainSpec,
+        chain_spec: &reth_primitives::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
         self.receipts.optimism_root_slow(

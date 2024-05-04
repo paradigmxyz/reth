@@ -6476,7 +6476,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
- "clap",
  "nybbles",
  "once_cell",
  "rand 0.8.5",
