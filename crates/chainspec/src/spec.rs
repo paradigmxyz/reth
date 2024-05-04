@@ -1,4 +1,5 @@
-
+use crate::net::{goerli_nodes, mainnet_nodes, sepolia_nodes};
+use once_cell::sync::Lazy;
 use reth_primitives::{
     constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
     holesky_nodes,
@@ -8,8 +9,6 @@ use reth_primitives::{
     Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
-use crate::net::{goerli_nodes, mainnet_nodes, sepolia_nodes};
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -32,7 +31,7 @@ pub(crate) use crate::{
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::mainnet(),
-        genesis: serde_json::from_str(include_str!("./primitives/res/genesis/mainnet.json"))
+        genesis: serde_json::from_str(include_str!("../../primitives/res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
         genesis_hash: Some(b256!(
             "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
@@ -83,7 +82,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::goerli(),
-        genesis: serde_json::from_str(include_str!("./primitives/res/genesis/goerli.json"))
+        genesis: serde_json::from_str(include_str!("../../primitives/res/genesis/goerli.json"))
             .expect("Can't deserialize Goerli genesis json"),
         genesis_hash: Some(b256!(
             "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
@@ -125,7 +124,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::sepolia(),
-        genesis: serde_json::from_str(include_str!("./primitives/res/genesis/sepolia.json"))
+        genesis: serde_json::from_str(include_str!("../../primitives/res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
@@ -171,7 +170,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::holesky(),
-        genesis: serde_json::from_str(include_str!("./primitives/res/genesis/holesky.json"))
+        genesis: serde_json::from_str(include_str!("../../primitives/res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(b256!(
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
@@ -215,7 +214,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::dev(),
-        genesis: serde_json::from_str(include_str!("./primitives/res/genesis/dev.json"))
+        genesis: serde_json::from_str(include_str!("../../primitives/res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
         genesis_hash: Some(b256!(
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"

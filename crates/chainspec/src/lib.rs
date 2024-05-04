@@ -8,7 +8,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-
 pub use alloy_chains::{Chain, ChainKind, NamedChain};
 pub use info::ChainInfo;
 pub use spec::{
@@ -22,16 +21,19 @@ pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 #[cfg(test)]
 pub(crate) use spec::{OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS};
 
-// The chain spec module.
-mod spec;
-// The chain info module.
+/// The config info module namely spec id.
+pub mod config;
+/// The chain info module.
 mod info;
-mod net;
+/// The netwoek module.
+pub mod net;
+/// The chain spec module.
+mod spec;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::U256;
     use alloy_rlp::Encodable;
+    use reth_primitives::U256;
     use std::str::FromStr;
 
     #[test]
