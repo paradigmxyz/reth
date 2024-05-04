@@ -87,6 +87,7 @@ members = [
     "examples/txpool-tracing/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
+    "examples/exex/evm/",
     "examples/exex/minimal/",
     "examples/exex/op-bridge/",
     "examples/exex/rollup/",

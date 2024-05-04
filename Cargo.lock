@@ -2912,6 +2912,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "exex-evm"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-tracing",
+ "tokio",
+]
+
+[[package]]
 name = "exex-minimal"
 version = "0.0.0"
 dependencies = [
