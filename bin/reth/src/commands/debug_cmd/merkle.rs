@@ -164,7 +164,7 @@ impl Command {
         assert!(best_block_number < self.to, "Nothing to run");
 
         // get the block range from the network
-        let block_range = best_block_number..=self.to;
+        let block_range = best_block_number + 1..=self.to;
         info!(target: "reth::cli", ?block_range, "Downloading range of blocks");
         let blocks = block_range_client
             .get_full_block_range(to_header.hash_slow(), self.to - best_block_number)
