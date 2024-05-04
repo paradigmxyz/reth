@@ -1,12 +1,11 @@
 //! MEV bundle type bindings
 
 use crate::{BlockId, BlockNumberOrTag, Log};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256, U64};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use serde::{
     ser::{SerializeSeq, Serializer},
     Deserialize, Deserializer, Serialize,
 };
-
 /// A bundle of transactions to send to the matchmaker.
 ///
 /// Note: this is for `mev_sendBundle` and not `eth_sendBundle`.
@@ -35,28 +34,29 @@ pub struct SendBundleRequest {
 #[serde(rename_all = "camelCase")]
 pub struct Inclusion {
     /// The first block the bundle is valid for.
-    pub block: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub block: u64,
     /// The last block the bundle is valid for.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_block: Option<U64>,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    pub max_block: Option<u64>,
 }
 
 impl Inclusion {
     /// Creates a new inclusion with the given min block..
     pub fn at_block(block: u64) -> Self {
-        Self { block: U64::from(block), max_block: None }
+        Self { block, max_block: None }
     }
 
     /// Returns the block number of the first block the bundle is valid for.
     #[inline]
     pub fn block_number(&self) -> u64 {
-        self.block.to()
+        self.block
     }
 
     /// Returns the block number of the last block the bundle is valid for.
     #[inline]
     pub fn max_block_number(&self) -> Option<u64> {
-        self.max_block.as_ref().map(|b| b.to())
+        self.max_block.as_ref().map(|b| *b)
     }
 }
 
@@ -100,8 +100,10 @@ pub struct Validity {
 #[serde(rename_all = "camelCase")]
 pub struct Refund {
     /// The index of the transaction in the bundle.
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub body_idx: u64,
     /// The minimum percent of the bundle's earnings to redistribute.
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub percent: u64,
 }
 
@@ -113,6 +115,7 @@ pub struct RefundConfig {
     /// The address to refund.
     pub address: Address,
     /// The minimum percent of the bundle's earnings to redistribute.
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub percent: u64,
 }
 
@@ -315,23 +318,23 @@ pub struct SimBundleOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_block: Option<BlockId>,
     /// Block number used for simulation, defaults to parentBlock.number + 1
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub block_number: Option<U64>,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    pub block_number: Option<u64>,
     /// Coinbase used for simulation, defaults to parentBlock.coinbase
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coinbase: Option<Address>,
     /// Timestamp used for simulation, defaults to parentBlock.timestamp + 12
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<U64>,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    pub timestamp: Option<u64>,
     /// Gas limit used for simulation, defaults to parentBlock.gasLimit
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gas_limit: Option<U64>,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    pub gas_limit: Option<u64>,
     /// Base fee used for simulation, defaults to parentBlock.baseFeePerGas
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_fee: Option<U64>,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    pub base_fee: Option<u64>,
     /// Timeout in seconds, defaults to 5
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<U64>,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    pub timeout: Option<u64>,
 }
 
 /// Response from the matchmaker after sending a simulation request.
@@ -344,15 +347,20 @@ pub struct SimBundleResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// The block number of the simulated block.
-    pub state_block: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub state_block: u64,
     /// The gas price of the simulated block.
-    pub mev_gas_price: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub mev_gas_price: u64,
     /// The profit of the simulated block.
-    pub profit: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub profit: u64,
     /// The refundable value of the simulated block.
-    pub refundable_value: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub refundable_value: u64,
     /// The gas used by the simulated block.
-    pub gas_used: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub gas_used: u64,
     /// Logs returned by mev_simBundle.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logs: Option<Vec<SimBundleLogs>>,
@@ -373,8 +381,8 @@ pub struct SimBundleLogs {
 impl SendBundleRequest {
     /// Create a new bundle request.
     pub fn new(
-        block_num: U64,
-        max_block: Option<U64>,
+        block_num: u64,
+        max_block: Option<u64>,
         protocol_version: ProtocolVersion,
         bundle_body: Vec<BundleItem>,
     ) -> Self {
@@ -404,8 +412,8 @@ pub struct PrivateTransactionRequest {
     pub tx: Bytes,
     /// Hex-encoded number string, optional. Highest block number in which the transaction should
     /// be included.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_block_number: Option<U64>,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    pub max_block_number: Option<u64>,
     /// Preferences for private transaction.
     #[serde(default, skip_serializing_if = "PrivateTransactionPreferences::is_empty")]
     pub preferences: PrivateTransactionPreferences,
@@ -593,12 +601,13 @@ pub struct EthSendBundle {
     /// A list of hex-encoded signed transactions
     pub txs: Vec<Bytes>,
     /// hex-encoded block number for which this bundle is valid
-    pub block_number: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub block_number: u64,
     /// unix timestamp when this bundle becomes active
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
     pub min_timestamp: Option<u64>,
     /// unix timestamp how long this bundle stays valid
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
     pub max_timestamp: Option<u64>,
     /// list of hashes of possibly reverting txs
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -625,11 +634,12 @@ pub struct EthCallBundle {
     /// A list of hex-encoded signed transactions
     pub txs: Vec<Bytes>,
     /// hex encoded block number for which this bundle is valid on
-    pub block_number: U64,
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    pub block_number: u64,
     /// Either a hex encoded number or a block tag for which state to base this simulation on
     pub state_block_number: BlockNumberOrTag,
     /// the timestamp to use for this bundle simulation, in seconds since the unix epoch
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
     pub timestamp: Option<u64>,
 }
 
@@ -654,8 +664,10 @@ pub struct EthCallBundleResponse {
     /// Results of individual transactions within the bundle
     pub results: Vec<EthCallBundleTransactionResult>,
     /// The block number used as a base for this simulation
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub state_block_number: u64,
     /// The total gas used by all transactions in the bundle
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub total_gas_used: u64,
 }
 
@@ -678,6 +690,7 @@ pub struct EthCallBundleTransactionResult {
     #[serde(with = "u256_numeric_string")]
     pub gas_price: U256,
     /// The amount of gas used by the transaction
+    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub gas_used: u64,
     /// The address to which the transaction is sent (optional)
     pub to_address: Option<Address>,
@@ -827,7 +840,7 @@ mod tests {
 
         let bundle = SendBundleRequest {
             protocol_version: ProtocolVersion::V0_1,
-            inclusion: Inclusion { block: U64::from(1), max_block: None },
+            inclusion: Inclusion { block: 1, max_block: None },
             bundle_body,
             validity,
             privacy,
