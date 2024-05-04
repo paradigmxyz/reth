@@ -34,6 +34,27 @@ pub trait BatchExecutor<DB> {
     /// Executes the next block in the batch and update the state internally.
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 
+    /// Executes multiple inputs in the batch and update the state internally.
+    fn execute_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Input<'a>>,
+    {
+        for input in inputs {
+            self.execute_one(input)?;
+        }
+        Ok(())
+    }
+
+    /// Executes the entire batch and return the final state.
+    fn execute_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
+    where
+        I: IntoIterator<Item = Self::Input<'a>>,
+        Self: Sized,
+    {
+        self.execute_many(batch)?;
+        Ok(self.finalize())
+    }
+
     /// Finishes the batch and return the final state.
     fn finalize(self) -> Self::Output;
 
