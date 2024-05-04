@@ -1,7 +1,7 @@
 //! Command that dumps genesis block JSON configuration to stdout
 use crate::args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 use std::sync::Arc;
 
 /// Dumps genesis block JSON configuration to stdout

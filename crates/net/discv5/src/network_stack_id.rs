@@ -1,7 +1,7 @@
 //! Keys of ENR [`ForkId`](reth_primitives::ForkId) kv-pair. Identifies which network stack a node
 //! belongs to.
 
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 
 /// Identifies which Ethereum network stack a node belongs to, on the discovery network.
 #[derive(Debug)]

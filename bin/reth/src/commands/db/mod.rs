@@ -13,7 +13,7 @@ use reth_db::{
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
 };
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{
     io::{self, Write},

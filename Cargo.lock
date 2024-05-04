@@ -6867,7 +6867,6 @@ name = "reth-ethereum-engine-primitives"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-rlp",
- "reth-chainspec",
  "reth-engine-primitives",
  "reth-primitives",
  "reth-rpc-types",
@@ -7524,7 +7523,6 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "rayon",
- "reth-chainspec",
  "reth-codecs",
  "reth-db",
  "reth-evm",

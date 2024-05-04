@@ -1,5 +1,4 @@
-use crate::{ Hardfork, Head};
-use reth_chain_spec::ChainSpec;
+use crate::{ChainSpec, Hardfork, Head};
 /// Returns the spec id at the given timestamp.
 ///
 /// Note: This is only intended to be used after the merge, when hardforks are activated by

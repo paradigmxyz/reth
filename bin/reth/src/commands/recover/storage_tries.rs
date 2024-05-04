@@ -10,7 +10,7 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_node_core::{args::DatabaseArgs, init::init_genesis};
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;
 use std::{fs, sync::Arc};

@@ -10,7 +10,7 @@ use reth_node_core::{
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 use reth_provider::ChainSpecProvider;
 use reth_tasks::TaskExecutor;
 use std::sync::Arc;

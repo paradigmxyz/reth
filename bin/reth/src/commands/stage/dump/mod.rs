@@ -16,7 +16,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_node_core::dirs::PlatformPath;
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;

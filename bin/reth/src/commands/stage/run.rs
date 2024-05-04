@@ -20,7 +20,7 @@ use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
 use reth_node_ethereum::EthEvmConfig;
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 use reth_provider::{
     ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };

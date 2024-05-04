@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use core::fmt;
-use reth_chainspec::ChainSpec;
+use reth_primitives::ChainSpec;
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [PayloadAttributes] trait for ethereum mainnet and optimism types.
