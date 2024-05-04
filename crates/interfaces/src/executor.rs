@@ -80,7 +80,7 @@ pub enum BlockValidationError {
 }
 
 /// BlockExecutor Errors
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
@@ -122,7 +122,7 @@ pub enum BlockExecutionError {
     /// Optimism Block Executor Errors
     #[cfg(feature = "optimism")]
     #[error(transparent)]
-    OptimismBlockExecution(#[from] OptimismBlockExecutionError),
+    Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Optimism Block Executor Errors

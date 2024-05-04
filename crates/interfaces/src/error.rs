@@ -16,7 +16,7 @@ pub type RethResult<T> = Result<T, RethError>;
 /// This enum encapsulates various error types that can occur during blockchain interactions.
 ///
 /// It allows for structured error handling based on the nature of the encountered issue.
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub enum RethError {
     /// Error encountered during block execution.
     #[error(transparent)]

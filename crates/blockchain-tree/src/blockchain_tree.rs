@@ -2162,7 +2162,7 @@ mod tests {
             .assert(&tree);
 
         // unwind canonical
-        assert_eq!(tree.unwind(block1.number), Ok(()));
+        assert!(tree.unwind(block1.number).is_ok());
         // Trie state:
         //    b2   b2a (pending block)
         //   /    /
@@ -2226,7 +2226,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12), Ok(()));
+        assert!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12).is_ok());
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),
