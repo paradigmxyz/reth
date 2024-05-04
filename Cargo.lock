@@ -7208,8 +7208,8 @@ dependencies = [
 name = "reth-network-types"
 version = "0.2.0-beta.6"
 dependencies = [
+ "alloy-primitives",
  "enr",
- "reth-primitives",
  "reth-rpc-types",
  "secp256k1",
  "serde_with",

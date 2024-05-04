@@ -126,7 +126,7 @@ impl std::fmt::Display for AnyNode {
             AnyNode::NodeRecord(record) => write!(f, "{record}"),
             AnyNode::Enr(enr) => write!(f, "{enr}"),
             AnyNode::PeerId(peer_id) => {
-                write!(f, "enode://{}", reth_primitives::hex::encode(peer_id.as_slice()))
+                write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
             }
         }
     }
