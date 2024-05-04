@@ -28,9 +28,9 @@ pub struct CompilerArgs {
     /// the compiled bytecodes.
     #[arg(long = "experimental.compiler")]
     pub compiler: bool,
-    /// The block number at which the compiled contracts stop being run.
-    #[arg(long = "experimental.compiler.end-block", default_value = "19000000")]
-    pub end_block: u64,
+    /// Block on finishing the compiler before starting the node.
+    #[arg(long = "experimental.compiler.block-on-compiler")]
+    pub block_on_compiler: bool,
     /// Path to a file that contains all the contracts to compile.
     ///
     /// Defaults to `<datadir>/compiler/contracts.toml`.
@@ -53,7 +53,7 @@ impl Default for CompilerArgs {
     fn default() -> Self {
         Self {
             compiler: false,
-            end_block: 19_000_000,
+            block_on_compiler: false,
             contracts_file: None,
             out_dir: None,
             cc: None,

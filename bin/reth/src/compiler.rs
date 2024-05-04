@@ -20,6 +20,9 @@ use std::{
 
 pub use reth_evm_compiler::*;
 
+/// About 10MiB of cached `bytecode_hash -> function_pointer` (40 bytes).
+const MAX_CACHE_SIZE: usize = 250_000;
+
 /// Ethereum EVM and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -58,12 +61,17 @@ impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CompilerExecutorBuilder {
 
         let done = Arc::new(AtomicBool::new(false));
         let done2 = done.clone();
-        ctx.task_executor().spawn_blocking(async move {
+        let handle = ctx.task_executor().spawn_blocking(async move {
             if let Err(err) = compiler.run_to_end(&contracts_config) {
                 tracing::error!(%err, "failed to run compiler");
             }
             done2.store(true, Ordering::Relaxed);
         });
+        if compiler_config.block_on_compiler {
+            tracing::info!("Blocking on EVM bytecode compiler");
+            handle.await?;
+            tracing::info!("Done blocking on EVM bytecode compiler");
+        }
         Ok(mk_return(CompilerEvmConfig::new(done, out_dir)))
     }
 }
@@ -95,13 +103,22 @@ impl CompilerEvmConfig {
     }
 
     fn make_context(&self) -> CompilerEvmContext<'_> {
-        CompilerEvmContext {
-            config: self.0.as_ref().map(|c| c.lock().unwrap_or_else(PoisonError::into_inner)),
-        }
+        CompilerEvmContext::new(
+            self.0.as_ref().map(|c| c.lock().unwrap_or_else(PoisonError::into_inner)),
+        )
     }
 }
 
 impl CompilerEvmConfigInner {
+    /// Clears the cache if it's too big.
+    fn gc(&mut self) {
+        if let Some(dll) = &mut self.dll {
+            if dll.cache.len() > MAX_CACHE_SIZE {
+                dll.cache = Default::default();
+            }
+        }
+    }
+
     fn get_or_load_library(&mut self, spec_id: SpecId) -> Option<&mut EvmCompilerDll> {
         self.maybe_load_library(spec_id);
         self.dll.as_mut()
@@ -193,7 +210,14 @@ pub struct CompilerEvmContext<'a> {
     config: Option<MutexGuard<'a, CompilerEvmConfigInner>>,
 }
 
-impl CompilerEvmContext<'_> {
+impl<'a> CompilerEvmContext<'a> {
+    fn new(mut config: Option<MutexGuard<'a, CompilerEvmConfigInner>>) -> Self {
+        if let Some(config) = &mut config {
+            config.gc();
+        }
+        Self { config }
+    }
+
     #[inline]
     fn get_or_load_library(&mut self, spec_id: SpecId) -> Option<&mut EvmCompilerDll> {
         match self.config.as_mut() {
@@ -232,9 +256,9 @@ fn execute_frame<DB: Database>(
 
     interpreter.shared_memory =
         std::mem::replace(memory, reth_revm::interpreter::EMPTY_SHARED_MEMORY);
-    let r = unsafe { f.call_with_interpreter(interpreter, evm) };
+    let result = unsafe { f.call_with_interpreter(interpreter, evm) };
     *memory = interpreter.take_memory();
-    Some(r)
+    Some(result)
 }
 
 #[cold]

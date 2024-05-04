@@ -11,8 +11,10 @@ use std::{
 /// A handle to an open EVM compiler-generated DLL.
 #[derive(Debug)]
 pub struct EvmCompilerDll {
-    lib: Library,
-    cache: HashMap<B256, Option<EvmCompilerFn>>,
+    /// The underlying shared library.
+    pub lib: Library,
+    /// The cache of loaded functions.
+    pub cache: HashMap<B256, Option<EvmCompilerFn>>,
 }
 
 impl EvmCompilerDll {
