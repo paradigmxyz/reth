@@ -473,7 +473,7 @@ impl StaticFileProviderRW {
     }
 
     /// Adds an instruction to prune transactions during commit.
-    /// 
+    ///
     /// Note: last_block refers to the block the unwinds ends at.
     pub fn prune_transactions(
         &mut self,
@@ -485,7 +485,7 @@ impl StaticFileProviderRW {
     }
 
     /// Adds an instruction to prune receipts during commit.
-    /// 
+    ///
     /// Note: last_block refers to the block the unwinds ends at.
     pub fn prune_receipts(
         &mut self,
@@ -497,7 +497,7 @@ impl StaticFileProviderRW {
     }
 
     /// Adds an instruction to prune headers during commit.
-    /// 
+    ///
     /// Note: last_block refers to the block the unwinds ends at.
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
