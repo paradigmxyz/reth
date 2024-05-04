@@ -30,11 +30,15 @@ pub struct StaticFileProviderRW {
     /// stored in a [dashmap::DashMap] inside the parent [StaticFileProvider].which is an [Arc].
     /// If we were to use an [Arc] here, we would create a reference cycle.
     reader: Weak<StaticFileProviderInner>,
+    /// A [`NippyJarWriter`] instance.
     writer: NippyJarWriter<SegmentHeader>,
+    /// Path to opened file.
     data_path: PathBuf,
+    /// Reusable buffer for encoding appended data.
     buf: Vec<u8>,
+    /// Metrics.
     metrics: Option<Arc<StaticFileProviderMetrics>>,
-    /// On commit, does the instructed pruning.
+    /// On commit, does the instructed pruning: <NumberOfRows, Option<LastBlockNumber>>
     prune_on_commit: Option<(u64, Option<BlockNumber>)>,
 }
 
@@ -469,6 +473,8 @@ impl StaticFileProviderRW {
     }
 
     /// Adds an instruction to prune transactions during commit.
+    /// 
+    /// Note: last_block refers to the block the unwinds ends at.
     pub fn prune_transactions(
         &mut self,
         to_delete: u64,
@@ -479,6 +485,8 @@ impl StaticFileProviderRW {
     }
 
     /// Adds an instruction to prune receipts during commit.
+    /// 
+    /// Note: last_block refers to the block the unwinds ends at.
     pub fn prune_receipts(
         &mut self,
         to_delete: u64,
@@ -489,6 +497,8 @@ impl StaticFileProviderRW {
     }
 
     /// Adds an instruction to prune headers during commit.
+    /// 
+    /// Note: last_block refers to the block the unwinds ends at.
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
         self.queue_prune(to_delete, None)
