@@ -37,7 +37,11 @@ pub struct Inclusion {
     #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub block: u64,
     /// The last block the bundle is valid for.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_block: Option<u64>,
 }
 
@@ -315,25 +319,41 @@ pub struct SimBundleOverrides {
     /// Block used for simulation state. Defaults to latest block.
     /// Block header data will be derived from parent block by default.
     /// Specify other params to override the default values.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_block: Option<BlockId>,
     /// Block number used for simulation, defaults to parentBlock.number + 1
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(default, with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
     pub block_number: Option<u64>,
     /// Coinbase used for simulation, defaults to parentBlock.coinbase
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coinbase: Option<Address>,
     /// Timestamp used for simulation, defaults to parentBlock.timestamp + 12
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub timestamp: Option<u64>,
     /// Gas limit used for simulation, defaults to parentBlock.gasLimit
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub gas_limit: Option<u64>,
     /// Base fee used for simulation, defaults to parentBlock.baseFeePerGas
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub base_fee: Option<u64>,
     /// Timeout in seconds, defaults to 5
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub timeout: Option<u64>,
 }
 
@@ -344,7 +364,7 @@ pub struct SimBundleResponse {
     /// Whether the simulation was successful.
     pub success: bool,
     /// Error message if the simulation failed.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// The block number of the simulated block.
     #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
@@ -362,7 +382,7 @@ pub struct SimBundleResponse {
     #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub gas_used: u64,
     /// Logs returned by mev_simBundle.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logs: Option<Vec<SimBundleLogs>>,
 }
 
@@ -371,10 +391,10 @@ pub struct SimBundleResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SimBundleLogs {
     /// Logs for transactions in bundle.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tx_logs: Option<Vec<Log>>,
     /// Logs for bundles in bundle.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle_logs: Option<Vec<SimBundleLogs>>,
 }
 
@@ -412,7 +432,11 @@ pub struct PrivateTransactionRequest {
     pub tx: Bytes,
     /// Hex-encoded number string, optional. Highest block number in which the transaction should
     /// be included.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_block_number: Option<u64>,
     /// Preferences for private transaction.
     #[serde(default, skip_serializing_if = "PrivateTransactionPreferences::is_empty")]
@@ -423,10 +447,10 @@ pub struct PrivateTransactionRequest {
 #[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
 pub struct PrivateTransactionPreferences {
     /// Requirements for the bundle to be included in the block.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validity: Option<Validity>,
     /// Preferences on what data should be shared about the bundle and its transactions
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub privacy: Option<Privacy>,
 }
 
@@ -604,16 +628,24 @@ pub struct EthSendBundle {
     #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub block_number: u64,
     /// unix timestamp when this bundle becomes active
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub min_timestamp: Option<u64>,
     /// unix timestamp how long this bundle stays valid
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_timestamp: Option<u64>,
     /// list of hashes of possibly reverting txs
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reverting_tx_hashes: Vec<B256>,
     /// UUID that can be used to cancel/replace this bundle
-    #[serde(rename = "replacementUuid", skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "replacementUuid", skip_serializing_if = "Option::is_none")]
     pub replacement_uuid: Option<String>,
 }
 
@@ -639,7 +671,11 @@ pub struct EthCallBundle {
     /// Either a hex encoded number or a block tag for which state to base this simulation on
     pub state_block_number: BlockNumberOrTag,
     /// the timestamp to use for this bundle simulation, in seconds since the unix epoch
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(
+        default,
+        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub timestamp: Option<u64>,
 }
 
