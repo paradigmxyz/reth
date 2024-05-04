@@ -148,7 +148,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // database expected height.
             Ordering::Greater => {
                 static_file_producer
-                    .prune_transactions(next_static_file_tx_num - next_tx_num, from_block - 1);
+                    .prune_transactions(next_static_file_tx_num - next_tx_num, from_block - 1)?;
                 // Since this is a database <-> static file inconsistency, we commit the change
                 // straight away.
                 static_file_producer.commit()?;
@@ -326,7 +326,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         // Unwinds static file
         static_file_producer
-            .prune_transactions(static_file_tx_num.saturating_sub(db_tx_num), input.unwind_to);
+            .prune_transactions(static_file_tx_num.saturating_sub(db_tx_num), input.unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
@@ -580,7 +580,7 @@ mod tests {
         {
             let mut static_file_producer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
-            static_file_producer.prune_transactions(1, checkpoint.block_number);
+            static_file_producer.prune_transactions(1, checkpoint.block_number).unwrap();
             static_file_producer.commit().unwrap();
         }
         // Unwind all of it

@@ -581,7 +581,7 @@ mod tests {
             last_header.state_root = root;
 
             let hash = last_header.hash_slow();
-            writer.prune_headers(1);
+            writer.prune_headers(1).unwrap();
             writer.commit().unwrap();
             writer.append_header(last_header, U256::ZERO, hash).unwrap();
             writer.commit().unwrap();

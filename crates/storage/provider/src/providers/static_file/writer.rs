@@ -393,6 +393,7 @@ impl StaticFileProviderRW {
         hash: BlockHash,
     ) -> ProviderResult<BlockNumber> {
         let start = Instant::now();
+        self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
@@ -425,6 +426,7 @@ impl StaticFileProviderRW {
         tx: TransactionSignedNoHash,
     ) -> ProviderResult<TxNumber> {
         let start = Instant::now();
+        self.ensure_no_queued_prune()?;
 
         let result = self.append_with_tx_number(StaticFileSegment::Transactions, tx_num, tx)?;
 
@@ -451,6 +453,7 @@ impl StaticFileProviderRW {
         receipt: Receipt,
     ) -> ProviderResult<TxNumber> {
         let start = Instant::now();
+        self.ensure_no_queued_prune()?;
 
         let result = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
 
@@ -466,21 +469,50 @@ impl StaticFileProviderRW {
     }
 
     /// Adds an instruction to prune transactions during commit.
-    pub fn prune_transactions(&mut self, to_delete: u64, last_block: BlockNumber) {
+    pub fn prune_transactions(
+        &mut self,
+        to_delete: u64,
+        last_block: BlockNumber,
+    ) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Transactions);
-        self.prune_on_commit = Some((to_delete, Some(last_block)));
+        self.queue_prune(to_delete, Some(last_block))
     }
 
     /// Adds an instruction to prune receipts during commit.
-    pub fn prune_receipts(&mut self, to_delete: u64, last_block: BlockNumber) {
+    pub fn prune_receipts(
+        &mut self,
+        to_delete: u64,
+        last_block: BlockNumber,
+    ) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Receipts);
-        self.prune_on_commit = Some((to_delete, Some(last_block)));
+        self.queue_prune(to_delete, Some(last_block))
     }
 
     /// Adds an instruction to prune headers during commit.
-    pub fn prune_headers(&mut self, to_delete: u64) {
+    pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
-        self.prune_on_commit = Some((to_delete, None));
+        self.queue_prune(to_delete, None)
+    }
+
+    /// Adds an instruction to prune data during commit.
+    fn queue_prune(
+        &mut self,
+        to_delete: u64,
+        last_block: Option<BlockNumber>,
+    ) -> ProviderResult<()> {
+        self.ensure_no_queued_prune()?;
+        self.prune_on_commit = Some((to_delete, last_block));
+        Ok(())
+    }
+
+    /// Returns Error if there is a pruning instruction that needs to be applied.
+    fn ensure_no_queued_prune(&self) -> ProviderResult<()> {
+        if self.prune_on_commit.is_some() {
+            return Err(ProviderError::NippyJar(
+                "Pruning should be comitted before appending or pruning more data".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Removes the last `number` of transactions from the data file.

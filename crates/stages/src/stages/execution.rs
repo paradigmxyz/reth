@@ -568,7 +568,7 @@ where
         Ordering::Greater => static_file_producer.prune_receipts(
             next_static_file_receipt_num - next_receipt_num,
             start_block.saturating_sub(1),
-        ),
+        )?,
         Ordering::Less => {
             let mut last_block = static_file_provider
                 .get_highest_static_file_block(StaticFileSegment::Receipts)

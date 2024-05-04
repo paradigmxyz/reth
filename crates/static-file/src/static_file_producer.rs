@@ -276,7 +276,7 @@ mod tests {
         let mut static_file_writer = static_file_provider
             .latest_writer(StaticFileSegment::Headers)
             .expect("get static file writer for headers");
-        static_file_writer.prune_headers(blocks.len() as u64);
+        static_file_writer.prune_headers(blocks.len() as u64).unwrap();
         static_file_writer.commit().expect("prune headers");
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
