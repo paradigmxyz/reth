@@ -164,7 +164,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let static_file_producer = if self.prune_modes.receipts.is_none() &&
             self.prune_modes.receipts_log_filter.is_empty()
         {
-            Some(prepare_static_file_producer(provider, start_block)?)
+            let mut producer = prepare_static_file_producer(provider, start_block)?;
+            // Since there might be a database <-> static file inconsistency (read
+            // `prepare_static_file_producer` for context), we commit the change straight away.
+            producer.commit()?;
+            Some(producer)
         } else {
             None
         };
@@ -564,7 +568,7 @@ where
         Ordering::Greater => static_file_producer.prune_receipts(
             next_static_file_receipt_num - next_receipt_num,
             start_block.saturating_sub(1),
-        )?,
+        ),
         Ordering::Less => {
             let mut last_block = static_file_provider
                 .get_highest_static_file_block(StaticFileSegment::Receipts)

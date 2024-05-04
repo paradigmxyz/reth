@@ -34,6 +34,8 @@ pub struct StaticFileProviderRW {
     data_path: PathBuf,
     buf: Vec<u8>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
+    /// On commit, does the instructed pruning.
+    prune_on_commit: Option<(u64, Option<BlockNumber>)>,
 }
 
 impl StaticFileProviderRW {
@@ -45,7 +47,14 @@ impl StaticFileProviderRW {
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
-        Ok(Self { writer, data_path, buf: Vec::with_capacity(100), reader, metrics })
+        Ok(Self {
+            writer,
+            data_path,
+            buf: Vec::with_capacity(100),
+            reader,
+            metrics,
+            prune_on_commit: None,
+        })
     }
 
     fn open(
@@ -99,6 +108,18 @@ impl StaticFileProviderRW {
     /// Commits configuration changes to disk and updates the reader index with the new changes.
     pub fn commit(&mut self) -> ProviderResult<()> {
         let start = Instant::now();
+
+        // Truncates the data file if instructed to.
+        if let Some((to_delete, last_block_number)) = self.prune_on_commit.take() {
+            match self.writer.user_header().segment() {
+                StaticFileSegment::Headers => self.prune_header_data(to_delete)?,
+                StaticFileSegment::Transactions => self
+                    .prune_transaction_data(to_delete, last_block_number.expect("should exist"))?,
+                StaticFileSegment::Receipts => {
+                    self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
+                }
+            }
+        }
 
         // Commits offsets and new user_header to disk
         self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
@@ -444,11 +465,26 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
-    /// Removes the last `number` of transactions from static files.
-    ///
-    /// # Note
-    /// Commits to the configuration file at the end.
-    pub fn prune_transactions(
+    /// Adds an instruction to prune transactions during commit.
+    pub fn prune_transactions(&mut self, to_delete: u64, last_block: BlockNumber) {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Transactions);
+        self.prune_on_commit = Some((to_delete, Some(last_block)));
+    }
+
+    /// Adds an instruction to prune receipts during commit.
+    pub fn prune_receipts(&mut self, to_delete: u64, last_block: BlockNumber) {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Receipts);
+        self.prune_on_commit = Some((to_delete, Some(last_block)));
+    }
+
+    /// Adds an instruction to prune headers during commit.
+    pub fn prune_headers(&mut self, to_delete: u64) {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
+        self.prune_on_commit = Some((to_delete, None));
+    }
+
+    /// Removes the last `number` of transactions from the data file.
+    fn prune_transaction_data(
         &mut self,
         number: u64,
         last_block: BlockNumber,
@@ -471,11 +507,8 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    /// Prunes `to_delete` number of receipts from static_files.
-    ///
-    /// # Note
-    /// Commits to the configuration file at the end.
-    pub fn prune_receipts(
+    /// Prunes `to_delete` number of receipts from the data file.
+    fn prune_receipt_data(
         &mut self,
         to_delete: u64,
         last_block: BlockNumber,
@@ -498,11 +531,8 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    /// Prunes `to_delete` number of headers from static_files.
-    ///
-    /// # Note
-    /// Commits to the configuration file at the end.
-    pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
+    /// Prunes `to_delete` number of headers from the data file.
+    fn prune_header_data(&mut self, to_delete: u64) -> ProviderResult<()> {
         let start = Instant::now();
 
         let segment = StaticFileSegment::Headers;
