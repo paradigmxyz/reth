@@ -19,7 +19,7 @@ use jsonrpsee::{
 use std::{
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     sync::Arc,
     task::{Context, Poll},
 };
@@ -155,19 +155,19 @@ where
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
         let stopped = stop_handle.clone().shutdown();
-        tokio::pin!(stopped);
+        let mut pinned_stopped = pin!(stopped);
 
         let (drop_on_completion, mut process_connection_awaiter) = mpsc::channel::<()>(1);
 
         trace!("accepting ipc connections");
         loop {
-            match try_accept_conn(&listener, stopped).await {
+            match try_accept_conn(&listener, pinned_stopped).await {
                 AcceptConnection::Established { local_socket_stream, stop } => {
                     let Some(conn_permit) = connection_guard.try_acquire() else {
                         let (mut _reader, mut writer) = local_socket_stream.into_split();
                         let _ = writer.write_all(b"Too many connections. Please try again later.").await;
                         drop((_reader, writer));
-                        stopped = stop;
+                        pinned_stopped = stop;
                         continue;
                     };
 
@@ -191,12 +191,12 @@ where
                     });
 
                     id = id.wrapping_add(1);
-                    stopped = stop;
+                    pinned_stopped = stop;
                 }
                 AcceptConnection::Shutdown => { break; }
                 AcceptConnection::Err((e, stop)) => {
                     tracing::error!("Error while awaiting a new IPC connection: {:?}", e);
-                    stopped = stop;
+                    pinned_stopped = stop;
                 }
             }
         }
@@ -223,9 +223,9 @@ where
     S: Future + Unpin,
 {
     let accept = listener.accept();
-    tokio::pin!(accept);
+    let pinned_accept = pin!(accept);
 
-    match futures_util::future::select(accept, stopped).await {
+    match futures_util::future::select(pinned_accept, stopped).await {
         Either::Left((res, stop)) => match res {
             Ok(local_socket_stream) => AcceptConnection::Established { local_socket_stream, stop },
             Err(e) => AcceptConnection::Err((e, stop)),
@@ -506,23 +506,23 @@ async fn to_ipc_service<S, T>(
         pending_calls: Default::default(),
         items: Default::default(),
     };
-    tokio::pin!(conn, rx_item);
-
     let stopped = stop_handle.shutdown();
 
-    tokio::pin!(stopped);
+    let mut pinned_conn = pin!(conn);
+    let mut pinned_rx_item = pin!(rx_item);
+    let mut pinned_stopped = pin!(stopped);
 
     loop {
         tokio::select! {
-            _ = &mut conn => {
+            _ = &mut pinned_conn => {
                break
             }
-            item = rx_item.next() => {
+            item = pinned_rx_item.next() => {
                 if let Some(item) = item {
-                    conn.push_back(item);
+                    pinned_conn.push_back(item);
                 }
             }
-            _ = &mut stopped=> {
+            _ = &mut pinned_stopped => {
                 // shutdown
                 break
             }
