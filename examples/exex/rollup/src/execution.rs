@@ -1,4 +1,4 @@
-use alloy_consensus::{SidecarCoder, SimpleCoder};
+use alloy_consensus::{Blob, SidecarCoder, SimpleCoder};
 use alloy_rlp::Decodable as _;
 use eyre::OptionExt;
 use reth::transaction_pool::TransactionPool;
@@ -157,7 +157,7 @@ async fn decode_transactions<Pool: TransactionPool>(
             .map(|(blob, commitment)| (blob, kzg_to_versioned_hash((*commitment).into())))
             // Filter only blobs that are present in the block data
             .filter(|(_, hash)| blob_hashes.contains(hash))
-            .map(|(blob, _)| blob)
+            .map(|(blob, _)| Blob::from(*blob))
             .collect::<Vec<_>>();
         if blobs.len() != blob_hashes.len() {
             eyre::bail!("some blobs not found")
