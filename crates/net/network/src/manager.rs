@@ -35,7 +35,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
-use futures::{pin_mut, Future, StreamExt};
+use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -53,7 +53,7 @@ use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
-    pin::Pin,
+    pin::{pin, Pin},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -902,17 +902,17 @@ where
         shutdown_hook: impl FnOnce(&mut Self),
     ) {
         let network = self;
-        pin_mut!(network, shutdown);
+        let mut pinned_network = pin!(network);
 
         let mut graceful_guard = None;
         tokio::select! {
-            _ = &mut network => {},
+            _ = &mut pinned_network => {},
             guard = shutdown => {
                 graceful_guard = Some(guard);
             },
         }
 
-        shutdown_hook(&mut network);
+        shutdown_hook(&mut pinned_network);
         drop(graceful_guard);
     }
 }

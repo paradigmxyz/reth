@@ -12,7 +12,7 @@ use std::{
     fmt,
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     task::{ready, Context, Poll},
 };
 
@@ -23,7 +23,7 @@ use crate::{
     CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
-use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_primitives::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -159,7 +159,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         };
 
         let f = handshake(proxy);
-        pin_mut!(f);
+        let mut pinned_f = pin!(f);
 
         // this polls the connection and the primary stream concurrently until the handshake is
         // complete
@@ -186,7 +186,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 Some(msg) = from_primary.recv() => {
                     self.inner.conn.send(msg).await.map_err(Into::into)?;
                 }
-                res = &mut f => {
+                res = &mut pinned_f => {
                     let (st, extra) = res?;
                     return Ok((RlpxSatelliteStream {
                             inner: self.inner,

@@ -6565,7 +6565,6 @@ dependencies = [
 name = "reth-cli-runner"
 version = "0.2.0-beta.6"
 dependencies = [
- "futures",
  "reth-tasks",
  "tokio",
  "tracing",
