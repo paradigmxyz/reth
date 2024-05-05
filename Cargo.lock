@@ -2208,6 +2208,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom-rlpx-subprotocol"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth",
+ "reth-eth-wire",
+ "reth-network",
+ "reth-network-api",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc-types",
+ "reth-tracing",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

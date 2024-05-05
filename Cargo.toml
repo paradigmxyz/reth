@@ -123,6 +123,9 @@ members = [
     "examples/polygon-p2p/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
+    "examples/custom-rlpx-subprotocol",
+    "examples/exex/minimal/",
+    "examples/exex/op-bridge/",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
