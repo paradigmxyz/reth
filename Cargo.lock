@@ -2913,6 +2913,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "exex-in-memory-state"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "reth",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-tracing",
+]
+
+[[package]]
 name = "exex-minimal"
 version = "0.0.0"
 dependencies = [
