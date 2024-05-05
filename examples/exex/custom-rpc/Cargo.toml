@@ -1,0 +1,26 @@
+[package]
+name = "exex-custom-rpc"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-node-ethereum.workspace = true
+reth-primitives.workspace = true
+reth-tracing.workspace = true
+reth-provider.workspace = true
+reth-rpc-api = {workspace = true, features = ["client"]}
+reth-rpc.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+futures.workspace = true
+alloy-sol-types = { workspace = true, features = ["json"] }
+alloy-rpc-types.workspace = true
+clap = { workspace = true, features = ["derive"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+async-trait.workspace = true

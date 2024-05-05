@@ -2912,6 +2912,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "exex-custom-rpc"
+version = "0.0.0"
+dependencies = [
+ "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=af788af)",
+ "alloy-sol-types",
+ "async-trait",
+ "clap",
+ "eyre",
+ "futures",
+ "jsonrpsee",
+ "reth",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc",
+ "reth-rpc-api",
+ "reth-tracing",
+ "tokio",
+]
+
+[[package]]
 name = "exex-minimal"
 version = "0.0.0"
 dependencies = [
