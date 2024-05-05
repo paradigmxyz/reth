@@ -9,6 +9,9 @@ use tokio_util::either::Either;
 pub mod engine_store;
 use engine_store::EngineStoreStream;
 
+#[cfg(all(feature = "ethereum-reorg", not(feature = "optimism")))]
+pub mod reorg;
+
 pub mod skip_fcu;
 use skip_fcu::EngineSkipFcu;
 
@@ -85,6 +88,39 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     {
         if let Some(path) = maybe_path {
             Either::Left(self.store_messages(path))
+        } else {
+            Either::Right(self)
+        }
+    }
+
+    /// Creates reorgs with specified frequency.
+    #[cfg(all(feature = "ethereum-reorg", not(feature = "optimism")))]
+    fn reorg<Provider>(
+        self,
+        provider: Provider,
+        payload_validator: reth_payload_validator::ExecutionPayloadValidator,
+        frequency: usize,
+    ) -> reorg::EngineReorg<Self, Engine, Provider>
+    where
+        Self: Sized,
+    {
+        reorg::EngineReorg::new(self, provider, payload_validator, frequency)
+    }
+
+    /// If frequency is [Some], returns the stream that creates reorgs with
+    /// specified frequency. Otherwise, returns `Self`.
+    #[cfg(all(feature = "ethereum-reorg", not(feature = "optimism")))]
+    fn maybe_reorg<Provider>(
+        self,
+        provider: Provider,
+        payload_validator: reth_payload_validator::ExecutionPayloadValidator,
+        frequency: Option<usize>,
+    ) -> Either<reorg::EngineReorg<Self, Engine, Provider>, Self>
+    where
+        Self: Sized,
+    {
+        if let Some(frequency) = frequency {
+            Either::Left(reorg::EngineReorg::new(self, provider, payload_validator, frequency))
         } else {
             Either::Right(self)
         }
