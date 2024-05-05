@@ -84,6 +84,7 @@ members = [
     "examples/trace-transaction-cli/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
+    "examples/custom-rlpx-subprotocol",
     "examples/exex/minimal/",
     "examples/exex/op-bridge/",
     "testing/ef-tests/",

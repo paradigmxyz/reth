@@ -1,0 +1,20 @@
+[package]
+name = "custom-rlpx-subprotocol"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+futures.workspace = true
+reth-eth-wire.workspace = true
+reth-network.workspace = true
+reth-network-api.workspace = true
+reth-provider.workspace = true
+reth-primitives.workspace = true
+tokio-stream.workspace = true
+reth-rpc-types.workspace = true
+reth-tracing.workspace = true
+reth.workspace = true
+eyre.workspace = true
