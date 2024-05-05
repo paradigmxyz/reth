@@ -844,6 +844,7 @@ mod tests {
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
+    use std::pin::pin;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 
@@ -854,10 +855,11 @@ mod tests {
         let sink = pending.accept().await.unwrap();
         let closed = sink.closed();
 
-        futures::pin_mut!(closed, stream);
+        let mut pinned_closed = pin!(closed);
+        let mut pinned_stream = pin!(stream);
 
         loop {
-            match select(closed, stream.next()).await {
+            match select(pinned_closed, pinned_stream.next()).await {
                 // subscription closed.
                 Either::Left((_, _)) => break Ok(()),
 
@@ -872,7 +874,7 @@ mod tests {
                         break Ok(());
                     }
 
-                    closed = c;
+                    pinned_closed = c;
                 }
 
                 // Send back back the error.

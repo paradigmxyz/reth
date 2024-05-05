@@ -10,9 +10,8 @@
 
 //! Entrypoint for running commands.
 
-use futures::pin_mut;
 use reth_tasks::{TaskExecutor, TaskManager};
-use std::future::Future;
+use std::{future::Future, pin::pin};
 use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
@@ -141,12 +140,12 @@ where
     E: Send + Sync + From<reth_tasks::PanickedTaskError> + 'static,
 {
     {
-        pin_mut!(fut);
+        let pinned_fut = pin!(fut);
         tokio::select! {
             err = tasks => {
                 return Err(err.into())
             },
-            res = fut => res?,
+            res = pinned_fut => res?,
         }
     }
     Ok(())
@@ -166,28 +165,31 @@ where
     {
         let mut stream = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let sigterm = stream.recv();
-        pin_mut!(sigterm, ctrl_c, fut);
+        let pinned_sigterm = pin!(sigterm);
+        let pinned_ctrl_c = pin!(ctrl_c);
+        let pinned_fut = pin!(fut);
 
         tokio::select! {
-            _ = ctrl_c => {
+            _ = pinned_ctrl_c => {
                 trace!(target: "reth::cli", "Received ctrl-c");
             },
-            _ = sigterm => {
+            _ = pinned_sigterm => {
                 trace!(target: "reth::cli", "Received SIGTERM");
             },
-            res = fut => res?,
+            res = pinned_fut => res?,
         }
     }
 
     #[cfg(not(unix))]
     {
-        pin_mut!(ctrl_c, fut);
+        let pinned_ctrl_c = pin!(ctrl_c);
+        let pinned_fut = pin!(fut);
 
         tokio::select! {
-            _ = ctrl_c => {
+            _ = pinned_ctrl_c => {
                 trace!(target: "reth::cli", "Received ctrl-c");
             },
-            res = fut => res?,
+            res = pinned_fut => res?,
         }
     }
 
