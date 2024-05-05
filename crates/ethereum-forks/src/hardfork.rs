@@ -62,6 +62,10 @@ pub enum Hardfork {
     /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#canyon>.
     #[cfg(feature = "optimism")]
     Canyon,
+    /// Delta:
+    /// https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#delta
+    #[cfg(feature = "optimism")]
+    Delta,
     // ArbOS11,
     /// Cancun.
     Cancun,

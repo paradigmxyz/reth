@@ -289,6 +289,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
+            (Hardfork::Delta, ForkCondition::Timestamp(1708560000)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
@@ -2323,9 +2324,49 @@ Post-merge hard forks (timestamp based):
                     Head { number: 0, ..Default::default() },
                     ForkId { hash: ForkHash([0xca, 0xf5, 0x17, 0xed]), next: 3950000 },
                 ),
-                // TODO: complete these, see https://github.com/paradigmxyz/reth/issues/8012
+                // Berlin
                 (
-                    Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
+                    Head { number: 3950000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x52, 0x6a, 0x21, 0x71]), next: 105235063 },
+                ),
+                // London
+                (
+                    Head { number: 105235063, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                ),
+                // Arrow Glacier
+                (
+                    Head { number: 105235063, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                ),
+                // Grey Glacier
+                (
+                    Head { number: 105235063, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                ),
+                // Paris
+                (
+                    Head { number: 105235063, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                ),
+                // Bedrock
+                (
+                    Head { number: 105235063, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
+                ),
+                // Canyon
+                (
+                    Head { timestamp: 1704992401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x0, 0x0, 0x0, 0x0]), next: 1708560000 },
+                ),
+                // Delta
+                (
+                    Head { timestamp: 1708560000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x0, 0x0, 0x0, 0x0]), next: 1710374401 },
+                ),
+                // Ecotone
+                (
+                    Head { number: 0, timestamp: 1710374401, ..Default::default() },
                     ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 0 },
                 ),
             ],
