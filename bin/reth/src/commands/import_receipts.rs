@@ -148,6 +148,7 @@ impl ImportReceiptsCommand {
             )?;
         }
 
+        tx.commit()?;
         // as static files works in file ranges, internally it will be committing when creating the
         // next file range already, so we only need to call explicitly at the end.
         static_file_provider.commit()?;
