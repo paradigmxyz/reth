@@ -19,12 +19,12 @@ use crate::{
 use dyn_clone::DynClone;
 use futures_util::{
     future::{select, BoxFuture},
-    pin_mut, Future, FutureExt, TryFutureExt,
+    Future, FutureExt, TryFutureExt,
 };
 use std::{
     any::Any,
     fmt::{Display, Formatter},
-    pin::Pin,
+    pin::{pin, Pin},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -334,7 +334,7 @@ impl TaskExecutor {
             async move {
                 // Create an instance of IncCounterOnDrop with the counter to increment
                 let _inc_counter_on_drop = IncCounterOnDrop::new(finished_regular_tasks_metrics);
-                pin_mut!(fut);
+                let fut = pin!(fut);
                 let _ = select(on_shutdown, fut).await;
             }
         }
@@ -409,7 +409,7 @@ impl TaskExecutor {
         let task = async move {
             // Create an instance of IncCounterOnDrop with the counter to increment
             let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_metrics);
-            pin_mut!(task);
+            let task = pin!(task);
             let _ = select(on_shutdown, task).await;
         };
 
