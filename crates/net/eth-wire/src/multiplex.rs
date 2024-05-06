@@ -159,7 +159,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         };
 
         let f = handshake(proxy);
-        let mut pinned_f = pin!(f);
+        let mut f = pin!(f);
 
         // this polls the connection and the primary stream concurrently until the handshake is
         // complete
@@ -186,7 +186,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 Some(msg) = from_primary.recv() => {
                     self.inner.conn.send(msg).await.map_err(Into::into)?;
                 }
-                res = &mut pinned_f => {
+                res = &mut f => {
                     let (st, extra) = res?;
                     return Ok((RlpxSatelliteStream {
                             inner: self.inner,

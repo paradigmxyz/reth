@@ -119,8 +119,8 @@ mod tests {
         let local_addr = listener.local_address();
 
         tokio::task::spawn(async move {
-            let mut pinned_listener = pin!(listener);
-            match poll_fn(|cx| pinned_listener.as_mut().poll(cx)).await {
+            let mut listener = pin!(listener);
+            match poll_fn(|cx| listener.as_mut().poll(cx)).await {
                 ListenerEvent::Incoming { .. } => {}
                 _ => {
                     panic!("unexpected event")

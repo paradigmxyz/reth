@@ -902,17 +902,17 @@ where
         shutdown_hook: impl FnOnce(&mut Self),
     ) {
         let network = self;
-        let mut pinned_network = pin!(network);
+        let mut network = pin!(network);
 
         let mut graceful_guard = None;
         tokio::select! {
-            _ = &mut pinned_network => {},
+            _ = &mut network => {},
             guard = shutdown => {
                 graceful_guard = Some(guard);
             },
         }
 
-        shutdown_hook(&mut pinned_network);
+        shutdown_hook(&mut network);
         drop(graceful_guard);
     }
 }

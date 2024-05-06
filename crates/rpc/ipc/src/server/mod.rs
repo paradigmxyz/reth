@@ -155,19 +155,19 @@ where
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
         let stopped = stop_handle.clone().shutdown();
-        let mut pinned_stopped = pin!(stopped);
+        let mut stopped = pin!(stopped);
 
         let (drop_on_completion, mut process_connection_awaiter) = mpsc::channel::<()>(1);
 
         trace!("accepting ipc connections");
         loop {
-            match try_accept_conn(&listener, pinned_stopped).await {
+            match try_accept_conn(&listener, stopped).await {
                 AcceptConnection::Established { local_socket_stream, stop } => {
                     let Some(conn_permit) = connection_guard.try_acquire() else {
                         let (mut _reader, mut writer) = local_socket_stream.into_split();
                         let _ = writer.write_all(b"Too many connections. Please try again later.").await;
                         drop((_reader, writer));
-                        pinned_stopped = stop;
+                        stopped = stop;
                         continue;
                     };
 
@@ -191,12 +191,12 @@ where
                     });
 
                     id = id.wrapping_add(1);
-                    pinned_stopped = stop;
+                    stopped = stop;
                 }
                 AcceptConnection::Shutdown => { break; }
                 AcceptConnection::Err((e, stop)) => {
                     tracing::error!("Error while awaiting a new IPC connection: {:?}", e);
-                    pinned_stopped = stop;
+                    stopped = stop;
                 }
             }
         }
@@ -223,9 +223,9 @@ where
     S: Future + Unpin,
 {
     let accept = listener.accept();
-    let pinned_accept = pin!(accept);
+    let accept = pin!(accept);
 
-    match futures_util::future::select(pinned_accept, stopped).await {
+    match futures_util::future::select(accept, stopped).await {
         Either::Left((res, stop)) => match res {
             Ok(local_socket_stream) => AcceptConnection::Established { local_socket_stream, stop },
             Err(e) => AcceptConnection::Err((e, stop)),
@@ -508,21 +508,21 @@ async fn to_ipc_service<S, T>(
     };
     let stopped = stop_handle.shutdown();
 
-    let mut pinned_conn = pin!(conn);
-    let mut pinned_rx_item = pin!(rx_item);
-    let mut pinned_stopped = pin!(stopped);
+    let mut conn = pin!(conn);
+    let mut rx_item = pin!(rx_item);
+    let mut stopped = pin!(stopped);
 
     loop {
         tokio::select! {
-            _ = &mut pinned_conn => {
+            _ = &mut conn => {
                break
             }
-            item = pinned_rx_item.next() => {
+            item = rx_item.next() => {
                 if let Some(item) = item {
-                    pinned_conn.push_back(item);
+                    conn.push_back(item);
                 }
             }
-            _ = &mut pinned_stopped => {
+            _ = &mut stopped => {
                 // shutdown
                 break
             }
@@ -855,11 +855,11 @@ mod tests {
         let sink = pending.accept().await.unwrap();
         let closed = sink.closed();
 
-        let mut pinned_closed = pin!(closed);
-        let mut pinned_stream = pin!(stream);
+        let mut closed = pin!(closed);
+        let mut stream = pin!(stream);
 
         loop {
-            match select(pinned_closed, pinned_stream.next()).await {
+            match select(closed, stream.next()).await {
                 // subscription closed.
                 Either::Left((_, _)) => break Ok(()),
 
@@ -874,7 +874,7 @@ mod tests {
                         break Ok(());
                     }
 
-                    pinned_closed = c;
+                    closed = c;
                 }
 
                 // Send back back the error.

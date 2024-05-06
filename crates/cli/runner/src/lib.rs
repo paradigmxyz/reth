@@ -140,12 +140,12 @@ where
     E: Send + Sync + From<reth_tasks::PanickedTaskError> + 'static,
 {
     {
-        let pinned_fut = pin!(fut);
+        let fut = pin!(fut);
         tokio::select! {
             err = tasks => {
                 return Err(err.into())
             },
-            res = pinned_fut => res?,
+            res = fut => res?,
         }
     }
     Ok(())
@@ -165,31 +165,31 @@ where
     {
         let mut stream = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let sigterm = stream.recv();
-        let pinned_sigterm = pin!(sigterm);
-        let pinned_ctrl_c = pin!(ctrl_c);
-        let pinned_fut = pin!(fut);
+        let sigterm = pin!(sigterm);
+        let ctrl_c = pin!(ctrl_c);
+        let fut = pin!(fut);
 
         tokio::select! {
-            _ = pinned_ctrl_c => {
+            _ = ctrl_c => {
                 trace!(target: "reth::cli", "Received ctrl-c");
             },
-            _ = pinned_sigterm => {
+            _ = sigterm => {
                 trace!(target: "reth::cli", "Received SIGTERM");
             },
-            res = pinned_fut => res?,
+            res = fut => res?,
         }
     }
 
     #[cfg(not(unix))]
     {
-        let pinned_ctrl_c = pin!(ctrl_c);
-        let pinned_fut = pin!(fut);
+        let ctrl_c = pin!(ctrl_c);
+        let fut = pin!(fut);
 
         tokio::select! {
-            _ = pinned_ctrl_c => {
+            _ = ctrl_c => {
                 trace!(target: "reth::cli", "Received ctrl-c");
             },
-            res = pinned_fut => res?,
+            res = fut => res?,
         }
     }
 

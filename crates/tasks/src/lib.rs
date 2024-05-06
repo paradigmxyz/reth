@@ -334,8 +334,8 @@ impl TaskExecutor {
             async move {
                 // Create an instance of IncCounterOnDrop with the counter to increment
                 let _inc_counter_on_drop = IncCounterOnDrop::new(finished_regular_tasks_metrics);
-                let pinned_fut = pin!(fut);
-                let _ = select(on_shutdown, pinned_fut).await;
+                let fut = pin!(fut);
+                let _ = select(on_shutdown, fut).await;
             }
         }
         .in_current_span();
@@ -409,8 +409,8 @@ impl TaskExecutor {
         let task = async move {
             // Create an instance of IncCounterOnDrop with the counter to increment
             let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_metrics);
-            let pinned_task = pin!(task);
-            let _ = select(on_shutdown, pinned_task).await;
+            let task = pin!(task);
+            let _ = select(on_shutdown, task).await;
         };
 
         self.spawn_on_rt(task, task_kind)
