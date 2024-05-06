@@ -15,9 +15,10 @@ use reth_provider::{
     providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
     StaticFileProviderFactory,
 };
+use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -68,7 +69,7 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
 pub struct Pipeline<DB: Database> {
     /// Provider factory.
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: Arc<ProviderFactory<DB>>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
@@ -185,7 +186,7 @@ where
     /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
     /// the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
-        self.produce_static_files()?;
+        self.move_to_static_files()?;
 
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
@@ -222,9 +223,10 @@ where
         Ok(self.progress.next_ctrl())
     }
 
-    /// Run [static file producer](StaticFileProducer) and move all data from the database to static
-    /// files for corresponding [segments](reth_primitives::static_file::StaticFileSegment),
-    /// according to their [stage checkpoints](StageCheckpoint):
+    /// Run [static file producer](StaticFileProducer) and [pruner](reth_prune::Pruner) to **move**
+    /// all data from the database to static files for corresponding
+    /// [segments](reth_primitives::static_file::StaticFileSegment), according to their [stage
+    /// checkpoints](StageCheckpoint):
     /// - [StaticFileSegment::Headers](reth_primitives::static_file::StaticFileSegment::Headers) ->
     ///   [StageId::Headers]
     /// - [StaticFileSegment::Receipts](reth_primitives::static_file::StaticFileSegment::Receipts)
@@ -234,22 +236,36 @@ where
     ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
-    pub fn produce_static_files(&self) -> RethResult<()> {
+    pub fn move_to_static_files(&self) -> RethResult<()> {
         let mut static_file_producer = self.static_file_producer.lock();
 
-        let provider = self.provider_factory.provider()?;
-        let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
-            headers: provider
-                .get_stage_checkpoint(StageId::Headers)?
-                .map(|checkpoint| checkpoint.block_number),
-            receipts: provider
-                .get_stage_checkpoint(StageId::Execution)?
-                .map(|checkpoint| checkpoint.block_number),
-            transactions: provider
-                .get_stage_checkpoint(StageId::Bodies)?
-                .map(|checkpoint| checkpoint.block_number),
-        })?;
-        static_file_producer.run(targets)?;
+        let lowest_static_file_height = {
+            let provider = self.provider_factory.provider()?;
+            let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
+                .into_iter()
+                .map(|stage| {
+                    provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
+                headers: stages_checkpoints[0],
+                receipts: stages_checkpoints[1],
+                transactions: stages_checkpoints[2],
+            })?;
+            static_file_producer.run(targets)?;
+            stages_checkpoints.into_iter().min().expect("exists")
+        };
+
+        if let Some(prune_tip) = lowest_static_file_height {
+            // Run the pruner so we don't potentially end up with higher height in the database vs
+            // static files.
+            let mut pruner = PrunerBuilder::new(Default::default())
+                .prune_delete_limit(usize::MAX)
+                .build(self.provider_factory.clone());
+
+            pruner.run(prune_tip)?;
+        }
 
         Ok(())
     }
