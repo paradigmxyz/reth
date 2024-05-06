@@ -146,9 +146,11 @@ impl ImportReceiptsCommand {
                 Some(static_file_producer),
                 OriginalValuesKnown::Yes,
             )?;
-
-            static_file_provider.commit()?;
         }
+
+        // as static files works in file ranges, internally it will be committing when creating the
+        // next file range already, so we only need to call explicitly at the end.
+        static_file_provider.commit()?;
 
         if total_decoded_receipts == 0 {
             error!(target: "reth::cli", "No receipts were imported, ensure the receipt file is valid and not empty");
