@@ -148,8 +148,6 @@ where
                         }
                         self.progress.update(target);
 
-                        // TODO: if report ControlFlow::Unwind we will issue a warning of bad block
-                        // detected. Do we want?
                         return (self, Ok(ControlFlow::Continue { block_number: target }))
                     }
                 }
