@@ -243,10 +243,14 @@ fn decode_chain_into_rollup_events(
                 .zip(receipts.iter().flatten())
                 .map(move |(tx, receipt)| (block, tx, receipt))
         })
-        // Filter only transactions to the rollup contract
-        .filter(|(_, tx, _)| tx.to() == Some(ROLLUP_CONTRACT_ADDRESS))
-        // Get all logs
-        .flat_map(|(block, tx, receipt)| receipt.logs.iter().map(move |log| (block, tx, log)))
+        // Get all logs from rollup contract
+        .flat_map(|(block, tx, receipt)| {
+            receipt
+                .logs
+                .iter()
+                .filter(|log| log.address == ROLLUP_CONTRACT_ADDRESS)
+                .map(move |log| (block, tx, log))
+        })
         // Decode and filter rollup events
         .filter_map(|(block, tx, log)| {
             RollupContractEvents::decode_raw_log(log.topics(), &log.data.data, true)
