@@ -121,16 +121,15 @@ impl<C> NetworkConfig<C> {
         self,
         f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::Config,
     ) -> Self {
-        let rlpx_port = self.listener_addr.port();
         let network_stack_id = NetworkStackId::id(&self.chain_spec);
         let fork_id = self.chain_spec.latest_fork_id();
         let boot_nodes = self.boot_nodes.clone();
 
-        let mut builder =
-            reth_discv5::Config::builder(rlpx_port).add_unsigned_boot_nodes(boot_nodes.into_iter());
+        let mut builder = reth_discv5::Config::builder(self.listener_addr)
+            .add_unsigned_boot_nodes(boot_nodes.into_iter());
 
         if let Some(id) = network_stack_id {
-            builder = builder.fork(id, fork_id);
+            builder = builder.fork(id, fork_id)
         }
 
         self.set_discovery_v5(f(builder))
