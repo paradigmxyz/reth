@@ -523,9 +523,10 @@ mod tests {
             .expect_err(
                 "Executing cancun block without parent beacon block root field should fail",
             );
+
         assert_eq!(
-            err,
-            BlockExecutionError::Validation(BlockValidationError::MissingParentBeaconBlockRoot)
+            err.as_validation().unwrap().clone(),
+            BlockValidationError::MissingParentBeaconBlockRoot
         );
 
         // fix header, set a gas limit

@@ -132,6 +132,14 @@ impl BlockExecutionError {
         Self::Other(Box::new(error))
     }
 
+    /// Returns the inner `BlockValidationError` if the error is a validation error.
+    pub const fn as_validation(&self) -> Option<&BlockValidationError> {
+        match self {
+            Self::Validation(err) => Some(err),
+            _ => None,
+        }
+    }
+
     /// Returns `true` if the error is fatal.
     ///
     /// This represents an unrecoverable database related error.
