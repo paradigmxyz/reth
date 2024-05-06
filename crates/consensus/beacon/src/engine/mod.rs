@@ -1524,7 +1524,7 @@ where
             self.set_canonical_head(ctrl.block_number().unwrap_or_default())?;
             self.blockchain.update_block_hashes_and_clear_buffered()?;
             self.blockchain.connect_buffered_blocks_to_canonical_hashes()?;
-            // We are on a optimistic syncing process, better to wait for the next FCU to handle
+            // We are on an optimistic syncing process, better to wait for the next FCU to handle
             return Ok(())
         }
 

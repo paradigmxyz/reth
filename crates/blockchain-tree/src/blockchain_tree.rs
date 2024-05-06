@@ -1249,6 +1249,13 @@ where
         &self,
         revert_until: BlockNumber,
     ) -> Result<Option<Chain>, CanonicalError> {
+
+        // This should only happen when an optimistic sync target was re-orged.
+        //
+        // Static files generally contain finalized data. The blockchain tree only deals
+        // with unfinalized data. The only scenario where canonical reverts go past the highest
+        // static file is when an optimistic sync occured and unfinalized data was written to
+        // static files.
         if self
             .externals
             .provider_factory
@@ -1262,12 +1269,6 @@ where
                 "Reverting optimistic canonical chain to block {}",
                 revert_until
             );
-            // This should only happen when an optimistic sync target was re-orged.
-            //
-            // Static files generally contain finalized data. The blockchain tree only deals
-            // with unfinalized data. The only scenario where canonical reverts go past the highest
-            // static file is when an optimistic sync occured and unfinalized data was written to
-            // static files.
             return Err(CanonicalError::OptimisticTargetRevert(revert_until))
         }
 
