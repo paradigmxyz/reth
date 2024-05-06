@@ -7229,10 +7229,14 @@ name = "reth-network-types"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "enr",
- "reth-rpc-types",
+ "rand 0.8.5",
  "secp256k1",
+ "serde_json",
  "serde_with",
+ "thiserror",
+ "url",
 ]
 
 [[package]]
@@ -7558,6 +7562,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-ethereum-forks",
+ "reth-network-types",
  "reth-rpc-types",
  "revm",
  "revm-primitives",
@@ -7798,29 +7803,24 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.2.0-beta.6"
 dependencies = [
- "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=17c5650)",
  "alloy-primitives",
- "alloy-rlp",
  "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=17c5650)",
  "alloy-rpc-types-anvil",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-trace",
  "arbitrary",
  "bytes",
- "enr",
  "ethereum_ssz",
  "ethereum_ssz_derive",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "secp256k1",
  "serde",
  "serde_json",
  "serde_with",
  "similar-asserts",
  "thiserror",
- "url",
 ]
 
 [[package]]
