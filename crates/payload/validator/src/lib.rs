@@ -129,7 +129,7 @@ impl ExecutionPayloadValidator {
                 // cancun active but excess blob gas not present
                 return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
             }
-            if cancun_fields.clone().into_inner().is_none() {
+            if cancun_fields.as_ref().is_none() {
                 // cancun active but cancun fields not present
                 return Err(PayloadError::PostCancunWithoutCancunFields)
             }
@@ -146,7 +146,7 @@ impl ExecutionPayloadValidator {
                 // cancun not active but excess blob gas present
                 return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
             }
-            if cancun_fields.clone().into_inner().is_some() {
+            if cancun_fields.as_ref().is_some() {
                 // cancun not active but cancun fields present
                 return Err(PayloadError::PreCancunWithCancunFields)
             }
