@@ -17,10 +17,11 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_rpc_types_beacon::beacon::events::PayloadAttributesEvent;
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
-use reth::{cli::Cli, rpc::types::beacon::events::PayloadAttributesEvent};
+use reth::cli::Cli;
 use reth_node_ethereum::EthereumNode;
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
