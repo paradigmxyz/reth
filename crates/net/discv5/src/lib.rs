@@ -676,9 +676,10 @@ mod test {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
+        let rlpx_addr: SocketAddr = "127.0.0.1:30303".parse().unwrap();
 
         let discv5_listen_config = ListenConfig::from(discv5_addr);
-        let discv5_config = Config::builder((Ipv4Addr::UNSPECIFIED, 30303).into())
+        let discv5_config = Config::builder(rlpx_addr)
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 
