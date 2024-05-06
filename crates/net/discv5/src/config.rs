@@ -222,7 +222,7 @@ impl ConfigBuilder {
             .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
 
         discv5_config.listen_config =
-            amend_listen_config_wrt_rlpx(tcp_socket.ip(), &discv5_config.listen_config);
+            amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
 
         let fork = fork.map(|(key, fork_id)| (key, fork_id.into()));
 
@@ -343,8 +343,8 @@ pub fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
 /// to one IP address per IP version (atm, may become spec'd how to advertise different addresses).
 /// The RLPx address overwrites the discv5 address w.r.t. IP version.
 pub fn amend_listen_config_wrt_rlpx(
-    rlpx_addr: IpAddr,
     listen_config: &ListenConfig,
+    rlpx_addr: IpAddr,
 ) -> ListenConfig {
     let discv5_socket_ipv4 = ipv4(listen_config);
     let discv5_socket_ipv6 = ipv6(listen_config);
@@ -507,7 +507,7 @@ mod test {
 
         let listen_config = ListenConfig::default();
 
-        let amended_config = amend_listen_config_wrt_rlpx(rlpx_addr.into(), &listen_config);
+        let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
 
         let config_socket_ipv4 = ipv4(&amended_config).unwrap();
 
@@ -522,7 +522,7 @@ mod test {
 
         let listen_config = ListenConfig::default();
 
-        let amended_config = amend_listen_config_wrt_rlpx(rlpx_addr.into(), &listen_config);
+        let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
 
         let config_socket_ipv6 = ipv6(&amended_config).unwrap();
 
