@@ -66,7 +66,8 @@ impl ImportReceiptsCommand {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         debug!(target: "reth::cli",
-            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE), "Chunking receipts import"
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE),
+            "Chunking receipts import"
         );
 
         // add network name to data dir
@@ -141,6 +142,10 @@ impl ImportReceiptsCommand {
         }
 
         // compare the highest static file block to the number of receipts we decoded
+        //
+        // `HeaderNumbers` and `TransactionHashNumbers` tables serve as additional indexes, but
+        // nothing like this needs to exist for Receipts. So `tx.entries::<tables::Receipts>` would
+        // return zero here.
         let total_imported_receipts = static_file_provider
             .get_highest_static_file_block(StaticFileSegment::Receipts)
             .expect("static files must exist after ensuring we decoded more than zero");
