@@ -7,6 +7,7 @@ use crate::{
         DatabaseArgs, NetworkArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
     utils::get_single_header,
 };
 use clap::Parser;
@@ -25,7 +26,6 @@ use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::Header
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_core::init::init_genesis;
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{
     fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
@@ -111,8 +111,7 @@ impl Command {
         let stage_conf = &config.stages;
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory =
-            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
+        let executor = block_executor!(self.chain.clone());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
@@ -124,14 +123,14 @@ impl Command {
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
-                    factory.clone(),
+                    executor.clone(),
                     stage_conf.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
                 .set(ExecutionStage::new(
-                    factory,
+                    executor,
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,

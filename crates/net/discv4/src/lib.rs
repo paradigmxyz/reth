@@ -94,16 +94,6 @@ pub const DEFAULT_DISCOVERY_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
 /// Note: the default TCP port is the same.
 pub const DEFAULT_DISCOVERY_PORT: u16 = 30303;
 
-/// The default address for discv5 via UDP.
-///
-/// Note: the default TCP address is the same.
-pub const DEFAULT_DISCOVERY_V5_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-
-/// The default port for discv5 via UDP.
-///
-/// Default is port 9000.
-pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9000;
-
 /// The default address for discv4 via UDP: "0.0.0.0:30303"
 ///
 /// Note: The default TCP address is the same.
@@ -992,7 +982,7 @@ impl Discv4Service {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    pub(crate) fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
+    pub(crate) fn send_packet(&self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target: "discv4", r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
@@ -1277,7 +1267,7 @@ impl Discv4Service {
 
     /// Handler for incoming `EnrRequest` message
     fn on_enr_request(
-        &mut self,
+        &self,
         msg: EnrRequest,
         remote_addr: SocketAddr,
         id: PeerId,

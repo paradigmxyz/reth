@@ -21,7 +21,12 @@ reth-network-types.workspace = true
 # ethereum
 alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+    "serde",
+] }
 enr.workspace = true
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
@@ -36,6 +41,7 @@ generic-array = "0.14"
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+assert_matches.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 reth-tracing.workspace = true

@@ -8,6 +8,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
+use reth_config::config::EtlConfig;
 use reth_db::{database::Database, init_db};
 use reth_node_core::init::{init_from_state_dump, init_genesis};
 use reth_primitives::{ChainSpec, B256};
@@ -78,11 +79,15 @@ impl InitStateCommand {
         info!(target: "reth::cli", "Database opened");
 
         let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files())?;
+        let etl_config = EtlConfig::new(
+            Some(EtlConfig::from_datadir(data_dir.data_dir())),
+            EtlConfig::default_file_size(),
+        );
 
         info!(target: "reth::cli", "Writing genesis block");
 
         let hash = match self.state {
-            Some(path) => init_at_state(path, provider_factory)?,
+            Some(path) => init_at_state(path, provider_factory, etl_config)?,
             None => init_genesis(provider_factory)?,
         };
 
@@ -95,6 +100,7 @@ impl InitStateCommand {
 pub fn init_at_state<DB: Database>(
     state_dump_path: PathBuf,
     factory: ProviderFactory<DB>,
+    etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     info!(target: "reth::cli",
         path=?state_dump_path,
@@ -103,5 +109,5 @@ pub fn init_at_state<DB: Database>(
     let file = File::open(state_dump_path)?;
     let reader = BufReader::new(file);
 
-    init_from_state_dump(reader, factory)
+    init_from_state_dump(reader, factory, etl_config)
 }

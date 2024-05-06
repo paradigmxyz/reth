@@ -19,6 +19,12 @@ use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspect
 
 mod execute;
 pub use execute::*;
+pub mod l1;
+pub use l1::*;
+
+mod error;
+pub mod verify;
+pub use error::OptimismBlockExecutionError;
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Default, Clone, Copy)]

@@ -15,6 +15,8 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
+reth-evm.workspace = true
+reth-revm.workspace = true
 reth-provider.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
@@ -40,8 +42,9 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
-reth-node-ethereum.workspace = true
+reth-evm-ethereum.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
 

@@ -16,7 +16,7 @@ use reth_rpc_types::engine::{
     OptimismPayloadAttributes, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v3, convert_block_to_payload_field_v2, try_block_to_payload_v1,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
 use revm::primitives::HandlerCfg;
 use std::sync::Arc;
@@ -230,7 +230,7 @@ impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<OptimismBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: OptimismBuiltPayload) -> Self {
-        try_block_to_payload_v1(value.block)
+        block_to_payload_v1(value.block)
     }
 }
 

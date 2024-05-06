@@ -3,9 +3,10 @@
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
 use reth_config::Config;
-use reth_discv4::{
-    DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT, DEFAULT_DISCOVERY_V5_ADDR,
-    DEFAULT_DISCOVERY_V5_PORT,
+use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv5::{
+    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR, DEFAULT_DISCOVERY_V5_PORT,
+    DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 use reth_net_nat::NatResolver;
 use reth_network::{
@@ -235,6 +236,23 @@ pub struct DiscoveryArgs {
     #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
     default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port: u16,
+
+    /// The interval in seconds at which to carry out periodic lookup queries, for the whole
+    /// run of the program.
+    #[arg(id = "discovery.v5.lookup-interval", long = "discovery.v5.lookup-interval", value_name = "DISCOVERY_V5_LOOKUP_INTERVAL",
+    default_value_t = DEFAULT_SECONDS_LOOKUP_INTERVAL)]
+    pub discv5_lookup_interval: u64,
+
+    /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
+    /// times, at bootstrap.
+    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval",
+        default_value_t = DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL)]
+    pub discv5_bootstrap_lookup_interval: u64,
+
+    /// The number of times to carry out boost lookup queries at bootstrap.
+    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown",
+                        default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
+    pub discv5_bootstrap_lookup_countdown: u64,
 }
 
 impl DiscoveryArgs {
@@ -249,11 +267,6 @@ impl DiscoveryArgs {
 
         if self.disable_discovery || self.disable_discv4_discovery {
             network_config_builder = network_config_builder.disable_discv4_discovery();
-        }
-
-        if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
-            network_config_builder = network_config_builder.disable_discv4_discovery();
-            network_config_builder = network_config_builder.enable_discv5_discovery();
         }
 
         network_config_builder
@@ -278,6 +291,9 @@ impl Default for DiscoveryArgs {
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: DEFAULT_DISCOVERY_V5_ADDR,
             discv5_port: DEFAULT_DISCOVERY_V5_PORT,
+            discv5_lookup_interval: DEFAULT_SECONDS_LOOKUP_INTERVAL,
+            discv5_bootstrap_lookup_interval: DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
+            discv5_bootstrap_lookup_countdown: DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
         }
     }
 }

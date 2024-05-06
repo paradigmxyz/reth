@@ -258,7 +258,7 @@ impl ExExManager {
 
     /// Updates the current buffer capacity and notifies all `is_ready` watchers of the manager's
     /// readiness to receive notifications.
-    fn update_capacity(&mut self) {
+    fn update_capacity(&self) {
         let capacity = self.max_capacity.saturating_sub(self.buffer.len());
         self.current_capacity.store(capacity, Ordering::Relaxed);
         self.metrics.current_capacity.set(capacity as f64);

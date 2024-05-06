@@ -98,6 +98,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C>
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
     type Pool = C::Pool;
     type Evm = C::Evm;
+    type Executor = C::Executor;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -105,6 +106,10 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn evm_config(&self) -> &Self::Evm {
         self.components.evm_config()
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        self.components.block_executor()
     }
 
     fn provider(&self) -> &Self::Provider {
