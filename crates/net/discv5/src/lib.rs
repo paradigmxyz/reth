@@ -336,8 +336,9 @@ impl Discv5 {
     ) -> Result<NodeRecord, Error> {
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
-        // too
+        if enr.tcp4().is_none() && enr.tcp6().is_none() {
+            return Err(Error::UnreachableRlpx)
+        }
         let Some(tcp_port) = (match self.rlpx_ip_mode {
             IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
