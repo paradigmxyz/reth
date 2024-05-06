@@ -18,7 +18,7 @@ use reth_provider::{
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -67,9 +67,9 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// # Defaults
 ///
 /// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
-pub struct Pipeline<DB: Database + Clone> {
+pub struct Pipeline<DB: Database> {
     /// Provider factory.
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: Arc<ProviderFactory<DB>>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
@@ -86,7 +86,7 @@ pub struct Pipeline<DB: Database + Clone> {
 
 impl<DB> Pipeline<DB>
 where
-    DB: Database + Clone + 'static,
+    DB: Database + 'static,
 {
     /// Construct a pipeline using a [`PipelineBuilder`].
     pub fn builder() -> PipelineBuilder<DB> {
@@ -556,7 +556,7 @@ fn on_stage_error<DB: Database>(
     }
 }
 
-impl<DB: Database + Clone> std::fmt::Debug for Pipeline<DB> {
+impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())

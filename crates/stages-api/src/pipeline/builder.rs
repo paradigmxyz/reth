@@ -3,6 +3,7 @@ use reth_db::database::Database;
 use reth_primitives::{stage::StageId, BlockNumber, B256};
 use reth_provider::ProviderFactory;
 use reth_static_file::StaticFileProducer;
+use std::sync::Arc;
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
@@ -22,7 +23,7 @@ where
 
 impl<DB> PipelineBuilder<DB>
 where
-    DB: Database + Clone,
+    DB: Database,
 {
     /// Add a stage to the pipeline.
     pub fn add_stage<S>(mut self, stage: S) -> Self
@@ -75,7 +76,7 @@ where
     ) -> Pipeline<DB> {
         let Self { stages, max_block, tip_tx, metrics_tx } = self;
         Pipeline {
-            provider_factory,
+            provider_factory: Arc::new(provider_factory),
             stages,
             max_block,
             static_file_producer,

@@ -16,6 +16,7 @@ use reth_provider::{
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -33,7 +34,7 @@ type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
 /// Pruning routine. Main pruning logic happens in [Pruner::run].
 #[derive(Debug)]
 pub struct Pruner<DB> {
-    provider_factory: ProviderFactory<DB>,
+    provider_factory: Arc<ProviderFactory<DB>>,
     segments: Vec<Box<dyn Segment<DB>>>,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
@@ -59,7 +60,7 @@ pub struct Pruner<DB> {
 impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: Arc<ProviderFactory<DB>>,
         segments: Vec<Box<dyn Segment<DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
@@ -337,6 +338,7 @@ mod tests {
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::{FinishedExExHeight, MAINNET};
     use reth_provider::ProviderFactory;
+    use std::sync::Arc;
 
     #[test]
     fn is_pruning_needed() {
@@ -349,7 +351,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
         let mut pruner =
-            Pruner::new(provider_factory, vec![], 5, 0, 5, None, finished_exex_height_rx);
+            Pruner::new(Arc::new(provider_factory), vec![], 5, 0, 5, None, finished_exex_height_rx);
 
         // No last pruned block number was set before
         let first_block_number = 1;

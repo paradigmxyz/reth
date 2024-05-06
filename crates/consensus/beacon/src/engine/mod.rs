@@ -158,7 +158,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 #[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
-    DB: Database + Clone,
+    DB: Database,
     Client: HeadersClient + BodiesClient,
     BT: BlockchainTreeEngine
         + BlockReader
@@ -209,7 +209,7 @@ where
 
 impl<DB, BT, Client, EngineT> BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
-    DB: Database + Clone + Unpin + 'static,
+    DB: Database + Unpin + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
         + BlockIdReader
@@ -1755,7 +1755,7 @@ where
 /// receiver and forwarding them to the blockchain tree.
 impl<DB, BT, Client, EngineT> Future for BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
-    DB: Database + Clone + Unpin + 'static,
+    DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     BT: BlockchainTreeEngine
         + BlockReader
