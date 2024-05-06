@@ -397,7 +397,7 @@ where
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
 
         let pruner = Pruner::new(
-            Arc::new(provider_factory.clone()),
+            provider_factory.clone(),
             vec![],
             5,
             self.base_config.chain_spec.prune_delete_limit,

@@ -1,10 +1,9 @@
-use std::{sync::Arc, time::Duration};
-
 use crate::{segments::SegmentSet, Pruner};
 use reth_config::PruneConfig;
 use reth_db::database::Database;
 use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
+use std::time::Duration;
 use tokio::sync::watch;
 
 /// Contains the information required to build a pruner
@@ -80,7 +79,7 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration.
-    pub fn build<DB: Database>(self, provider_factory: Arc<ProviderFactory<DB>>) -> Pruner<DB> {
+    pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
 
         Pruner::new(

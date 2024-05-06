@@ -18,7 +18,7 @@ use reth_provider::{
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
-use std::{pin::Pin, sync::Arc};
+use std::pin::Pin;
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -69,7 +69,7 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
 pub struct Pipeline<DB: Database> {
     /// Provider factory.
-    provider_factory: Arc<ProviderFactory<DB>>,
+    provider_factory: ProviderFactory<DB>,
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<DB>>,
     /// The maximum block number to sync to.
