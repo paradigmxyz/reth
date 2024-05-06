@@ -38,8 +38,9 @@ pub mod network_stack_id;
 pub use discv5::{self, IpMode};
 
 pub use config::{
-    BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,
-    DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
+    BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
+    DEFAULT_DISCOVERY_V5_PORT, DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
+    DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
@@ -236,19 +237,45 @@ impl Discv5 {
                 None
             }
             discv5::Event::SessionEstablished(enr, remote_socket) => {
-                // covers `reth_discv4::DiscoveryUpdate` equivalents `DiscoveryUpdate::Added(_)`
-                // and `DiscoveryUpdate::DiscoveredAtCapacity(_)
+                // this branch is semantically similar to branches of 
+                // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
+                // `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
                 // peer has been discovered as part of query, or, by incoming session (peer has
                 // discovered us)
-
-                self.metrics.discovered_peers_advertised_networks.increment_once_by_network_type(&enr);
 
                 self.metrics.discovered_peers.increment_established_sessions_raw(1);
 
                 self.on_discovered_peer(&enr, remote_socket)
             }
-            _ => None,
+            discv5::Event::UnverifiableEnr {
+                enr,
+                socket,
+                node_id: _,
+            } => {
+                // this branch is semantically similar to branches of 
+                // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
+                // `DiscoveryUpdate::DiscoveredAtCapacity(_)
+
+                // peer has been discovered as part of query, or, by an outgoing session (but peer 
+                // is behind NAT and responds from a different socket)
+
+                // NOTE: `discv5::Discv5` won't initiate a session with any peer with an
+                // unverifiable node record, for example one that advertises a reserved LAN IP
+                // address on a WAN network. This is in order to prevent DoS attacks, where some
+                // malicious peers may advertise a victim's socket. We will still try and connect
+                // to them over RLPx, to be compatible with EL discv5 implementations that don't
+                // enforce this security measure.
+
+                trace!(target: "net::discv5",
+                    ?enr,
+                    %socket,
+                    "discovered unverifiable enr, source socket doesn't match socket advertised in ENR"
+                );
+
+                self.on_discovered_peer(&enr, socket)
+            }
+            _ => None
         }
     }
 
@@ -258,10 +285,12 @@ impl Discv5 {
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Option<DiscoveredPeer> {
+        self.metrics.discovered_peers_advertised_networks.increment_once_by_network_type(enr);
+
         let node_record = match self.try_into_reachable(enr, socket) {
             Ok(enr_bc) => enr_bc,
             Err(err) => {
-                trace!(target: "net::discovery::discv5",
+                trace!(target: "net::discv5",
                     %err,
                     ?enr,
                     "discovered peer is unreachable"
@@ -273,7 +302,7 @@ impl Discv5 {
             }
         };
         if let FilterOutcome::Ignore { reason } = self.filter_discovered_peer(enr) {
-            trace!(target: "net::discovery::discv5",
+            trace!(target: "net::discv5",
                 ?enr,
                 reason,
                 "filtered out discovered peer"
@@ -289,7 +318,7 @@ impl Discv5 {
             .then(|| self.get_fork_id(enr).ok())
             .flatten();
 
-        trace!(target: "net::discovery::discv5",
+        trace!(target: "net::discv5",
             ?fork_id,
             ?enr,
             "discovered peer"
@@ -299,19 +328,13 @@ impl Discv5 {
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local [`IpMode`]. Tries the socket from which the ENR was sent, if socket is missing
-    /// from ENR.
-    ///
-    ///  Note: [`discv5::Discv5`] won't initiate a session with any peer with a malformed node
-    /// record, that advertises a reserved IP address on a WAN network.
+    /// w.r.t. local [`IpMode`]. Uses source socket as udp socket.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
         socket: SocketAddr,
     ) -> Result<NodeRecord, Error> {
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
-
-        let udp_socket = self.ip_mode().get_contactable_addr(enr).unwrap_or(socket);
 
         // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
         // too
@@ -322,7 +345,7 @@ impl Discv5 {
             return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
         };
 
-        Ok(NodeRecord { address: udp_socket.ip(), tcp_port, udp_port: udp_socket.port(), id })
+        Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
     }
 
     /// Applies filtering rules on an ENR. Returns [`Ok`](FilterOutcome::Ok) if peer should be
@@ -619,7 +642,7 @@ pub async fn lookup(
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
     use reth_primitives::MAINNET;
@@ -673,7 +696,7 @@ mod tests {
         let (node_2, mut stream_2, _) = start_discovery_node(30355).await;
         let node_2_enr = node_2.with_discv5(|discv5| discv5.local_enr());
 
-        trace!(target: "net::discovery::tests",
+        trace!(target: "net::discv5::test",
             node_1_node_id=format!("{:#}", node_1_enr.node_id()),
             node_2_node_id=format!("{:#}", node_2_enr.node_id()),
             "started nodes"

@@ -438,20 +438,11 @@ Debug:
       --debug.max-block <MAX_BLOCK>
           Runs the sync only up to the specified block
 
-      --debug.print-inspector
-          Print opcode level traces directly to console during execution
-
-      --debug.hook-block <HOOK_BLOCK>
-          Hook on a specific block during execution
-
-      --debug.hook-transaction <HOOK_TRANSACTION>
-          Hook on a specific transaction during execution
-
-      --debug.hook-all
-          Hook on every transaction in a block
-
       --debug.skip-fcu <SKIP_FCU>
           If provided, the engine will skip `n` consecutive FCUs
+
+      --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
+          If provided, the engine will skip `n` consecutive new payloads
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location

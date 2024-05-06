@@ -1,6 +1,10 @@
 //! Ethereum block executor.
 
-use crate::{verify::verify_receipts, EthEvmConfig};
+use crate::{
+    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
+    verify::verify_receipts,
+    EthEvmConfig,
+};
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -19,7 +23,6 @@ use reth_primitives::{
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    eth_dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
     Evm, State,
 };
@@ -520,9 +523,10 @@ mod tests {
             .expect_err(
                 "Executing cancun block without parent beacon block root field should fail",
             );
+
         assert_eq!(
-            err,
-            BlockExecutionError::Validation(BlockValidationError::MissingParentBeaconBlockRoot)
+            err.as_validation().unwrap().clone(),
+            BlockValidationError::MissingParentBeaconBlockRoot
         );
 
         // fix header, set a gas limit
