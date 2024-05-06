@@ -33,7 +33,7 @@ use tracing::trace;
 /// database while the pipeline is still active.
 pub(crate) struct EngineSyncController<DB, Client>
 where
-    DB: Database,
+    DB: Database + Clone,
     Client: HeadersClient + BodiesClient,
 {
     /// A downloader that can download full blocks from the network.
@@ -65,7 +65,7 @@ where
 
 impl<DB, Client> EngineSyncController<DB, Client>
 where
-    DB: Database + 'static,
+    DB: Database + Clone + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance
@@ -410,14 +410,14 @@ pub(crate) enum EngineSyncEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PipelineState<DB: Database> {
+enum PipelineState<DB: Database + Clone> {
     /// Pipeline is idle.
     Idle(Option<Pipeline<DB>>),
     /// Pipeline is running and waiting for a response
     Running(oneshot::Receiver<PipelineWithResult<DB>>),
 }
 
-impl<DB: Database> PipelineState<DB> {
+impl<DB: Database + Clone> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
     fn is_idle(&self) -> bool {
         matches!(self, PipelineState::Idle(_))

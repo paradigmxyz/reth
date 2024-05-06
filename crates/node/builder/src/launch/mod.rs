@@ -359,7 +359,7 @@ where
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
 
-        let mut pruner = pruner_builder.build(Arc::new(ctx.provider_factory().clone()));
+        let mut pruner = pruner_builder.build(ctx.provider_factory().clone());
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
