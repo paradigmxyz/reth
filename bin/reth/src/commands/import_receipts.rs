@@ -8,7 +8,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db::{database::Database, init_db, transaction::DbTx, DatabaseEnv};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
