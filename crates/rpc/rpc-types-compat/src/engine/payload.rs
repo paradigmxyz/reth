@@ -84,21 +84,21 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 }
 
 /// Converts [SealedBlock] to [ExecutionPayload]
-pub fn try_block_to_payload(value: SealedBlock) -> ExecutionPayload {
+pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
     if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
     } else if value.withdrawals.is_some() {
         // block with withdrawals: V2
-        ExecutionPayload::V2(try_block_to_payload_v2(value))
+        ExecutionPayload::V2(block_to_payload_v2(value))
     } else {
         // otherwise V1
-        ExecutionPayload::V1(try_block_to_payload_v1(value))
+        ExecutionPayload::V1(block_to_payload_v1(value))
     }
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadV1]
-pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
+pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
     let transactions = value.raw_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
@@ -119,7 +119,7 @@ pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadV2]
-pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
+pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
     let transactions = value.raw_transactions();
 
     ExecutionPayloadV2 {
@@ -176,9 +176,9 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
 pub fn convert_block_to_payload_field_v2(value: SealedBlock) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
     if value.withdrawals.is_some() {
-        ExecutionPayloadFieldV2::V2(try_block_to_payload_v2(value))
+        ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
     } else {
-        ExecutionPayloadFieldV2::V1(try_block_to_payload_v1(value))
+        ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
     }
 }
 
@@ -205,7 +205,7 @@ pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> Ex
 pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayloadInputV2 {
     ExecutionPayloadInputV2 {
         withdrawals: value.withdrawals.clone().map(Withdrawals::into_inner),
-        execution_payload: try_block_to_payload_v1(value),
+        execution_payload: block_to_payload_v1(value),
     }
 }
 
