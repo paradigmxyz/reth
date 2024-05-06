@@ -9,8 +9,8 @@ use tokio_util::either::Either;
 pub mod engine_store;
 use engine_store::EngineStoreStream;
 
-#[cfg(all(feature = "ethereum-reorg", not(feature = "optimism")))]
 pub mod reorg;
+use reorg::EngineReorg;
 
 pub mod skip_fcu;
 use skip_fcu::EngineSkipFcu;
@@ -94,28 +94,26 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     }
 
     /// Creates reorgs with specified frequency.
-    #[cfg(all(feature = "ethereum-reorg", not(feature = "optimism")))]
     fn reorg<Provider>(
         self,
         provider: Provider,
         payload_validator: reth_payload_validator::ExecutionPayloadValidator,
         frequency: usize,
-    ) -> reorg::EngineReorg<Self, Engine, Provider>
+    ) -> EngineReorg<Self, Engine, Provider>
     where
         Self: Sized,
     {
-        reorg::EngineReorg::new(self, provider, payload_validator, frequency)
+        EngineReorg::new(self, provider, payload_validator, frequency)
     }
 
     /// If frequency is [Some], returns the stream that creates reorgs with
     /// specified frequency. Otherwise, returns `Self`.
-    #[cfg(all(feature = "ethereum-reorg", not(feature = "optimism")))]
     fn maybe_reorg<Provider>(
         self,
         provider: Provider,
         payload_validator: reth_payload_validator::ExecutionPayloadValidator,
         frequency: Option<usize>,
-    ) -> Either<reorg::EngineReorg<Self, Engine, Provider>, Self>
+    ) -> Either<EngineReorg<Self, Engine, Provider>, Self>
     where
         Self: Sized,
     {

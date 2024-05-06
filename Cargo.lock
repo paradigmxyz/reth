@@ -7275,6 +7275,7 @@ dependencies = [
  "reth-node-core",
  "reth-node-events",
  "reth-payload-builder",
+ "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
  "reth-prune",

@@ -264,6 +264,11 @@ where
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            .maybe_reorg(
+                blockchain_db.clone(),
+                reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
+                node_config.debug.reorg_frequency,
+            )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.

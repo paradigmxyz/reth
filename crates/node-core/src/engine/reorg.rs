@@ -155,6 +155,8 @@ where
                             // at block `n` according to consensus checks) from the current payload
                             // as well as the corresponding forkchoice state. We will rely on CL to
                             // reorg us back to canonical chain.
+                            // TODO: This is an expensive blocking operation, ideally it's spawned
+                            // as a task so that the stream could yield the control back.
                             let (reorg_payload, reorg_cancun_fields) = match create_reorg_head(
                                 this.provider,
                                 this.payload_validator,
