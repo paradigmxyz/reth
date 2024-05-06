@@ -712,6 +712,7 @@ where
         }
 
         // Check if parent exists in side chain or in canonical chain.
+        // TODO: handle find_block_by_hash errors.
         if matches!(self.blockchain.find_block_by_hash(parent_hash, BlockSource::Any), Ok(Some(_)))
         {
             Some(parent_hash)
@@ -728,6 +729,7 @@ where
                 // ancestor in the cache, check its presence in blockchain tree
                 if current_header.is_none() &&
                     matches!(
+                        // TODO: handle find_block_by_hash errors.
                         self.blockchain.find_block_by_hash(current_hash, BlockSource::Any),
                         Ok(Some(_))
                     )
