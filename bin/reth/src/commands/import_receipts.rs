@@ -101,11 +101,8 @@ impl ImportReceiptsCommand {
 
         while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
             // create a new file client from chunk read from file
-            let ReceiptFileClient {
-                mut receipts,
-                mut first_block,
-                total_receipts: total_receipts_chunk,
-            } = file_client;
+            let ReceiptFileClient { receipts, first_block, total_receipts: total_receipts_chunk } =
+                file_client;
 
             // mark these as decoded
             total_decoded_receipts += total_receipts_chunk;
