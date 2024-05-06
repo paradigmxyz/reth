@@ -35,7 +35,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
-use futures::{pin_mut, Future, StreamExt};
+use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -53,7 +53,7 @@ use reth_tokio_util::EventListeners;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
-    pin::Pin,
+    pin::{pin, Pin},
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -403,7 +403,7 @@ where
     }
 
     /// Handle an incoming request from the peer
-    fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
+    fn on_eth_request(&self, peer_id: PeerId, req: PeerRequest) {
         match req {
             PeerRequest::GetBlockHeaders { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetBlockHeaders {
@@ -902,7 +902,7 @@ where
         shutdown_hook: impl FnOnce(&mut Self),
     ) {
         let network = self;
-        pin_mut!(network, shutdown);
+        let mut network = pin!(network);
 
         let mut graceful_guard = None;
         tokio::select! {

@@ -3,13 +3,22 @@ use futures::Future;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{Log, SealedBlockWithSenders, TransactionSigned};
+use reth_primitives::{address, Address, Log, SealedBlockWithSenders, TransactionSigned};
 use reth_provider::Chain;
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
 
 sol!(L1StandardBridge, "l1_standard_bridge_abi.json");
 use crate::L1StandardBridge::{ETHBridgeFinalized, ETHBridgeInitiated, L1StandardBridgeEvents};
+
+const OP_BRIDGES: [Address; 6] = [
+    address!("3154Cf16ccdb4C6d922629664174b904d80F2C35"),
+    address!("3a05E5d33d7Ab3864D53aaEc93c8301C1Fa49115"),
+    address!("697402166Fbf2F22E970df8a6486Ef171dbfc524"),
+    address!("99C9fc46f92E8a1c0deC1b1747d010903E884bE1"),
+    address!("735aDBbE72226BD52e818E7181953f42E3b0FF21"),
+    address!("3B95bC951EE0f553ba487327278cAc44f29715E5"),
+];
 
 /// Initializes the ExEx.
 ///
@@ -213,8 +222,14 @@ fn decode_chain_into_events(
                 .zip(receipts.iter().flatten())
                 .map(move |(tx, receipt)| (block, tx, receipt))
         })
-        // Get all logs
-        .flat_map(|(block, tx, receipt)| receipt.logs.iter().map(move |log| (block, tx, log)))
+        // Get all logs from expected bridge contracts
+        .flat_map(|(block, tx, receipt)| {
+            receipt
+                .logs
+                .iter()
+                .filter(|log| OP_BRIDGES.contains(&log.address))
+                .map(move |log| (block, tx, log))
+        })
         // Decode and filter bridge events
         .filter_map(|(block, tx, log)| {
             L1StandardBridgeEvents::decode_raw_log(log.topics(), &log.data.data, true)

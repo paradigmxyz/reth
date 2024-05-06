@@ -114,7 +114,7 @@ impl MockDiscovery {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    fn send_packet(&mut self, msg: Message, to: SocketAddr) -> B256 {
+    fn send_packet(&self, msg: Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         let _ = self.egress.try_send((payload, to));
         hash

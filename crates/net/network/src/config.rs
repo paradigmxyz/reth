@@ -176,8 +176,6 @@ pub struct NetworkConfigBuilder {
     dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery version 4.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
-    /// Whether to enable discovery version 5. Disabled by default.
-    enable_discovery_v5: bool,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
     /// Address to use for discovery
@@ -220,7 +218,6 @@ impl NetworkConfigBuilder {
             secret_key,
             dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
-            enable_discovery_v5: false,
             boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
@@ -353,12 +350,6 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Allows discv5 discovery.
-    pub fn discovery_v5(mut self) -> Self {
-        self.enable_discovery_v5 = true;
-        self
-    }
-
     /// Sets the dns discovery config to use.
     pub fn dns_discovery(mut self, config: DnsDiscoveryConfig) -> Self {
         self.dns_discovery_config = Some(config);
@@ -404,12 +395,6 @@ impl NetworkConfigBuilder {
     /// Disable the Discv4 discovery.
     pub fn disable_discv4_discovery(mut self) -> Self {
         self.discovery_v4_builder = None;
-        self
-    }
-
-    /// Enable the Discv5 discovery.
-    pub fn enable_discv5_discovery(mut self) -> Self {
-        self.enable_discovery_v5 = true;
         self
     }
 
@@ -469,7 +454,6 @@ impl NetworkConfigBuilder {
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
-            enable_discovery_v5: _,
             boot_nodes,
             discovery_addr,
             listener_addr,

@@ -1,12 +1,5 @@
 //! Unwinding a certain block range
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{Config, PruneConfig};
@@ -21,7 +14,6 @@ use reth_node_core::{
     args::{get_secret_key, NetworkArgs},
     dirs::ChainPath,
 };
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
@@ -41,6 +33,15 @@ use reth_static_file::StaticFileProducer;
 use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
 use tracing::info;
+
+use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
+};
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -178,10 +179,7 @@ impl Command {
         let stage_conf = &config.stages;
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory = reth_revm::EvmProcessorFactory::new(
-            provider_factory.chain_spec(),
-            EthEvmConfig::default(),
-        );
+        let executor = block_executor!(provider_factory.chain_spec());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
@@ -193,14 +191,14 @@ impl Command {
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
-                    factory.clone(),
+                    executor.clone(),
                     stage_conf.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
                 .set(ExecutionStage::new(
-                    factory,
+                    executor,
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,

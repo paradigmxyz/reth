@@ -733,7 +733,6 @@ impl PoolTransaction for MockTransaction {
     fn chain_id(&self) -> Option<u64> {
         match self {
             MockTransaction::Legacy { chain_id, .. } => *chain_id,
-
             MockTransaction::Eip1559 { chain_id, .. } |
             MockTransaction::Eip4844 { chain_id, .. } |
             MockTransaction::Eip2930 { chain_id, .. } => Some(*chain_id),

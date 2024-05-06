@@ -234,7 +234,7 @@ where
     }
 
     /// Invoked when a new [`ForkId`] is activated.
-    pub(crate) fn update_fork_id(&mut self, fork_id: ForkId) {
+    pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         self.discovery.update_fork_id(fork_id)
     }
 

@@ -6,6 +6,7 @@ use crate::{
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -26,7 +27,6 @@ use reth_interfaces::p2p::{
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_node_core::init::init_genesis;
-use reth_node_ethereum::EthEvmConfig;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{
@@ -269,8 +269,7 @@ where
         .expect("failed to set download range");
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-    let factory =
-        reth_revm::EvmProcessorFactory::new(provider_factory.chain_spec(), EthEvmConfig::default());
+    let executor = block_executor!(provider_factory.chain_spec());
 
     let max_block = file_client.max_block().unwrap_or(0);
 
@@ -285,14 +284,14 @@ where
                 consensus.clone(),
                 header_downloader,
                 body_downloader,
-                factory.clone(),
+                executor.clone(),
                 config.stages.etl.clone(),
             )
             .set(SenderRecoveryStage {
                 commit_threshold: config.stages.sender_recovery.commit_threshold,
             })
             .set(ExecutionStage::new(
-                factory,
+                executor,
                 ExecutionStageThresholds {
                     max_blocks: config.stages.execution.max_blocks,
                     max_changes: config.stages.execution.max_changes,
