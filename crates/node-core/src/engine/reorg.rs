@@ -366,7 +366,7 @@ where
                 Some(sum_blob_gas_used),
                 Some(calculate_excess_blob_gas(
                     reorg_target_parent.excess_blob_gas.unwrap_or_default(),
-                    reorg_target_parent.excess_blob_gas.unwrap_or_default(),
+                    reorg_target_parent.blob_gas_used.unwrap_or_default(),
                 )),
             )
         } else {
