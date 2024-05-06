@@ -1249,7 +1249,6 @@ where
         &self,
         revert_until: BlockNumber,
     ) -> Result<Option<Chain>, CanonicalError> {
-
         // This should only happen when an optimistic sync target was re-orged.
         //
         // Static files generally contain finalized data. The blockchain tree only deals
