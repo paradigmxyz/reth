@@ -239,6 +239,7 @@ where
     pub fn move_to_static_files(&self) -> RethResult<()> {
         let mut static_file_producer = self.static_file_producer.lock();
 
+        // Copies data from database to static files
         let lowest_static_file_height = {
             let provider = self.provider_factory.provider()?;
             let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
@@ -257,9 +258,10 @@ where
             stages_checkpoints.into_iter().min().expect("exists")
         };
 
+        // Deletes data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {
             // Run the pruner so we don't potentially end up with higher height in the database vs
-            // static files.
+            // static files during a pipeline unwind
             let mut pruner = PrunerBuilder::new(Default::default())
                 .prune_delete_limit(usize::MAX)
                 .build(self.provider_factory.clone());
