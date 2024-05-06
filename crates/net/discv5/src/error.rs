@@ -35,4 +35,7 @@ pub enum Error {
     /// An error from underlying [`discv5::Discv5`] node.
     #[error("sigp/discv5 error, {0}")]
     Discv5Error(discv5::Error),
+    /// The [`ListenConfig`](discv5::ListenConfig) has been misconfigured.
+    #[error("misconfigured listen config, RLPx TCP address must also be supported by discv5")]
+    ListenConfigMisconfigured,
 }

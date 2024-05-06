@@ -498,6 +498,10 @@ impl<'a> From<&'a ExecutionPayload> for BeaconExecutionPayload<'a> {
             ExecutionPayload::V3(payload) => {
                 BeaconExecutionPayload::V3(BeaconExecutionPayloadV3::from(payload))
             }
+            ExecutionPayload::V4(_payload) => {
+                // TODO(onbjerg): Implement `ExecutionPayloadV4` support
+                todo!()
+            }
         }
     }
 }
