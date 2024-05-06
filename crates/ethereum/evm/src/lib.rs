@@ -16,6 +16,10 @@ use reth_primitives::{
 };
 use reth_revm::{Database, EvmBuilder};
 pub mod execute;
+pub mod verify;
+
+/// Ethereum DAO hardfork state change data.
+pub mod dao_fork;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]

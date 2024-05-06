@@ -173,7 +173,7 @@ impl<T> MeteredSender<T> {
 
     /// Calls the underlying [Sender](mpsc::Sender)'s `send`, incrementing the appropriate
     /// metrics depending on the result.
-    pub async fn send(&mut self, value: T) -> Result<(), SendError<T>> {
+    pub async fn send(&self, value: T) -> Result<(), SendError<T>> {
         match self.sender.send(value).await {
             Ok(()) => {
                 self.metrics.messages_sent.increment(1);

@@ -126,6 +126,7 @@ impl Command {
         let mut network_config_builder = config
             .network_config(self.nat, None, p2p_secret_key)
             .chain_spec(self.chain.clone())
+            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .boot_nodes(self.chain.bootnodes().unwrap_or_default());
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
@@ -136,7 +137,10 @@ impl Command {
             data_dir.static_files(),
         )?));
 
-        if self.discovery.enable_discv5_discovery {
+        if !self.discovery.disable_discovery &&
+            (self.discovery.enable_discv5_discovery ||
+                network_config.chain_spec.chain.is_optimism())
+        {
             network_config = network_config.discovery_v5_with_config_builder(|builder| {
                 let DiscoveryArgs {
                     discv5_addr,

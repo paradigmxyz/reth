@@ -43,7 +43,7 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
 
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
-    pub fn new(mut jar: NippyJar<H>) -> Result<Self, NippyJarError> {
+    pub fn new(jar: NippyJar<H>) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 

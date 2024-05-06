@@ -239,7 +239,7 @@ impl TransactionFetcher {
     ///
     /// Returns left over hashes.
     pub fn pack_request(
-        &mut self,
+        &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
@@ -260,7 +260,7 @@ impl TransactionFetcher {
     /// response. If no, it's added to surplus hashes. If yes, it's added to hashes to the request
     /// and expected response size is accumulated.
     pub fn pack_request_eth68(
-        &mut self,
+        &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: impl HandleMempoolData
             + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
@@ -328,7 +328,7 @@ impl TransactionFetcher {
     ///
     /// Returns left over hashes.
     pub fn pack_request_eth66(
-        &mut self,
+        &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {

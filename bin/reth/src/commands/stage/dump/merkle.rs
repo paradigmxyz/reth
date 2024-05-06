@@ -1,11 +1,10 @@
 use super::setup;
-use crate::utils::DbTool;
+use crate::{macros::block_executor, utils::DbTool};
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, PruneModes};
 use reth_provider::ProviderFactory;
 use reth_stages::{
@@ -81,9 +80,11 @@ async fn unwind_and_copy<DB: Database>(
 
     MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
+    let executor = block_executor!(db_tool.chain.clone());
+
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
-        reth_revm::EvmProcessorFactory::new(db_tool.chain.clone(), EthEvmConfig::default()),
+        executor,
         ExecutionStageThresholds {
             max_blocks: Some(u64::MAX),
             max_changes: None,

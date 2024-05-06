@@ -18,7 +18,7 @@ use reth_payload_builder::{
     PayloadJobGenerator,
 };
 use reth_primitives::{
-    constants::{EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION},
+    constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
@@ -251,8 +251,6 @@ impl PayloadTaskGuard {
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
     extradata: Bytes,
-    /// Target gas ceiling for built blocks, defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
-    max_gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
@@ -296,21 +294,12 @@ impl BasicPayloadJobGeneratorConfig {
         self.extradata = extradata;
         self
     }
-
-    /// Sets the target gas ceiling for mined blocks.
-    ///
-    /// Defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
-    pub fn max_gas_limit(mut self, max_gas_limit: u64) -> Self {
-        self.max_gas_limit = max_gas_limit;
-        self
-    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
         Self {
             extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,

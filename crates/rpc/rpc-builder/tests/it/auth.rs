@@ -2,13 +2,13 @@
 
 use crate::utils::launch_auth;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
-use reth_node_ethereum::EthEngineTypes;
+use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_primitives::{Block, U64};
 use reth_rpc::JwtSecret;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadId, TransitionConfiguration};
 use reth_rpc_types_compat::engine::payload::{
-    convert_block_to_payload_input_v2, try_block_to_payload_v1,
+    block_to_payload_v1, convert_block_to_payload_input_v2,
 };
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
@@ -17,7 +17,7 @@ where
     C: EngineApiClient<EthEngineTypes>,
 {
     let block = Block::default().seal_slow();
-    EngineApiClient::new_payload_v1(client, try_block_to_payload_v1(block.clone())).await;
+    EngineApiClient::new_payload_v1(client, block_to_payload_v1(block.clone())).await;
     EngineApiClient::new_payload_v2(client, convert_block_to_payload_input_v2(block)).await;
     EngineApiClient::fork_choice_updated_v1(client, ForkchoiceState::default(), None).await;
     EngineApiClient::get_payload_v1(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;

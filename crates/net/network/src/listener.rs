@@ -104,8 +104,10 @@ impl Stream for TcpListenerStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::pin_mut;
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::{
+        net::{Ipv4Addr, SocketAddrV4},
+        pin::pin,
+    };
     use tokio::macros::support::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -117,7 +119,7 @@ mod tests {
         let local_addr = listener.local_address();
 
         tokio::task::spawn(async move {
-            pin_mut!(listener);
+            let mut listener = pin!(listener);
             match poll_fn(|cx| listener.as_mut().poll(cx)).await {
                 ListenerEvent::Incoming { .. } => {}
                 _ => {

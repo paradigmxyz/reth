@@ -446,7 +446,7 @@ where
     ///
     /// Returns `true` if the head needs to be updated.
     fn on_head_already_canonical(
-        &mut self,
+        &self,
         header: &SealedHeader,
         attrs: &mut Option<EngineT::PayloadAttributes>,
     ) -> bool {
@@ -506,7 +506,7 @@ where
         } else {
             let previous_action = self
                 .blockchain_tree_action
-                .replace(BlockchainTreeAction::FcuMakeCanonical { state, attrs, tx });
+                .replace(BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx });
             debug_assert!(previous_action.is_none(), "Pre-existing action found");
         }
     }
@@ -804,7 +804,7 @@ where
     /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
     /// consistent with the head block.
     fn ensure_consistent_forkchoice_state(
-        &mut self,
+        &self,
         state: ForkchoiceState,
     ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
         // Ensure that the finalized block, if not zero, is known and in the canonical chain
@@ -1624,7 +1624,7 @@ where
         action: BlockchainTreeAction<EngineT>,
     ) -> RethResult<EngineEventOutcome> {
         match action {
-            BlockchainTreeAction::FcuMakeCanonical { state, attrs, tx } => {
+            BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx } => {
                 let start = Instant::now();
                 let result = self.blockchain.make_canonical(state.head_block_hash);
                 let elapsed = self.record_make_canonical_latency(start, &result);
@@ -1697,36 +1697,46 @@ where
                         // if we're currently syncing and the inserted block is the targeted
                         // FCU head block, we can try to make it canonical.
                         if block_hash == target.head_block_hash {
-                            if let Err((_hash, error)) =
-                                self.try_make_sync_target_canonical(block_num_hash)
-                            {
-                                if error.is_fatal() {
-                                    let response = Err(BeaconOnNewPayloadError::Internal(
-                                        Box::new(error.clone()),
-                                    ));
-                                    let _ = tx.send(response);
-                                    return Err(RethError::Canonical(error))
-                                }
-
-                                // If we could not make the sync target block canonical,
-                                // we should return the error as an invalid payload status.
-                                let status = Ok(PayloadStatus::new(
-                                    PayloadStatusEnum::Invalid {
-                                        validation_error: error.to_string(),
-                                    },
-                                    // TODO: return a proper latest valid hash
-                                    // See: <https://github.com/paradigmxyz/reth/issues/7146>
-                                    self.forkchoice_state_tracker.last_valid_head(),
-                                ));
-                                let _ = tx.send(status);
-                                return Ok(EngineEventOutcome::Processed)
-                            }
+                            let previous_action = self.blockchain_tree_action.replace(
+                                BlockchainTreeAction::MakeNewPayloadCanonical {
+                                    payload_num_hash: block_num_hash,
+                                    status,
+                                    tx,
+                                },
+                            );
+                            debug_assert!(previous_action.is_none(), "Pre-existing action found");
+                            return Ok(EngineEventOutcome::Processed)
                         }
                     }
                     // block was successfully inserted, so we can cancel the full block
                     // request, if any exists
                     self.sync.cancel_full_block_request(block_hash);
                 }
+
+                trace!(target: "consensus::engine", ?status, "Returning payload status");
+                let _ = tx.send(Ok(status));
+            }
+            BlockchainTreeAction::MakeNewPayloadCanonical { payload_num_hash, status, tx } => {
+                let status = match self.try_make_sync_target_canonical(payload_num_hash) {
+                    Ok(()) => status,
+                    Err((_hash, error)) => {
+                        if error.is_fatal() {
+                            let response =
+                                Err(BeaconOnNewPayloadError::Internal(Box::new(error.clone())));
+                            let _ = tx.send(response);
+                            return Err(RethError::Canonical(error))
+                        }
+
+                        // If we could not make the sync target block canonical,
+                        // we should return the error as an invalid payload status.
+                        PayloadStatus::new(
+                            PayloadStatusEnum::Invalid { validation_error: error.to_string() },
+                            // TODO: return a proper latest valid hash
+                            // See: <https://github.com/paradigmxyz/reth/issues/7146>
+                            self.forkchoice_state_tracker.last_valid_head(),
+                        )
+                    }
+                };
 
                 trace!(target: "consensus::engine", ?status, "Returning payload status");
                 let _ = tx.send(Ok(status));
@@ -1859,13 +1869,18 @@ where
 }
 
 enum BlockchainTreeAction<EngineT: EngineTypes> {
-    FcuMakeCanonical {
+    MakeForkchoiceHeadCanonical {
         state: ForkchoiceState,
         attrs: Option<EngineT::PayloadAttributes>,
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
     InsertNewPayload {
         block: SealedBlock,
+        tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
+    },
+    MakeNewPayloadCanonical {
+        payload_num_hash: BlockNumHash,
+        status: PayloadStatus,
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
 }
@@ -1891,7 +1906,7 @@ mod tests {
     use reth_primitives::{stage::StageCheckpoint, ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
-    use reth_rpc_types_compat::engine::payload::try_block_to_payload_v1;
+    use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
     use std::{collections::VecDeque, sync::Arc};
     use tokio::sync::oneshot::error::TryRecvError;
@@ -1953,7 +1968,7 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received
-        let _ = env.send_new_payload(try_block_to_payload_v1(SealedBlock::default()), None).await;
+        let _ = env.send_new_payload(block_to_payload_v1(SealedBlock::default()), None).await;
 
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
@@ -2410,7 +2425,7 @@ mod tests {
             // Send new payload
             let res = env
                 .send_new_payload(
-                    try_block_to_payload_v1(random_block(&mut rng, 0, None, None, Some(0))),
+                    block_to_payload_v1(random_block(&mut rng, 0, None, None, Some(0))),
                     None,
                 )
                 .await;
@@ -2421,7 +2436,7 @@ mod tests {
             // Send new payload
             let res = env
                 .send_new_payload(
-                    try_block_to_payload_v1(random_block(&mut rng, 1, None, None, Some(0))),
+                    block_to_payload_v1(random_block(&mut rng, 1, None, None, Some(0))),
                     None,
                 )
                 .await;
@@ -2477,7 +2492,7 @@ mod tests {
 
             // Send new payload
             let result = env
-                .send_new_payload_retry_on_syncing(try_block_to_payload_v1(block2.clone()), None)
+                .send_new_payload_retry_on_syncing(block_to_payload_v1(block2.clone()), None)
                 .await
                 .unwrap();
 
@@ -2591,7 +2606,7 @@ mod tests {
             // Send new payload
             let parent = rng.gen();
             let block = random_block(&mut rng, 2, Some(parent), None, Some(0));
-            let res = env.send_new_payload(try_block_to_payload_v1(block), None).await;
+            let res = env.send_new_payload(block_to_payload_v1(block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2658,7 +2673,7 @@ mod tests {
 
             // Send new payload
             let result = env
-                .send_new_payload_retry_on_syncing(try_block_to_payload_v1(block2.clone()), None)
+                .send_new_payload_retry_on_syncing(block_to_payload_v1(block2.clone()), None)
                 .await
                 .unwrap();
 

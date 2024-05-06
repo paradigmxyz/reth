@@ -9,6 +9,7 @@ Usage: reth db [OPTIONS] <COMMAND>
 Commands:
   stats                Lists all the tables, their entry count and their size
   list                 Lists the contents of a table
+  checksum             Calculates the content checksum of a table
   diff                 Create a diff between two database tables or two entire databases
   get                  Gets the content of a table for the given key
   drop                 Deletes all database entries
