@@ -25,7 +25,8 @@ pub struct ReceiptFileClient {
 impl FromReader for ReceiptFileClient {
     type Error = FileClientError;
 
-    /// Initialize the [`ReceiptFileClient`] from bytes that have been read from file.
+    /// Initialize the [`ReceiptFileClient`] from bytes that have been read from file. Caution! If
+    /// first block has no transactions, it's assumed to be the genesis block.
     fn from_reader<B>(
         reader: B,
         num_bytes: u64,
@@ -96,16 +97,21 @@ impl FromReader for ReceiptFileClient {
                     None => {
                         match first_block {
                             Some(num) => {
+                                // if there was a block number before this, push receipts for that
+                                // block
                                 receipts.push(receipts_for_block);
+                                // block with no txns
                                 block_number = num + receipts.len() as u64;
                             }
                             None => {
+                                // this is the first block and it's empty, assume it's the genesis
+                                // block
                                 first_block = Some(0);
                                 block_number = 0;
                             }
                         }
 
-                        receipts_for_block = vec![None];
+                        receipts_for_block = vec![];
                     }
                 }
 
@@ -167,7 +173,10 @@ mod test {
     use crate::file_codec_ovm_receipt::test::{
         receipt_block_1 as op_mainnet_receipt_block_1,
         receipt_block_2 as op_mainnet_receipt_block_2,
-        HACK_RECEIPT_ENCODED_BLOCK_1_AND_BLOCK_2 as HACK_RECEIPT_ENCODED_BLOCK_1_AND_BLOCK_2_OP_MAINNET,
+        receipt_block_3 as op_mainnet_receipt_block_3,
+        HACK_RECEIPT_ENCODED_BLOCK_1 as HACK_RECEIPT_ENCODED_BLOCK_1_OP_MAINNET,
+        HACK_RECEIPT_ENCODED_BLOCK_2 as HACK_RECEIPT_ENCODED_BLOCK_2_OP_MAINNET,
+        HACK_RECEIPT_ENCODED_BLOCK_3 as HACK_RECEIPT_ENCODED_BLOCK_3_OP_MAINNET,
     };
 
     use super::*;
@@ -182,7 +191,8 @@ mod test {
         // genesis block has no hack receipts
         let mut encoded_receipts = HACK_RECEIPT_BLOCK_NO_TRANSACTIONS.to_vec();
         // one receipt each for block 1 and 2
-        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_1_AND_BLOCK_2_OP_MAINNET);
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_1_OP_MAINNET);
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_2_OP_MAINNET);
         // no receipt for block 4
         encoded_receipts.extend_from_slice(HACK_RECEIPT_BLOCK_NO_TRANSACTIONS);
 
@@ -194,9 +204,65 @@ mod test {
 
         assert_eq!(4, total_receipts);
         assert_eq!(0, first_block);
-        assert_eq!(None, receipts[0][0].clone());
+        assert!(receipts[0].is_empty());
         assert_eq!(op_mainnet_receipt_block_1().receipt, receipts[1][0].clone().unwrap());
         assert_eq!(op_mainnet_receipt_block_2().receipt, receipts[2][0].clone().unwrap());
-        assert_eq!(None, receipts[3][0].clone());
+        assert!(receipts[3].is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_receipts_middle_block() {
+        init_test_tracing();
+
+        // genesis block has no hack receipts
+        let mut encoded_receipts = HACK_RECEIPT_BLOCK_NO_TRANSACTIONS.to_vec();
+        // one receipt each for block 1
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_1_OP_MAINNET);
+        // no receipt for block 2
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_BLOCK_NO_TRANSACTIONS);
+        // one receipt for block 3
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_3_OP_MAINNET);
+
+        let encoded_byte_len = encoded_receipts.len() as u64;
+        let reader = &mut &encoded_receipts[..];
+
+        let (ReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
+            ReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
+
+        assert_eq!(4, total_receipts);
+        assert_eq!(0, first_block);
+        assert!(receipts[0].is_empty());
+        assert_eq!(op_mainnet_receipt_block_1().receipt, receipts[1][0].clone().unwrap());
+        assert!(receipts[2].is_empty());
+        assert_eq!(op_mainnet_receipt_block_3().receipt, receipts[3][0].clone().unwrap());
+    }
+
+    #[tokio::test]
+    async fn two_receipts_same_block() {
+        init_test_tracing();
+
+        // genesis block has no hack receipts
+        let mut encoded_receipts = HACK_RECEIPT_BLOCK_NO_TRANSACTIONS.to_vec();
+        // one receipt each for block 1
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_1_OP_MAINNET);
+        // two receipts for block 2
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_2_OP_MAINNET);
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_2_OP_MAINNET);
+        // one receipt for block 3
+        encoded_receipts.extend_from_slice(HACK_RECEIPT_ENCODED_BLOCK_3_OP_MAINNET);
+
+        let encoded_byte_len = encoded_receipts.len() as u64;
+        let reader = &mut &encoded_receipts[..];
+
+        let (ReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
+            ReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
+
+        assert_eq!(5, total_receipts);
+        assert_eq!(0, first_block);
+        assert!(receipts[0].is_empty());
+        assert_eq!(op_mainnet_receipt_block_1().receipt, receipts[1][0].clone().unwrap());
+        assert_eq!(op_mainnet_receipt_block_2().receipt, receipts[2][0].clone().unwrap());
+        assert_eq!(op_mainnet_receipt_block_2().receipt, receipts[2][1].clone().unwrap());
+        assert_eq!(op_mainnet_receipt_block_3().receipt, receipts[3][0].clone().unwrap());
     }
 }
