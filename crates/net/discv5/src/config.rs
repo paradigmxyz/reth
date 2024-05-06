@@ -513,7 +513,7 @@ mod test {
 
         assert_eq!(*config_socket_ipv4.ip(), rlpx_addr);
         assert_eq!(config_socket_ipv4.port(), DEFAULT_DISCOVERY_V5_PORT);
-        assert_eq!(ipv6(&amended_config), None);
+        assert_eq!(ipv6(&amended_config), ipv6(&listen_config));
     }
 
     #[test]
@@ -528,6 +528,6 @@ mod test {
 
         assert_eq!(*config_socket_ipv6.ip(), rlpx_addr);
         assert_eq!(config_socket_ipv6.port(), DEFAULT_DISCOVERY_V5_PORT);
-        assert_eq!(ipv4(&amended_config), None);
+        assert_eq!(ipv4(&amended_config), ipv4(&listen_config));
     }
 }
