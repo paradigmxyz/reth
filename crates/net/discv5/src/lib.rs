@@ -39,8 +39,8 @@ pub use discv5::{self, IpMode};
 
 pub use config::{
     BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
-    DEFAULT_DISCOVERY_V5_PORT, DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
-    DEFAULT_SECONDS_LOOKUP_INTERVAL,
+    DEFAULT_DISCOVERY_V5_ADDR_IPV6, DEFAULT_DISCOVERY_V5_PORT,
+    DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 pub use enr::enr_to_discv4_id;
 pub use error::Error;
@@ -66,8 +66,8 @@ pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = 0;
 pub struct Discv5 {
     /// sigp/discv5 node.
     discv5: Arc<discv5::Discv5>,
-    /// [`IpMode`] of the the node.
-    ip_mode: IpMode,
+    /// [`IpMode`] of the the RLPx network.
+    rlpx_ip_mode: IpMode,
     /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
     fork_key: Option<&'static [u8]>,
     /// Filter applied to a discovered peers before passing it up to app.
@@ -162,7 +162,7 @@ impl Discv5 {
         //
         // 1. make local enr from listen config
         //
-        let (enr, bc_enr, fork_key, ip_mode) = build_local_enr(sk, &discv5_config);
+        let (enr, bc_enr, fork_key, rlpx_ip_mode) = build_local_enr(sk, &discv5_config);
 
         trace!(target: "net::discv5",
             ?enr,
@@ -214,7 +214,7 @@ impl Discv5 {
         );
 
         Ok((
-            Self { discv5, ip_mode, fork_key, discovered_peer_filter, metrics },
+            Self { discv5, rlpx_ip_mode, fork_key, discovered_peer_filter, metrics },
             discv5_updates,
             bc_enr,
         ))
@@ -328,7 +328,7 @@ impl Discv5 {
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local [`IpMode`]. Uses source socket as udp socket.
+    /// w.r.t. local RLPx [`IpMode`]. Uses source socket as udp socket.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
@@ -336,13 +336,15 @@ impl Discv5 {
     ) -> Result<NodeRecord, Error> {
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        // since we, on bootstrap, set tcp4 in local ENR for `IpMode::Dual`, we prefer tcp4 here
-        // too
-        let Some(tcp_port) = (match self.ip_mode() {
-            IpMode::Ip4 | IpMode::DualStack => enr.tcp4(),
+        if enr.tcp4().is_none() && enr.tcp6().is_none() {
+            return Err(Error::UnreachableRlpx)
+        }
+        let Some(tcp_port) = (match self.rlpx_ip_mode {
+            IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
+            _ => unimplemented!("dual-stack support not implemented for rlpx"),
         }) else {
-            return Err(Error::IpVersionMismatchRlpx(self.ip_mode()))
+            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode))
         };
 
         Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
@@ -385,9 +387,9 @@ impl Discv5 {
     // Complementary
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
-    /// Returns the [`IpMode`] of the local node.
+    /// Returns the RLPx [`IpMode`] of the local node.
     pub fn ip_mode(&self) -> IpMode {
-        self.ip_mode
+        self.rlpx_ip_mode
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
@@ -418,42 +420,44 @@ pub fn build_local_enr(
 ) -> (Enr<SecretKey>, NodeRecord, Option<&'static [u8]>, IpMode) {
     let mut builder = discv5::enr::Enr::builder();
 
-    let Config { discv5_config, fork, tcp_port, other_enr_kv_pairs, .. } = config;
+    let Config { discv5_config, fork, tcp_socket, other_enr_kv_pairs, .. } = config;
 
-    let (ip_mode, socket) = match discv5_config.listen_config {
+    let socket = match discv5_config.listen_config {
         ListenConfig::Ipv4 { ip, port } => {
             if ip != Ipv4Addr::UNSPECIFIED {
                 builder.ip4(ip);
             }
             builder.udp4(port);
-            builder.tcp4(*tcp_port);
+            builder.tcp4(tcp_socket.port());
 
-            (IpMode::Ip4, (ip, port).into())
+            (ip, port).into()
         }
         ListenConfig::Ipv6 { ip, port } => {
             if ip != Ipv6Addr::UNSPECIFIED {
                 builder.ip6(ip);
             }
             builder.udp6(port);
-            builder.tcp6(*tcp_port);
+            builder.tcp6(tcp_socket.port());
 
-            (IpMode::Ip6, (ip, port).into())
+            (ip, port).into()
         }
         ListenConfig::DualStack { ipv4, ipv4_port, ipv6, ipv6_port } => {
             if ipv4 != Ipv4Addr::UNSPECIFIED {
                 builder.ip4(ipv4);
             }
             builder.udp4(ipv4_port);
-            builder.tcp4(*tcp_port);
+            builder.tcp4(tcp_socket.port());
 
             if ipv6 != Ipv6Addr::UNSPECIFIED {
                 builder.ip6(ipv6);
             }
             builder.udp6(ipv6_port);
 
-            (IpMode::DualStack, (ipv6, ipv6_port).into())
+            (ipv6, ipv6_port).into()
         }
     };
+
+    let rlpx_ip_mode = if tcp_socket.is_ipv4() { IpMode::Ip4 } else { IpMode::Ip6 };
 
     // identifies which network node is on
     let network_stack_id = fork.as_ref().map(|(network_stack_id, fork_value)| {
@@ -473,7 +477,7 @@ pub fn build_local_enr(
     // backwards compatible enr
     let bc_enr = NodeRecord::from_secret_key(socket, sk);
 
-    (enr, bc_enr, network_stack_id, ip_mode)
+    (enr, bc_enr, network_stack_id, rlpx_ip_mode)
 }
 
 /// Bootstraps underlying [`discv5::Discv5`] node with configured peers.
@@ -660,7 +664,7 @@ mod test {
                 )
                 .unwrap(),
             ),
-            ip_mode: IpMode::Ip4,
+            rlpx_ip_mode: IpMode::Ip4,
             fork_key: None,
             discovered_peer_filter: MustNotIncludeKeys::default(),
             metrics: Discv5Metrics::default(),
@@ -673,9 +677,10 @@ mod test {
         let secret_key = SecretKey::new(&mut thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port_discv5}").parse().unwrap();
+        let rlpx_addr: SocketAddr = "127.0.0.1:30303".parse().unwrap();
 
         let discv5_listen_config = ListenConfig::from(discv5_addr);
-        let discv5_config = Config::builder(30303)
+        let discv5_config = Config::builder(rlpx_addr)
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 
@@ -867,7 +872,9 @@ mod test {
         const TCP_PORT: u16 = 30303;
         let fork_id = MAINNET.latest_fork_id();
 
-        let config = Config::builder(TCP_PORT).fork(NetworkStackId::ETH, fork_id).build();
+        let config = Config::builder((Ipv4Addr::UNSPECIFIED, TCP_PORT).into())
+            .fork(NetworkStackId::ETH, fork_id)
+            .build();
 
         let sk = SecretKey::new(&mut thread_rng());
         let (enr, _, _, _) = build_local_enr(&sk, &config);
