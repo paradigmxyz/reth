@@ -121,7 +121,7 @@ impl ImportReceiptsCommand {
             // current list of receipts. When initially writing to static files, the provider
             // expects the first block to be block zero. So, if the first block returned by the file
             // client is block #1, we insert empty receipts for the genesis block.
-            if first_block == 1 {
+            /*if first_block == 1 {
                 // prepend the first empty receipts
                 receipts.insert(0, vec![]);
                 // this ensures the bundle state and static file producer start at zero
@@ -129,7 +129,7 @@ impl ImportReceiptsCommand {
                 // we count this as decoded so the partial import check later does not error if this
                 // branch is executed
                 total_decoded_receipts += 1;
-            }
+            }*/
 
             // We're reusing receipt writing code internal to
             // `BundleStateWithReceipts::write_to_storage`, so we just use a default empty
