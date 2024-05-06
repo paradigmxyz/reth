@@ -7007,6 +7007,7 @@ dependencies = [
  "reth-revm",
  "revm",
  "revm-primitives",
+ "thiserror",
  "tracing",
 ]
 
