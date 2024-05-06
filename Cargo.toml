@@ -278,14 +278,9 @@ reth-node-events = { path = "crates/node/events" }
 reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
-revm = { version = "8.0.0", features = [
-    "std",
-    "secp256k1",
-], default-features = false }
-revm-primitives = { version = "3.1.0", features = [
-    "std",
-], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "7d810bc" }
+revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "7168ac5" }
 
 # eth
 alloy-chains = "0.1.15"
@@ -294,20 +289,21 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "c3ea7bc" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "c3ea7bc" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "77c1240" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
 
 # misc
 auto_impl = "1"
@@ -382,10 +378,7 @@ secp256k1 = { version = "0.28", default-features = false, features = [
     "recovery",
 ] }
 # TODO: Remove `k256` feature: https://github.com/sigp/enr/pull/74
-enr = { version = "0.12.0", default-features = false, features = [
-    "k256",
-    "rust-secp256k1",
-] }
+enr = { version = "0.12.0", default-features = false, features = ["k256", "rust-secp256k1"] }
 
 # for eip-4844
 c-kzg = "1.0.0"
