@@ -8,7 +8,8 @@ use reth_primitives::{
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
+    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadV4, PayloadError,
 };
 
 /// Converts [ExecutionPayloadV1] to [Block]
@@ -81,6 +82,15 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
     base_block.header.excess_blob_gas = Some(payload.excess_blob_gas);
 
     Ok(base_block)
+}
+
+/// Converts [ExecutionPayloadV4] to [Block]
+pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
+    // this performs the same conversion as the underlying V3 payload.
+    //
+    // the new request lists (`deposit_requests`, `withdrawal_requests`) are EL -> CL only, so we do
+    // not do anything special here to handle them
+    try_payload_v3_to_block(payload.payload_inner)
 }
 
 /// Converts [SealedBlock] to [ExecutionPayload]
@@ -224,6 +234,7 @@ pub fn try_into_block(
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
         ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload)?,
         ExecutionPayload::V3(payload) => try_payload_v3_to_block(payload)?,
+        ExecutionPayload::V4(payload) => try_payload_v4_to_block(payload)?,
     };
 
     base_payload.header.parent_beacon_block_root = parent_beacon_block_root;
