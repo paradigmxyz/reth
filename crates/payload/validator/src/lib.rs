@@ -120,9 +120,20 @@ impl ExecutionPayloadValidator {
             })
         }
 
-        let cancun_active = self.is_cancun_active_at_timestamp(sealed_block.timestamp);
-
-        if !cancun_active {
+        if self.is_cancun_active_at_timestamp(sealed_block.timestamp) {
+            if sealed_block.header.blob_gas_used.is_none() {
+                // cancun active but blob gas used not present
+                return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
+            }
+            if sealed_block.header.excess_blob_gas.is_none() {
+                // cancun active but excess blob gas not present
+                return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
+            }
+            if cancun_fields.clone().into_inner().is_none() {
+                // cancun active but cancun fields not present
+                return Err(PayloadError::PostCancunWithoutCancunFields)
+            }
+        } else {
             if sealed_block.has_blob_transactions() {
                 // cancun not active but blob transactions present
                 return Err(PayloadError::PreCancunBlockWithBlobTransactions)
@@ -138,19 +149,6 @@ impl ExecutionPayloadValidator {
             if cancun_fields.clone().into_inner().is_some() {
                 // cancun not active but cancun fields present
                 return Err(PayloadError::PreCancunWithCancunFields)
-            }
-        } else {
-            if sealed_block.header.blob_gas_used.is_none() {
-                // cancun active but blob gas used not present
-                return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
-            }
-            if sealed_block.header.excess_blob_gas.is_none() {
-                // cancun active but excess blob gas not present
-                return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
-            }
-            if cancun_fields.clone().into_inner().is_none() {
-                // cancun active but cancun fields not present
-                return Err(PayloadError::PostCancunWithoutCancunFields)
             }
         }
 
