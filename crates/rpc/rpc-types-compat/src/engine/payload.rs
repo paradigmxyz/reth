@@ -95,6 +95,7 @@ pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, Pay
 
 /// Converts [SealedBlock] to [ExecutionPayload]
 pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
+    // todo(onbjerg): check for requests_root here and return payload v4
     if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
