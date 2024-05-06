@@ -147,9 +147,9 @@ impl Command {
         {
             network_config = network_config.discovery_v5_with_config_builder(|builder| {
                 let DiscoveryArgs {
-                    discv5_addr_ipv4,
+                    discv5_addr: discv5_addr_ipv4,
                     discv5_addr_ipv6,
-                    discv5_port_ipv4,
+                    discv5_port: discv5_port_ipv4,
                     discv5_port_ipv6,
                     discv5_lookup_interval,
                     discv5_bootstrap_lookup_interval,

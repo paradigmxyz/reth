@@ -232,19 +232,21 @@ pub struct DiscoveryArgs {
     pub port: u16,
 
     /// The UDP IPv4 address to use for devp2p peer discovery version 5.
-    #[arg(id = "discovery.v5.addr.ipv4", long = "discovery.v5.addr.ipv4", value_name = "DISCOVERY_V5_ADDR_IPV4", default_value = None)]
-    pub discv5_addr_ipv4: Option<Ipv4Addr>,
+    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR", default_value = None)]
+    pub discv5_addr: Option<Ipv4Addr>,
 
     /// The UDP IPv6 address to use for devp2p peer discovery version 5.
     #[arg(id = "discovery.v5.addr.ipv6", long = "discovery.v5.addr.ipv6", value_name = "DISCOVERY_V5_ADDR_IPV6", default_value = None)]
     pub discv5_addr_ipv6: Option<Ipv6Addr>,
 
-    /// The UDP IPv4 port to use for devp2p peer discovery version 5.
-    #[arg(id = "discovery.v5.port.ipv4", long = "discovery.v5.port.ipv4", value_name = "DISCOVERY_V5_PORT_IPV4",
+    /// The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
+    /// IPv4, or `--discv5.addr` is set.
+    #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
     default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
-    pub discv5_port_ipv4: u16,
+    pub discv5_port: u16,
 
-    /// The UDP IPv6 port to use for devp2p peer discovery version 5.
+    /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
+    /// IPv6, or `--discv5.addr.ipv6` is set.
     #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
     default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port_ipv6: u16,
@@ -300,9 +302,9 @@ impl Default for DiscoveryArgs {
             enable_discv5_discovery: cfg!(feature = "optimism"),
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
-            discv5_addr_ipv4: None,
+            discv5_addr: None,
             discv5_addr_ipv6: None,
-            discv5_port_ipv4: DEFAULT_DISCOVERY_V5_PORT,
+            discv5_port: DEFAULT_DISCOVERY_V5_PORT,
             discv5_port_ipv6: DEFAULT_DISCOVERY_V5_PORT,
             discv5_lookup_interval: DEFAULT_SECONDS_LOOKUP_INTERVAL,
             discv5_bootstrap_lookup_interval: DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
