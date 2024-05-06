@@ -38,7 +38,8 @@ pub struct StaticFileProviderRW {
     buf: Vec<u8>,
     /// Metrics.
     metrics: Option<Arc<StaticFileProviderMetrics>>,
-    /// On commit, does the instructed pruning: <NumberOfRows, Option<LastBlockNumber>>
+    /// On commit, does the instructed pruning: number of lines, and if it applies, the last block
+    /// it ends at.
     prune_on_commit: Option<(u64, Option<BlockNumber>)>,
 }
 
