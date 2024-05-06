@@ -475,7 +475,9 @@ impl RethRpcConfig for RpcServerArgs {
 
         let mut builder = AuthServerConfig::builder(jwt_secret).socket_addr(address);
         if self.auth_ipc {
-            builder = builder.ipc_endpoint(self.auth_ipc_path.clone());
+            builder = builder
+                .ipc_endpoint(self.auth_ipc_path.clone())
+                .with_ipc_config(self.ipc_server_builder());
         }
         Ok(builder.build())
     }
