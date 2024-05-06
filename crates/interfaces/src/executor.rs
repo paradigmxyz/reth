@@ -118,35 +118,20 @@ pub enum BlockExecutionError {
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
-
     /// Optimism Block Executor Errors
-    #[cfg(feature = "optimism")]
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Optimism Block Executor Errors
-#[cfg(feature = "optimism")]
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum OptimismBlockExecutionError {
-    /// Error when trying to parse L1 block info
-    #[error("could not get L1 block info from L2 block: {message:?}")]
-    L1BlockInfoError {
-        /// The inner error message
-        message: String,
-    },
-    /// Thrown when force deploy of create2deployer code fails.
-    #[error("failed to force create2deployer account code")]
-    ForceCreate2DeployerFail,
-    /// Thrown when a blob transaction is included in a sequencer's block.
-    #[error("blob transaction included in sequencer block")]
-    BlobTransactionRejected,
-    /// Thrown when a database account could not be loaded.
-    #[error("failed to load account {0}")]
-    AccountLoadFailed(reth_primitives::Address),
-}
-
 impl BlockExecutionError {
+    /// Create a new `BlockExecutionError::Other` variant.
+    pub fn other<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Other(Box::new(error))
+    }
+
     /// Returns `true` if the error is fatal.
     ///
     /// This represents an unrecoverable database related error.
