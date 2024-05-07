@@ -97,7 +97,7 @@ pub struct NetworkArgs {
     /// than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when
     /// assembling a `PooledTransactions` response. Default
     /// is 128 KiB.
-    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,long_help = None)]
+    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,help = "Sets the soft limit for the byte size of a single pooled transactions response when packing multiple responses into a single packet for a `GetPooledTransactions` request. Specified at 128 Kib by default.",long_help = None)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 }
 
