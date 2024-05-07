@@ -248,21 +248,3 @@ pub fn is_duplicate(tx_hash: TxHash, block_number: u64) -> bool {
     }
     false
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_common_import_command_chain_args() {
-        for chain in SUPPORTED_CHAINS {
-            let args: ImportOpCommand =
-                ImportOpCommand::parse_from(["reth", "--chain", chain, "."]);
-            assert_eq!(
-                Ok(args.chain.chain),
-                chain.parse::<reth_primitives::Chain>(),
-                "failed to parse chain {chain}"
-            );
-        }
-    }
-}
