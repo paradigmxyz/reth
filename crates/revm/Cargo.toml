@@ -17,7 +17,6 @@ reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-provider.workspace = true
 reth-consensus-common.workspace = true
-reth-evm = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 
 # revm
@@ -28,15 +27,7 @@ revm-inspectors.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-reth-evm.workspace = true
 reth-trie.workspace = true
 
 [features]
-test-utils = ["dep:reth-trie", "dep:reth-evm"]
-optimism = [
-    "revm/optimism",
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-interfaces/optimism",
-]
-js-tracer = ["revm-inspectors/js-tracer"]
+test-utils = ["dep:reth-trie"]
