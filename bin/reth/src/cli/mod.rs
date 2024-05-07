@@ -8,7 +8,7 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state,
+        config_cmd, db, debug_cmd, dump_genesis, import, import_receipts, init_cmd, init_state,
         node::{self, NoArgs},
         p2p, recover, stage, test_vectors,
     },
@@ -150,6 +150,9 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::ImportReceipts(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute())
+            }
             #[cfg(feature = "optimism")]
             Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -188,6 +191,9 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
+    /// This imports RLP encoded receipts from a file.
+    #[command(name = "import-receipts")]
+    ImportReceipts(import_receipts::ImportReceiptsCommand),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]

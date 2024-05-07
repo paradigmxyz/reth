@@ -138,7 +138,7 @@ impl ImportCommand {
         let mut total_decoded_blocks = 0;
         let mut total_decoded_txns = 0;
 
-        while let Some(file_client) = reader.next_chunk().await? {
+        while let Some(file_client) = reader.next_chunk::<FileClient>().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
