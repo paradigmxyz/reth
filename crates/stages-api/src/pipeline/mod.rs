@@ -141,7 +141,7 @@ where
                 match target {
                     PipelineTarget::Sync(tip) => self.set_tip(tip),
                     PipelineTarget::Unwind(target) => {
-                        if let Err(err) = self.produce_static_files() {
+                        if let Err(err) = self.move_to_static_files() {
                             return (self, Err(err.into()))
                         }
                         if let Err(err) = self.unwind(target, None) {
