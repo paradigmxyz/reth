@@ -43,17 +43,6 @@ use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, error, info};
 
-/// Stages that require state.
-const STATE_STAGES: &[StageId] = &[
-    StageId::Execution,
-    StageId::MerkleUnwind,
-    StageId::AccountHashing,
-    StageId::StorageHashing,
-    StageId::MerkleExecute,
-    StageId::IndexStorageHistory,
-    StageId::IndexAccountHistory,
-];
-
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
 pub struct ImportCommand {
@@ -171,7 +160,7 @@ impl ImportCommand {
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
-                true,
+                self.no_state,
             )
             .await?;
 
@@ -307,7 +296,7 @@ where
                 config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
                 ExExManagerHandle::empty(),
             ))
-            .disable_all_if(STATE_STAGES, || should_exec),
+            .disable_all_if(&StageId::STATE_REQUIRED, || should_exec),
         )
         .build(provider_factory, static_file_producer);
 
