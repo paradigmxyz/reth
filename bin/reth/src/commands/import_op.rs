@@ -10,7 +10,7 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 
 use reth_db::{init_db, tables, transaction::DbTx};
@@ -107,7 +107,7 @@ impl ImportOpCommand {
 
         init_genesis(provider_factory.clone())?;
 
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
         // open file

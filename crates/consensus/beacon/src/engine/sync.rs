@@ -1,8 +1,8 @@
 //! Sync management for the engine implementation.
 
 use crate::{
-    engine::metrics::EngineSyncMetrics, BeaconConsensus, BeaconConsensusEngineEvent,
-    ConsensusEngineLiveSyncProgress,
+    engine::metrics::EngineSyncMetrics, BeaconConsensusEngineEvent,
+    ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
 use futures::FutureExt;
 use reth_db::database::Database;
@@ -81,7 +81,7 @@ where
         Self {
             full_block_client: FullBlockClient::new(
                 client,
-                Arc::new(BeaconConsensus::new(chain_spec)),
+                Arc::new(EthBeaconConsensus::new(chain_spec)),
             ),
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
