@@ -94,7 +94,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
-    /// Fill transaction environment from a [Transaction] and the given sender address.
+    /// Fill transaction environment from a [TransactionSigned] and the given sender address.
     fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
 
     /// Fill [CfgEnvWithHandlerCfg] fields according to the chain spec and given header
