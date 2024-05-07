@@ -352,10 +352,7 @@ pub struct UnauthedP2PStream<S> {
 impl<S> UnauthedP2PStream<S> {
     // ...
     pub async fn handshake(mut self, hello: HelloMessage) -> Result<(P2PStream<S>, HelloMessage), Error> {
-        let mut raw_hello_bytes = BytesMut::new();
-        P2PMessage::Hello(hello.clone()).encode(&mut raw_hello_bytes);
-
-        self.inner.send(raw_hello_bytes.into()).await?;
+        self.inner.send(alloy_rlp::encode(P2PMessage::Hello(hello.clone())).into()).await?;
         let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next()).await;
 
         let their_hello = match P2PMessage::decode(&mut &first_message_bytes[..]) {

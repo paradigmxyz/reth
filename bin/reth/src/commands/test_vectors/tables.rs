@@ -58,12 +58,12 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
 
     generate!([
         (CanonicalHeaders, PER_TABLE, TABLE),
-        (HeaderTD, PER_TABLE, TABLE),
+        (HeaderTerminalDifficulties, PER_TABLE, TABLE),
         (HeaderNumbers, PER_TABLE, TABLE),
         (Headers, PER_TABLE, TABLE),
         (BlockBodyIndices, PER_TABLE, TABLE),
         (BlockOmmers, 100, TABLE),
-        (TxHashNumber, PER_TABLE, TABLE),
+        (TransactionHashNumbers, PER_TABLE, TABLE),
         (Transactions, 100, TABLE),
         (PlainStorageState, PER_TABLE, DUPSORT),
         (PlainAccountState, PER_TABLE, TABLE)
@@ -73,14 +73,15 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
 }
 
 /// Generates test-vectors for normal tables. Keys are sorted and not repeated.
-fn generate_table_vector<T: Table>(runner: &mut TestRunner, per_table: usize) -> Result<()>
+fn generate_table_vector<T>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
     T::Key: Arbitrary + serde::Serialize + Ord + std::hash::Hash,
     T::Value: Arbitrary + serde::Serialize,
+    T: Table,
 {
     let mut rows = vec![];
     let mut seen_keys = HashSet::new();
-    let strat = proptest::collection::vec(
+    let strategy = proptest::collection::vec(
         any_with::<TableRow<T>>((
             <T::Key as Arbitrary>::Parameters::default(),
             <T::Value as Arbitrary>::Parameters::default(),
@@ -93,7 +94,7 @@ where
     while rows.len() < per_table {
         // Generate all `per_table` rows: (Key, Value)
         rows.extend(
-            &mut strat
+            &mut strategy
                 .new_tree(runner)
                 .map_err(|e| eyre::eyre!("{e}"))?
                 .current()
@@ -109,9 +110,9 @@ where
 
 /// Generates test-vectors for DUPSORT tables. Each key has multiple (subkey, value). Keys and
 /// subkeys are sorted.
-fn generate_dupsort_vector<T: Table>(runner: &mut TestRunner, per_table: usize) -> Result<()>
+fn generate_dupsort_vector<T>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
-    T: DupSort,
+    T: Table + DupSort,
     T::Key: Arbitrary + serde::Serialize + Ord + std::hash::Hash,
     T::Value: Arbitrary + serde::Serialize + Ord,
 {

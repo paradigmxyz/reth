@@ -21,23 +21,21 @@
 //! [`StreamClone`] buffers egress bytes for [`MuxDemuxer`] that are read and sent to the network
 //! when [`MuxDemuxStream`] is polled.
 
-use std::{
-    collections::HashMap,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
-
-use derive_more::{Deref, DerefMut};
-use futures::{Sink, SinkExt, StreamExt};
-use reth_primitives::bytes::{Bytes, BytesMut};
-use tokio::sync::mpsc;
-use tokio_stream::Stream;
-
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability},
     errors::MuxDemuxError,
     CanDisconnect, DisconnectP2P, DisconnectReason,
 };
+use derive_more::{Deref, DerefMut};
+use futures::{Sink, SinkExt, StreamExt};
+use reth_primitives::bytes::{Bytes, BytesMut};
+use std::{
+    collections::HashMap,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+use tokio::sync::mpsc;
+use tokio_stream::Stream;
 
 use MuxDemuxError::*;
 
@@ -173,7 +171,7 @@ impl<S> MuxDemuxStream<S> {
 
     /// Checks if all clones of this shared stream have been dropped, if true then returns //
     /// function to drop the stream.
-    fn can_drop(&mut self) -> bool {
+    fn can_drop(&self) -> bool {
         for tx in self.demux.values() {
             if !tx.is_closed() {
                 return false
@@ -280,7 +278,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<S, E> CanDisconnect<Bytes> for MuxDemuxStream<S>
 where
     S: Sink<Bytes, Error = E> + CanDisconnect<Bytes> + Unpin + Send + Sync,
@@ -344,7 +341,6 @@ impl Sink<Bytes> for StreamClone {
     }
 }
 
-#[async_trait::async_trait]
 impl CanDisconnect<Bytes> for StreamClone {
     async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), MuxDemuxError> {
         Err(CannotDisconnectP2PStream)
@@ -353,21 +349,6 @@ impl CanDisconnect<Bytes> for StreamClone {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, pin::Pin};
-
-    use futures::{Future, SinkExt, StreamExt};
-    use reth_ecies::util::pk2id;
-    use reth_primitives::{
-        bytes::{BufMut, Bytes, BytesMut},
-        ForkFilter, Hardfork, MAINNET,
-    };
-    use secp256k1::{SecretKey, SECP256K1};
-    use tokio::{
-        net::{TcpListener, TcpStream},
-        task::JoinHandle,
-    };
-    use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
-
     use crate::{
         capability::{Capability, SharedCapabilities},
         muxdemux::MuxDemuxStream,
@@ -375,6 +356,19 @@ mod tests {
         EthVersion, HelloMessageWithProtocols, Status, StatusBuilder, StreamClone,
         UnauthedEthStream, UnauthedP2PStream,
     };
+    use futures::{Future, SinkExt, StreamExt};
+    use reth_network_types::pk2id;
+    use reth_primitives::{
+        bytes::{BufMut, Bytes, BytesMut},
+        ForkFilter, Hardfork, MAINNET,
+    };
+    use secp256k1::{SecretKey, SECP256K1};
+    use std::{net::SocketAddr, pin::Pin};
+    use tokio::{
+        net::{TcpListener, TcpStream},
+        task::JoinHandle,
+    };
+    use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
 
     const ETH_68_CAP: Capability = Capability::eth(EthVersion::Eth68);
     const ETH_68_PROTOCOL: Protocol = Protocol::new(ETH_68_CAP, 13);
@@ -435,12 +429,10 @@ mod tests {
             F: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
                 + Send
                 + Sync
-                + Send
                 + 'static,
             G: FnOnce(StreamClone) -> Pin<Box<(dyn Future<Output = BytesMut> + Send)>>
                 + Send
                 + Sync
-                + Send
                 + 'static,
         {
             let local_addr = self.local_addr;
@@ -464,7 +456,7 @@ mod tests {
             let remote_id = pk2id(&remote_key.public_key(SECP256K1));
             let mut remote_hello = self.local_hello.clone();
             remote_hello.id = remote_id;
-            let fork_filter = self.fork_filter.clone();
+            let fork_filter = self.fork_filter;
 
             let remote_handle = tokio::spawn(async move {
                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
@@ -515,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_unmask_msg_id() {
-        let mut msg = BytesMut::with_capacity(1);
+        let mut msg = Vec::with_capacity(1);
         msg.put_u8(0x07); // eth msg id
 
         let mxdmx_stream =
@@ -523,19 +515,19 @@ mod tests {
                 .unwrap();
         _ = mxdmx_stream.unmask_msg_id(&mut msg[0]).unwrap();
 
-        assert_eq!(msg.as_ref(), &[0x07]);
+        assert_eq!(msg.as_slice(), &[0x07]);
     }
 
     #[test]
     fn test_mask_msg_id() {
-        let mut msg = BytesMut::with_capacity(2);
+        let mut msg = Vec::with_capacity(2);
         msg.put_u8(0x10); // eth msg id
         msg.put_u8(0x20); // some msg data
 
         let mxdmx_stream =
             MuxDemuxStream::try_new((), Capability::eth(EthVersion::Eth66), shared_caps_eth68())
                 .unwrap();
-        let egress_bytes = mxdmx_stream.mask_msg_id(msg.freeze());
+        let egress_bytes = mxdmx_stream.mask_msg_id(msg.into());
 
         assert_eq!(egress_bytes.as_ref(), &[0x10, 0x20]);
     }

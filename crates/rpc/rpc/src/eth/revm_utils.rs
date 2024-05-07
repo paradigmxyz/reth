@@ -7,7 +7,7 @@ use reth_primitives::revm::env::fill_op_tx_env;
 use reth_primitives::revm::env::fill_tx_env;
 use reth_primitives::{
     revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, B256, U256,
+    TransactionSignedEcRecovered, TxHash, TxKind, B256, U256,
 };
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
@@ -17,14 +17,14 @@ use reth_rpc_types::{
 use revm::primitives::{Bytes, OptimismFields};
 use revm::{
     db::CacheDB,
-    inspector_handle_register,
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{
-        db::DatabaseRef, BlockEnv, Bytecode, CfgEnvWithHandlerCfg, EnvWithHandlerCfg,
-        ResultAndState, SpecId, TransactTo, TxEnv,
+        db::DatabaseRef, BlockEnv, Bytecode, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId,
+        TransactTo, TxEnv,
     },
-    Database, GetInspector,
+    Database,
 };
+use std::cmp::min;
 use tracing::trace;
 
 /// Helper type that bundles various overrides for EVM Execution.
@@ -66,7 +66,7 @@ impl From<Option<StateOverride>> for EvmOverrides {
 /// Helper type to work with different transaction types when configuring the EVM env.
 ///
 /// This makes it easier to handle errors.
-pub(crate) trait FillableTransaction {
+pub trait FillableTransaction {
     /// Returns the hash of the transaction.
     fn hash(&self) -> TxHash;
 
@@ -120,110 +120,6 @@ pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Addre
     Precompiles::new(spec).addresses().copied().map(Address::from)
 }
 
-/// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state changes.
-pub(crate) fn transact<DB>(
-    db: DB,
-    env: EnvWithHandlerCfg,
-) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
-where
-    DB: Database,
-    <DB as Database>::Error: Into<EthApiError>,
-{
-    let mut evm = revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
-    let res = evm.transact()?;
-    let (_, env) = evm.into_db_and_env_with_handler_cfg();
-    Ok((res, env))
-}
-
-/// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state changes.
-pub(crate) fn inspect<DB, I>(
-    db: DB,
-    env: EnvWithHandlerCfg,
-    inspector: I,
-) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
-where
-    DB: Database,
-    <DB as Database>::Error: Into<EthApiError>,
-    I: GetInspector<DB>,
-{
-    let mut evm = revm::Evm::builder()
-        .with_db(db)
-        .with_external_context(inspector)
-        .with_env_with_handler_cfg(env)
-        .append_handler_register(inspector_handle_register)
-        .build();
-    let res = evm.transact()?;
-    let (_, env) = evm.into_db_and_env_with_handler_cfg();
-    Ok((res, env))
-}
-
-/// Same as [inspect] but also returns the database again.
-///
-/// Even though [Database] is also implemented on `&mut`
-/// this is still useful if there are certain trait bounds on the Inspector's database generic type
-pub(crate) fn inspect_and_return_db<DB, I>(
-    db: DB,
-    env: EnvWithHandlerCfg,
-    inspector: I,
-) -> EthResult<(ResultAndState, EnvWithHandlerCfg, DB)>
-where
-    DB: Database,
-    <DB as Database>::Error: Into<EthApiError>,
-    I: GetInspector<DB>,
-{
-    let mut evm = revm::Evm::builder()
-        .with_external_context(inspector)
-        .with_db(db)
-        .with_env_with_handler_cfg(env)
-        .append_handler_register(inspector_handle_register)
-        .build();
-    let res = evm.transact()?;
-    let (db, env) = evm.into_db_and_env_with_handler_cfg();
-    Ok((res, env, db))
-}
-
-/// Replays all the transactions until the target transaction is found.
-///
-/// All transactions before the target transaction are executed and their changes are written to the
-/// _runtime_ db ([CacheDB]).
-///
-/// Note: This assumes the target transaction is in the given iterator.
-/// Returns the index of the target transaction in the given iterator.
-pub(crate) fn replay_transactions_until<DB, I, Tx>(
-    db: &mut CacheDB<DB>,
-    cfg: CfgEnvWithHandlerCfg,
-    block_env: BlockEnv,
-    transactions: I,
-    target_tx_hash: B256,
-) -> Result<usize, EthApiError>
-where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
-    I: IntoIterator<Item = Tx>,
-    Tx: FillableTransaction,
-{
-    let mut evm = revm::Evm::builder()
-        .with_db(db)
-        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-            cfg,
-            block_env,
-            Default::default(),
-        ))
-        .build();
-    let mut index = 0;
-    for tx in transactions.into_iter() {
-        if tx.hash() == target_tx_hash {
-            // reached the target transaction
-            break
-        }
-
-        tx.try_fill_tx_env(evm.tx_mut())?;
-        evm.transact_commit()?;
-        index += 1;
-    }
-    Ok(index)
-}
-
 /// Prepares the [EnvWithHandlerCfg] for execution.
 ///
 /// Does not commit any changes to the underlying database.
@@ -235,7 +131,7 @@ where
 ///  - `nonce` is set to `None`
 pub(crate) fn prepare_call_env<DB>(
     mut cfg: CfgEnvWithHandlerCfg,
-    block: BlockEnv,
+    mut block: BlockEnv,
     request: TransactionRequest,
     gas_limit: u64,
     db: &mut CacheDB<DB>,
@@ -258,24 +154,25 @@ where
     // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
     cfg.disable_base_fee = true;
 
-    let request_gas = request.gas;
-
-    let mut env = build_call_evm_env(cfg, block, request)?;
-    env.tx.nonce = None;
-
-    // apply state overrides
-    if let Some(state_overrides) = overrides.state {
-        apply_state_overrides(state_overrides, db)?;
-    }
-
-    // apply block overrides
+    // apply block overrides, we need to apply them first so that they take effect when we we create
+    // the evm env via `build_call_evm_env`, e.g. basefee
     if let Some(mut block_overrides) = overrides.block {
         if let Some(block_hashes) = block_overrides.block_hash.take() {
             // override block hashes
             db.block_hashes
                 .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
         }
-        apply_block_overrides(*block_overrides, &mut env.env.block);
+        apply_block_overrides(*block_overrides, &mut block);
+    }
+
+    let request_gas = request.gas;
+    let mut env = build_call_evm_env(cfg, block, request)?;
+    // set nonce to None so that the next nonce is used when transacting the call
+    env.tx.nonce = None;
+
+    // apply state overrides
+    if let Some(state_overrides) = overrides.state {
+        apply_state_overrides(state_overrides, db)?;
     }
 
     if request_gas.is_none() {
@@ -320,7 +217,7 @@ pub(crate) fn create_txn_env(
     request: TransactionRequest,
 ) -> EthResult<TxEnv> {
     // Ensure that if versioned hashes are set, they're not empty
-    if request.has_empty_blob_hashes() {
+    if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
         return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
     }
 
@@ -343,28 +240,30 @@ pub(crate) fn create_txn_env(
 
     let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
         CallFees::ensure_fees(
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
+            gas_price.map(U256::from),
+            max_fee_per_gas.map(U256::from),
+            max_priority_fee_per_gas.map(U256::from),
             block_env.basefee,
             blob_versioned_hashes.as_deref(),
-            max_fee_per_blob_gas,
+            max_fee_per_blob_gas.map(U256::from),
             block_env.get_blob_gasprice().map(U256::from),
         )?;
 
-    let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
+    let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
+    let transact_to = match to {
+        Some(TxKind::Call(to)) => TransactTo::call(to),
+        _ => TransactTo::create(),
+    };
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
-        nonce: nonce
-            .map(|n| n.try_into().map_err(|_| RpcInvalidTransactionError::NonceTooHigh))
-            .transpose()?,
+        nonce,
         caller: from.unwrap_or_default(),
         gas_price,
         gas_priority_fee: max_priority_fee_per_gas,
-        transact_to: to.map(TransactTo::Call).unwrap_or_else(TransactTo::create),
+        transact_to,
         value: value.unwrap_or_default(),
         data: input.try_into_unique_input()?.unwrap_or_default(),
-        chain_id: chain_id.map(|c| c.to()),
+        chain_id,
         access_list: access_list
             .map(reth_rpc_types::AccessList::into_flattened)
             .unwrap_or_default(),
@@ -379,7 +278,10 @@ pub(crate) fn create_txn_env(
 }
 
 /// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
-pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(db: DB, env: &mut TxEnv) -> EthResult<()>
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
+    db: &mut DB,
+    env: &mut TxEnv,
+) -> EthResult<()>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
@@ -397,7 +299,7 @@ where
 ///
 /// Returns an error if the caller has insufficient funds.
 /// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
-pub(crate) fn caller_gas_allowance<DB>(mut db: DB, env: &TxEnv) -> EthResult<U256>
+pub(crate) fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
@@ -438,9 +340,6 @@ pub(crate) struct CallFees {
 impl CallFees {
     /// Ensures the fields of a [TransactionRequest] are not conflicting.
     ///
-    /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the returned `gas_price`
-    /// will be `0`. See: <https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/internal/ethapi/transaction_args.go#L242-L255>
-    ///
     /// # EIP-4844 transactions
     ///
     /// Blob transactions have an additional fee parameter `maxFeePerBlobGas`.
@@ -458,21 +357,38 @@ impl CallFees {
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> EthResult<CallFees> {
-        /// Ensures that the transaction's max fee is lower than the priority fee, if any.
-        fn ensure_valid_fee_cap(
-            max_fee: U256,
+        /// Get the effective gas price of a transaction as specfified in EIP-1559 with relevant
+        /// checks.
+        fn get_effective_gas_price(
+            max_fee_per_gas: Option<U256>,
             max_priority_fee_per_gas: Option<U256>,
-        ) -> EthResult<()> {
-            if let Some(max_priority) = max_priority_fee_per_gas {
-                if max_priority > max_fee {
-                    // Fail early
-                    return Err(
-                        // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
-                        RpcInvalidTransactionError::TipAboveFeeCap.into(),
-                    )
+            block_base_fee: U256,
+        ) -> EthResult<U256> {
+            match max_fee_per_gas {
+                Some(max_fee) => {
+                    if max_fee < block_base_fee {
+                        // `base_fee_per_gas` is greater than the `max_fee_per_gas`
+                        return Err(RpcInvalidTransactionError::FeeCapTooLow.into())
+                    }
+                    if max_fee < max_priority_fee_per_gas.unwrap_or(U256::ZERO) {
+                        return Err(
+                            // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
+                            RpcInvalidTransactionError::TipAboveFeeCap.into(),
+                        )
+                    }
+                    Ok(min(
+                        max_fee,
+                        block_base_fee
+                            .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
+                            .ok_or_else(|| {
+                                EthApiError::from(RpcInvalidTransactionError::TipVeryHigh)
+                            })?,
+                    ))
                 }
+                None => Ok(block_base_fee
+                    .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
+                    .ok_or_else(|| EthApiError::from(RpcInvalidTransactionError::TipVeryHigh))?),
             }
-            Ok(())
         }
 
         let has_blob_hashes =
@@ -491,18 +407,26 @@ impl CallFees {
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas, None) => {
                 // request for eip-1559 transaction
-                let max_fee = max_fee_per_gas.unwrap_or(block_base_fee);
-                ensure_valid_fee_cap(max_fee, max_priority_fee_per_gas)?;
-
+                let effective_gas_price = get_effective_gas_price(
+                    max_fee_per_gas,
+                    max_priority_fee_per_gas,
+                    block_base_fee,
+                )?;
                 let max_fee_per_blob_gas = has_blob_hashes.then_some(block_blob_fee).flatten();
 
-                Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas, max_fee_per_blob_gas })
+                Ok(CallFees {
+                    gas_price: effective_gas_price,
+                    max_priority_fee_per_gas,
+                    max_fee_per_blob_gas,
+                })
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas, Some(max_fee_per_blob_gas)) => {
                 // request for eip-4844 transaction
-                let max_fee = max_fee_per_gas.unwrap_or(block_base_fee);
-                ensure_valid_fee_cap(max_fee, max_priority_fee_per_gas)?;
-
+                let effective_gas_price = get_effective_gas_price(
+                    max_fee_per_gas,
+                    max_priority_fee_per_gas,
+                    block_base_fee,
+                )?;
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
@@ -510,7 +434,7 @@ impl CallFees {
                 }
 
                 Ok(CallFees {
-                    gas_price: max_fee,
+                    gas_price: effective_gas_price,
                     max_priority_fee_per_gas,
                     max_fee_per_blob_gas: Some(max_fee_per_blob_gas),
                 })
@@ -629,6 +553,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use reth_primitives::constants::GWEI_TO_WEI;
+
     use super::*;
 
     #[test]
@@ -659,5 +585,77 @@ mod tests {
         .unwrap();
         assert!(gas_price.is_zero());
         assert_eq!(max_fee_per_blob_gas, Some(U256::from(99)));
+    }
+
+    #[test]
+    fn test_eip_1559_fees() {
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(25 * GWEI_TO_WEI)),
+            Some(U256::from(15 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(25 * GWEI_TO_WEI));
+
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(25 * GWEI_TO_WEI)),
+            Some(U256::from(5 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(20 * GWEI_TO_WEI));
+
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(30 * GWEI_TO_WEI));
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            Some(U256::from(31 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::from(5 * GWEI_TO_WEI)),
+            Some(U256::from(GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::MAX),
+            Some(U256::MAX),
+            U256::from(5 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
     }
 }

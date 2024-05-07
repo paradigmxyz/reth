@@ -215,7 +215,7 @@ mod tests {
 
     /// Assert that the block was removed from all buffer collections.
     fn assert_block_removal(buffer: &BlockBuffer, block: &SealedBlockWithSenders) {
-        assert!(buffer.blocks.get(&block.hash()).is_none());
+        assert!(!buffer.blocks.contains_key(&block.hash()));
         assert!(buffer
             .parent_to_child
             .get(&block.parent_hash)

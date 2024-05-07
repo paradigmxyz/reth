@@ -4,10 +4,10 @@ use crate::{
     prefix_set::PrefixSetMut,
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
-    StateRootError, StorageRootError,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
+use reth_interfaces::trie::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
@@ -61,7 +61,7 @@ where
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(Vec::from([target_nibbles.clone()]));
+            HashBuilder::default().with_proof_retainer(Vec::from([target_nibbles]));
 
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);
@@ -165,11 +165,10 @@ where
 mod tests {
     use super::*;
     use crate::StateRoot;
-    use alloy_chains::Chain;
     use once_cell::sync::Lazy;
     use reth_db::database::Database;
     use reth_interfaces::RethResult;
-    use reth_primitives::{Account, Bytes, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
+    use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
     use std::{str::FromStr, sync::Arc};
 
@@ -208,9 +207,8 @@ mod tests {
         let genesis = chain_spec.genesis();
         let alloc_accounts = genesis
             .alloc
-            .clone()
-            .into_iter()
-            .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
+            .iter()
+            .map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
         provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
         let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {

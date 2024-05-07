@@ -6,21 +6,19 @@ use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{
-        error::{DownloadError, DownloadResult, PeerRequestResult},
-        headers::{
-            client::{HeadersClient, HeadersRequest},
-            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
-            error::{HeadersDownloaderError, HeadersDownloaderResult},
-        },
-        priority::Priority,
+use reth_consensus::Consensus;
+use reth_interfaces::p2p::{
+    error::{DownloadError, DownloadResult, PeerRequestResult},
+    headers::{
+        client::{HeadersClient, HeadersRequest},
+        downloader::{validate_header_download, HeaderDownloader, SyncTarget},
+        error::{HeadersDownloaderError, HeadersDownloaderResult},
     },
+    priority::Priority,
 };
+use reth_network_types::PeerId;
 use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, PeerId, SealedHeader,
-    B256,
+    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, SealedHeader, B256,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -258,7 +256,7 @@ where
                 validated.last().or_else(|| self.lowest_validated_header())
             {
                 if let Err(error) = self.validate(validated_header, &parent) {
-                    trace!(target: "downloaders::headers", ?error ,"Failed to validate header");
+                    trace!(target: "downloaders::headers", %error ,"Failed to validate header");
                     return Err(
                         HeadersResponseError { request, peer_id: Some(peer_id), error }.into()
                     )
@@ -278,12 +276,13 @@ where
         {
             // Every header must be valid on its own
             if let Err(error) = self.consensus.validate_header(last_header) {
-                trace!(target: "downloaders::headers", ?error, "Failed to validate header");
+                trace!(target: "downloaders::headers", %error, "Failed to validate header");
                 return Err(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
                     error: DownloadError::HeaderValidation {
                         hash: head.hash(),
+                        number: head.number,
                         error: Box::new(error),
                     },
                 }
@@ -294,7 +293,7 @@ where
             // detached head error.
             if let Err(error) = self.consensus.validate_header_against_parent(last_header, head) {
                 // Replace the last header with a detached variant
-                error!(target: "downloaders::headers", ?error, number = last_header.number, hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
+                error!(target: "downloaders::headers", %error, number = last_header.number, hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
                 return Err(HeadersDownloaderError::DetachedHead {
                     local_head: Box::new(head.clone()),
                     header: Box::new(last_header.clone()),
@@ -529,7 +528,7 @@ where
     fn penalize_peer(&self, peer_id: Option<PeerId>, error: &DownloadError) {
         // Penalize the peer for bad response
         if let Some(peer_id) = peer_id {
-            trace!(target: "downloaders::headers", ?peer_id, ?error, "Penalizing peer");
+            trace!(target: "downloaders::headers", ?peer_id, %error, "Penalizing peer");
             self.client.report_bad_message(peer_id);
         }
     }
@@ -537,7 +536,7 @@ where
     /// Handles the error of a bad response
     ///
     /// This will re-submit the request.
-    fn on_headers_error(&mut self, err: Box<HeadersResponseError>) {
+    fn on_headers_error(&self, err: Box<HeadersResponseError>) {
         let HeadersResponseError { request, peer_id, error } = *err;
 
         self.penalize_peer(peer_id, &error);
@@ -582,7 +581,7 @@ where
     }
 
     /// Starts a request future
-    fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+    fn submit_request(&self, request: HeadersRequest, priority: Priority) {
         trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
         self.metrics.in_flight_requests.increment(1.);
@@ -775,7 +774,7 @@ where
                     match this.on_sync_target_outcome(outcome) {
                         Ok(()) => break,
                         Err(ReverseHeadersDownloaderError::Response(error)) => {
-                            trace!(target: "downloaders::headers", ?error, "invalid sync target response");
+                            trace!(target: "downloaders::headers", %error, "invalid sync target response");
                             if error.is_channel_closed() {
                                 // download channel closed which means the network was dropped
                                 return Poll::Ready(None)
@@ -1201,7 +1200,7 @@ impl ReverseHeadersDownloaderBuilder {
 
 /// Configures and returns the next [HeadersRequest] based on the given parameters
 ///
-/// The request wil start at the given `next_request_block_number` block.
+/// The request will start at the given `next_request_block_number` block.
 /// The `limit` of the request will either be the targeted `request_limit` or the difference of
 /// `next_request_block_number` and the `local_head` in case this is smaller than the targeted
 /// `request_limit`.
@@ -1224,7 +1223,8 @@ mod tests {
 
     use crate::headers::test_utils::child_header;
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_interfaces::test_utils::TestHeadersClient;
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]

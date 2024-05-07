@@ -1,4 +1,4 @@
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, TxValue, B256};
+use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -28,12 +28,12 @@ pub struct TxLegacy {
     pub gas_limit: u64,
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
+    pub to: TxKind,
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
-    pub value: TxValue,
+    pub value: U256,
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
     /// Some). pub init: An unlimited size byte array specifying the
     /// EVM-code for the account initialisation procedure CREATE,
@@ -51,7 +51,7 @@ impl TxLegacy {
         mem::size_of::<u128>() + // gas_price
         mem::size_of::<u64>() + // gas_limit
         self.to.size() + // to
-        mem::size_of::<TxValue>() + // value
+        mem::size_of::<U256>() + // value
         self.input.len() // input
     }
 
@@ -173,7 +173,7 @@ impl TxLegacy {
 mod tests {
     use super::TxLegacy;
     use crate::{
-        transaction::{signature::Signature, TransactionKind},
+        transaction::{signature::Signature, TxKind},
         Address, Transaction, TransactionSigned, B256, U256,
     };
 
@@ -190,8 +190,8 @@ mod tests {
             nonce: 0x18,
             gas_price: 0xfa56ea00,
             gas_limit: 119902,
-            to: TransactionKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
-            value: 0x1c6bf526340000u64.into(),
+            to: TxKind::Call(hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
+            value: U256::from(0x1c6bf526340000u64),
             input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
         });
 

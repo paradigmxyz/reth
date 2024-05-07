@@ -2,14 +2,17 @@ use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_node_api::AttributesValidationError;
+use reth_engine_primitives::EngineObjectValidationError;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{B256, U256};
+use reth_rpc_types::ToRpcError;
 use thiserror::Error;
 
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
+/// Invalid payload attributes code.
+pub const INVALID_PAYLOAD_ATTRIBUTES: i32 = -38003;
 /// Payload unsupported fork code.
 pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 /// Payload unknown error code.
@@ -19,6 +22,9 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error message for the request too large error.
 const REQUEST_TOO_LARGE_MESSAGE: &str = "Too large request";
+
+/// Error message for the request too large error.
+const INVALID_PAYLOAD_ATTRIBUTES_MSG: &str = "Invalid payload attributes";
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
 ///
@@ -80,12 +86,17 @@ pub enum EngineApiError {
     GetPayloadError(#[from] PayloadBuilderError),
     /// The payload or attributes are known to be malformed before processing.
     #[error(transparent)]
-    AttributesValidationError(#[from] AttributesValidationError),
-    /// If the optimism feature flag is enabled, the payload attributes must have a present
-    /// gas limit for the forkchoice updated method.
-    #[cfg(feature = "optimism")]
-    #[error("Missing gas limit in payload attributes")]
-    MissingGasLimitInPayloadAttributes,
+    EngineObjectValidationError(#[from] EngineObjectValidationError),
+    /// Any other error
+    #[error("{0}")]
+    Other(Box<dyn ToRpcError>),
+}
+
+impl EngineApiError {
+    /// Crates a new [EngineApiError::Other] variant.
+    pub fn other<E: ToRpcError>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
 }
 
 /// Helper type to represent the `error` field in the error response:
@@ -106,29 +117,28 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EngineApiError) -> Self {
         match error {
             EngineApiError::InvalidBodiesRange { .. } |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::WithdrawalsNotSupportedInV1,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::NoParentBeaconBlockRootPostCancun,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::NoWithdrawalsPostShanghai,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::HasWithdrawalsPreShanghai,
-            ) |
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::InvalidParams(_),
+            EngineApiError::EngineObjectValidationError(EngineObjectValidationError::Payload(
+                _,
+            )) |
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::InvalidParams(_),
             ) => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
                 jsonrpsee_types::error::ErrorObject::owned(
                     INVALID_PARAMS_CODE,
                     INVALID_PARAMS_MSG,
+                    Some(ErrorData::new(error)),
+                )
+            }
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(_),
+            ) => {
+                // Note: the data field is not required by the spec, but is also included by other
+                // clients
+                jsonrpsee_types::error::ErrorObject::owned(
+                    INVALID_PAYLOAD_ATTRIBUTES,
+                    INVALID_PAYLOAD_ATTRIBUTES_MSG,
                     Some(ErrorData::new(error)),
                 )
             }
@@ -144,8 +154,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     Some(ErrorData::new(error)),
                 )
             }
-            EngineApiError::AttributesValidationError(
-                AttributesValidationError::UnsupportedFork,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::UnsupportedFork,
             ) => jsonrpsee_types::error::ErrorObject::owned(
                 UNSUPPORTED_FORK_CODE,
                 error.to_string(),
@@ -184,15 +194,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     )
                 }
             },
-            // Optimism errors
-            #[cfg(feature = "optimism")]
-            EngineApiError::MissingGasLimitInPayloadAttributes => {
-                jsonrpsee_types::error::ErrorObject::owned(
-                    INVALID_PARAMS_CODE,
-                    INVALID_PARAMS_MSG,
-                    Some(ErrorData::new(error)),
-                )
-            }
             // Any other server error
             EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
@@ -202,13 +203,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 SERVER_ERROR_MSG,
                 Some(ErrorData::new(error)),
             ),
+            EngineApiError::Other(err) => err.to_rpc_error(),
         }
-    }
-}
-
-impl From<EngineApiError> for jsonrpsee_core::error::Error {
-    fn from(error: EngineApiError) -> Self {
-        jsonrpsee_core::error::Error::Call(error.into())
     }
 }
 
@@ -224,7 +220,6 @@ mod tests {
         err: impl Into<jsonrpsee_types::error::ErrorObject<'static>>,
     ) {
         let err = err.into();
-        dbg!(&err);
         assert_eq!(err.code(), code);
         assert_eq!(err.message(), message);
     }
@@ -236,7 +231,9 @@ mod tests {
         ensure_engine_rpc_error(
             UNSUPPORTED_FORK_CODE,
             "Unsupported fork",
-            EngineApiError::AttributesValidationError(AttributesValidationError::UnsupportedFork),
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::UnsupportedFork,
+            ),
         );
 
         ensure_engine_rpc_error(

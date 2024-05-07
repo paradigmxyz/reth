@@ -1,5 +1,5 @@
 use crate::{
-    error::{mdbx_result, mdbx_result_with_tx_kind, Error, Result},
+    error::{mdbx_result, Error, Result},
     flags::*,
     mdbx_try_optional,
     transaction::{TransactionKind, RW},
@@ -30,11 +30,9 @@ where
     pub(crate) fn new(txn: Transaction<K>, dbi: ffi::MDBX_dbi) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
         unsafe {
-            mdbx_result_with_tx_kind::<K>(
-                txn.txn_execute(|txn| ffi::mdbx_cursor_open(txn, dbi, &mut cursor)),
-                txn.txn(),
-                txn.env().txn_manager(),
-            )?;
+            txn.txn_execute(|txn_ptr| {
+                mdbx_result(ffi::mdbx_cursor_open(txn_ptr, dbi, &mut cursor))
+            })??;
         }
         Ok(Self { txn, cursor })
     }
@@ -47,7 +45,7 @@ where
 
             let s = Self { txn: other.txn.clone(), cursor };
 
-            mdbx_result_with_tx_kind::<K>(res, s.txn.txn(), s.txn.env().txn_manager())?;
+            mdbx_result(res)?;
 
             Ok(s)
         }
@@ -95,11 +93,12 @@ where
             let key_ptr = key_val.iov_base;
             let data_ptr = data_val.iov_base;
             self.txn.txn_execute(|txn| {
-                let v = mdbx_result_with_tx_kind::<K>(
-                    ffi::mdbx_cursor_get(self.cursor, &mut key_val, &mut data_val, op),
-                    txn,
-                    self.txn.env().txn_manager(),
-                )?;
+                let v = mdbx_result(ffi::mdbx_cursor_get(
+                    self.cursor,
+                    &mut key_val,
+                    &mut data_val,
+                    op,
+                ))?;
                 assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
                     // MDBX wrote in new key
@@ -111,7 +110,7 @@ where
                 };
                 let data_out = Value::decode_val::<K>(txn, data_val)?;
                 Ok((key_out, data_out, v))
-            })
+            })?
         }
     }
 
@@ -444,7 +443,7 @@ impl Cursor<RW> {
         mdbx_result(unsafe {
             self.txn.txn_execute(|_| {
                 ffi::mdbx_cursor_put(self.cursor, &key_val, &mut data_val, flags.bits())
-            })
+            })?
         })?;
 
         Ok(())
@@ -458,7 +457,7 @@ impl Cursor<RW> {
     /// current key, if the database was opened with [DatabaseFlags::DUP_SORT].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
-            self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))
+            self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
         })?;
 
         Ok(())
@@ -470,7 +469,7 @@ where
     K: TransactionKind,
 {
     fn clone(&self) -> Self {
-        self.txn.txn_execute(|_| Self::new_at_position(self).unwrap())
+        self.txn.txn_execute(|_| Self::new_at_position(self).unwrap()).unwrap()
     }
 }
 
@@ -488,7 +487,7 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) })
+        self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) }).unwrap()
     }
 }
 
@@ -564,7 +563,7 @@ where
                 let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
                 let op = mem::replace(op, *next_op);
                 unsafe {
-                    cursor.txn.txn_execute(|txn| {
+                    let result = cursor.txn.txn_execute(|txn| {
                         match ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) {
                             ffi::MDBX_SUCCESS => {
                                 let key = match Key::decode_val::<K>(txn, key) {
@@ -577,13 +576,17 @@ where
                                 };
                                 Some(Ok((key, data)))
                             }
-                            // MDBX_ENODATA can occur when the cursor was previously seeked to a
+                            // MDBX_ENODATA can occur when the cursor was previously sought to a
                             // non-existent value, e.g. iter_from with a
                             // key greater than all values in the database.
                             ffi::MDBX_NOTFOUND | ffi::MDBX_ENODATA => None,
                             error => Some(Err(Error::from_err_code(error))),
                         }
-                    })
+                    });
+                    match result {
+                        Ok(result) => result,
+                        Err(err) => Some(Err(err)),
+                    }
                 }
             }
             Self::Err(err) => err.take().map(Err),
@@ -655,7 +658,7 @@ where
                 let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
                 let op = mem::replace(op, *next_op);
                 unsafe {
-                    cursor.txn.txn_execute(|txn| {
+                    let result = cursor.txn.txn_execute(|txn| {
                         match ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) {
                             ffi::MDBX_SUCCESS => {
                                 let key = match Key::decode_val::<K>(txn, key) {
@@ -668,13 +671,17 @@ where
                                 };
                                 Some(Ok((key, data)))
                             }
-                            // MDBX_NODATA can occur when the cursor was previously seeked to a
+                            // MDBX_NODATA can occur when the cursor was previously sought to a
                             // non-existent value, e.g. iter_from with a
                             // key greater than all values in the database.
                             ffi::MDBX_NOTFOUND | ffi::MDBX_ENODATA => None,
                             error => Some(Err(Error::from_err_code(error))),
                         }
-                    })
+                    });
+                    match result {
+                        Ok(result) => result,
+                        Err(err) => Some(Err(err)),
+                    }
                 }
             }
             Iter::Err(err) => err.take().map(Err),
@@ -752,7 +759,7 @@ where
                 let mut data = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
                 let op = mem::replace(op, ffi::MDBX_NEXT_NODUP);
 
-                cursor.txn.txn_execute(|_| {
+                let result = cursor.txn.txn_execute(|_| {
                     let err_code =
                         unsafe { ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) };
 
@@ -763,7 +770,12 @@ where
                             ffi::MDBX_NEXT_DUP,
                         )
                     })
-                })
+                });
+
+                match result {
+                    Ok(result) => result,
+                    Err(err) => Some(IntoIter::Err(Some(err))),
+                }
             }
             IterDup::Err(err) => err.take().map(|e| IntoIter::Err(Some(e))),
         }

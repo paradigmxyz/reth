@@ -2,14 +2,13 @@
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use alloy_sol_types::decode_revert_reason;
-use jsonrpsee::{
-    core::Error as RpcError,
-    types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
-};
+use jsonrpsee::types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject};
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
-use reth_revm::tracing::js::JsInspectorError;
-use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use reth_revm::tracing::{js::JsInspectorError, MuxError};
+use reth_rpc_types::{
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
+};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
@@ -106,34 +105,25 @@ pub enum EthApiError {
     #[error(transparent)]
     /// Call Input error when both `data` and `input` fields are set and not equal.
     TransactionInputError(#[from] TransactionInputError),
-    /// Optimism related error
-    #[error(transparent)]
-    #[cfg(feature = "optimism")]
-    Optimism(#[from] OptimismEthApiError),
     /// Evm generic purpose error.
     #[error("Revm error: {0}")]
     EvmCustom(String),
+    /// Error encountered when converting a transaction type
+    #[error("Transaction conversion error")]
+    TransactionConversionError,
+    /// Error thrown when tracing with a muxTracer fails
+    #[error(transparent)]
+    MuxTracerError(#[from] MuxError),
+    /// Any other error
+    #[error("{0}")]
+    Other(Box<dyn ToRpcError>),
 }
 
-/// Eth Optimism Api Error
-#[cfg(feature = "optimism")]
-#[derive(Debug, thiserror::Error)]
-pub enum OptimismEthApiError {
-    /// Wrapper around a [hyper::Error].
-    #[error(transparent)]
-    HyperError(#[from] hyper::Error),
-    /// Wrapper around an [reqwest::Error].
-    #[error(transparent)]
-    HttpError(#[from] reqwest::Error),
-    /// Thrown when serializing transaction to forward to sequencer
-    #[error("invalid sequencer transaction")]
-    InvalidSequencerTransaction,
-    /// Thrown when calculating L1 gas fee
-    #[error("failed to calculate l1 gas fee")]
-    L1BlockFeeError,
-    /// Thrown when calculating L1 gas used
-    #[error("failed to calculate l1 gas used")]
-    L1BlockGasError,
+impl EthApiError {
+    /// crates a new [EthApiError::Other] variant.
+    pub fn other<E: ToRpcError>(err: E) -> Self {
+        EthApiError::Other(Box::new(err))
+    }
 }
 
 impl From<EthApiError> for ErrorObject<'static> {
@@ -146,7 +136,8 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
-            EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),
+            EthApiError::InvalidTracerConfig |
+            EthApiError::TransactionConversionError => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |
@@ -171,23 +162,12 @@ impl From<EthApiError> for ErrorObject<'static> {
             err @ EthApiError::InternalBlockingTaskError => internal_rpc_err(err.to_string()),
             err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
-            #[cfg(feature = "optimism")]
-            EthApiError::Optimism(err) => match err {
-                OptimismEthApiError::HyperError(err) => internal_rpc_err(err.to_string()),
-                OptimismEthApiError::HttpError(err) => internal_rpc_err(err.to_string()),
-                OptimismEthApiError::InvalidSequencerTransaction |
-                OptimismEthApiError::L1BlockFeeError |
-                OptimismEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
-            },
+            EthApiError::Other(err) => err.to_rpc_error(),
+            EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
         }
     }
 }
 
-impl From<EthApiError> for RpcError {
-    fn from(error: EthApiError) -> Self {
-        RpcError::Call(error.into())
-    }
-}
 impl From<JsInspectorError> for EthApiError {
     fn from(error: JsInspectorError) -> Self {
         match error {
@@ -342,7 +322,7 @@ pub enum RpcInvalidTransactionError {
     /// hardfork.
     #[error("blob_versioned_hashes is not supported for blocks before the Cancun hardfork")]
     BlobVersionedHashesNotSupported,
-    /// Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
+    /// Block `blob_base_fee` is greater than tx-specified `max_fee_per_blob_gas` after Cancun.
     #[error("max fee per blob gas less than block blob gas fee")]
     BlobFeeCapTooLow,
     /// Blob transaction has a versioned hash with an invalid blob
@@ -679,7 +659,7 @@ impl From<PoolError> for EthApiError {
 /// Errors returned from a sign request.
 #[derive(Debug, thiserror::Error)]
 pub enum SignError {
-    /// Error occured while trying to sign data.
+    /// Error occurred while trying to sign data.
     #[error("could not sign")]
     CouldNotSign,
     /// Signer for requested account not found.

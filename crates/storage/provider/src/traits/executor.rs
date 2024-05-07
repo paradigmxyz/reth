@@ -3,37 +3,34 @@
 use crate::{bundle_state::BundleStateWithReceipts, StateProvider};
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, U256};
-use std::time::Duration;
-use tracing::debug;
 
-/// Executor factory that would create the EVM with particular state provider.
-///
-/// It can be used to mock executor.
+/// A factory capable of creating an executor with the given state provider.
 pub trait ExecutorFactory: Send + Sync + 'static {
     /// Executor with [`StateProvider`]
     fn with_state<'a, SP: StateProvider + 'a>(
         &'a self,
-        _sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor + 'a>;
+        sp: SP,
+    ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a>;
 }
 
 /// An executor capable of executing a block.
+///
+/// This type is capable of executing (multiple) blocks by applying the state changes made by each
+/// block. The final state of the executor can extracted using
+/// [`Self::take_output_state`].
 pub trait BlockExecutor {
-    /// Execute a block.
-    fn execute(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
+    /// The error type returned by the executor.
+    type Error;
 
-    /// Executes the block and checks receipts.
+    /// Executes the entire block and verifies:
+    ///  - receipts (receipts root)
     ///
-    /// See [execute](BlockExecutor::execute) for more details.
+    /// This will update the state of the executor with the changes made by the block.
     fn execute_and_verify_receipt(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(), BlockExecutionError>;
+    ) -> Result<(), Self::Error>;
 
     /// Runs the provided transactions and commits their state to the run-time database.
     ///
@@ -46,18 +43,16 @@ pub trait BlockExecutor {
     ///
     /// The second returned value represents the total gas used by this block of transactions.
     ///
-    /// See [execute](BlockExecutor::execute) for more details.
+    /// See [execute_and_verify_receipt](BlockExecutor::execute_and_verify_receipt) for more
+    /// details.
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>;
+    ) -> Result<(Vec<Receipt>, u64), Self::Error>;
 
     /// Return bundle state. This is output of executed blocks.
     fn take_output_state(&mut self) -> BundleStateWithReceipts;
-
-    /// Internal statistics of execution.
-    fn stats(&self) -> BlockExecutorStats;
 
     /// Returns the size hint of current in-memory changes.
     fn size_hint(&self) -> Option<usize>;
@@ -70,35 +65,4 @@ pub trait PrunableBlockExecutor: BlockExecutor {
 
     /// Set prune modes.
     fn set_prune_modes(&mut self, prune_modes: PruneModes);
-}
-
-/// Block execution statistics. Contains duration of each step of block execution.
-#[derive(Clone, Debug, Default)]
-pub struct BlockExecutorStats {
-    /// Execution duration.
-    pub execution_duration: Duration,
-    /// Time needed to apply output of revm execution to revm cached state.
-    pub apply_state_duration: Duration,
-    /// Time needed to apply post execution state changes.
-    pub apply_post_execution_state_changes_duration: Duration,
-    /// Time needed to merge transitions and create reverts.
-    /// It this time transitions are applies to revm bundle state.
-    pub merge_transitions_duration: Duration,
-    /// Time needed to calculate receipt roots.
-    pub receipt_root_duration: Duration,
-}
-
-impl BlockExecutorStats {
-    /// Log duration to info level log.
-    pub fn log_info(&self) {
-        debug!(
-            target: "evm",
-            evm_transact = ?self.execution_duration,
-            apply_state = ?self.apply_state_duration,
-            apply_post_state = ?self.apply_post_execution_state_changes_duration,
-            merge_transitions = ?self.merge_transitions_duration,
-            receipt_root = ?self.receipt_root_duration,
-            "Execution time"
-        );
-    }
 }

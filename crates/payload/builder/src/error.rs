@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
-    /// Thrown whe the parent block is missing.
+    /// Thrown when the parent block is missing.
     #[error("missing parent block {0}")]
     MissingParentBlock(B256),
     /// An oneshot channels has been closed.

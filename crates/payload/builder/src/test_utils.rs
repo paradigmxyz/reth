@@ -5,7 +5,7 @@ use crate::{
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_node_api::EngineTypes;
+use reth_engine_primitives::EngineTypes;
 use reth_primitives::{Block, U256};
 use reth_provider::CanonStateNotification;
 use std::{

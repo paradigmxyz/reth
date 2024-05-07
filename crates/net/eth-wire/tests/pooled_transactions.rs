@@ -2,7 +2,7 @@
 
 use alloy_rlp::{Decodable, Encodable};
 use reth_eth_wire::{EthVersion, PooledTransactions, ProtocolMessage};
-use reth_primitives::{hex, Bytes, PooledTransactionsElement};
+use reth_primitives::{hex, PooledTransactionsElement};
 use std::{fs, path::PathBuf};
 use test_fuzz::test_fuzz;
 
@@ -70,6 +70,6 @@ fn decode_blob_rpc_transaction() {
     let network_data_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/rpc_blob_transaction");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
-    let hex_data = Bytes::from(hex::decode(data.trim()).unwrap());
-    let _txs = PooledTransactionsElement::decode_enveloped(hex_data).unwrap();
+    let hex_data = hex::decode(data.trim()).unwrap();
+    let _txs = PooledTransactionsElement::decode_enveloped(&mut hex_data.as_ref()).unwrap();
 }

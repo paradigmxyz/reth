@@ -5,7 +5,7 @@ use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
 use reth_primitives::bytes::{Buf, BufMut};
-use std::fmt::Display;
+use std::{fmt::Display, future::Future};
 use thiserror::Error;
 use tokio::io::AsyncWrite;
 use tokio_util::codec::{Encoder, Framed};
@@ -129,8 +129,13 @@ impl Decodable for DisconnectReason {
             // this should be a list, so decode the list header. this should advance the buffer so
             // buf[0] is the first (and only) element of the list.
             let header = Header::decode(buf)?;
+
             if !header.list {
                 return Err(RlpError::UnexpectedString)
+            }
+
+            if header.payload_length != 1 {
+                return Err(RlpError::ListLengthMismatch { expected: 1, got: header.payload_length })
             }
         }
 
@@ -149,19 +154,17 @@ impl Decodable for DisconnectReason {
 /// This trait is meant to allow higher level protocols like `eth` to disconnect from a peer, using
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
-#[async_trait::async_trait]
 pub trait CanDisconnect<T>: Sink<T> + Unpin {
     /// Disconnects from the underlying stream, using a [`DisconnectReason`] as disconnect
     /// information if the stream implements a protocol that can carry the additional disconnect
     /// metadata.
-    async fn disconnect(
+    fn disconnect(
         &mut self,
         reason: DisconnectReason,
-    ) -> Result<(), <Self as Sink<T>>::Error>;
+    ) -> impl Future<Output = Result<(), <Self as Sink<T>>::Error>> + Send;
 }
 
 // basic impls for things like Framed<TcpStream, etc>
-#[async_trait::async_trait]
 impl<T, I, U> CanDisconnect<I> for Framed<T, U>
 where
     T: AsyncWrite + Unpin + Send,
@@ -175,7 +178,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<S> CanDisconnect<bytes::Bytes> for ECIESStream<S>
 where
     S: AsyncWrite + Unpin + Send,
@@ -233,6 +235,14 @@ mod tests {
     #[test]
     fn test_reason_too_long() {
         assert!(DisconnectReason::decode(&mut &[0u8; 3][..]).is_err())
+    }
+
+    #[test]
+    fn test_reason_zero_length_list() {
+        let list_with_zero_length = hex::decode("c000").unwrap();
+        let res = DisconnectReason::decode(&mut &list_with_zero_length[..]);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().to_string(), "unexpected list length (got 0, expected 1)")
     }
 
     #[test]

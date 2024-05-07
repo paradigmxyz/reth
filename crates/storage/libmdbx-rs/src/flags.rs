@@ -17,7 +17,7 @@ pub enum SyncMode {
     /// hardware, with [SyncMode::NoMetaSync] you may get a doubling of write performance.
     ///
     /// This trade-off maintains database integrity, but a system crash may undo the last committed
-    /// transaction. I.e. it preserves the ACI (atomicity, consistency, isolation) but not D
+    /// transaction. I.e. it preserves the ACPI (atomicity, consistency, isolation) but not D
     /// (durability) database property.
     NoMetaSync,
 
@@ -75,7 +75,7 @@ pub enum SyncMode {
     /// the database, but you can lose the last transactions, if at least one buffer is not yet
     /// flushed to disk. The risk is governed by how often the system flushes dirty buffers to
     /// disk and how often [Environment::sync()](crate::Environment::sync) is called. So,
-    /// transactions exhibit ACI (atomicity, consistency, isolation) properties and only lose D
+    /// transactions exhibit ACPI (atomicity, consistency, isolation) properties and only lose D
     /// (durability). I.e. database integrity is maintained, but a system crash may undo the
     /// final transactions.
     ///

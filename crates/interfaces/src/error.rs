@@ -1,10 +1,10 @@
 use crate::{
     blockchain_tree::error::{BlockchainTreeError, CanonicalError},
-    consensus::ConsensusError,
     db::DatabaseError,
     executor::BlockExecutionError,
     provider::ProviderError,
 };
+use reth_consensus::ConsensusError;
 use reth_network_api::NetworkError;
 use reth_primitives::fs::FsPathError;
 
@@ -16,7 +16,7 @@ pub type RethResult<T> = Result<T, RethError>;
 /// This enum encapsulates various error types that can occur during blockchain interactions.
 ///
 /// It allows for structured error handling based on the nature of the encountered issue.
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub enum RethError {
     /// Error encountered during block execution.
     #[error(transparent)]
@@ -70,11 +70,11 @@ mod size_asserts {
         };
     }
 
-    static_assert_size!(RethError, 56);
-    static_assert_size!(BlockExecutionError, 48);
+    static_assert_size!(RethError, 64);
+    static_assert_size!(BlockExecutionError, 56);
     static_assert_size!(ConsensusError, 48);
     static_assert_size!(DatabaseError, 40);
     static_assert_size!(ProviderError, 48);
     static_assert_size!(NetworkError, 0);
-    static_assert_size!(CanonicalError, 48);
+    static_assert_size!(CanonicalError, 56);
 }

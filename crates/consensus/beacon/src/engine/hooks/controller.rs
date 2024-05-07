@@ -1,5 +1,5 @@
 use crate::hooks::{
-    EngineContext, EngineHook, EngineHookDBAccessLevel, EngineHookError, EngineHookEvent,
+    EngineHook, EngineHookContext, EngineHookDBAccessLevel, EngineHookError, EngineHookEvent,
     EngineHooks,
 };
 use std::{
@@ -10,7 +10,6 @@ use tracing::debug;
 
 #[derive(Debug)]
 pub(crate) struct PolledHook {
-    #[allow(dead_code)]
     pub(crate) name: &'static str,
     pub(crate) event: EngineHookEvent,
     pub(crate) db_access_level: EngineHookDBAccessLevel,
@@ -50,7 +49,7 @@ impl EngineHooksController {
     pub(crate) fn poll_active_db_write_hook(
         &mut self,
         cx: &mut Context<'_>,
-        args: EngineContext,
+        args: EngineHookContext,
     ) -> Poll<Result<PolledHook, EngineHookError>> {
         let Some(mut hook) = self.active_db_write_hook.take() else { return Poll::Pending };
 
@@ -99,7 +98,7 @@ impl EngineHooksController {
     pub(crate) fn poll_next_hook(
         &mut self,
         cx: &mut Context<'_>,
-        args: EngineContext,
+        args: EngineHookContext,
         db_write_active: bool,
     ) -> Poll<Result<PolledHook, EngineHookError>> {
         let Some(mut hook) = self.hooks.pop_front() else { return Poll::Pending };
@@ -125,10 +124,10 @@ impl EngineHooksController {
     }
 
     fn poll_next_hook_inner(
-        &mut self,
+        &self,
         cx: &mut Context<'_>,
         hook: &mut Box<dyn EngineHook>,
-        args: EngineContext,
+        args: EngineHookContext,
         db_write_active: bool,
     ) -> Poll<Result<PolledHook, EngineHookError>> {
         // Hook with DB write access level is not allowed to run due to already running hook with DB
@@ -151,6 +150,8 @@ impl EngineHooksController {
             );
 
             return Poll::Ready(Ok(result))
+        } else {
+            debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
         }
 
         Poll::Pending
@@ -165,7 +166,7 @@ impl EngineHooksController {
 #[cfg(test)]
 mod tests {
     use crate::hooks::{
-        EngineContext, EngineHook, EngineHookDBAccessLevel, EngineHookEvent, EngineHooks,
+        EngineHook, EngineHookContext, EngineHookDBAccessLevel, EngineHookEvent, EngineHooks,
         EngineHooksController,
     };
     use futures::poll;
@@ -211,7 +212,7 @@ mod tests {
         fn poll(
             &mut self,
             _cx: &mut Context<'_>,
-            _ctx: EngineContext,
+            _ctx: EngineHookContext,
         ) -> Poll<RethResult<EngineHookEvent>> {
             self.results.pop_front().map_or(Poll::Pending, Poll::Ready)
         }
@@ -225,7 +226,7 @@ mod tests {
     async fn poll_active_db_write_hook() {
         let mut controller = EngineHooksController::new(EngineHooks::new());
 
-        let context = EngineContext { tip_block_number: 2, finalized_block_number: Some(1) };
+        let context = EngineHookContext { tip_block_number: 2, finalized_block_number: Some(1) };
 
         // No currently running hook with DB write access is set
         let result = poll!(poll_fn(|cx| controller.poll_active_db_write_hook(cx, context)));
@@ -276,7 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn poll_next_hook_db_write_active() {
-        let context = EngineContext { tip_block_number: 2, finalized_block_number: Some(1) };
+        let context = EngineHookContext { tip_block_number: 2, finalized_block_number: Some(1) };
 
         let mut hook_rw = TestHook::new_rw("read-write");
         hook_rw.add_result(Ok(EngineHookEvent::Started));
@@ -310,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn poll_next_hook_db_write_inactive() {
-        let context = EngineContext { tip_block_number: 2, finalized_block_number: Some(1) };
+        let context = EngineHookContext { tip_block_number: 2, finalized_block_number: Some(1) };
 
         let hook_rw_1_name = "read-write-1";
         let mut hook_rw_1 = TestHook::new_rw(hook_rw_1_name);

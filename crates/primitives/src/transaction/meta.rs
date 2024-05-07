@@ -15,4 +15,6 @@ pub struct TransactionMeta {
     pub base_fee: Option<u64>,
     /// The excess blob gas of the block.
     pub excess_blob_gas: Option<u64>,
+    /// The block's timestamp.
+    pub timestamp: u64,
 }

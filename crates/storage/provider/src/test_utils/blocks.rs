@@ -1,14 +1,15 @@
 //! Dummy blocks and data for tests
 use crate::{BundleStateWithReceipts, DatabaseProviderRW};
+use alloy_primitives::Log;
 use alloy_rlp::Decodable;
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
-    b256,
+    alloy_primitives, b256,
     hex_literal::hex,
     proofs::{state_root_unhashed, storage_root_unhashed},
     revm::compat::into_reth_acc,
-    Address, BlockNumber, Bytes, Header, Log, Receipt, Receipts, SealedBlock,
-    SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256, U256,
+    Address, BlockNumber, Bytes, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
+    TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::{
     db::BundleState,
@@ -26,7 +27,10 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
-    assert_eq!(tx.table::<tables::HeaderTD>().unwrap(), vec![(n, g.difficulty.into())]);
+    assert_eq!(
+        tx.table::<tables::HeaderTerminalDifficulties>().unwrap(),
+        vec![(n, g.difficulty.into())]
+    );
     assert_eq!(
         tx.table::<tables::BlockBodyIndices>().unwrap(),
         vec![(0, StoredBlockBodyIndices::default())]
@@ -34,23 +38,23 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
     assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TransactionBlock>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TxHashNumber>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountHistory>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StorageHistory>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountsHistory>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StoragesHistory>().unwrap(), vec![]);
     // TODO check after this gets done: https://github.com/paradigmxyz/reth/issues/1588
     // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountChangeSet>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::StorageChangeSet>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::HashedAccount>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::HashedStorage>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::AccountChangeSets>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::StorageChangeSets>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::HashedAccounts>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::HashedStorages>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StoragesTrie>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::TxSenders>().unwrap(), vec![]);
-    // SyncStage is not updated in tests
+    assert_eq!(tx.table::<tables::TransactionSenders>().unwrap(), vec![]);
+    // StageCheckpoints is not updated in tests
 }
 
 const BLOCK_RLP: [u8; 610] = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0");
@@ -58,14 +62,14 @@ const BLOCK_RLP: [u8; 610] = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd1
 /// Test chain with genesis, blocks, execution results
 /// that have valid changesets.
 #[derive(Debug)]
-pub struct BlockChainTestData {
+pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
     pub blocks: Vec<(SealedBlockWithSenders, BundleStateWithReceipts)>,
 }
 
-impl BlockChainTestData {
+impl BlockchainTestData {
     /// Create test data with two blocks that are connected, specifying their block numbers.
     pub fn default_from_number(first: BlockNumber) -> Self {
         let one = block1(first);
@@ -81,7 +85,7 @@ impl BlockChainTestData {
     }
 }
 
-impl Default for BlockChainTestData {
+impl Default for BlockchainTestData {
     fn default() -> Self {
         let one = block1(1);
         let mut extended_state = one.1.clone();
@@ -144,14 +148,14 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             .state_storage(account1, HashMap::from([(slot, (U256::ZERO, U256::from(10)))]))
             .build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP2930,
+            tx_type: TxType::Eip2930,
             success: true,
             cumulative_gas_used: 300,
-            logs: vec![Log {
-                address: Address::new([0x60; 20]),
-                topics: vec![B256::with_last_byte(1), B256::with_last_byte(2)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x60; 20]),
+                vec![B256::with_last_byte(1), B256::with_last_byte(2)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -202,14 +206,14 @@ fn block2(
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: false,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -227,6 +231,7 @@ fn block2(
     );
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
+
     block.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = block.header.clone().unseal();
     header.number = number;
@@ -262,19 +267,21 @@ fn block3(
                         .clone()
                         .map(|slot| (U256::from(slot), (U256::ZERO, U256::from(slot)))),
                 ),
-            );
+            )
+            .revert_account_info(number, address, Some(None))
+            .revert_storage(number, address, Vec::new());
     }
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -356,14 +363,14 @@ fn block4(
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -440,14 +447,14 @@ fn block5(
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
         Receipts::from_vec(vec![vec![Some(Receipt {
-            tx_type: TxType::EIP1559,
+            tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]

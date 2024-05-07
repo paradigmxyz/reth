@@ -1,0 +1,60 @@
+[package]
+name = "reth-node-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+## reth
+reth-auto-seal-consensus.workspace = true
+reth-beacon-consensus.workspace = true
+reth-blockchain-tree.workspace = true
+reth-exex.workspace = true
+reth-evm.workspace = true
+reth-provider.workspace = true
+reth-db.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-rpc.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-network.workspace = true
+reth-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-transaction-pool.workspace = true
+reth-tasks.workspace = true
+reth-tracing.workspace = true
+reth-interfaces.workspace = true
+reth-static-file.workspace = true
+reth-prune.workspace = true
+reth-stages.workspace = true
+reth-config.workspace = true
+reth-downloaders.workspace = true
+reth-node-events.workspace = true
+reth-consensus.workspace = true
+
+## async
+futures.workspace = true
+tokio = { workspace = true, features = [
+    "sync",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
+tokio-stream.workspace = true
+
+## misc
+aquamarine.workspace = true
+eyre.workspace = true
+fdlimit.workspace = true
+confy.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

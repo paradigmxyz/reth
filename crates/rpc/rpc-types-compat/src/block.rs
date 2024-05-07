@@ -3,7 +3,7 @@
 use crate::transaction::from_recovered_with_block_context;
 use alloy_rlp::Encodable;
 use reth_primitives::{
-    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, B256, U256, U64,
+    Block as PrimitiveBlock, BlockWithSenders, Header as PrimitiveHeader, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
@@ -76,7 +76,7 @@ pub fn from_block_full(
                 block_hash,
                 block_number,
                 base_fee_per_gas,
-                U256::from(idx),
+                idx,
             )
         })
         .collect::<Vec<_>>();
@@ -127,31 +127,21 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         transactions_root,
         receipts_root,
         withdrawals_root,
-        number: Some(U256::from(number)),
-        gas_used: U256::from(gas_used),
-        gas_limit: U256::from(gas_limit),
+        number: Some(number),
+        gas_used: gas_used as u128,
+        gas_limit: gas_limit as u128,
         extra_data,
         logs_bloom,
-        timestamp: U256::from(timestamp),
+        timestamp,
         difficulty,
         mix_hash: Some(mix_hash),
         nonce: Some(nonce.to_be_bytes().into()),
-        base_fee_per_gas: base_fee_per_gas.map(U256::from),
-        blob_gas_used: blob_gas_used.map(U64::from),
-        excess_blob_gas: excess_blob_gas.map(U64::from),
+        base_fee_per_gas: base_fee_per_gas.map(u128::from),
+        blob_gas_used: blob_gas_used.map(u128::from),
+        excess_blob_gas: excess_blob_gas.map(u128::from),
         parent_beacon_block_root,
         total_difficulty: None,
-    }
-}
-
-fn from_primitive_withdrawal(
-    withdrawal: reth_primitives::Withdrawal,
-) -> reth_rpc_types::Withdrawal {
-    reth_rpc_types::Withdrawal {
-        index: withdrawal.index,
-        address: withdrawal.address,
-        validator_index: withdrawal.validator_index,
-        amount: withdrawal.amount,
+        requests_root: None,
     }
 }
 
@@ -167,13 +157,11 @@ fn from_block_with_transactions(
     let mut header = from_primitive_with_hash(block.header.seal(block_hash));
     header.total_difficulty = Some(total_difficulty);
 
-    let withdrawals = if header.withdrawals_root.is_some() {
-        block
-            .withdrawals
-            .map(|withdrawals| withdrawals.into_iter().map(from_primitive_withdrawal).collect())
-    } else {
-        None
-    };
+    let withdrawals = header
+        .withdrawals_root
+        .is_some()
+        .then(|| block.withdrawals.map(Withdrawals::into_inner))
+        .flatten();
 
     Block {
         header,

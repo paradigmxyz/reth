@@ -58,6 +58,11 @@ Database:
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
 
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+          
+          [possible values: true, false]
+
       --table <TABLE>
           The table name to diff. If not specified, all tables are diffed.
 

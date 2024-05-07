@@ -11,18 +11,17 @@ Arguments:
           The name of the stage to run
 
           Possible values:
-          - headers:          The headers stage within the pipeline
-          - bodies:           The bodies stage within the pipeline
-          - senders:          The senders stage within the pipeline
-          - execution:        The execution stage within the pipeline
-          - account-hashing:  The account hashing stage within the pipeline
-          - storage-hashing:  The storage hashing stage within the pipeline
-          - hashing:          The hashing stage within the pipeline
-          - merkle:           The Merkle stage within the pipeline
-          - tx-lookup:        The transaction lookup stage within the pipeline
-          - account-history:  The account history stage within the pipeline
-          - storage-history:  The storage history stage within the pipeline
-          - total-difficulty: The total difficulty stage within the pipeline
+          - headers:         The headers stage within the pipeline
+          - bodies:          The bodies stage within the pipeline
+          - senders:         The senders stage within the pipeline
+          - execution:       The execution stage within the pipeline
+          - account-hashing: The account hashing stage within the pipeline
+          - storage-hashing: The storage hashing stage within the pipeline
+          - hashing:         The account and storage hashing stages within the pipeline
+          - merkle:          The merkle stage within the pipeline
+          - tx-lookup:       The transaction lookup stage within the pipeline
+          - account-history: The account history stage within the pipeline
+          - storage-history: The storage history stage within the pipeline
 
 Options:
       --config <FILE>
@@ -62,6 +61,12 @@ Options:
       --batch-size <BATCH_SIZE>
           Batch size for stage execution and unwind
 
+      --etl-file-size <ETL_FILE_SIZE>
+          The maximum size in bytes of data held in memory before being flushed to disk as a file
+
+      --etl-dir <ETL_DIR>
+          Directory where to collect ETL files
+
   -s, --skip-unwind
           Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
           
@@ -91,15 +96,43 @@ Networking:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
+      --enable-discv5-discovery
+          Enable Discv5 discovery
+
       --discovery.addr <DISCOVERY_ADDR>
-          The UDP address to use for P2P discovery/networking
+          The UDP address to use for devp2p peer discovery version 4
           
           [default: 0.0.0.0]
 
       --discovery.port <DISCOVERY_PORT>
-          The UDP port to use for P2P discovery/networking
+          The UDP port to use for devp2p peer discovery version 4
           
           [default: 30303]
+
+      --discovery.v5.addr <DISCOVERY_V5_ADDR>
+          The UDP address to use for devp2p peer discovery version 5
+          
+          [default: 0.0.0.0]
+
+      --discovery.v5.port <DISCOVERY_V5_PORT>
+          The UDP port to use for devp2p peer discovery version 5
+          
+          [default: 9000]
+
+      --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
+          The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
+          
+          [default: 60]
+
+      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
+          The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
+          
+          [default: 5]
+
+      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
+          The number of times to carry out boost lookup queries at bootstrap
+          
+          [default: 100]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
@@ -152,6 +185,18 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --pooled-tx-response-soft-limit <BYTES>
+          Soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. Spec'd at 2 MiB.
+          
+          <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+          
+          [default: 2097152]
+
+      --pooled-tx-pack-soft-limit <BYTES>
+          Default soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a `PooledTransactions` response. Default is 128 KiB
+          
+          [default: 131072]
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
@@ -166,10 +211,18 @@ Database:
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
 
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+          
+          [possible values: true, false]
+
   -c, --commit
           Commits the changes in the database. WARNING: potentially destructive.
           
           Useful when you want to run diagnostics on the database.
+
+      --checkpoints
+          Save stage checkpoints
 
 Logging:
       --log.stdout.format <FORMAT>

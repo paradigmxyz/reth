@@ -1,7 +1,7 @@
 //! Prune hook for the engine implementation.
 
 use crate::{
-    engine::hooks::{EngineContext, EngineHook, EngineHookError, EngineHookEvent},
+    engine::hooks::{EngineHook, EngineHookContext, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
@@ -121,7 +121,7 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        ctx: EngineContext,
+        ctx: EngineHookContext,
     ) -> Poll<RethResult<EngineHookEvent>> {
         // Try to spawn a pruner
         match self.try_spawn_pruner(ctx.tip_block_number) {

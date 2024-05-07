@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc::unbounded_channel};
 
 criterion_group!(
-    name = brodcast_benches;
+    name = broadcast_benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = broadcast_ingress_bench
 );
@@ -87,4 +87,4 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
     });
 }
 
-criterion_main!(brodcast_benches);
+criterion_main!(broadcast_benches);

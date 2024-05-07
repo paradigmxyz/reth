@@ -6,9 +6,10 @@ use crate::p2p::{
     priority::Priority,
 };
 use parking_lot::Mutex;
+use reth_network_types::{PeerId, WithPeerId};
 use reth_primitives::{
-    BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, PeerId, SealedBlock,
-    SealedHeader, WithPeerId, B256,
+    BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, SealedBlock,
+    SealedHeader, B256,
 };
 use std::{collections::HashMap, sync::Arc};
 

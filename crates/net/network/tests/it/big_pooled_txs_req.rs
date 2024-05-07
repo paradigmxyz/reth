@@ -13,7 +13,7 @@ use reth_transaction_pool::{
 };
 
 use tokio::sync::oneshot;
-// peer0: `GetPooledTransactions` requestor
+// peer0: `GetPooledTransactions` requester
 // peer1: `GetPooledTransactions` responder
 #[tokio::test(flavor = "multi_thread")]
 async fn test_large_tx_req() {
@@ -50,7 +50,7 @@ async fn test_large_tx_req() {
     net.peers_mut()[0].install_transactions_manager(testing_pool());
     net.peers_mut()[1].install_transactions_manager(pool1);
 
-    // connect peers together and check for connection existance
+    // connect peers together and check for connection existence
     let handle0 = net.peers()[0].handle();
     let handle1 = net.peers()[1].handle();
     let mut events0 = NetworkEventStream::new(handle0.event_listener());
@@ -82,7 +82,7 @@ async fn test_large_tx_req() {
             txs.into_iter().for_each(|tx| assert!(txs_hashes.contains(tx.hash())));
         }
         Err(e) => {
-            panic!("error: {:?}", e);
+            panic!("error: {e:?}");
         }
     }
 }

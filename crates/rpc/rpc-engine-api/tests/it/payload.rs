@@ -13,8 +13,8 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_standalone_withdraw_to_withdrawal, convert_to_payload_body_v1, try_block_to_payload,
-    try_block_to_payload_v1, try_into_sealed_block, try_payload_v1_to_block,
+    block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
+    try_payload_v1_to_block,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
@@ -23,7 +23,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     // Recalculate roots
     transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
-    try_block_to_payload(SealedBlock {
+    block_to_payload(SealedBlock {
         header: transformed.header.seal_slow(),
         body: transformed.body,
         ommers: transformed.ommers,
@@ -46,11 +46,7 @@ fn payload_body_roundtrip() {
                 .map(|x| TransactionSigned::decode(&mut &x[..]))
                 .collect::<Result<Vec<_>, _>>(),
         );
-        let withdraw = payload_body.withdrawals.map(|withdrawals| {
-            Withdrawals::new(
-                withdrawals.into_iter().map(convert_standalone_withdraw_to_withdrawal).collect(),
-            )
-        });
+        let withdraw = payload_body.withdrawals.map(Withdrawals::new);
         assert_eq!(block.withdrawals, withdraw);
     }
 }
@@ -93,7 +89,7 @@ fn payload_validation() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayloadV1 = try_block_to_payload_v1(block.clone());
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(block.clone());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new().into();

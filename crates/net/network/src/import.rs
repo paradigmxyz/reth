@@ -1,7 +1,7 @@
 //! This module provides an abstraction over block import in the form of the `BlockImport` trait.
 
 use crate::message::NewBlockMessage;
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::task::{Context, Poll};
 
 /// Abstraction over block import.
@@ -50,7 +50,7 @@ pub enum BlockValidation {
 pub enum BlockImportError {
     /// Consensus error
     #[error(transparent)]
-    Consensus(#[from] reth_interfaces::consensus::ConsensusError),
+    Consensus(#[from] reth_consensus::ConsensusError),
 }
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.

@@ -9,7 +9,7 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{cursor::DbCursorRW, TxHashNumber};
+use reth_db::{cursor::DbCursorRW, TransactionHashNumbers};
 use std::collections::HashSet;
 
 criterion_group! {
@@ -34,7 +34,7 @@ pub fn hash_keys(c: &mut Criterion) {
     group.sample_size(10);
 
     for size in [10_000, 100_000, 1_000_000] {
-        measure_table_insertion::<TxHashNumber>(&mut group, size);
+        measure_table_insertion::<TransactionHashNumbers>(&mut group, size);
     }
 }
 
@@ -136,7 +136,7 @@ where
     T::Key: std::hash::Hash + Arbitrary,
     T::Value: Arbitrary,
 {
-    let strat = proptest::collection::vec(
+    let strategy = proptest::collection::vec(
         any_with::<TableRow<T>>((
             <T::Key as Arbitrary>::Parameters::default(),
             <T::Value as Arbitrary>::Parameters::default(),
@@ -147,8 +147,8 @@ where
     .boxed();
 
     let mut runner = TestRunner::new(ProptestConfig::default());
-    let mut preload = strat.new_tree(&mut runner).unwrap().current();
-    let mut input = strat.new_tree(&mut runner).unwrap().current();
+    let mut preload = strategy.new_tree(&mut runner).unwrap().current();
+    let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
     let mut unique_keys = HashSet::new();
     preload.retain(|(k, _)| unique_keys.insert(k.clone()));

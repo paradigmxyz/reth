@@ -11,13 +11,18 @@ use crate::{
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
+use discv5::ListenConfig;
 use reth_config::Config;
-use reth_db::{mdbx::DatabaseArguments, open_db};
+use reth_db::create_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ProviderFactory;
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    net::{SocketAddrV4, SocketAddrV6},
+    path::PathBuf,
+    sync::Arc,
+};
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
@@ -73,10 +78,10 @@ pub struct Command {
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Subcommands,
 }
 
@@ -100,14 +105,11 @@ impl Command {
     /// Execute `p2p` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let tempdir = tempfile::TempDir::new()?;
-        let noop_db = Arc::new(open_db(
-            &tempdir.into_path(),
-            DatabaseArguments::default().log_level(self.db.log_level),
-        )?);
+        let noop_db = Arc::new(create_db(tempdir.into_path(), self.db.database_args())?);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or(data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
@@ -119,22 +121,59 @@ impl Command {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
         }
 
-        config.peers.connect_trusted_nodes_only = self.trusted_only;
+        config.peers.trusted_nodes_only = self.trusted_only;
 
-        let default_secret_key_path = data_dir.p2p_secret_path();
+        let default_secret_key_path = data_dir.p2p_secret();
         let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
 
-        let mut network_config_builder =
-            config.network_config(self.nat, None, p2p_secret_key).chain_spec(self.chain.clone());
+        let mut network_config_builder = config
+            .network_config(self.nat, None, p2p_secret_key)
+            .chain_spec(self.chain.clone())
+            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
+            .boot_nodes(self.chain.bootnodes().unwrap_or_default());
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
-        let network = network_config_builder
-            .build(Arc::new(ProviderFactory::new(noop_db, self.chain.clone())))
-            .start_network()
-            .await?;
+        let mut network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
+            noop_db,
+            self.chain.clone(),
+            data_dir.static_files(),
+        )?));
 
+        if !self.discovery.disable_discovery &&
+            (self.discovery.enable_discv5_discovery ||
+                network_config.chain_spec.chain.is_optimism())
+        {
+            network_config = network_config.discovery_v5_with_config_builder(|builder| {
+                let DiscoveryArgs {
+                    discv5_addr: discv5_addr_ipv4,
+                    discv5_addr_ipv6,
+                    discv5_port: discv5_port_ipv4,
+                    discv5_port_ipv6,
+                    discv5_lookup_interval,
+                    discv5_bootstrap_lookup_interval,
+                    discv5_bootstrap_lookup_countdown,
+                    ..
+                } = self.discovery;
+
+                builder
+                    .discv5_config(
+                        discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                            discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
+                            discv5_addr_ipv6
+                                .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                        ))
+                        .build(),
+                    )
+                    .lookup_interval(discv5_lookup_interval)
+                    .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                    .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
+                    .build()
+            });
+        }
+
+        let network = network_config.start_network().await?;
         let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);
         let backoff = ConstantBuilder::default().with_max_times(retries);

@@ -5,17 +5,16 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-//! Consensus for ethereum network
-
+use reth_consensus::{Consensus, ConsensusError};
 use reth_consensus_common::validation;
-use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, Chain, ChainSpec, Hardfork, Header, SealedBlock,
-    SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
+
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
@@ -47,14 +46,27 @@ impl Consensus for BeaconConsensus {
         Ok(())
     }
 
+    #[allow(unused_assignments)]
+    #[allow(unused_mut)]
     fn validate_header_with_total_difficulty(
         &self,
         header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
+        let mut is_post_merge = self
+            .chain_spec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(total_difficulty, header.difficulty);
+
+        #[cfg(feature = "optimism")]
         {
-            if !header.is_zero_difficulty() {
+            // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
+            // reached.
+            is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
+        }
+
+        if is_post_merge {
+            if !self.chain_spec.is_optimism() && !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
@@ -75,7 +87,7 @@ impl Consensus for BeaconConsensus {
             // is greater than its parent timestamp.
 
             // validate header extradata for all networks post merge
-            validate_header_extradata(header)?;
+            validation::validate_header_extradata(header)?;
 
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
@@ -84,7 +96,7 @@ impl Consensus for BeaconConsensus {
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
 
-            // Check if timestamp is in future. Clock can drift but this can be consensus issue.
+            // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
             let present_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
@@ -95,11 +107,11 @@ impl Consensus for BeaconConsensus {
                 })
             }
 
-            // Goerli exception:
+            // Goerli and early OP exception:
             //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
-            //  support clique.
-            if self.chain_spec.chain != Chain::goerli() {
-                validate_header_extradata(header)?;
+            //  support clique. Same goes for OP blocks below Bedrock.
+            if self.chain_spec.chain != Chain::goerli() && !self.chain_spec.is_optimism() {
+                validation::validate_header_extradata(header)?;
             }
         }
 
@@ -108,17 +120,5 @@ impl Consensus for BeaconConsensus {
 
     fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
         validation::validate_block_standalone(block, &self.chain_spec)
-    }
-}
-
-/// Validates the header's extradata according to the beacon consensus rules.
-///
-/// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
-/// This must be 32 bytes or fewer; formally Hx.
-fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
-    if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
-    } else {
-        Ok(())
     }
 }

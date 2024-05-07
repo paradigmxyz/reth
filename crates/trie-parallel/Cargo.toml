@@ -1,0 +1,66 @@
+[package]
+name = "reth-trie-parallel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Parallel implementation of merkle root algorithm"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-db.workspace = true
+reth-trie.workspace = true
+reth-interfaces.workspace = true
+reth-provider.workspace = true
+
+# alloy
+alloy-rlp.workspace = true
+
+# tracing
+tracing.workspace = true
+
+# misc
+thiserror.workspace = true
+derive_more.workspace = true
+
+# `async` feature
+reth-tasks = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, default-features = false }
+itertools = { workspace = true, optional = true }
+
+# `parallel` feature
+rayon = { workspace = true, optional = true }
+
+# `metrics` feature
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth
+reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-trie = { workspace = true, features = ["test-utils"] }
+
+# misc
+rand.workspace = true
+tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
+rayon.workspace = true
+criterion = { workspace = true, features = ["async_tokio"] }
+proptest.workspace = true
+
+[features]
+default = ["metrics", "async", "parallel"]
+metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
+async = ["reth-tasks/rayon", "tokio/sync", "itertools"]
+parallel = ["rayon"]
+
+[[bench]]
+name = "root"
+required-features = ["async", "parallel"]
+harness = false

@@ -97,6 +97,19 @@ impl TransactionValidationTaskExecutor<()> {
     }
 }
 
+impl<V> TransactionValidationTaskExecutor<V> {
+    /// Maps the given validator to a new type.
+    pub fn map<F, T>(self, mut f: F) -> TransactionValidationTaskExecutor<T>
+    where
+        F: FnMut(V) -> T,
+    {
+        TransactionValidationTaskExecutor {
+            validator: f(self.validator),
+            to_validation_task: self.to_validation_task,
+        }
+    }
+}
+
 impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
 where
     Client: BlockReaderIdExt,
@@ -153,7 +166,6 @@ impl<V> TransactionValidationTaskExecutor<V> {
     }
 }
 
-#[async_trait::async_trait]
 impl<V> TransactionValidator for TransactionValidationTaskExecutor<V>
 where
     V: TransactionValidator + Clone + 'static,

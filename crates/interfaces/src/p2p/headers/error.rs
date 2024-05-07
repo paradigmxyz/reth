@@ -1,4 +1,4 @@
-use crate::consensus::ConsensusError;
+use reth_consensus::ConsensusError;
 use reth_primitives::SealedHeader;
 use thiserror::Error;
 

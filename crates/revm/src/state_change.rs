@@ -152,7 +152,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
             for withdrawal in withdrawals.iter() {
                 if withdrawal.amount > 0 {
                     *balance_increments.entry(withdrawal.address).or_default() +=
-                        withdrawal.amount_wei();
+                        withdrawal.amount_wei().to::<u128>();
                 }
             }
         }

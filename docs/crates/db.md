@@ -35,30 +35,30 @@ The `Table` trait has two generic values, `Key` and `Value`, which need to imple
 There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/storage/db/src/tables/mod.rs#L161-L188) if you would like to see the table definitions for any of the tables below.
 
 - CanonicalHeaders
-- HeaderTD
+- HeaderTerminalDifficulties
 - HeaderNumbers
 - Headers
 - BlockBodyIndices
 - BlockOmmers
 - BlockWithdrawals
-- TransactionBlock
+- TransactionBlocks
 - Transactions
-- TxHashNumber
+- TransactionHashNumbers
 - Receipts
 - PlainAccountState
 - PlainStorageState
 - Bytecodes
-- AccountHistory
-- StorageHistory
-- AccountChangeSet
-- StorageChangeSet
+- AccountsHistory
+- StoragesHistory
+- AccountChangeSets
+- StorageChangeSets
 - HashedAccount
-- HashedStorage
+- HashedStorages
 - AccountsTrie
 - StoragesTrie
-- TxSenders
-- SyncStage
-- SyncStageProgress
+- TransactionSenders
+- StageCheckpoints
+- StageCheckpointProgresses
 - PruneCheckpoints
 
 <br>
@@ -137,7 +137,6 @@ The `Database` defines two associated types `TX` and `TXMut`.
 
 [File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L11)
 
-
 The `TX` type can be any type that implements the `DbTx` trait, which provides a set of functions to interact with read only transactions.
 
 [File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L36)
@@ -149,7 +148,7 @@ pub trait DbTx: Send + Sync {
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// DupCursor type for this read-only transaction
     type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
-    
+
     /// Get value
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
     /// Commit for read only transaction will consume and free transaction and allows

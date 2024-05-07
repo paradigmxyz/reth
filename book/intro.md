@@ -35,7 +35,7 @@ To achieve that, we are licensing Reth under the Apache/MIT permissive license.
 
 Reth aims to be fast, so we used Rust and the [Erigon staged-sync](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) node architecture.
 
-We also use our Ethereum libraries (including [ethers-rs](https://github.com/gakonst/ethers-rs/) and [revm](https://github.com/bluealloy/revm/)) which we’ve battle-tested and optimized via [Foundry](https://github.com/foundry-rs/foundry/).
+We also use our Ethereum libraries (including [Alloy](https://github.com/alloy-rs/alloy/) and [revm](https://github.com/bluealloy/revm/)) which we’ve battle-tested and optimized via [Foundry](https://github.com/foundry-rs/foundry/).
 
 **3. Free for anyone to use any way they want**
 

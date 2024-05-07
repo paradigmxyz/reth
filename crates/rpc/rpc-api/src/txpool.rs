@@ -5,7 +5,6 @@ use reth_rpc_types::txpool::{TxpoolContent, TxpoolContentFrom, TxpoolInspect, Tx
 /// Txpool rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "txpool"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "txpool"))]
-#[async_trait::async_trait]
 pub trait TxPoolApi {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.

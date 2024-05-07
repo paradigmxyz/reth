@@ -18,7 +18,8 @@ use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
 use reth_network_api::PeerKind;
-use reth_primitives::{ForkId, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{ForkId, B256};
 use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
@@ -163,7 +164,7 @@ where
     ///
     /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
     pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage) {
-        // send a `NewBlock` message to a fraction fo the connected peers (square root of the total
+        // send a `NewBlock` message to a fraction of the connected peers (square root of the total
         // number of peers)
         let num_propagate = (self.active_peers.len() as f64).sqrt() as u64 + 1;
 
@@ -233,7 +234,7 @@ where
     }
 
     /// Invoked when a new [`ForkId`] is activated.
-    pub(crate) fn update_fork_id(&mut self, fork_id: ForkId) {
+    pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         self.discovery.update_fork_id(fork_id)
     }
 
@@ -265,6 +266,11 @@ where
     pub(crate) fn ban_discovery(&self, peer_id: PeerId, ip: IpAddr) {
         trace!(target: "net", ?peer_id, ?ip, "Banning discovery");
         self.discovery.ban(peer_id, ip)
+    }
+
+    /// Marks the given peer as trusted.
+    pub(crate) fn add_trusted_peer_id(&mut self, peer_id: PeerId) {
+        self.peers_manager.add_trusted_peer_id(peer_id)
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
@@ -311,6 +317,10 @@ where
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
             PeerAction::DisconnectBannedIncoming { peer_id } => {
+                self.state_fetcher.on_pending_disconnect(&peer_id);
+                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
+            }
+            PeerAction::DisconnectUntrustedIncoming { peer_id } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
             }
@@ -528,7 +538,8 @@ mod tests {
         BlockBodies, EthVersion,
     };
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_primitives::{BlockBody, Header, PeerId, B256};
+    use reth_network_types::PeerId;
+    use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;
     use std::{
         future::poll_fn,

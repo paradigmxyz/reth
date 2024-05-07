@@ -30,6 +30,12 @@ Options:
           
           [default: mainnet]
 
+      --no-state
+          Disables stages that require state.
+
+      --chunk-len <CHUNK_LEN>
+          Chunk byte length.
+
       --instance <INSTANCE>
           Add a new instance of a node.
           
@@ -57,6 +63,11 @@ Database:
           - debug:   Enables logging for debug-level messages
           - trace:   Enables logging for trace debug-level messages
           - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+          
+          [possible values: true, false]
 
   <IMPORT_PATH>
           The path to a block file for import.

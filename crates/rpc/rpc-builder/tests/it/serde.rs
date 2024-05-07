@@ -2,7 +2,7 @@
 
 use crate::utils::launch_http;
 use jsonrpsee::{
-    core::{client::ClientT, traits::ToRpcParams, Error},
+    core::{client::ClientT, traits::ToRpcParams},
     types::Request,
 };
 use reth_primitives::U256;
@@ -12,7 +12,7 @@ use serde_json::value::RawValue;
 struct RawRpcParams(Box<RawValue>);
 
 impl ToRpcParams for RawRpcParams {
-    fn to_rpc_params(self) -> Result<Option<Box<RawValue>>, Error> {
+    fn to_rpc_params(self) -> Result<Option<Box<RawValue>>, serde_json::Error> {
         Ok(Some(self.0))
     }
 }
