@@ -106,7 +106,7 @@ impl TxEip4844 {
     /// commitments, and proofs. Each blob data element is verified against its commitment and
     /// proof.
     ///
-    /// Returns [BlobTransactionValidationError::InvalidProof] if any blob KZG proof in the response
+    /// Returns `InvalidProof` if any blob KZG proof in the response
     /// fails to verify, or if the versioned hashes in the transaction do not match the actual
     /// commitment versioned hashes.
     #[cfg(feature = "c-kzg")]
