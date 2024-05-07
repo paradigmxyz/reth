@@ -41,13 +41,18 @@ triehash = { version = "0.8", optional = true }
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-tracing = { workspace = true }
 
 # trie
 triehash = "0.8"
 
 # misc
 proptest.workspace = true
-tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
+tokio = { workspace = true, default-features = false, features = [
+    "sync",
+    "rt",
+    "macros",
+] }
 tokio-stream.workspace = true
 once_cell.workspace = true
 serde_json.workspace = true

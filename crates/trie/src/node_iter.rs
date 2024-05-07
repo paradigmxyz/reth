@@ -206,6 +206,7 @@ where
         loop {
             // Check if there's a key in the walker.
             if let Some(key) = self.walker.key() {
+                println!("NodeIter Key: {:#?}", key);
                 // Check if the walker key hasn't been checked yet.
                 if !self.current_walker_key_checked {
                     self.current_walker_key_checked = true;
@@ -224,6 +225,7 @@ where
             // Check for a current hashed storage entry.
             if let Some(StorageEntry { key: hashed_key, value }) = self.current_hashed_entry.take()
             {
+                println!("NodeIter Hashed Entry: {:#?}", self.current_hashed_entry);
                 // Compare keys and proceed accordingly.
                 if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
@@ -237,6 +239,7 @@ where
 
             // Attempt to get the next unprocessed key from the walker.
             if let Some(seek_key) = self.walker.next_unprocessed_key() {
+                println!("NodeIter Seek Key: {:#?}", seek_key);
                 // Seek and update the current hashed entry based on the new seek key.
                 self.current_hashed_entry =
                     self.hashed_storage_cursor.seek(self.hashed_address, seek_key)?;

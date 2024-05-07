@@ -57,3 +57,6 @@ pub mod metrics;
 /// Collection of trie-related test utilities.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
+
+#[cfg(test)]
+mod tests;

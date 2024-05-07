@@ -8004,6 +8004,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-tracing",
  "revm",
  "serde_json",
  "similar-asserts",
