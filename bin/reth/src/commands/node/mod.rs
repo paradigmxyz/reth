@@ -78,7 +78,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
 
     /// Bitfinity Args
     #[command(flatten)]
-    pub bitfinity: BitfinityArgs,
+    pub bitfinity: crate::args::BitfinityArgs,
 
     /// All networking related arguments
     #[command(flatten)]
@@ -166,7 +166,9 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
 
         // set up real database
         let database = DatabaseBuilder::Real(datadir);
-        let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?);
+        let chain = Arc::new(
+            reth_downloaders::bitfinity_evm_client::BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?
+        );
 
         // set up node config
         let mut node_config = NodeConfig {
