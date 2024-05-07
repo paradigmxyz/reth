@@ -141,10 +141,15 @@ impl<C> NetworkConfig<C> {
         self
     }
 
-    /// Sets the address for the incoming connection listener.
+    /// Sets the address for the incoming RLPx connection listener.
     pub fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
         self
+    }
+
+    /// Returns the address for the incoming RLPx connection listener.
+    pub fn listener_addr(&self) -> &SocketAddr {
+        &self.listener_addr
     }
 }
 

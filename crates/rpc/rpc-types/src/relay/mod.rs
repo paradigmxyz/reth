@@ -1,12 +1,10 @@
 //! Relay API bindings: <https://flashbots.github.io/relay-specs/>
 
-use crate::{
-    beacon::{BlsPublicKey, BlsSignature},
-    engine::{
-        BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    },
+use crate::engine::{
+    BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
 use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types_beacon::beacon::{BlsPublicKey, BlsSignature};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -104,7 +102,7 @@ pub struct SignedBidSubmissionV1 {
     /// The BidTrace message associated with the submission.
     pub message: BidTrace,
     /// The execution payload for the submission.
-    #[serde(with = "crate::beacon::payload::beacon_payload_v1")]
+    #[serde(with = "alloy_rpc_types_beacon::beacon::payload::beacon_payload_v1")]
     pub execution_payload: ExecutionPayloadV1,
     /// The signature associated with the submission.
     pub signature: BlsSignature,
@@ -118,7 +116,7 @@ pub struct SignedBidSubmissionV2 {
     /// The BidTrace message associated with the submission.
     pub message: BidTrace,
     /// The execution payload for the submission.
-    #[serde(with = "crate::beacon::payload::beacon_payload_v2")]
+    #[serde(with = "alloy_rpc_types_beacon::beacon::payload::beacon_payload_v2")]
     pub execution_payload: ExecutionPayloadV2,
     /// The signature associated with the submission.
     pub signature: BlsSignature,
@@ -132,7 +130,7 @@ pub struct SignedBidSubmissionV3 {
     /// The BidTrace message associated with the submission.
     pub message: BidTrace,
     /// The execution payload for the submission.
-    #[serde(with = "crate::beacon::payload::beacon_payload_v3")]
+    #[serde(with = "alloy_rpc_types_beacon::beacon::payload::beacon_payload_v3")]
     pub execution_payload: ExecutionPayloadV3,
     /// The Deneb block bundle for this bid.
     pub blobs_bundle: BlobsBundleV1,
@@ -146,7 +144,7 @@ pub struct SubmitBlockRequest {
     /// The BidTrace message associated with the block submission.
     pub message: BidTrace,
     /// The execution payload for the block submission.
-    #[serde(with = "crate::beacon::payload::beacon_payload")]
+    #[serde(with = "alloy_rpc_types_beacon::beacon::payload::beacon_payload")]
     pub execution_payload: ExecutionPayload,
     /// The signature associated with the block submission.
     pub signature: BlsSignature,

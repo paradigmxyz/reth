@@ -10,7 +10,7 @@ use crate::{
 use clap::Parser;
 use reth_config::config::EtlConfig;
 use reth_db::{database::Database, init_db};
-use reth_node_core::init::{init_from_state_dump, init_genesis};
+use reth_node_core::init::init_from_state_dump;
 use reth_primitives::{ChainSpec, B256};
 use reth_provider::ProviderFactory;
 
@@ -59,8 +59,8 @@ pub struct InitStateCommand {
     ///
     /// Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
     /// and including the non-genesis block to init chain at. See 'import' command.
-    #[arg(long, value_name = "STATE_DUMP_FILE", verbatim_doc_comment, default_value = None)]
-    state: Option<PathBuf>,
+    #[arg(value_name = "STATE_DUMP_FILE", verbatim_doc_comment)]
+    state: PathBuf,
 
     #[command(flatten)]
     db: DatabaseArgs,
@@ -69,7 +69,7 @@ pub struct InitStateCommand {
 impl InitStateCommand {
     /// Execute the `init` command
     pub async fn execute(self) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth init starting");
+        info!(target: "reth::cli", "Reth init-state starting");
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
@@ -84,12 +84,9 @@ impl InitStateCommand {
             EtlConfig::default_file_size(),
         );
 
-        info!(target: "reth::cli", "Writing genesis block");
+        info!(target: "reth::cli", "Initiating state dump");
 
-        let hash = match self.state {
-            Some(path) => init_at_state(path, provider_factory, etl_config)?,
-            None => init_genesis(provider_factory)?,
-        };
+        let hash = init_at_state(self.state, provider_factory, etl_config)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
