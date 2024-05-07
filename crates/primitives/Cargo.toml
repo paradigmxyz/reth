@@ -27,7 +27,7 @@ alloy-trie = { workspace = true, features = ["serde"] }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
-alloy-consensus = {workspace=true, features=["arbitrary","serde", "kzg"]}
+
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "recovery", "rand"] }
 # for eip-4844
@@ -104,7 +104,7 @@ arbitrary = [
     "dep:proptest-derive",
     "zstd-codec",
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile", "alloy-eips/kzg"]
 zstd-codec = ["dep:zstd"]
 clap = ["dep:clap"]
 optimism = [
