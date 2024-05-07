@@ -153,19 +153,20 @@ pub mod tx_fetcher {
     /// search is budget constrained.
     ///
     /// Default is a sixth of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
-    /// (the breadth of the search), divided by [`DEFAULT_MAX_COUNT_FALLBACK_PEERS`], which
-    /// defaults to 3 peers (the depth of the search), so the 711 lru hashes in the pending hashes
-    /// cache.
+    /// (the ideal max number of hashes pending fetch), divided by
+    /// [`DEFAULT_MAX_COUNT_FALLBACK_PEERS`], which defaults to 3 peers (the depth of the search),
+    /// so a search breadth of 711 lru hashes in the pending hashes cache.
     pub const DEFAULT_BUDGET_FIND_IDLE_FALLBACK_PEER: usize =
         DEFAULT_MAX_COUNT_PENDING_FETCH / 6 / DEFAULT_MAX_COUNT_FALLBACK_PEERS as usize;
 
     /// Default budget for finding hashes in the intersection of transactions announced by a peer
     /// and in the cache of hashes pending fetch, when said search is budget constrained.
     ///
-    /// Default is a sixth of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
-    /// (the breadth of the search), so 2133 lru hashes in the pending hashes cache.
+    /// Default is an eight of [`DEFAULT_MAX_COUNT_PENDING_FETCH`], which defaults to 12 800 hashes
+    /// (the ideal max number of hashes pending fetch), so a search breadth of 1 600 lru hashes in
+    /// the pending hashes cache.
     pub const DEFAULT_BUDGET_FIND_INTERSECTION_ANNOUNCED_BY_PEER_AND_PENDING_FETCH: usize =
-        DEFAULT_MAX_COUNT_PENDING_FETCH / 6;
+        DEFAULT_MAX_COUNT_PENDING_FETCH / 8;
 
     /* ====== SCALARS FOR USE ON FETCH PENDING HASHES ====== */
 
