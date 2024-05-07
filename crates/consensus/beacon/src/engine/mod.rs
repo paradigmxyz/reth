@@ -702,7 +702,7 @@ where
     ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
     ///    the above conditions.
     fn latest_valid_hash_for_invalid_payload(
-        &self,
+        &mut self,
         parent_hash: B256,
         insert_err: Option<&InsertBlockErrorKind>,
     ) -> Option<B256> {
@@ -712,12 +712,31 @@ where
         }
 
         // Check if parent exists in side chain or in canonical chain.
+        // TODO: handle find_block_by_hash errors.
         if matches!(self.blockchain.find_block_by_hash(parent_hash, BlockSource::Any), Ok(Some(_)))
         {
             Some(parent_hash)
         } else {
-            // TODO: attempt to iterate over ancestors in the invalid cache
+            // iterate over ancestors in the invalid cache
             // until we encounter the first valid ancestor
+            let mut current_hash = parent_hash;
+            let mut current_header = self.invalid_headers.get(&current_hash);
+            while let Some(header) = current_header {
+                current_hash = header.parent_hash;
+                current_header = self.invalid_headers.get(&current_hash);
+
+                // If current_header is None, then the current_hash does not have an invalid
+                // ancestor in the cache, check its presence in blockchain tree
+                if current_header.is_none() &&
+                    matches!(
+                        // TODO: handle find_block_by_hash errors.
+                        self.blockchain.find_block_by_hash(current_hash, BlockSource::Any),
+                        Ok(Some(_))
+                    )
+                {
+                    return Some(current_hash)
+                }
+            }
             None
         }
     }
@@ -725,7 +744,7 @@ where
     /// Prepares the invalid payload response for the given hash, checking the
     /// database for the parent hash and populating the payload status with the latest valid hash
     /// according to the engine api spec.
-    fn prepare_invalid_response(&self, mut parent_hash: B256) -> PayloadStatus {
+    fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> PayloadStatus {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
         if let Ok(Some(parent)) = self.blockchain.header_by_hash_or_number(parent_hash.into()) {
@@ -734,10 +753,12 @@ where
             }
         }
 
+        let valid_parent_hash =
+            self.latest_valid_hash_for_invalid_payload(parent_hash, None).unwrap_or_default();
         PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
-        .with_latest_valid_hash(parent_hash)
+        .with_latest_valid_hash(valid_parent_hash)
     }
 
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
@@ -1089,7 +1110,7 @@ where
     ///
     /// This validation **MUST** be instantly run in all cases even during active sync process.
     fn ensure_well_formed_payload(
-        &self,
+        &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> Result<SealedBlock, PayloadStatus> {

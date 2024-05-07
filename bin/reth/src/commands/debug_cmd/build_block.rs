@@ -14,7 +14,7 @@ use eyre::Context;
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
@@ -160,7 +160,8 @@ impl Command {
             data_dir.static_files(),
         )?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         let executor = block_executor!(self.chain.clone());
 
@@ -213,7 +214,7 @@ impl Command {
                     ))?;
 
                     let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len()).into();
+                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
 
                     // first construct the tx, calculating the length of the tx with sidecar before
                     // insertion

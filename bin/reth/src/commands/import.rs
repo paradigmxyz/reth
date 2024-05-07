@@ -12,7 +12,7 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, init_db, tables, transaction::DbTx};
@@ -42,17 +42,6 @@ use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::{debug, error, info};
-
-/// Stages that require state.
-const STATE_STAGES: &[StageId] = &[
-    StageId::Execution,
-    StageId::MerkleUnwind,
-    StageId::AccountHashing,
-    StageId::StorageHashing,
-    StageId::MerkleExecute,
-    StageId::IndexStorageHistory,
-    StageId::IndexAccountHistory,
-];
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -140,7 +129,7 @@ impl ImportCommand {
 
         init_genesis(provider_factory.clone())?;
 
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
         // open file
@@ -171,7 +160,7 @@ impl ImportCommand {
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
-                true,
+                self.no_state,
             )
             .await?;
 
@@ -307,7 +296,7 @@ where
                 config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
                 ExExManagerHandle::empty(),
             ))
-            .disable_all_if(STATE_STAGES, || should_exec),
+            .disable_all_if(&StageId::STATE_REQUIRED, || should_exec),
         )
         .build(provider_factory, static_file_producer);
 

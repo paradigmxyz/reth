@@ -445,7 +445,6 @@ pub enum OpenDiskFileBlobStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
     use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
@@ -455,11 +454,15 @@ mod tests {
     }
 
     fn rng_blobs(num: usize) -> Vec<(TxHash, BlobTransactionSidecar)> {
-        let mut runner = TestRunner::new(Default::default());
-        prop::collection::vec(any::<(TxHash, BlobTransactionSidecar)>(), num)
-            .new_tree(&mut runner)
-            .unwrap()
-            .current()
+        let mut rng = rand::thread_rng();
+        (0..num)
+            .map(|_| {
+                let tx = TxHash::random_with(&mut rng);
+                let blob =
+                    BlobTransactionSidecar { blobs: vec![], commitments: vec![], proofs: vec![] };
+                (tx, blob)
+            })
+            .collect()
     }
 
     #[test]

@@ -1,5 +1,5 @@
 [package]
-name = "reth-beacon-consensus-core"
+name = "reth-ethereum-consensus"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
