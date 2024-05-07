@@ -210,8 +210,8 @@ pub mod tx_fetcher {
     /// for the intersection of hashes announced by a peer and hashes pending fetch. The max
     /// inflight requests is configured in [`TransactionFetcherInfo`].
     ///
-    /// Default is 2 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION: usize = 2;
+    /// Default is 3 requests.
+    pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION: usize = 3;
 
     // Default divisor to the max pending pool imports when calculating search breadth of the
     /// search for any idle peer to which to send a request filled with hashes pending fetch.
@@ -226,8 +226,8 @@ pub mod tx_fetcher {
     /// The max pending pool imports is configured in
     /// [`PendingPoolImportsInfo`](crate::transactions::PendingPoolImportsInfo).
     ///
-    /// Default is 3 requests.
-    pub const DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION: usize = 3;
+    /// Default is 4 requests.
+    pub const DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION: usize = 4;
 
     /* ================== ROUGH MEASURES ================== */
 
