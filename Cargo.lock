@@ -139,6 +139,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=0bb7604)",
+ "arbitrary",
  "c-kzg",
  "serde",
 ]
@@ -7520,6 +7521,7 @@ name = "reth-primitives"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=0bb7604)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=0bb7604)",
  "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=0bb7604)",
  "alloy-primitives",

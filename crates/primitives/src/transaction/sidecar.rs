@@ -12,6 +12,8 @@ use crate::{
     },
     Signature, Transaction, TransactionSigned, TxEip4844, TxHash, B256, EIP4844_TX_TYPE_ID,
 };
+#[cfg(any(test, feature = "arbitrary"))]
+pub use alloy_consensus::BlobTransactionSidecar;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::BufMut;
 #[cfg(any(test, feature = "arbitrary"))]
@@ -306,92 +308,6 @@ impl BlobTransaction {
     }
 }
 
-/// This represents a set of blobs, and its corresponding commitments and proofs.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[repr(C)]
-pub struct BlobTransactionSidecar {
-    /// The blob data.
-    pub blobs: Vec<Blob>,
-    /// The blob commitments.
-    pub commitments: Vec<Bytes48>,
-    /// The blob proofs.
-    pub proofs: Vec<Bytes48>,
-}
-
-impl BlobTransactionSidecar {
-    /// Creates a new [BlobTransactionSidecar] using the given blobs, commitments, and proofs.
-    pub fn new(blobs: Vec<Blob>, commitments: Vec<Bytes48>, proofs: Vec<Bytes48>) -> Self {
-        Self { blobs, commitments, proofs }
-    }
-
-    /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
-    ///
-    /// This encodes the fields in the following order:
-    /// - `blobs`
-    /// - `commitments`
-    /// - `proofs`
-    #[inline]
-    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        BlobTransactionSidecarRlp::wrap_ref(self).encode(out);
-    }
-
-    /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
-    pub fn fields_len(&self) -> usize {
-        BlobTransactionSidecarRlp::wrap_ref(self).fields_len()
-    }
-
-    /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
-    ///
-    /// This decodes the fields in the following order:
-    /// - `blobs`
-    /// - `commitments`
-    /// - `proofs`
-    #[inline]
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(BlobTransactionSidecarRlp::decode(buf)?.unwrap())
-    }
-
-    /// Calculates a size heuristic for the in-memory size of the [BlobTransactionSidecar].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.blobs.len() * BYTES_PER_BLOB + // blobs
-        self.commitments.len() * BYTES_PER_COMMITMENT + // commitments
-        self.proofs.len() * BYTES_PER_PROOF // proofs
-    }
-}
-
-impl From<reth_rpc_types::BlobTransactionSidecar> for BlobTransactionSidecar {
-    fn from(value: reth_rpc_types::BlobTransactionSidecar) -> Self {
-        // SAFETY: Same repr and size
-        unsafe { std::mem::transmute(value) }
-    }
-}
-
-impl From<BlobTransactionSidecar> for reth_rpc_types::BlobTransactionSidecar {
-    fn from(value: BlobTransactionSidecar) -> Self {
-        // SAFETY: Same repr and size
-        unsafe { std::mem::transmute(value) }
-    }
-}
-
-impl Encodable for BlobTransactionSidecar {
-    /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.encode_inner(out)
-    }
-
-    fn length(&self) -> usize {
-        self.fields_len()
-    }
-}
-
-impl Decodable for BlobTransactionSidecar {
-    /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Self::decode_inner(buf)
-    }
-}
-
 // Wrapper for c-kzg rlp
 #[repr(C)]
 struct BlobTransactionSidecarRlp {
@@ -435,61 +351,6 @@ impl BlobTransactionSidecarRlp {
             proofs: Decodable::decode(buf)?,
         })
     }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut arr = [0u8; BYTES_PER_BLOB];
-
-        // Note: the "fix" for this is kinda pointless.
-        #[allow(clippy::large_stack_frames)]
-        let blobs: Vec<Blob> = (0..u.int_in_range(1..=16)?)
-            .map(|_| {
-                arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
-
-                // Ensure that each blob is canonical by ensuring each field element contained in
-                // the blob is < BLS_MODULUS
-                for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
-                    arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
-                }
-
-                Blob::from(arr)
-            })
-            .collect();
-
-        Ok(generate_blob_sidecar(blobs))
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
-    type Parameters = ParamsFor<String>;
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        proptest_vec(proptest_vec(proptest_any::<u8>(), BYTES_PER_BLOB), 1..=5)
-            .prop_map(move |blobs| {
-                let blobs = blobs
-                    .into_iter()
-                    .map(|mut blob| {
-                        let mut arr = [0u8; BYTES_PER_BLOB];
-
-                        // Ensure that each blob is canonical by ensuring each field element
-                        // contained in the blob is < BLS_MODULUS
-                        for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
-                            blob[i * BYTES_PER_FIELD_ELEMENT] = 0;
-                        }
-
-                        arr.copy_from_slice(blob.as_slice());
-                        arr.into()
-                    })
-                    .collect();
-
-                generate_blob_sidecar(blobs)
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<BlobTransactionSidecar>;
 }
 
 /// Generates a [`BlobTransactionSidecar`] structure containing blobs, commitments, and proofs.
