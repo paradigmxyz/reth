@@ -6591,14 +6591,16 @@ name = "reth-chainspec"
 version = "0.2.0-beta.6"
 dependencies = [
  "alloy-chains",
- "alloy-eips",
- "alloy-genesis",
+ "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=77c1240)",
+ "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=77c1240)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
  "nybbles",
  "once_cell",
  "rand 0.8.5",
+ "reth-ethereum-forks",
+ "reth-network-types",
  "reth-primitives",
  "reth-rpc-types",
  "revm-primitives",
