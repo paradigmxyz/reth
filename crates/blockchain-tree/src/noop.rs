@@ -68,6 +68,12 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
     fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
     }
+
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        Ok(BTreeMap::new())
+    }
 }
 
 impl BlockchainTreeViewer for NoopBlockchainTree {
