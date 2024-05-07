@@ -3,23 +3,26 @@ use super::{
     StaticFileProviderRWRefMut, BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, WithdrawalsProvider,
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
+    HeaderProvider, ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
+    cursor::DbCursorRO,
     models::StoredBlockBodyIndices,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
     table::Table,
     tables,
+    transaction::DbTx,
 };
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
+    stage::StageId,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
@@ -32,6 +35,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{mpsc, Arc},
 };
+use strum::IntoEnumIterator;
 use tracing::warn;
 
 /// Alias type for a map that can be queried for block ranges from a transaction
@@ -446,6 +450,158 @@ impl StaticFileProvider {
         }
 
         Ok(())
+    }
+
+    /// Makes consistency checks across all static file segments.
+    pub fn check_consistency<TX: DbTx>(
+        &self,
+        provider: &DatabaseProvider<TX>,
+    ) -> ProviderResult<Option<BlockNumber>> {
+        let mut unwind_target: Option<BlockNumber> = None;
+        let mut update_unwind_target = |new_target: Option<BlockNumber>| {
+            let new_target = new_target.unwrap_or_default();
+            if let Some(target) = unwind_target.as_mut() {
+                *target = (*target).min(new_target);
+            } else {
+                unwind_target = Some(new_target);
+            }
+        };
+
+        // Since Header Stage is the first stage, a mismatch with Finish Stage means that we had an
+        // interrupted pipeline run/unwind.
+        let interrupted_pipeline = provider.get_stage_checkpoint(StageId::Finish)? !=
+            provider.get_stage_checkpoint(StageId::Headers)?;
+
+        // TODO: this check is not good
+        let is_pruned_node =
+            self.get_highest_static_file_block(StaticFileSegment::Receipts).is_none() &&
+                provider.get_stage_checkpoint(StageId::Execution)?.is_some() &&
+                provider.tx_ref().entries::<tables::Receipts>()? > 0;
+
+        for segment in StaticFileSegment::iter() {
+            if is_pruned_node && segment.is_receipts() {
+                // Pruned nodes (including full node) do not store receipts as static files.
+                continue
+            }
+
+            let initial_highest_block = self.get_highest_static_file_block(segment);
+
+            // By calling a writer, an inner consistency check will be triggered on
+            // [`NippyJarWriter::check_consistency_and_heal`]
+            //
+            // * If appending data was interrupted before a config commit, then data file will be
+            //   truncated according to the config.
+            //
+            // * If pruning data was interrupted before a config commit, then we have deleted data
+            //   that we are expected to still have. We need to check the Database and unwind
+            //   everything accordingly.
+            let mut writer = self.latest_writer(segment)?;
+
+            // This will commit any inconsistencies found and update the reader index
+            writer.commit()?;
+
+            let mut highest_block = self.get_highest_static_file_block(segment);
+            if initial_highest_block != highest_block {
+                // The updated `highest_block` is a consistency heal as a result from some pruning
+                // behavior being interrupted.
+                update_unwind_target(highest_block);
+            }
+
+            // Make sure the last transaction matches the last block from its indices.
+            // Only applies to Transaction & Receipt segments
+            let highest_tx = self.get_highest_static_file_tx(segment);
+            if let Some(highest_tx) = highest_tx {
+                let mut last_block = highest_block.unwrap_or_default();
+                // To be extra safe, we make sure that the last tx num matches the last block from
+                // its indices. If not, get it and create an unwind target, since we
+                // are missing data we should have.
+                loop {
+                    if let Some(indices) = provider.block_body_indices(last_block)? {
+                        if indices.last_tx_num() <= highest_tx {
+                            break
+                        }
+                    }
+                    if last_block == 0 {
+                        break
+                    }
+                    last_block -= 1;
+
+                    highest_block = Some(last_block);
+                    update_unwind_target(highest_block);
+                }
+            }
+
+            // There should be no gap between static file & database elements.
+            if let Some(unwind) = if segment.is_headers() {
+                self.ensure_header_continuity(provider, highest_block)?
+            } else {
+                self.ensure_tx_continuity(segment, provider, highest_tx, highest_block)?
+            } {
+                update_unwind_target(Some(unwind));
+            }
+        }
+
+        Ok(unwind_target)
+    }
+
+    /// Ensures that there are no gaps between static file headers and database headers.
+    ///
+    /// If a gap is found (eg. static block 5 and first db block 7), return a PipelineTarget::Unwind
+    /// to the given static file block as to restore missing data.
+    fn ensure_header_continuity<TX: DbTx>(
+        &self,
+        provider: &DatabaseProvider<TX>,
+        highest_static: Option<BlockNumber>,
+    ) -> ProviderResult<Option<BlockNumber>> {
+        let highest_static = highest_static.unwrap_or_default();
+        let mut db_cursor = provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
+
+        if let Some((db_header_num, _)) = db_cursor.first()? {
+            // If there is a gap between the header found in static file and
+            // database, then we have most likely lost static file data and need to load it again
+            if !(db_header_num <= highest_static || highest_static + 1 == db_header_num) {
+                return Ok(Some(highest_static))
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Ensures that there are no gaps between static file transactions/receipts and database
+    /// transactions/receipts.
+    ///
+    /// If a gap is found (eg. static tx 5 and first db tx 7), return a PipelineTarget::Unwind to
+    /// the given static file block as to restore missing data.
+    fn ensure_tx_continuity<TX: DbTx>(
+        &self,
+        segment: StaticFileSegment,
+        provider: &DatabaseProvider<TX>,
+        highest_static_tx: Option<TxNumber>,
+        highest_static_block: Option<BlockNumber>,
+    ) -> ProviderResult<Option<BlockNumber>> {
+        let highest_static_tx = highest_static_tx.unwrap_or_default();
+        let first_db_tx_num = match segment {
+            StaticFileSegment::Headers => unreachable!(),
+            StaticFileSegment::Transactions => {
+                let mut cursor = provider.tx_ref().cursor_read::<tables::Transactions>()?;
+                cursor.first()?.map(|(tx_num, _)| tx_num)
+            }
+            StaticFileSegment::Receipts => {
+                let mut cursor = provider.tx_ref().cursor_read::<tables::Receipts>()?;
+                cursor.first()?.map(|(tx_num, _)| tx_num)
+            }
+        };
+
+        if let Some(first_db_tx_num) = first_db_tx_num {
+            // If there is a gap more than one element between the header found in static file and
+            // database, then we have most likely lost static file data and need to load it again
+            if !(first_db_tx_num <= highest_static_tx || highest_static_tx + 1 == first_db_tx_num) {
+                // TODO is this unwrap or default safe
+                return Ok(Some(highest_static_block.unwrap_or_default()))
+            }
+        }
+
+        Ok(None)
     }
 
     /// Gets the highest static file block if it exists for a static file segment.
