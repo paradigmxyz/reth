@@ -2,7 +2,7 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_rlp::{BufMut, Encodable};
 use rayon::prelude::*;
 use reth_db::database::Database;
-use reth_interfaces::trie::StorageRootError;
+use reth_interfaces::{blockchain_tree::error::CanonicalError, trie::StorageRootError};
 use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},
     B256,
@@ -206,6 +206,17 @@ impl From<ParallelStateRootError> for ProviderError {
             ParallelStateRootError::Provider(error) => error,
             ParallelStateRootError::StorageRoot(StorageRootError::DB(error)) => {
                 ProviderError::Database(error)
+            }
+        }
+    }
+}
+
+impl From<ParallelStateRootError> for CanonicalError {
+    fn from(error: ParallelStateRootError) -> Self {
+        match error {
+            ParallelStateRootError::Provider(error) => CanonicalError::Provider(error),
+            ParallelStateRootError::StorageRoot(StorageRootError::DB(error)) => {
+                CanonicalError::Provider(ProviderError::Database(error))
             }
         }
     }

@@ -1157,9 +1157,7 @@ where
                     ConsistentDbView::new_with_latest_tip(self.externals.provider_factory.clone())?;
                 let (state_root, trie_updates) =
                     ParallelStateRoot::new(consistent_view, hashed_state.clone())
-                        .incremental_root_with_updates()
-                        .map(|(root, updates)| (root, Some(updates)))
-                        .map_err(ProviderError::from)?;
+                        .incremental_root_with_updates()?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
@@ -1170,7 +1168,7 @@ where
                     .into())
                 }
                 self.metrics.trie_updates_insert_recomputed.increment(1);
-                trie_updates.unwrap_or_default()
+                trie_updates
             }
         };
         recorder.record_relative(MakeCanonicalAction::RetrieveStateTrieUpdates);
