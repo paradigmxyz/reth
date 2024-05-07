@@ -213,7 +213,7 @@ impl Command {
                     ))?;
 
                     let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len()).into();
+                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
 
                     // first construct the tx, calculating the length of the tx with sidecar before
                     // insertion
