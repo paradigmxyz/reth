@@ -18,7 +18,7 @@ use reth_provider::{
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
-use std::pin::Pin;
+use std::{pin::Pin, time::Duration};
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
@@ -264,6 +264,7 @@ where
             // static files during a pipeline unwind
             let mut pruner = PrunerBuilder::new(Default::default())
                 .prune_delete_limit(usize::MAX)
+                .timeout(Duration::from_secs(86400))
                 .build(self.provider_factory.clone());
 
             pruner.run(prune_tip)?;
