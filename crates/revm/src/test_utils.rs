@@ -2,7 +2,7 @@ use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256, revm::config::revm_spec, trie::AccountProof, Account, Address, BlockNumber,
-    Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, Transaction, B256, U256,
+    Bytecode, Bytes, ChainSpec, Head, Header, StorageKey, TransactionSigned, B256, U256,
 };
 
 #[cfg(not(feature = "optimism"))]
@@ -114,20 +114,17 @@ impl StateProvider for StateProviderTest {
 pub struct TestEvmConfig;
 
 impl ConfigureEvmEnv for TestEvmConfig {
-    #[cfg(not(feature = "optimism"))]
-    type TxMeta = ();
-    #[cfg(feature = "optimism")]
-    type TxMeta = Bytes;
-
     #[allow(unused_variables)]
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Self::TxMeta)
-    where
-        T: AsRef<Transaction>,
-    {
+    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         #[cfg(not(feature = "optimism"))]
         fill_tx_env(tx_env, transaction, sender);
+
         #[cfg(feature = "optimism")]
-        fill_op_tx_env(tx_env, transaction, sender, meta);
+        {
+            let mut buf = Vec::with_capacity(transaction.length_without_header());
+            transaction.encode_enveloped(&mut buf);
+            fill_op_tx_env(tx_env, transaction, sender, buf.into());
+        }
     }
 
     fn fill_cfg_env(
