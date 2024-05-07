@@ -5387,7 +5387,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
 dependencies = [
- "proc-macro-crate 3.1.0",
+ "proc-macro-crate 2.0.0",
  "proc-macro2",
  "quote",
  "syn 2.0.60",
@@ -7653,13 +7653,11 @@ name = "reth-revm"
 version = "0.2.0-beta.6"
 dependencies = [
  "reth-consensus-common",
- "reth-evm",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
  "revm",
- "revm-inspectors",
  "tracing",
 ]
 

@@ -5,7 +5,6 @@ use alloy_sol_types::decode_revert_reason;
 use jsonrpsee::types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject};
 use reth_interfaces::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
-use reth_revm::tracing::{js::JsInspectorError, MuxError};
 use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
 };
@@ -14,6 +13,7 @@ use reth_transaction_pool::error::{
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
+use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
 use std::time::Duration;
 
 /// Result alias
