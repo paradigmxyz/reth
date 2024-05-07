@@ -473,9 +473,9 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
-    /// Adds an instruction to prune transactions during commit.
+    /// Adds an instruction to prune `to_delete`transactions during commit.
     ///
-    /// Note: last_block refers to the block the unwinds ends at.
+    /// Note: `last_block` refers to the block the unwinds ends at.
     pub fn prune_transactions(
         &mut self,
         to_delete: u64,
@@ -485,9 +485,9 @@ impl StaticFileProviderRW {
         self.queue_prune(to_delete, Some(last_block))
     }
 
-    /// Adds an instruction to prune receipts during commit.
+    /// Adds an instruction to prune `to_delete` receipts during commit.
     ///
-    /// Note: last_block refers to the block the unwinds ends at.
+    /// Note: `last_block` refers to the block the unwinds ends at.
     pub fn prune_receipts(
         &mut self,
         to_delete: u64,
@@ -497,15 +497,16 @@ impl StaticFileProviderRW {
         self.queue_prune(to_delete, Some(last_block))
     }
 
-    /// Adds an instruction to prune headers during commit.
-    ///
-    /// Note: last_block refers to the block the unwinds ends at.
+    /// Adds an instruction to prune `to_delete` headers during commit.
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
         self.queue_prune(to_delete, None)
     }
 
-    /// Adds an instruction to prune data during commit.
+    /// Adds an instruction to prune `to_delete` elements during commit.
+    ///
+    /// Note: `last_block` refers to the block the unwinds ends at if dealing with transaction-based
+    /// data.
     fn queue_prune(
         &mut self,
         to_delete: u64,
@@ -526,10 +527,10 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    /// Removes the last `number` of transactions from the data file.
+    /// Removes the last `to_delete` transactions from the data file.
     fn prune_transaction_data(
         &mut self,
-        number: u64,
+        to_delete: u64,
         last_block: BlockNumber,
     ) -> ProviderResult<()> {
         let start = Instant::now();
@@ -537,7 +538,7 @@ impl StaticFileProviderRW {
         let segment = StaticFileSegment::Transactions;
         debug_assert!(self.writer.user_header().segment() == segment);
 
-        self.truncate(segment, number, Some(last_block))?;
+        self.truncate(segment, to_delete, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -550,7 +551,7 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    /// Prunes `to_delete` number of receipts from the data file.
+    /// Prunes the last `to_delete` receipts from the data file.
     fn prune_receipt_data(
         &mut self,
         to_delete: u64,
@@ -574,7 +575,7 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    /// Prunes `to_delete` number of headers from the data file.
+    /// Prunes the last `to_delete` headers from the data file.
     fn prune_header_data(&mut self, to_delete: u64) -> ProviderResult<()> {
         let start = Instant::now();
 
