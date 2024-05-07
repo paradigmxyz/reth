@@ -7,6 +7,7 @@ use crate::{
 };
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -24,7 +25,7 @@ use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
-    ChainSpecProvider, DisplayBlocksChain, ExecutorFactory, HeaderProvider, ProviderError,
+    ChainSpecProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
@@ -57,13 +58,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
-pub struct BlockchainTree<DB, EVM> {
+pub struct BlockchainTree<DB, E> {
     /// The state of the tree
     ///
     /// Tracks all the chains, the block indices, and the block buffer.
     state: TreeState,
     /// External components (the database, consensus engine etc.)
-    externals: TreeExternals<DB, EVM>,
+    externals: TreeExternals<DB, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Broadcast channel for canon state changes notifications.
@@ -75,7 +76,7 @@ pub struct BlockchainTree<DB, EVM> {
     prune_modes: Option<PruneModes>,
 }
 
-impl<DB, EVM> BlockchainTree<DB, EVM> {
+impl<DB, E> BlockchainTree<DB, E> {
     /// Subscribe to new blocks events.
     ///
     /// Note: Only canonical blocks are emitted by the tree.
@@ -89,10 +90,10 @@ impl<DB, EVM> BlockchainTree<DB, EVM> {
     }
 }
 
-impl<DB, EVM> BlockchainTree<DB, EVM>
+impl<DB, E> BlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    EVM: ExecutorFactory,
+    E: BlockExecutorProvider,
 {
     /// Builds the blockchain tree for the node.
     ///
@@ -115,7 +116,7 @@ where
     ///   storage space efficiently. It's important to validate this configuration to ensure it does
     ///   not lead to unintended data loss.
     pub fn new(
-        externals: TreeExternals<DB, EVM>,
+        externals: TreeExternals<DB, E>,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
@@ -1216,7 +1217,7 @@ where
     ///
     /// The block, `revert_until`, is __non-inclusive__, i.e. `revert_until` stays in the database.
     fn revert_canonical_from_database(
-        &mut self,
+        &self,
         revert_until: BlockNumber,
     ) -> Result<Option<Chain>, CanonicalError> {
         // read data that is needed for new sidechain
@@ -1239,7 +1240,7 @@ where
         }
     }
 
-    fn update_reorg_metrics(&mut self, reorg_depth: f64) {
+    fn update_reorg_metrics(&self, reorg_depth: f64) {
         self.metrics.reorgs.increment(1);
         self.metrics.latest_reorg_depth.set(reorg_depth);
     }
@@ -1273,7 +1274,8 @@ mod tests {
     use linked_hash_set::LinkedHashSet;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm::test_utils::MockExecutorProvider;
+    use reth_evm_ethereum::execute::EthExecutorProvider;
     #[cfg(not(feature = "optimism"))]
     use reth_primitives::proofs::calculate_receipt_root;
     #[cfg(feature = "optimism")]
@@ -1289,19 +1291,15 @@ mod tests {
         MAINNET,
     };
     use reth_provider::{
-        test_utils::{
-            blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec,
-            TestExecutorFactory,
-        },
+        test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
         ProviderFactory,
     };
-    use reth_revm::EvmProcessorFactory;
     use reth_trie::StateRoot;
     use std::collections::HashMap;
 
     fn setup_externals(
         exec_res: Vec<BundleStateWithReceipts>,
-    ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, TestExecutorFactory> {
+    ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -1311,7 +1309,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory = TestExecutorFactory::default();
+        let executor_factory = MockExecutorProvider::default();
         executor_factory.extend(exec_res);
 
         TreeExternals::new(provider_factory, consensus, executor_factory)
@@ -1395,7 +1393,7 @@ mod tests {
             self
         }
 
-        fn assert<DB: Database, EF: ExecutorFactory>(self, tree: &BlockchainTree<DB, EF>) {
+        fn assert<DB: Database, E: BlockExecutorProvider>(self, tree: &BlockchainTree<DB, E>) {
             if let Some(chain_num) = self.chain_num {
                 assert_eq!(tree.state.chains.len(), chain_num);
             }
@@ -1439,8 +1437,7 @@ mod tests {
         );
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         let consensus = Arc::new(TestConsensus::default());
-        let executor_factory =
-            EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
+        let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
 
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
@@ -1548,7 +1545,7 @@ mod tests {
             mock_block(3, Some(sidechain_block_1.hash()), Vec::from([mock_tx(2)]), 3);
 
         let mut tree = BlockchainTree::new(
-            TreeExternals::new(provider_factory, consensus, executor_factory),
+            TreeExternals::new(provider_factory, consensus, executor_provider),
             BlockchainTreeConfig::default(),
             None,
         )
@@ -2165,7 +2162,7 @@ mod tests {
             .assert(&tree);
 
         // unwind canonical
-        assert_eq!(tree.unwind(block1.number), Ok(()));
+        assert!(tree.unwind(block1.number).is_ok());
         // Trie state:
         //    b2   b2a (pending block)
         //   /    /
@@ -2229,7 +2226,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12), Ok(()));
+        assert!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12).is_ok());
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),

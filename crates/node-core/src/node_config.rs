@@ -26,7 +26,11 @@ use reth_provider::{
 };
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    path::PathBuf,
+    sync::Arc,
+};
 use tracing::*;
 
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
@@ -462,6 +466,7 @@ impl NodeConfig {
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
             ))
+            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 // set discovery port based on instance number
@@ -470,26 +475,40 @@ impl NodeConfig {
 
         let config = cfg_builder.build(client);
 
-        if !self.network.discovery.enable_discv5_discovery {
+        if self.network.discovery.disable_discovery ||
+            !self.network.discovery.enable_discv5_discovery &&
+                !config.chain_spec.chain.is_optimism()
+        {
             return config
         }
+
+        let rlpx_addr = config.listener_addr().ip();
         // work around since discv5 config builder can't be integrated into network config builder
         // due to unsatisfied trait bounds
         config.discovery_v5_with_config_builder(|builder| {
             let DiscoveryArgs {
                 discv5_addr,
+                discv5_addr_ipv6,
                 discv5_port,
+                discv5_port_ipv6,
                 discv5_lookup_interval,
                 discv5_bootstrap_lookup_interval,
                 discv5_bootstrap_lookup_countdown,
                 ..
             } = self.network.discovery;
+
+            let discv5_addr_ipv4 = discv5_addr.or_else(|| ipv4(rlpx_addr));
+            let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| ipv6(rlpx_addr));
+            let discv5_port_ipv4 = discv5_port + self.instance - 1;
+            let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
+
             builder
                 .discv5_config(
-                    discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
-                        discv5_addr,
-                        discv5_port + self.instance - 1,
-                    ))))
+                    discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                        discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
+                        discv5_addr_ipv6
+                            .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                    ))
                     .build(),
                 )
                 .lookup_interval(discv5_lookup_interval)
@@ -530,5 +549,21 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
         }
+    }
+}
+
+/// Returns the address if this is an [`Ipv4Addr`].
+pub fn ipv4(ip: IpAddr) -> Option<Ipv4Addr> {
+    match ip {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
+    }
+}
+
+/// Returns the address if this is an [`Ipv6Addr`].
+pub fn ipv6(ip: IpAddr) -> Option<Ipv6Addr> {
+    match ip {
+        IpAddr::V4(_) => None,
+        IpAddr::V6(ip) => Some(ip),
     }
 }

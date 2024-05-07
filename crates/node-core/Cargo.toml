@@ -36,12 +36,16 @@ reth-tasks.workspace = true
 reth-trie.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
+reth-etl.workspace = true
+reth-codecs.workspace = true
 
 # ethereum
 discv5.workspace = true
 
 # async
 tokio.workspace = true
+tokio-util.workspace = true
+pin-project.workspace = true
 
 # metrics
 metrics-exporter-prometheus = "0.12.1"

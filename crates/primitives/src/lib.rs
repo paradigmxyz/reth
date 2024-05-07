@@ -85,12 +85,13 @@ pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
-#[cfg(feature = "c-kzg")]
 pub use transaction::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError,
-    FromRecoveredPooledTransaction, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered,
+    BlobTransaction, BlobTransactionSidecar, FromRecoveredPooledTransaction,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered,
 };
+
+#[cfg(feature = "c-kzg")]
+pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
@@ -144,8 +145,8 @@ mod optimism {
     pub use crate::{
         chain::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA},
         net::{
-            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, BASE_BOOTNODES,
-            BASE_TESTNET_BOOTNODES, OP_BOOTNODES, OP_TESTNET_BOOTNODES,
+            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, OP_BOOTNODES,
+            OP_TESTNET_BOOTNODES,
         },
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };

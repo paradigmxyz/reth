@@ -42,6 +42,11 @@ pub enum NippyJarError {
         /// The read offset size in number of bytes.
         offset_size: u64,
     },
+    #[error("attempted to read an out of bounds offset: {index}")]
+    OffsetOutOfBounds {
+        /// The index of the offset that was being read.
+        index: usize,
+    },
     #[error("compression or decompression requires a bigger destination output")]
     OutputTooSmall,
     #[error("dictionary is not loaded.")]

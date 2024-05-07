@@ -49,7 +49,7 @@ members = [
     "crates/rpc/rpc-types-compat/",
     "crates/engine-primitives/",
     "crates/ethereum/engine-primitives/",
-    "crates/node-ethereum/",
+    "crates/ethereum/node",
     "crates/node/builder/",
     "crates/optimism/consensus",
     "crates/optimism/node/",
@@ -88,9 +88,7 @@ members = [
     "examples/txpool-tracing/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
-    "examples/exex/minimal/",
-    "examples/exex/op-bridge/",
-    "examples/exex/rollup/",
+    "examples/exex/*",
     "examples/db-access",
     "testing/ef-tests/",
     "testing/testing-utils",
@@ -226,7 +224,7 @@ reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-node-builder = { path = "crates/node/builder" }
-reth-node-ethereum = { path = "crates/node-ethereum" }
+reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-node-core = { path = "crates/node-core" }
@@ -284,29 +282,30 @@ reth-testing-utils = { path = "testing/testing-utils" }
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "3d2077e" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "7168ac5" }
 
 # eth
 alloy-chains = "0.1.15"
-alloy-primitives = "0.7.1"
-alloy-dyn-abi = "0.7.1"
-alloy-sol-types = "0.7.1"
+alloy-primitives = "0.7.2"
+alloy-dyn-abi = "0.7.2"
+alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "ca54552" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "77c1240" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
 
 # misc
 auto_impl = "1"
@@ -342,6 +341,7 @@ smallvec = "1"
 dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
+url = "2.3"
 
 # proc-macros
 proc-macro2 = "1.0"

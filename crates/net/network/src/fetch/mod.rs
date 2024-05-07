@@ -130,7 +130,7 @@ impl StateFetcher {
     /// Returns the _next_ idle peer that's ready to accept a request,
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
     /// adequate data.
-    fn next_best_peer(&mut self) -> Option<PeerId> {
+    fn next_best_peer(&self) -> Option<PeerId> {
         let mut idle = self.peers.iter().filter(|(_, peer)| peer.state.is_idle());
 
         let mut best_peer = idle.next()?;

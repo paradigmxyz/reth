@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_evm::ConfigureEvm;
-use reth_evm_optimism::OptimismEvmConfig;
+use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
     components::{
@@ -97,9 +97,17 @@ where
     Node: FullNodeTypes,
 {
     type EVM = OptimismEvmConfig;
+    type Executor = OpExecutorProvider<Self::EVM>;
 
-    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(OptimismEvmConfig::default())
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let chain_spec = ctx.chain_spec();
+        let evm_config = OptimismEvmConfig::default();
+        let executor = OpExecutorProvider::new(chain_spec, evm_config);
+
+        Ok((evm_config, executor))
     }
 }
 
@@ -224,8 +232,7 @@ where
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
             // no extradata for OP
-            .extradata(Default::default())
-            .max_gas_limit(conf.max_gas_limit());
+            .extradata(Default::default());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),

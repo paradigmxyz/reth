@@ -10,9 +10,8 @@
 
 //! Entrypoint for running commands.
 
-use futures::pin_mut;
 use reth_tasks::{TaskExecutor, TaskManager};
-use std::future::Future;
+use std::{future::Future, pin::pin};
 use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
@@ -141,7 +140,7 @@ where
     E: Send + Sync + From<reth_tasks::PanickedTaskError> + 'static,
 {
     {
-        pin_mut!(fut);
+        let fut = pin!(fut);
         tokio::select! {
             err = tasks => {
                 return Err(err.into())
@@ -166,7 +165,9 @@ where
     {
         let mut stream = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let sigterm = stream.recv();
-        pin_mut!(sigterm, ctrl_c, fut);
+        let sigterm = pin!(sigterm);
+        let ctrl_c = pin!(ctrl_c);
+        let fut = pin!(fut);
 
         tokio::select! {
             _ = ctrl_c => {
@@ -181,7 +182,8 @@ where
 
     #[cfg(not(unix))]
     {
-        pin_mut!(ctrl_c, fut);
+        let ctrl_c = pin!(ctrl_c);
+        let fut = pin!(fut);
 
         tokio::select! {
             _ = ctrl_c => {

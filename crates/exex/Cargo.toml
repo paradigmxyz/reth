@@ -21,6 +21,8 @@ reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
+reth-network.workspace = true
+reth-payload-builder.workspace = true
 
 ## async
 tokio.workspace = true

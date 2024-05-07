@@ -12,7 +12,7 @@ use std::{
     fmt,
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     task::{ready, Context, Poll},
 };
 
@@ -23,7 +23,7 @@ use crate::{
     CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
-use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_primitives::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -159,7 +159,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         };
 
         let f = handshake(proxy);
-        pin_mut!(f);
+        let mut f = pin!(f);
 
         // this polls the connection and the primary stream concurrently until the handshake is
         // complete
@@ -239,7 +239,7 @@ impl<St> MultiplexInner<St> {
     }
 
     /// Delegates a message to the matching protocol.
-    fn delegate_message(&mut self, cap: &SharedCapability, msg: BytesMut) -> bool {
+    fn delegate_message(&self, cap: &SharedCapability, msg: BytesMut) -> bool {
         for proto in &self.protocols {
             if proto.shared_cap == *cap {
                 proto.send_raw(msg);
