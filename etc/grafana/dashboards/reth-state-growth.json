@@ -52,6 +52,7 @@
         }
       ]
     },
+    "description": "Ethereum state growth",
     "editable": true,
     "fiscalYearStartMonth": 0,
     "graphTooltip": 0,
@@ -1722,13 +1723,13 @@
       ]
     },
     "time": {
-      "from": "now-1h",
+      "from": "now-24h",
       "to": "now"
     },
     "timepicker": {},
     "timezone": "",
     "title": "Reth - State & History",
     "uid": "cab0fcc6-1c33-478c-9675-38bc1af5de82",
-    "version": 13,
+    "version": 1,
     "weekStart": ""
   }
