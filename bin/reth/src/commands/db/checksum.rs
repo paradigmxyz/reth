@@ -16,8 +16,6 @@ use tracing::{info, warn};
 pub struct Command {
     /// The table name
     table: Tables,
-    /// Static files
-    only_static_files: bool
 }
 
 impl Command {
