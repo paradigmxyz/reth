@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus-core.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-stages-api.workspace = true
@@ -70,6 +70,6 @@ optimism = [
     "reth-interfaces/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
-    "reth-beacon-consensus-core/optimism",
+    "reth-ethereum-consensus/optimism",
     "reth-rpc/optimism"
 ]

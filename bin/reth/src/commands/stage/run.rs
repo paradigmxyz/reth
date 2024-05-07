@@ -14,7 +14,7 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
@@ -169,7 +169,7 @@ impl Command {
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
                 StageEnum::Bodies => {
-                    let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+                    let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
