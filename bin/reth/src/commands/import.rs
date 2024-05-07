@@ -12,7 +12,7 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, init_db, tables, transaction::DbTx};
@@ -129,7 +129,7 @@ impl ImportCommand {
 
         init_genesis(provider_factory.clone())?;
 
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
         // open file

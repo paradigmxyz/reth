@@ -6516,13 +6516,13 @@ dependencies = [
  "assert_matches",
  "futures",
  "metrics",
- "reth-beacon-consensus-core",
  "reth-blockchain-tree",
  "reth-config",
  "reth-consensus",
  "reth-db",
  "reth-downloaders",
  "reth-engine-primitives",
+ "reth-ethereum-consensus",
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-evm-ethereum",
@@ -6549,15 +6549,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
-]
-
-[[package]]
-name = "reth-beacon-consensus-core"
-version = "0.2.0-beta.6"
-dependencies = [
- "reth-consensus",
- "reth-consensus-common",
- "reth-primitives",
 ]
 
 [[package]]
@@ -6929,6 +6920,15 @@ dependencies = [
  "test-fuzz",
  "thiserror",
  "tokio-util",
+]
+
+[[package]]
+name = "reth-ethereum-consensus"
+version = "0.2.0-beta.6"
+dependencies = [
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-primitives",
 ]
 
 [[package]]

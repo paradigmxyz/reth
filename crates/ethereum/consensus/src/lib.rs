@@ -19,19 +19,19 @@ use std::{sync::Arc, time::SystemTime};
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
 #[derive(Debug)]
-pub struct BeaconConsensus {
+pub struct EthBeaconConsensus {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
 }
 
-impl BeaconConsensus {
-    /// Create a new instance of [BeaconConsensus]
+impl EthBeaconConsensus {
+    /// Create a new instance of [EthBeaconConsensus]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
 
-impl Consensus for BeaconConsensus {
+impl Consensus for EthBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validation::validate_header_standalone(header, &self.chain_spec)?;
         Ok(())
