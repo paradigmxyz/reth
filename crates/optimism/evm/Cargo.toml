@@ -23,6 +23,7 @@ revm.workspace = true
 revm-primitives.workspace = true
 
 # misc
+thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
