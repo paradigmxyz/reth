@@ -11,10 +11,7 @@ use reth_primitives::{
     revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
 };
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     state::StateOverride,
@@ -31,7 +28,10 @@ use revm::{
     db::{CacheDB, DatabaseCommit},
     primitives::EnvWithHandlerCfg,
 };
-use revm_inspectors::opcode::OpcodeGasInspector;
+use revm_inspectors::{
+    opcode::OpcodeGasInspector,
+    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
+};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
