@@ -48,6 +48,13 @@ pub struct DiscoveredPeersMetrics {
     /// Total number of sessions established by [`discv5::Discv5`], that pass configured
     /// [`filter`](crate::filter) rules.
     total_established_sessions_custom_filtered: Counter,
+    /// Total number of unverifiable ENRs discovered by [`discv5::Discv5`].
+    ///
+    /// These are peers that fail [`discv5::Discv5`] session establishment, because the UDP socket
+    /// they're making a connection from doesn't match the UDP socket advertised in their ENR.
+    /// These peers will be denied a session (and hence can't make it into kbuckets) until they
+    /// have update their ENR, to reflect their actual UDP socket.
+    total_unverifiable_enrs_raw: Counter,
 }
 
 impl DiscoveredPeersMetrics {
@@ -81,6 +88,13 @@ impl DiscoveredPeersMetrics {
     /// [`filter`](crate::filter) rules.
     pub fn increment_established_sessions_filtered(&self, num: u64) {
         self.total_established_sessions_custom_filtered.increment(num)
+    }
+
+    /// Increments number of unverifiable ENRs discovered by [`discv5::Discv5`]. These are peers
+    /// that fail session establishment because their advertised UDP socket doesn't match the
+    /// socket they are making the connection from.
+    pub fn increment_total_unverifiable_enrs_raw(&self, num: u64) {
+        self.total_unverifiable_enrs_raw.increment(num)
     }
 }
 
