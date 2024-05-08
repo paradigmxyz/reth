@@ -2,8 +2,6 @@
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
 
-#[cfg(feature = "alloy-compat")]
-use alloy_eips::eip2718::Eip2718Error;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -12,8 +10,6 @@ use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-#[cfg(feature = "alloy-compat")]
-use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::mem;
 
@@ -617,10 +613,13 @@ impl From<TxEip4844> for Transaction {
 }
 
 #[cfg(feature = "alloy-compat")]
-impl TryFrom<reth_rpc_types::Transaction> for Transaction {
-    type Error = ConversionError;
+impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
+    type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        use alloy_eips::eip2718::Eip2718Error;
+        use alloy_rpc_types::ConversionError;
+
         match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
             ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
                 tx.transaction_type.unwrap(),
@@ -1721,10 +1720,11 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 }
 
 #[cfg(feature = "alloy-compat")]
-impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
-    type Error = ConversionError;
+impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedEcRecovered {
+    type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        use alloy_rpc_types::ConversionError;
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
 
         let transaction: Transaction = tx.try_into()?;

@@ -2,25 +2,22 @@
 //! Handles RPC requests for the `eth_` namespace.
 
 use jsonrpsee::core::RpcResult as Result;
-use serde_json::Value;
-use tracing::trace;
-
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
-};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
     HeaderProvider, StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
-    StateContext, SyncStatus, TransactionRequest, Work,
+    serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
+    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
+    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
+use serde_json::Value;
+use tracing::trace;
 
 use crate::{
     eth::{

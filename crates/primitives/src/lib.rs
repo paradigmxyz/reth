@@ -4,6 +4,7 @@
 //!
 //! ## Feature Flags
 //!
+//! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 
@@ -38,7 +39,6 @@ mod prune;
 mod receipt;
 /// Helpers for working with revm
 pub mod revm;
-pub mod serde_helper;
 pub mod stage;
 pub mod static_file;
 mod storage;
