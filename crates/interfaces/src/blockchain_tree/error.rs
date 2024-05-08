@@ -47,6 +47,9 @@ pub enum BlockchainTreeError {
         /// The block hash of the block that failed to buffer.
         block_hash: BlockHash,
     },
+    /// Thrown when trying to access genesis parent.
+    #[error("genesis block has no parent")]
+    GenesisBlockHasNoParent,
 }
 
 /// Canonical Errors
@@ -318,7 +321,8 @@ impl InsertBlockErrorKind {
                     BlockchainTreeError::CanonicalChain { .. } |
                     BlockchainTreeError::BlockNumberNotFoundInChain { .. } |
                     BlockchainTreeError::BlockHashNotFoundInChain { .. } |
-                    BlockchainTreeError::BlockBufferingFailed { .. } => false,
+                    BlockchainTreeError::BlockBufferingFailed { .. } |
+                    BlockchainTreeError::GenesisBlockHasNoParent => false,
                 }
             }
             InsertBlockErrorKind::Provider(_) | InsertBlockErrorKind::Internal(_) => {
