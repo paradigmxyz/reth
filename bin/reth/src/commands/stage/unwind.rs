@@ -153,8 +153,8 @@ impl Command {
                     provider_factory.clone(),
                     header_mode,
                     Arc::clone(&consensus),
-                    NoopHeaderDownloader,
-                    NoopBodiesDownloader,
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
                     executor.clone(),
                     stage_conf.etl.clone(),
                 )

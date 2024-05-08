@@ -8,6 +8,7 @@ use std::{ops::RangeInclusive, task::Poll};
 
 /// A [BodyDownloader] implementation that does nothing.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct NoopBodiesDownloader;
 
 impl BodyDownloader for NoopBodiesDownloader {
@@ -23,6 +24,6 @@ impl Stream for NoopBodiesDownloader {
         self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        Poll::Ready(None)
+        Poll::Pending
     }
 }

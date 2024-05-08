@@ -8,6 +8,7 @@ use std::task::Poll;
 
 /// A [HeaderDownloader] implementation that does nothing.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct NoopHeaderDownloader;
 
 impl HeaderDownloader for NoopHeaderDownloader {
@@ -25,6 +26,6 @@ impl Stream for NoopHeaderDownloader {
         self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        Poll::Ready(None)
+        Poll::Pending
     }
 }
