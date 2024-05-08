@@ -17,10 +17,6 @@ pub use spec::{
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
-#[cfg(feature = "optimism")]
-#[cfg(test)]
-pub(crate) use spec::{OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS};
-
 // /// The config info module namely spec id.
 // pub mod config;
 /// The chain info module.

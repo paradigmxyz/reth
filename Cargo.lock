@@ -6603,7 +6603,6 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-rpc-types",
- "revm-primitives",
  "serde",
  "serde_json",
 ]

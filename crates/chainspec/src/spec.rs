@@ -3,6 +3,13 @@ use crate::{
     Chain, ChainKind, NamedChain,
 };
 use once_cell::sync::Lazy;
+use reth_primitives::{
+    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
+    holesky_nodes,
+    proofs::state_root_ref_unhashed,
+    Address, BlockNumber, ForkFilter, ForkFilterKey, ForkHash, ForkId, Head, Header, NodeRecord,
+    SealedHeader, EMPTY_OMMER_ROOT_HASH,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -10,20 +17,17 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "optimism")]
+pub(crate) use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
 pub use alloy_eips::eip1559::BaseFeeParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, B256, U256};
 use reth_ethereum_forks::Hardfork;
-
 #[cfg(feature = "optimism")]
-pub(crate) use crate::{
-    constants::{
-        OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-        OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
-    },
-    net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
+pub(crate) use reth_primitives::constants::{
+    OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
+    OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
 };
-
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -1630,7 +1634,10 @@ impl OptimismGenesisInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
+    use reth_primitives::{
+        b256, constants::EMPTY_WITHDRAWALS, hex, trie::TrieAccount, ChainConfig, ForkHash, ForkId,
+        GenesisAccount, Head,
+    };
     use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
