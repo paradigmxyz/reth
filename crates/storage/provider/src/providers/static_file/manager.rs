@@ -22,7 +22,7 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
-    stage::StageId,
+    stage::{PipelineTarget, StageId},
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
@@ -453,10 +453,15 @@ impl StaticFileProvider {
     }
 
     /// Makes consistency checks across all static file segments.
+    ///
+    /// invariant: static files and database should have continuity
+    /// invariant: if there are no database entries, stage checkpoints should match static file
+    ///
+    /// Returns a [`Option::Some`] of [`PipelineTarget::Unwind`] if any healing was done.
     pub fn check_consistency<TX: DbTx>(
         &self,
         provider: &DatabaseProvider<TX>,
-    ) -> ProviderResult<Option<BlockNumber>> {
+    ) -> ProviderResult<Option<PipelineTarget>> {
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: Option<BlockNumber>| {
             let new_target = new_target.unwrap_or_default();
@@ -472,7 +477,7 @@ impl StaticFileProvider {
         let interrupted_pipeline = provider.get_stage_checkpoint(StageId::Finish)? !=
             provider.get_stage_checkpoint(StageId::Headers)?;
 
-        // TODO: this check is not good
+        // TODO: this check is not good enough
         let is_pruned_node =
             self.get_highest_static_file_block(StaticFileSegment::Receipts).is_none() &&
                 provider.get_stage_checkpoint(StageId::Execution)?.is_some() &&
@@ -541,13 +546,13 @@ impl StaticFileProvider {
             }
         }
 
-        Ok(unwind_target)
+        Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
     /// Ensures that there are no gaps between static file headers and database headers.
     ///
-    /// If a gap is found (eg. static block 5 and first db block 7), return a PipelineTarget::Unwind
-    /// to the given static file block as to restore missing data.
+    /// If a gap is found (eg. static block 5 and first db block 7), return a block number to unwind
+    /// to as to restore missing data.
     fn ensure_header_continuity<TX: DbTx>(
         &self,
         provider: &DatabaseProvider<TX>,
@@ -570,8 +575,8 @@ impl StaticFileProvider {
     /// Ensures that there are no gaps between static file transactions/receipts and database
     /// transactions/receipts.
     ///
-    /// If a gap is found (eg. static tx 5 and first db tx 7), return a PipelineTarget::Unwind to
-    /// the given static file block as to restore missing data.
+    /// If a gap is found (eg. static tx 5 and first db tx 7), return a block number to unwind to as
+    /// to restore missing data.
     fn ensure_tx_continuity<TX: DbTx>(
         &self,
         segment: StaticFileSegment,
