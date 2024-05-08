@@ -48,9 +48,6 @@ pub use transactions::{TransactionsProvider, TransactionsProviderExt};
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;
 
-mod executor;
-pub use executor::{BlockExecutor, ExecutorFactory, PrunableBlockExecutor};
-
 mod chain;
 pub use chain::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
