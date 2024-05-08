@@ -7,7 +7,7 @@ use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_exex::ExExManagerHandle;
-use reth_node_core::{args::NetworkArgs, dirs::ChainPath};
+use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
