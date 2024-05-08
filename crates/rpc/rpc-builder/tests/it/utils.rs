@@ -5,13 +5,13 @@ use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::MAINNET;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
-use reth_rpc::JwtSecret;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
     RpcModuleBuilder, RpcModuleSelection, RpcServerConfig, RpcServerHandle,
     TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApi;
+use reth_rpc_layer::JwtSecret;
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};

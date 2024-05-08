@@ -46,3 +46,5 @@ pub use reth_node_core::node_config::NodeConfig;
 pub use reth_node_api::*;
 
 use aquamarine as _;
+
+use reth_rpc as _;

@@ -90,7 +90,7 @@ members = [
     "examples/exex/*",
     "examples/db-access",
     "testing/ef-tests/",
-    "testing/testing-utils",
+    "testing/testing-utils", "crates/rpc/rpc-layer",
 ]
 default-members = ["bin/reth"]
 
@@ -264,6 +264,7 @@ reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
+reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-stages = { path = "crates/stages" }
 reth-stages-api = { path = "crates/stages-api" }
 reth-static-file = { path = "crates/static-file" }

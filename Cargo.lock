@@ -6814,6 +6814,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
+ "reth-rpc-layer",
  "reth-tracing",
  "secp256k1",
  "serde_json",
@@ -7317,6 +7318,7 @@ dependencies = [
  "reth-prune",
  "reth-rpc",
  "reth-rpc-engine-api",
+ "reth-rpc-layer",
  "reth-stages",
  "reth-static-file",
  "reth-tasks",
@@ -7372,6 +7374,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-engine-api",
+ "reth-rpc-layer",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
@@ -7766,6 +7769,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",
+ "reth-rpc-layer",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
@@ -7806,6 +7810,27 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "reth-rpc-layer"
+version = "0.2.0-beta.6"
+dependencies = [
+ "assert_matches",
+ "http 0.2.12",
+ "http-body 0.4.6",
+ "hyper 0.14.28",
+ "jsonrpsee",
+ "jsonwebtoken 8.3.0",
+ "pin-project",
+ "rand 0.8.5",
+ "reth-primitives",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tower",
  "tracing",
 ]
 
