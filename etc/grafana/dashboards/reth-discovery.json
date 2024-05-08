@@ -629,7 +629,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_discv5_total_kbucket_peers_raw{instance=\"$instance\"}",
+          "expr": "reth_discv5_kbucket_peers_raw_total{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -645,7 +645,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_discv5_total_sessions_raw{instance=\"$instance\"}",
+          "expr": "reth_discv5_sessions_raw_total{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -798,7 +798,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Session Establishments Failed (unverifiable ENR)"
+              "options": "Failed Session Establishments (unverifiable ENR)"
             },
             "properties": [
               {
@@ -839,7 +839,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_inserted_kbucket_peers_raw{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_inserted_kbucket_peers_raw_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": false,
           "instant": false,
@@ -855,7 +855,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -872,7 +872,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_established_sessions_unreachable_enr{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_established_sessions_unreachable_enr_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -889,7 +889,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval]) - rate(reth_discv5_total_established_sessions_custom_filtered{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval]) - rate(reth_discv5_established_sessions_custom_filtered_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -911,7 +911,7 @@
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Session Establishments Failed (unverifiable ENR)",
+          "legendFormat": "Failed Session Establishments (unverifiable ENR)",
           "range": true,
           "refId": "E",
           "useBackend": false
@@ -1137,7 +1137,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "(rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_unverifiable_enrs_raw_total{instance=\"$instance\"}[$__rate_interval])) - (rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opel{instance=\"$instance\"}[$__rate_interval]))",
+          "expr": "(rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_unverifiable_enrs_raw_total{instance=\"$instance\"}[$__rate_interval])) - (rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opel{instance=\"$instance\"}[$__rate_interval]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
