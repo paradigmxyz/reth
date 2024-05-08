@@ -15,7 +15,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "10.1.0"
+      "version": "10.3.3"
     },
     {
       "type": "datasource",
@@ -94,7 +94,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unitScale": true
         },
         "overrides": []
       },
@@ -124,7 +125,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.3.3",
       "targets": [
         {
           "datasource": {
@@ -163,7 +164,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unitScale": true
         },
         "overrides": []
       },
@@ -193,7 +195,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.3.3",
       "targets": [
         {
           "datasource": {
@@ -232,7 +234,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unitScale": true
         },
         "overrides": []
       },
@@ -262,7 +265,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.3.3",
       "targets": [
         {
           "datasource": {
@@ -301,7 +304,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unitScale": true
         },
         "overrides": []
       },
@@ -331,7 +335,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.3.3",
       "targets": [
         {
           "datasource": {
@@ -370,7 +374,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unitScale": true
         },
         "overrides": []
       },
@@ -400,7 +405,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.3.3",
       "targets": [
         {
           "datasource": {
@@ -439,7 +444,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unitScale": true
         },
         "overrides": []
       },
@@ -469,7 +475,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "10.3.3",
       "targets": [
         {
           "datasource": {
@@ -516,6 +522,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -559,7 +566,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unitScale": true
         },
         "overrides": [
           {
@@ -656,13 +664,14 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a  UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.\n\n",
+      "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a  UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.\n\nSessions will succeed to peers that advertise no UDP socket in their ENR. This allows peers to discover their reachable socket. On the other hand, for DoS protection, peers that advertise a different socket than the socket from which they make the connection, are denied a sigp/discv5 session. These peers are passed to RLPx nonetheless (some EL implementations of discv5 are more lax about ENR and source socket matching). ",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -707,7 +716,8 @@
               }
             ]
           },
-          "unit": "cps"
+          "unit": "cps",
+          "unitScale": true
         },
         "overrides": [
           {
@@ -858,6 +868,23 @@
           "range": true,
           "refId": "D",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_discv5_total_unverifiable_enrs_raw{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Session Establishment Failed (unverifiable ENR)",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
         }
       ],
       "title": "Peer Churn",
@@ -875,6 +902,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -919,7 +947,8 @@
               }
             ]
           },
-          "unit": "cps"
+          "unit": "cps",
+          "unitScale": true
         },
         "overrides": [
           {
@@ -1079,8 +1108,7 @@
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 38,
-  "style": "dark",
+  "schemaVersion": 39,
   "tags": [],
   "templating": {
     "list": [
@@ -1116,6 +1144,6 @@
   "timezone": "",
   "title": "Reth - Peer Discovery",
   "uid": "fd2d69b5-ca32-45d0-946e-c00ddcd7052c",
-  "version": 8,
+  "version": 1,
   "weekStart": ""
 }
