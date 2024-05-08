@@ -55,7 +55,10 @@ pub struct ImportReceiptsCommand {
     #[command(flatten)]
     db: DatabaseArgs,
 
-    /// The path to a receipts file for import.
+    /// The path to a receipts file for import. File must use `HackReceiptCodec` (used for
+    /// exporting OP chain segment below Bedrock block via testinprod/op-geth).
+    ///
+    /// <https://github.com/testinprod-io/op-geth/pull/1>
     #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PathBuf,
 }
