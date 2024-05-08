@@ -440,8 +440,8 @@ mod tests {
         Header, PruneModes, SealedHeader, MAINNET,
     };
     use reth_provider::{
-        test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
-        BundleStateWithReceipts, StaticFileProviderFactory,
+        test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
+        StaticFileProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_static_file::StaticFileProducer;
@@ -491,9 +491,6 @@ mod tests {
         /// Builds the pipeline.
         fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
             reth_tracing::init_test_tracing();
-
-            let executor_factory = TestExecutorFactory::default();
-            executor_factory.extend(self.executor_results);
 
             // Setup pipeline
             let (tip_tx, _tip_rx) = watch::channel(B256::default());
