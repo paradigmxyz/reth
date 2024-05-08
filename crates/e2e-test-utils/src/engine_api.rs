@@ -1,5 +1,8 @@
 use crate::traits::PayloadEnvelopeExt;
-use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
+use jsonrpsee::{
+    core::client::ClientT,
+    http_client::{transport::HttpBackend, HttpClient},
+};
 use reth::{
     api::{EngineTypes, PayloadBuilderAttributes},
     providers::CanonStateNotificationStream,
@@ -29,6 +32,14 @@ impl<E: EngineTypes + 'static> EngineApiTestContext<E> {
         Ok(EngineApiClient::<E>::get_payload_v3(&self.engine_api_client, payload_id).await?)
     }
 
+    /// Retrieves a v3 payload from the engine api as serde value
+    pub async fn get_payload_v3_value(
+        &self,
+        payload_id: PayloadId,
+    ) -> eyre::Result<serde_json::Value> {
+        Ok(self.engine_api_client.request("engine_getPayloadV3", (payload_id,)).await?)
+    }
+
     /// Submits a payload to the engine api
     pub async fn submit_payload(
         &self,
@@ -52,7 +63,7 @@ impl<E: EngineTypes + 'static> EngineApiTestContext<E> {
         )
         .await?;
 
-        assert!(submission.status == expected_status);
+        assert_eq!(submission.status, expected_status);
 
         Ok(submission.latest_valid_hash.unwrap_or_default())
     }

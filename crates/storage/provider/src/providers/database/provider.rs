@@ -1112,7 +1112,10 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
             Ordering::Greater => {
                 let mut static_file_producer =
                     static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-                static_file_producer.prune_headers(next_static_file_block_num - next_block)?
+                static_file_producer.prune_headers(next_static_file_block_num - next_block)?;
+                // Since this is a database <-> static file inconsistency, we commit the change
+                // straight away.
+                static_file_producer.commit()?
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.

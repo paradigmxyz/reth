@@ -1,20 +1,23 @@
 //! Optimism block executor.
 
-use crate::{l1::ensure_create2_deployer, verify::verify_receipts, OptimismEvmConfig};
+use crate::{
+    l1::ensure_create2_deployer, verify::verify_receipts, OptimismBlockExecutionError,
+    OptimismEvmConfig,
+};
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, Executor,
     },
-    ConfigureEvm, ConfigureEvmEnv,
+    ConfigureEvm,
 };
 use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError, OptimismBlockExecutionError},
+    executor::{BlockExecutionError, BlockValidationError},
     provider::ProviderError,
 };
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, Bytes, ChainSpec, GotExpected, Hardfork, Header, PruneModes,
-    Receipt, Receipts, TxType, Withdrawals, U256,
+    BlockNumber, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt,
+    Receipts, TxType, Withdrawals, U256,
 };
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -53,7 +56,6 @@ impl<EvmConfig> OpExecutorProvider<EvmConfig> {
 impl<EvmConfig> OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
 {
     fn op_executor<DB>(&self, db: DB) -> OpBlockExecutor<EvmConfig, DB>
     where
@@ -70,7 +72,6 @@ where
 impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
 {
     type Executor<DB: Database<Error = ProviderError>> = OpBlockExecutor<EvmConfig, DB>;
 
@@ -107,7 +108,6 @@ struct OpEvmExecutor<EvmConfig> {
 impl<EvmConfig> OpEvmExecutor<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
 {
     /// Executes the transactions in the block and returns the receipts.
     ///
@@ -141,13 +141,8 @@ where
         // blocks will always have at least a single transaction in them (the L1 info transaction),
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
-        ensure_create2_deployer(self.chain_spec.clone(), block.timestamp, evm.db_mut()).map_err(
-            |_| {
-                BlockExecutionError::OptimismBlockExecution(
-                    OptimismBlockExecutionError::ForceCreate2DeployerFail,
-                )
-            },
-        )?;
+        ensure_create2_deployer(self.chain_spec.clone(), block.timestamp, evm.db_mut())
+            .map_err(|_| OptimismBlockExecutionError::ForceCreate2DeployerFail)?;
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
@@ -167,9 +162,7 @@ where
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
-                return Err(BlockExecutionError::OptimismBlockExecution(
-                    OptimismBlockExecutionError::BlobTransactionRejected,
-                ));
+                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into());
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -184,15 +177,9 @@ where
                         .map(|acc| acc.account_info().unwrap_or_default())
                 })
                 .transpose()
-                .map_err(|_| {
-                    BlockExecutionError::OptimismBlockExecution(
-                        OptimismBlockExecutionError::AccountLoadFailed(*sender),
-                    )
-                })?;
+                .map_err(|_| OptimismBlockExecutionError::AccountLoadFailed(*sender))?;
 
-            let mut buf = Vec::with_capacity(transaction.length_without_header());
-            transaction.encode_enveloped(&mut buf);
-            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, buf.into());
+            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
@@ -282,8 +269,6 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO(mattsse): get rid of this
-    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -383,7 +368,6 @@ where
 impl<EvmConfig, DB> Executor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -436,8 +420,6 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> BatchExecutor<DB> for OpBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO: get rid of this
-    EvmConfig: ConfigureEvmEnv<TxMeta = Bytes>,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;

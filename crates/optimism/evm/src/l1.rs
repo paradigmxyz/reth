@@ -1,9 +1,7 @@
 //! Optimism-specific implementation and utilities for the executor
 
-use reth_interfaces::{
-    executor::{self as reth_executor, BlockExecutionError},
-    RethError,
-};
+use crate::OptimismBlockExecutionError;
+use reth_interfaces::{executor::BlockExecutionError, RethError};
 use reth_primitives::{address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, B256, U256};
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
@@ -29,20 +27,19 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 /// transaction in the L2 block.
 ///
 /// Returns an error if the L1 info transaction is not found, if the block is empty.
-pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError> {
+pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     let l1_info_tx_data = block
         .body
         .first()
-        .ok_or(reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+        .ok_or(OptimismBlockExecutionError::L1BlockInfoError {
             message: "could not find l1 block info tx in the L2 block".to_string(),
         })
         .map(|tx| tx.input())?;
 
     if l1_info_tx_data.len() < 4 {
-        return Err(reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
+        return Err(OptimismBlockExecutionError::L1BlockInfoError {
             message: "invalid l1 block info transaction calldata in the L2 block".to_string(),
-        }
-        .into())
+        })
     }
 
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
@@ -56,7 +53,7 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, BlockExecutionError
 }
 
 /// Parses the calldata of the [L1BlockInfo] transaction pre-Ecotone hardfork.
-pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, BlockExecutionError> {
+pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     // The setL1BlockValues tx calldata must be exactly 260 bytes long, considering that
     // we already removed the first 4 bytes (the function selector). Detailed breakdown:
     //   32 bytes for the block number
@@ -68,33 +65,25 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, BlockExecuti
     // + 32 bytes for the fee overhead
     // + 32 bytes for the fee scalar
     if data.len() != 256 {
-        return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "unexpected l1 block info tx calldata length found".to_string(),
-            },
-        ))
+        return Err(OptimismBlockExecutionError::L1BlockInfoError {
+            message: "unexpected l1 block info tx calldata length found".to_string(),
+        })
     }
 
     let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
-        BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 base fee".to_string(),
-            },
-        ),
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 base fee".to_string(),
+        },
     )?;
     let l1_fee_overhead = U256::try_from_be_slice(&data[192..224]).ok_or(
-        BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 fee overhead".to_string(),
-            },
-        ),
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 fee overhead".to_string(),
+        },
     )?;
     let l1_fee_scalar = U256::try_from_be_slice(&data[224..256]).ok_or(
-        BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 fee scalar".to_string(),
-            },
-        ),
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 fee scalar".to_string(),
+        },
     )?;
 
     let mut l1block = L1BlockInfo::default();
@@ -120,42 +109,32 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, BlockExecuti
 /// + 32 bytes for the blob base fee
 /// + 32 bytes for the block hash
 /// + 32 bytes for the batcher hash
-pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, BlockExecutionError> {
+pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     if data.len() != 160 {
-        return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "unexpected l1 block info tx calldata length found".to_string(),
-            },
-        ))
+        return Err(OptimismBlockExecutionError::L1BlockInfoError {
+            message: "unexpected l1 block info tx calldata length found".to_string(),
+        })
     }
 
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or(
-        reth_executor::BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 blob base fee scalar".to_string(),
-            },
-        ),
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee scalar".to_string(),
+        },
     )?;
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[12..16]).ok_or(
-        reth_executor::BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 base fee scalar".to_string(),
-            },
-        ),
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 base fee scalar".to_string(),
+        },
     )?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or(
-        reth_executor::BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 blob base fee".to_string(),
-            },
-        ),
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee".to_string(),
+        },
     )?;
     let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
-        reth_executor::BlockExecutionError::OptimismBlockExecution(
-            reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                message: "could not convert l1 blob base fee".to_string(),
-            },
-        ),
+        OptimismBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee".to_string(),
+        },
     )?;
 
     let mut l1block = L1BlockInfo::default();
@@ -216,11 +195,10 @@ impl RethL1BlockInfo for L1BlockInfo {
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
         } else {
-            return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
-                reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                    message: "Optimism hardforks are not active".to_string(),
-                },
-            ))
+            return Err(OptimismBlockExecutionError::L1BlockInfoError {
+                message: "Optimism hardforks are not active".to_string(),
+            }
+            .into())
         };
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
@@ -236,11 +214,10 @@ impl RethL1BlockInfo for L1BlockInfo {
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
         } else {
-            return Err(reth_executor::BlockExecutionError::OptimismBlockExecution(
-                reth_executor::OptimismBlockExecutionError::L1BlockInfoError {
-                    message: "Optimism hardforks are not active".to_string(),
-                },
-            ))
+            return Err(OptimismBlockExecutionError::L1BlockInfoError {
+                message: "Optimism hardforks are not active".to_string(),
+            }
+            .into())
         };
         Ok(self.data_gas(input, spec_id))
     }

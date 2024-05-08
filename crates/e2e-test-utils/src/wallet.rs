@@ -4,7 +4,8 @@ use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
 /// One of the accounts of the genesis allocations.
 pub struct Wallet {
     pub inner: LocalWallet,
-    chain_id: u64,
+    pub inner_nonce: u64,
+    pub chain_id: u64,
     amount: usize,
     derivation_path: Option<String>,
 }
@@ -13,7 +14,7 @@ impl Wallet {
     /// Creates a new account from one of the secret/pubkeys of the genesis allocations (test.json)
     pub fn new(amount: usize) -> Self {
         let inner = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC).build().unwrap();
-        Self { inner, chain_id: 1, amount, derivation_path: None }
+        Self { inner, chain_id: 1, amount, derivation_path: None, inner_nonce: 0 }
     }
 
     /// Sets chain id

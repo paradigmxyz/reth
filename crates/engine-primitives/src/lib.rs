@@ -115,6 +115,29 @@ pub fn validate_payload_timestamp(
         //    the payload does not fall within the time frame of the Cancun fork.
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
+
+    let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
+    if version == EngineApiMessageVersion::V4 && !is_prague {
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#specification-1>
+        //
+        // For `engine_getPayloadV4`:
+        //
+        // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        //    the built payload does not fall within the time frame of the Prague fork.
+        //
+        // For `engine_forkchoiceUpdatedV4`:
+        //
+        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the
+        //    `payloadAttributes` is set and the `payloadAttributes.timestamp` does not fall within
+        //    the time frame of the Prague fork.
+        //
+        // For `engine_newPayloadV4`:
+        //
+        // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
+        //    the payload does not fall within the time frame of the Prague fork.
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
     Ok(())
 }
 
@@ -128,7 +151,7 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
+    let is_shanghai_active = chain_spec.is_shanghai_active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {
@@ -136,17 +159,17 @@ pub fn validate_withdrawals_presence(
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
-            if is_shanghai {
+            if is_shanghai_active {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
         }
-        EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 => {
-            if is_shanghai && !has_withdrawals {
+        EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
+            if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
-            if !is_shanghai && has_withdrawals {
+            if !is_shanghai_active && has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
             }
@@ -237,7 +260,7 @@ pub fn validate_parent_beacon_block_root_presence(
                 ))
             }
         }
-        EngineApiMessageVersion::V3 => {
+        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -321,10 +344,14 @@ pub enum EngineApiMessageVersion {
     V1,
     /// Version 2
     ///
-    /// Added for shanghai hardfork.
+    /// Added in the Shanghai hardfork.
     V2,
     /// Version 3
     ///
-    /// Added for cancun hardfork.
+    /// Added in the Cancun hardfork.
     V3,
+    /// Version 4
+    ///
+    /// Added in the Prague hardfork.
+    V4,
 }

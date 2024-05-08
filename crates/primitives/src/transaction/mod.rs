@@ -25,12 +25,12 @@ pub use error::{
 };
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
-#[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
-pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
+pub use sidecar::BlobTransactionValidationError;
+pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use signature::{extract_chain_id, Signature};
 pub use tx_type::{
@@ -45,9 +45,7 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
-#[cfg(feature = "c-kzg")]
 mod pooled;
-#[cfg(feature = "c-kzg")]
 mod sidecar;
 mod signature;
 mod tx_type;
@@ -1698,7 +1696,6 @@ impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
-#[cfg(feature = "c-kzg")]
 pub trait FromRecoveredPooledTransaction {
     /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;

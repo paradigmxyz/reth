@@ -12,7 +12,7 @@ use crate::{
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
@@ -156,7 +156,8 @@ impl Command {
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
 
         // build the full block client
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 
         // get best block number
@@ -164,7 +165,7 @@ impl Command {
         assert!(best_block_number < self.to, "Nothing to run");
 
         // get the block range from the network
-        let block_range = best_block_number..=self.to;
+        let block_range = best_block_number + 1..=self.to;
         info!(target: "reth::cli", ?block_range, "Downloading range of blocks");
         let blocks = block_range_client
             .get_full_block_range(to_header.hash_slow(), self.to - best_block_number)

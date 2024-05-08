@@ -10,7 +10,7 @@ use reth_evm::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, Executor,
     },
-    ConfigureEvm, ConfigureEvmEnv,
+    ConfigureEvm,
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -62,7 +62,6 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig> {
 impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
@@ -79,7 +78,6 @@ where
 impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
     type Executor<DB: Database<Error = ProviderError>> = EthBlockExecutor<EvmConfig, DB>;
 
@@ -117,7 +115,6 @@ struct EthEvmExecutor<EvmConfig> {
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
     /// Executes the transactions in the block and returns the receipts.
     ///
@@ -158,7 +155,7 @@ where
                 .into())
             }
 
-            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, ());
+            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
@@ -238,8 +235,6 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO(mattsse): get rid of this
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database<Error = ProviderError>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -353,7 +348,6 @@ where
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -403,8 +397,6 @@ impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO(mattsse): get rid of this
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -523,9 +515,10 @@ mod tests {
             .expect_err(
                 "Executing cancun block without parent beacon block root field should fail",
             );
+
         assert_eq!(
-            err,
-            BlockExecutionError::Validation(BlockValidationError::MissingParentBeaconBlockRoot)
+            err.as_validation().unwrap().clone(),
+            BlockValidationError::MissingParentBeaconBlockRoot
         );
 
         // fix header, set a gas limit
