@@ -85,7 +85,7 @@ impl From<Vec<Withdrawal>> for Withdrawals {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{serde_helper::u64_via_ruint, Address};
+    use crate::Address;
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
 
@@ -95,15 +95,12 @@ mod tests {
     #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable)]
     struct RethWithdrawal {
         /// Monotonically increasing identifier issued by consensus layer.
-        #[serde(with = "u64_via_ruint")]
         index: u64,
         /// Index of validator associated with withdrawal.
-        #[serde(with = "u64_via_ruint", rename = "validatorIndex")]
         validator_index: u64,
         /// Target address for withdrawn ether.
         address: Address,
         /// Value of the withdrawal in gwei.
-        #[serde(with = "u64_via_ruint")]
         amount: u64,
     }
 
