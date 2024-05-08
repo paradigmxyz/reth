@@ -1,5 +1,6 @@
 //! This contains all of the `reth` commands
 
+pub mod bitfinity_import;
 pub mod config_cmd;
 pub mod db;
 pub mod debug_cmd;
