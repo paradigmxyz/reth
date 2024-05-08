@@ -54,7 +54,7 @@ pub struct DiscoveredPeersMetrics {
     /// they're making a connection from doesn't match the UDP socket advertised in their ENR.
     /// These peers will be denied a session (and hence can't make it into kbuckets) until they
     /// have update their ENR, to reflect their actual UDP socket.
-    total_unverifiable_enrs_raw: Counter,
+    unverifiable_enrs_raw_total: Counter,
 }
 
 impl DiscoveredPeersMetrics {
