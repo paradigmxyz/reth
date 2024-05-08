@@ -13,6 +13,9 @@ use reth_primitives::{
 
 /// Implementation of the trie cursor factory for a database transaction.
 impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
+    type StorageTrieCursor =
+        DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
+
     fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
         Ok(Box::new(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?)))
     }
@@ -20,11 +23,11 @@ impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
     fn storage_tries_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::new(DatabaseStorageTrieCursor::new(
+    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+        Ok(DatabaseStorageTrieCursor::new(
             self.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
-        )))
+        ))
     }
 }
 

@@ -503,7 +503,6 @@ where
         let mut storage_node_iter =
             StorageNodeIter::new(walker, hashed_storage_cursor, self.hashed_address);
         while let Some(node) = storage_node_iter.try_next()? {
-            println!("Storage Node: {:#?}", node);
             match node {
                 StorageNode::Branch(node) => {
                     tracker.inc_branch();

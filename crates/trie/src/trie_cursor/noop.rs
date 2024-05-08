@@ -9,6 +9,7 @@ use reth_primitives::trie::{BranchNodeCompact, Nibbles};
 pub struct NoopTrieCursorFactory;
 
 impl TrieCursorFactory for NoopTrieCursorFactory {
+    type StorageTrieCursor = NoopStorageTrieCursor;
     /// Generates a Noop account trie cursor.
     fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
         Ok(Box::<NoopAccountTrieCursor>::default())
@@ -18,8 +19,8 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     fn storage_tries_cursor(
         &self,
         _hashed_address: reth_primitives::B256,
-    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::<NoopStorageTrieCursor>::default())
+    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+        Ok(NoopStorageTrieCursor::default())
     }
 }
 

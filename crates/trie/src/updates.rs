@@ -120,12 +120,10 @@ impl TrieUpdates {
     ) {
         // Add updates from trie walker.
         let (_, walker_updates) = walker.split();
-        println!("Walker Updates: {:#?}", walker_updates);
         self.extend(walker_updates);
 
         // Add storage node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
-        println!("Hash Builder Updates: {:#?}", hash_builder_updates);
         self.extend(hash_builder_updates.into_iter().map(|(nibbles, node)| {
             (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
         }));
@@ -143,7 +141,6 @@ impl TrieUpdates {
         let mut trie_operations = Vec::from_iter(self.trie_operations);
         trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         for (key, operation) in trie_operations {
-            println!("Flush Key: {key:?}, Operation: {operation:?}");
             match key {
                 TrieKey::AccountNode(nibbles) => match operation {
                     TrieOp::Delete => {
@@ -173,7 +170,6 @@ impl TrieUpdates {
                             .filter(|e| e.nibbles == nibbles)
                             .is_some()
                         {
-                            println!("Performing delete on {:?}", storage_trie_cursor.current()?);
                             storage_trie_cursor.delete_current()?;
                         }
 
@@ -189,4 +185,18 @@ impl TrieUpdates {
 
         Ok(())
     }
+
+    pub fn sorted(&self) -> TrieUpdatesSorted {
+        let mut trie_operations = Vec::from_iter(self.trie_operations.clone());
+        trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        TrieUpdatesSorted { trie_operations }
+    }
 }
+
+/// The aggregation of trie updates.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deref)]
+pub struct TrieUpdatesSorted {
+    pub trie_operations: Vec<(TrieKey, TrieOp)>,
+}
+
+impl TrieUpdatesSorted {}

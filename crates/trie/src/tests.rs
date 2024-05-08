@@ -1,6 +1,7 @@
 use crate::{
     hashed_cursor::HashedPostStateCursorFactory, test_utils::storage_root_prehashed,
-    updates::TrieUpdates, HashedPostState, HashedStorage, StorageRoot,
+    trie_cursor::TrieUpdatesCursorFactory, updates::TrieUpdates, HashedPostState, HashedStorage,
+    StorageRoot,
 };
 use reth_db::{
     cursor::DbCursorRW,
@@ -17,14 +18,14 @@ use std::{collections::BTreeMap, iter};
 
 #[test]
 fn trie_updates_across_multiple_iterations() {
-    let _ = RethTracer::new()
-        .with_stdout(LayerInfo::new(
-            LogFormat::Terminal,
-            LevelFilter::TRACE.to_string(),
-            "".to_string(),
-            Some("always".to_string()),
-        ))
-        .init();
+    // let _ = RethTracer::new()
+    //     .with_stdout(LayerInfo::new(
+    //         LogFormat::Terminal,
+    //         LevelFilter::DEBUG.to_string(),
+    //         "".to_string(),
+    //         Some("always".to_string()),
+    //     ))
+    //     .init();
     let address = Address::ZERO;
     let hashed_address = keccak256(address);
 
@@ -77,11 +78,12 @@ fn trie_updates_across_multiple_iterations() {
     )]));
 
     let (storage_root, block1_updates) =
-        compute_storage_root(address, factory.provider().unwrap().tx_ref(), &post_state);
+        compute_storage_root(address, factory.provider().unwrap().tx_ref(), &post_state, &TrieUpdates::default());
     assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
     println!("Block #1 Storage Root: {:?}", storage_root);
-    println!("Block #1 Updates: {:#?}", block1_updates);
-    block1_updates.clone().flush(factory.provider_rw().unwrap().tx_ref()).unwrap();
+    // let provider_rw = factory.provider_rw().unwrap();
+    // block1_updates.clone().flush(provider_rw.tx_ref()).unwrap();
+    // provider_rw.commit().unwrap();
 
     // Block #2
     // Set 0x0fab0.. hashed slot to 0
@@ -95,7 +97,7 @@ fn trie_updates_across_multiple_iterations() {
     )]));
 
     let (storage_root, block2_updates) =
-        compute_storage_root(address, factory.provider().unwrap().tx_ref(), &post_state);
+        compute_storage_root(address, factory.provider().unwrap().tx_ref(), &post_state, &block1_updates);
     assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
     println!("Block #2 Storage Root: {:?}", storage_root);
 
@@ -112,7 +114,7 @@ fn trie_updates_across_multiple_iterations() {
                 .upsert(hashed_address, StorageEntry { key: *hashed_slot, value: *value })
                 .unwrap();
         }
-        // updates.flush(provider_rw.tx_ref()).unwrap();
+        updates.flush(provider_rw.tx_ref()).unwrap();
         provider_rw.commit().unwrap();
     }
 
@@ -126,6 +128,7 @@ fn compute_storage_root<TX: DbTx>(
     address: Address,
     tx: &TX,
     post_state: &HashedPostState,
+    update: &TrieUpdates,
 ) -> (B256, TrieUpdates) {
     let mut prefix_sets = post_state.construct_prefix_sets();
     let (root, _, updates) = StorageRoot::from_tx(tx, address)
@@ -133,6 +136,7 @@ fn compute_storage_root<TX: DbTx>(
             tx,
             &post_state.clone().into_sorted(),
         ))
+        .with_trie_cursor_factory(TrieUpdatesCursorFactory::new(tx, &update.sorted()))
         .with_prefix_set(prefix_sets.storage_prefix_sets.remove(&keccak256(address)).unwrap())
         .root_with_updates()
         .unwrap();
