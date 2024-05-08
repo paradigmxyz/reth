@@ -84,12 +84,12 @@
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 //! };
-//! use reth_rpc::JwtSecret;
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
 //!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
 //!     TransportRpcModuleConfig,
 //! };
+//! use reth_rpc_layer::JwtSecret;
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
