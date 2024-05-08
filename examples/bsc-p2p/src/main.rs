@@ -9,13 +9,12 @@
 //! This launch the regular reth node overriding the engine api payload builder with our custom.
 //!
 //! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
-use chain_cfg::{boot_nodes, head, bsc_chain_spec};
+use chainspec::{boot_nodes, head, bsc_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
     NetworkConfig, NetworkEvent, NetworkEvents, NetworkManager,
 };
 use reth_primitives::{ForkHash, ForkId};
-use reth_provider::test_utils::NoopProvider;
 use reth_tracing::{
     tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
     Tracer,
@@ -27,7 +26,7 @@ use std::{
 };
 use tokio_stream::StreamExt;
 
-pub mod chain_cfg;
+pub mod chainspec;
 
 #[tokio::main]
 async fn main() {
@@ -51,7 +50,7 @@ async fn main() {
         .chain_spec(bsc_chain_spec())
         .set_head(head())
         .listener_addr(local_addr)
-        .build(NoopProvider::default());
+        .build_with_noop_provider();
 
     // Set Discv4 lookup interval to 1 second
     let mut discv4_cfg = Discv4ConfigBuilder::default();

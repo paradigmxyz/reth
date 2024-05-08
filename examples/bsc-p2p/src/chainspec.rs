@@ -6,7 +6,6 @@ use reth_primitives::{
 use std::{collections::BTreeMap, sync::Arc};
 
 pub const SHANGHAI_TIME: u64 = 1705996800;
-const FEYNMAN_TIME: u64 = 1713419340;
 
 pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
     const GENESIS: B256 = b256!("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b");
