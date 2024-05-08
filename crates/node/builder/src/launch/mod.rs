@@ -463,44 +463,6 @@ where
             node: full_node,
         };
 
-                // Construct job scheduler for importing blocks
-                let import = ImportCommand::new(
-                    Some(self.config_path()),
-                    self.data_dir.clone().data_dir_path().into(),
-                    self.config.chain.clone(),
-                    self.config.bitfinity.clone(),
-                    self.config.db,
-                );
-        
-                let job_executor = lightspeed_scheduler::JobExecutor::new_with_local_tz();
-        
-                // Schedule the import job
-                {
-                    let interval = Duration::from_secs(self.config.bitfinity.import_interval);
-                    let db = Arc::clone(&self.db);
-                    job_executor
-                        .add_job_with_scheduler(
-                            Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
-                            Job::new("import", "block importer", None, move || {
-                                let import = import.clone();
-                                let config = config.clone();
-                                let provider_factory = provider_factory.clone();
-                                let db = db.clone();
-                                let blockchain_db = blockchain_db.clone();
-                                Box::pin(async move {
-                                    import.import(config, provider_factory, db.into()).await?;
-        
-                                    blockchain_db.update_chain_info()?;
-        
-                                    Ok(())
-                                })
-                            }),
-                        )
-                        .await;
-                }
-        
-                let job_executor_handler = job_executor.run().await?;
-                
         Ok(handle)
     }
 }

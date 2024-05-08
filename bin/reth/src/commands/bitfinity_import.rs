@@ -1,72 +1,53 @@
 //! Command that initializes the node by importing a chain from a file.
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    }, dirs::{DataDirPath, MaybePlatformPath}, macros::block_executor, version::SHORT_VERSION
+    commands::import::load_config, dirs::{DataDirPath, MaybePlatformPath}, macros::block_executor, version::SHORT_VERSION
 };
-use clap::Parser;
-use eyre::Context;
 use futures::{Stream, StreamExt};
+use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::BeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
-use reth_db::database_metrics::DatabaseMetadata;
+use reth_db::{database_metrics::DatabaseMetadata, DatabaseEnv};
 
-use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
+use reth_db::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, bitfinity_evm_client::{CertificateCheckSettings, BitfinityEvmClient},
 };
-use reth_interfaces::consensus::Consensus;
-use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
-use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{ChainSpec, B256};
-use reth_provider::{BlockNumReader, HeaderSyncMode, ProviderFactory};
+use reth_consensus::Consensus;
+use reth_exex::ExExManagerHandle;
+use reth_node_core::args::BitfinityArgs;
+use reth_node_events::node::NodeEvent;
+use reth_primitives::{ChainSpec, PruneModes, B256};
+use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory};
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
+    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
+    Pipeline, StageSet,
 };
-use std::{path::PathBuf, sync::Arc};
+use reth_static_file::StaticFileProducer;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
 /// Syncs RLP encoded blocks from a file.
-#[derive(Debug, Parser, Clone)]
+#[derive(Debug, Clone)]
 pub struct BitfinityImportCommand {
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
 
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
     chain: Arc<ChainSpec>,
 
     /// Bitfinity Related Args
-    #[clap(flatten)]
     bitfinity: BitfinityArgs,
 
     /// The database configuration.
-    #[clap(flatten)]
-    db: DatabaseArgs,
+    db: Arc<DatabaseEnv>,
 }
 
 impl BitfinityImportCommand {
@@ -76,65 +57,79 @@ impl BitfinityImportCommand {
         datadir: MaybePlatformPath<DataDirPath>,
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityArgs,
-        db: DatabaseArgs,
+        db: Arc<DatabaseEnv>,
     ) -> Self {
         Self { config, datadir, chain, bitfinity, db }
     }
 
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+    pub async fn execute(self) -> eyre::Result<tokio::task::JoinHandle<()>> {
+        info!(target: "reth::cli - BitfinityImportCommand", "reth {} starting", SHORT_VERSION);
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let config_path = self.config.clone().unwrap_or(data_dir.config());
        
         let mut config: Config = load_config(config_path.clone())?;
-        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+        info!(target: "reth::cli - BitfinityImportCommand", path = ?config_path, "Configuration loaded");
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
             config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
         }
 
-        let db_path = data_dir.db();
-
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db =
-            Arc::new(init_db(&db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
-        info!(target: "reth::cli", "Database opened");
+        info!(target: "reth::cli - BitfinityImportCommand", "Database opened");
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+            ProviderFactory::new(self.db.clone(), self.chain.clone(), data_dir.static_files())?;
 
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+        // debug!(target: "reth::cli - BitfinityImportCommand", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+        // init_genesis(provider_factory.clone())?;
 
-        init_genesis(provider_factory.clone())?;
-
-        // let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
-        // info!(target: "reth::cli", "Consensus engine initialized");
-
-        self.import(config, provider_factory, db.into()).await?;
-
-        Ok(())
+        let job_executor = JobExecutor::new_with_local_tz();
+        
+        // Schedule the import job
+        {
+            let interval = Duration::from_secs(self.bitfinity.import_interval);
+            let db = Arc::clone(&self.db);
+            job_executor
+            .add_job_with_scheduler(
+                Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
+                Job::new("import", "block importer", None, move || {
+                    let import = self.clone();
+                    let config = config.clone();
+                    let provider_factory = provider_factory.clone();
+                    let db = db.clone();
+                    // let blockchain_db = blockchain_db.clone();
+                    Box::pin(async move {
+                        import.import(config, provider_factory).await?;
+                        // blockchain_db.update_chain_info()?;
+                        
+                        Ok(())
+                    })
+                }),
+            )
+            .await;
+        }
+        
+        Ok(job_executor.run().await?)
     }
 
     /// Import the chain from the file
-    pub async fn import<DB>(
+    async fn import<DB>(
         &self,
         config: Config,
         provider_factory: ProviderFactory<DB>,
-        _db: Arc<DB>,
     ) -> eyre::Result<()>
     where
         DB: Database + DatabaseMetadata + Clone + Unpin + 'static,
     {
         let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
-        debug!(target: "reth::cli", "Consensus engine initialized");
+        debug!(target: "reth::cli - BitfinityImportCommand", "Consensus engine initialized");
 
         // Get the local block number
         let start_block = provider_factory.provider()?.last_block_number()? + 1;
 
-        debug!(target: "reth::cli", "Starting block: {}", start_block);
+        debug!(target: "reth::cli - BitfinityImportCommand", "Starting block: {}", start_block);
 
         let remote_client = Arc::new(
             BitfinityEvmClient::from_rpc_url(
@@ -154,39 +149,33 @@ impl BitfinityImportCommand {
         let tip = if let Some(tip) = remote_client.tip() {
             tip
         } else {
-            debug!(target: "reth::cli", "No tip found, skipping import");
+            debug!(target: "reth::cli - BitfinityImportCommand", "No tip found, skipping import");
             return Ok(());
         };
 
-        info!(target: "reth::cli", "Chain blocks imported");
+        info!(target: "reth::cli - BitfinityImportCommand", "Chain blocks imported");
 
         let (mut pipeline, _events) = self.build_import_pipeline(
             &config,
             provider_factory.clone(),
             &consensus,
             remote_client,
+            StaticFileProducer::new(
+                provider_factory.clone(),
+                provider_factory.static_file_provider(),
+                PruneModes::default(),
+            ),
         )?;
 
         // override the tip
         pipeline.set_tip(tip);
-        debug!(target: "reth::cli", ?tip, "Tip manually set");
-
-        // let provider = provider_factory.provider()?;
-
-        // let latest_block_number =
-        //     provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
-        // tokio::spawn(reth_node_core::events::node::handle_events(
-        //     None,
-        //     latest_block_number,
-        //     events,
-        //     db.clone(),
-        // ));
+        debug!(target: "reth::cli - BitfinityImportCommand", ?tip, "Tip manually set");
 
         // Run pipeline
-        debug!(target: "reth::cli", "Starting sync pipeline");
+        debug!(target: "reth::cli - BitfinityImportCommand", "Starting sync pipeline");
         pipeline.run().await?;
 
-        info!(target: "reth::cli", "Finishing up");
+        info!(target: "reth::cli - BitfinityImportCommand", "Finishing up");
         Ok(())
     }
 
@@ -196,6 +185,7 @@ impl BitfinityImportCommand {
         provider_factory: ProviderFactory<DB>,
         consensus: &Arc<C>,
         remote_client: Arc<BitfinityEvmClient>,
+        static_file_producer: StaticFileProducer<DB>,
     ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
     where
         DB: Database + Clone + Unpin + 'static,
@@ -252,33 +242,11 @@ impl BitfinityImportCommand {
                     ExExManagerHandle::empty(),
                 )),
             )
-            .build(provider_factory);
+            .build(provider_factory, static_file_producer);
 
         let events = pipeline.events().map(Into::into);
 
         Ok((pipeline, events))
     }
 
-    /// Loads the reth config
-    fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
-        confy::load_path::<Config>(config_path.clone())
-            .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_common_import_command_chain_args() {
-        for chain in SUPPORTED_CHAINS {
-            let args: BitfinityImportCommand = BitfinityImportCommand::parse_from(["reth", "--chain", chain, "."]);
-            assert_eq!(
-                Ok(args.chain.chain),
-                chain.parse::<reth_primitives::Chain>(),
-                "failed to parse chain {chain}"
-            );
-        }
-    }
 }

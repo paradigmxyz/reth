@@ -5,8 +5,7 @@ use crate::{
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+    }, commands::bitfinity_import::BitfinityImportCommand, dirs::{DataDirPath, MaybePlatformPath}
 };
 use clap::{value_parser, Args, Parser};
 use reth_cli_runner::CliContext;
@@ -170,8 +169,8 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
 
         // set up node config
         let mut node_config = NodeConfig {
-            config,
-            chain,
+            config: config.clone(),
+            chain: chain.clone(),
             metrics,
             instance,
             network,
@@ -182,7 +181,6 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             db,
             dev,
             pruning,
-            bitfinity,
         };
 
         // Register the prometheus recorder before creating the database,
@@ -200,8 +198,14 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         }
 
         let builder = NodeBuilder::new(node_config)
-            .with_database(database)
+            .with_database(database.clone())
             .with_launch_context(ctx.task_executor, data_dir);
+
+        // Init bitfinity import
+        {
+            let import = BitfinityImportCommand::new(config, datadir, chain, bitfinity, database);
+            let _import_handle = import.execute().await?;
+        }
 
         launcher(builder, ext).await
     }
