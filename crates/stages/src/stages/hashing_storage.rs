@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{
     codecs::CompactU256,
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -49,10 +49,13 @@ impl StorageHashingStage {
         Self { clean_threshold, commit_threshold, etl_config }
     }
 
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
+    /// Create new instance of [StorageHashingStage] from configuration.
+    pub fn from_config(config: HashingConfig, etl_config: EtlConfig) -> Self {
+        Self {
+            clean_threshold: config.clean_threshold,
+            commit_threshold: config.commit_threshold,
+            etl_config,
+        }
     }
 }
 

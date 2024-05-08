@@ -165,6 +165,7 @@ impl Command {
             Some(self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(data_dir.data_dir()))),
             self.etl_file_size.unwrap_or(EtlConfig::default_file_size()),
         );
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
@@ -235,31 +236,54 @@ impl Command {
                                 max_duration: None,
                             },
                             config.stages.merkle.clean_threshold,
-                            config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                            prune_modes,
                             ExExManagerHandle::empty(),
                         )),
                         None,
                     )
                 }
-                StageEnum::TxLookup => {
-                    (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
-                }
-                StageEnum::AccountHashing => {
-                    (Box::new(AccountHashingStage::new(1, batch_size, etl_config)), None)
-                }
-                StageEnum::StorageHashing => {
-                    (Box::new(StorageHashingStage::new(1, batch_size, etl_config)), None)
-                }
+                StageEnum::TxLookup => (
+                    Box::new(TransactionLookupStage::from_config(
+                        config.stages.transaction_lookup,
+                        etl_config,
+                        prune_modes.transaction_lookup,
+                    )),
+                    None,
+                ),
+                StageEnum::AccountHashing => (
+                    Box::new(AccountHashingStage::new(
+                        1,
+                        config.stages.account_hashing.commit_threshold,
+                        etl_config,
+                    )),
+                    None,
+                ),
+                StageEnum::StorageHashing => (
+                    Box::new(StorageHashingStage::new(
+                        1,
+                        config.stages.storage_hashing.commit_threshold,
+                        etl_config,
+                    )),
+                    None,
+                ),
                 StageEnum::Merkle => (
-                    Box::new(MerkleStage::default_execution()),
+                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (
-                    Box::new(IndexAccountHistoryStage::default().with_etl_config(etl_config)),
+                    Box::new(IndexAccountHistoryStage::from_config(
+                        config.stages.index_account_history,
+                        etl_config,
+                        prune_modes.account_history,
+                    )),
                     None,
                 ),
                 StageEnum::StorageHistory => (
-                    Box::new(IndexStorageHistoryStage::default().with_etl_config(etl_config)),
+                    Box::new(IndexStorageHistoryStage::from_config(
+                        config.stages.index_storage_history,
+                        etl_config,
+                        prune_modes.storage_history,
+                    )),
                     None,
                 ),
                 _ => return Ok(()),

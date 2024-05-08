@@ -96,6 +96,19 @@ pub struct StageConfig {
     pub etl: EtlConfig,
 }
 
+impl StageConfig {
+    /// The highest threshold (in number of blocks) for switching between incremental
+    /// and full calculations across [`super::MerkleStage`], [`super::AccountHashingStage`] and
+    /// [`super::StorageHashingStage`]. This is required to figure out if can prune or not
+    /// changesets on subsequent pipeline runs.
+    pub fn execution_external_clean_threshold(&self) -> u64 {
+        self.merkle
+            .clean_threshold
+            .max(self.account_hashing.clean_threshold)
+            .max(self.storage_hashing.clean_threshold)
+    }
+}
+
 /// Header stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]

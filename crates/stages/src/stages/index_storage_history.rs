@@ -1,5 +1,5 @@
 use super::{collect_history_indices, load_history_indices};
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::{
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
@@ -42,10 +42,13 @@ impl IndexStorageHistoryStage {
         Self { commit_threshold, prune_mode, etl_config }
     }
 
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
+    /// Create new instance of [IndexStorageHistoryStage] from configuration.
+    pub fn from_config(
+        config: IndexHistoryConfig,
+        etl_config: EtlConfig,
+        prune_mode: Option<PruneMode>,
+    ) -> Self {
+        Self { commit_threshold: config.commit_threshold, prune_mode, etl_config }
     }
 }
 

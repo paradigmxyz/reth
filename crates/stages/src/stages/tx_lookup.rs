@@ -1,5 +1,5 @@
 use num_traits::Zero;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -49,10 +49,13 @@ impl TransactionLookupStage {
         Self { chunk_size, etl_config, prune_mode }
     }
 
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
+    /// Create new instance of [TransactionLookupStage] from configuration.
+    pub fn from_config(
+        config: TransactionLookupConfig,
+        etl_config: EtlConfig,
+        prune_mode: Option<PruneMode>,
+    ) -> Self {
+        Self { chunk_size: config.chunk_size, etl_config, prune_mode }
     }
 }
 

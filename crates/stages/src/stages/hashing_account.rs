@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -48,10 +48,13 @@ impl AccountHashingStage {
         Self { clean_threshold, commit_threshold, etl_config }
     }
 
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
+    /// Create new instance of [AccountHashingStage] from configuration.
+    pub fn from_config(config: HashingConfig, etl_config: EtlConfig) -> Self {
+        Self {
+            clean_threshold: config.clean_threshold,
+            commit_threshold: config.commit_threshold,
+            etl_config,
+        }
     }
 }
 

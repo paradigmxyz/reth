@@ -177,6 +177,7 @@ impl Command {
             provider_factory.clone(),
         );
         let stage_conf = &config.stages;
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
@@ -192,7 +193,8 @@ impl Command {
                     header_downloader,
                     body_downloader,
                     executor.clone(),
-                    stage_conf.etl.clone(),
+                    stage_conf.clone(),
+                    prune_modes,
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,

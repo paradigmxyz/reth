@@ -6,7 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::config::EtlConfig;
+use reth_config::config::StageConfig;
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 use reth_downloaders::{
@@ -375,7 +375,8 @@ where
                     header_downloader,
                     body_downloader,
                     executor_factory.clone(),
-                    EtlConfig::default(),
+                    StageConfig::default(),
+                    PruneModes::default(),
                 ))
             }
         };
