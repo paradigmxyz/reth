@@ -273,7 +273,7 @@ impl Discv5 {
                     "discovered unverifiable enr, source socket doesn't match socket advertised in ENR"
                 );
 
-                self.metrics.discovered_peers.increment_total_unverifiable_enrs_raw(1);
+                self.metrics.discovered_peers.increment_unverifiable_enrs_raw_total(1);
 
                 self.on_discovered_peer(&enr, socket)
             }

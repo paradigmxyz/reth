@@ -93,8 +93,8 @@ impl DiscoveredPeersMetrics {
     /// Increments number of unverifiable ENRs discovered by [`discv5::Discv5`]. These are peers
     /// that fail session establishment because their advertised UDP socket doesn't match the
     /// socket they are making the connection from.
-    pub fn increment_total_unverifiable_enrs_raw(&self, num: u64) {
-        self.total_unverifiable_enrs_raw.increment(num)
+    pub fn increment_unverifiable_enrs_raw_total(&self, num: u64) {
+        self.unverifiable_enrs_raw_total.increment(num)
     }
 }
 
