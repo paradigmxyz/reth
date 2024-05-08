@@ -6,8 +6,8 @@ use reth_config::{Config, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
 use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+    bodies::{bodies::BodiesDownloaderBuilder, noop::NoopBodiesDownloader},
+    headers::{noop::NoopHeaderDownloader, reverse_headers::ReverseHeadersDownloaderBuilder},
 };
 use reth_exex::ExExManagerHandle;
 use reth_node_core::{
@@ -146,36 +146,8 @@ impl Command {
         config: Config,
         provider_factory: ProviderFactory<Arc<DB>>,
     ) -> Result<Pipeline<Arc<DB>>, eyre::Error> {
-        // Even though we are not planning to download anything, we need to initialize Body and
-        // Header stage with a network client
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
-        let p2p_secret_key = get_secret_key(&network_secret_path)?;
-        let default_peers_path = data_dir.known_peers();
-        let network = self
-            .network
-            .network_config(
-                &config,
-                provider_factory.chain_spec(),
-                p2p_secret_key,
-                default_peers_path,
-            )
-            .build(provider_factory.clone())
-            .start_network()
-            .await?;
-
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
-
-        // building network downloaders using the fetch client
-        let fetch_client = network.fetch_client().await?;
-        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(fetch_client.clone(), Arc::clone(&consensus));
-        let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies).build(
-            fetch_client,
-            Arc::clone(&consensus),
-            provider_factory.clone(),
-        );
         let stage_conf = &config.stages;
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
@@ -189,8 +161,8 @@ impl Command {
                     provider_factory.clone(),
                     header_mode,
                     Arc::clone(&consensus),
-                    header_downloader,
-                    body_downloader,
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
                     executor.clone(),
                     stage_conf.etl.clone(),
                 )
