@@ -1,7 +1,7 @@
 //! Unwinding a certain block range
 
 use clap::{Parser, Subcommand};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{Config, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
@@ -165,7 +165,7 @@ impl Command {
             .await?;
 
         let consensus: Arc<dyn Consensus> =
-            Arc::new(BeaconConsensus::new(provider_factory.chain_spec()));
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // building network downloaders using the fetch client
         let fetch_client = network.fetch_client().await?;

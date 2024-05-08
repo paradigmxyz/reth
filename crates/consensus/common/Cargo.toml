@@ -21,6 +21,3 @@ reth-consensus.workspace=true
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 mockall = "0.12"
-
-[features]
-optimism = ["reth-primitives/optimism"]

@@ -10,11 +10,13 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 
 use reth_db::{init_db, tables, transaction::DbTx};
-use reth_downloaders::file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE};
+use reth_downloaders::file_client::{
+    ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
+};
 
 use reth_node_core::init::init_genesis;
 
@@ -107,7 +109,7 @@ impl ImportOpCommand {
 
         init_genesis(provider_factory.clone())?;
 
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
         // open file
@@ -117,7 +119,7 @@ impl ImportOpCommand {
         let mut total_decoded_txns = 0;
         let mut total_filtered_out_dup_txns = 0;
 
-        while let Some(mut file_client) = reader.next_chunk().await? {
+        while let Some(mut file_client) = reader.next_chunk::<FileClient>().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"

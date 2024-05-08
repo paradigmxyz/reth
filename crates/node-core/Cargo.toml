@@ -107,7 +107,6 @@ optimism = [
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-consensus-common/optimism",
     "reth-beacon-consensus/optimism",
 ]
 

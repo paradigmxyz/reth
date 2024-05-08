@@ -169,7 +169,11 @@ where
         let static_file_producer = if self.prune_modes.receipts.is_none() &&
             self.prune_modes.receipts_log_filter.is_empty()
         {
-            Some(prepare_static_file_producer(provider, start_block)?)
+            let mut producer = prepare_static_file_producer(provider, start_block)?;
+            // Since there might be a database <-> static file inconsistency (read
+            // `prepare_static_file_producer` for context), we commit the change straight away.
+            producer.commit()?;
+            Some(producer)
         } else {
             None
         };

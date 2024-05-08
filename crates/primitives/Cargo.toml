@@ -45,7 +45,6 @@ once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2 = { version = "0.10.7", optional = true }
 tempfile = { workspace = true, optional = true }
 thiserror.workspace = true
 zstd = { version = "0.13", features = ["experimental"], optional = true }
@@ -67,8 +66,6 @@ revm-primitives = { workspace = true, features = ["arbitrary"] }
 nybbles = { workspace = true, features = ["arbitrary"] }
 alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
-
-arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 proptest.workspace = true
 proptest-derive.workspace = true
@@ -105,12 +102,11 @@ arbitrary = [
     "dep:proptest-derive",
     "zstd-codec",
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:sha2", "dep:tempfile"]
+c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 zstd-codec = ["dep:zstd"]
 clap = ["dep:clap"]
 optimism = [
     "reth-codecs/optimism",
-    "revm-primitives/optimism",
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]

@@ -85,12 +85,13 @@ pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
-#[cfg(feature = "c-kzg")]
 pub use transaction::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError,
-    FromRecoveredPooledTransaction, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered,
+    BlobTransaction, BlobTransactionSidecar, FromRecoveredPooledTransaction,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered,
 };
+
+#[cfg(feature = "c-kzg")]
+pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
