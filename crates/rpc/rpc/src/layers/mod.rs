@@ -1,8 +1,11 @@
 use http::{HeaderMap, Response};
 
+mod auth_client_layer;
 mod auth_layer;
 mod jwt_secret;
 mod jwt_validator;
+
+pub use auth_client_layer::{secret_to_bearer_header, AuthClientLayer, AuthClientService};
 pub use auth_layer::AuthLayer;
 pub use jwt_secret::{Claims, JwtError, JwtSecret};
 pub use jwt_validator::JwtAuthValidator;

@@ -12,9 +12,14 @@ use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, ChainSpec, Head, Header, Transaction, U256,
+    Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
+use reth_revm::{Database, EvmBuilder};
 pub mod execute;
+pub mod verify;
+
+/// Ethereum DAO hardfork state change data.
+pub mod dao_fork;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -22,12 +27,7 @@ pub mod execute;
 pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
-    type TxMeta = ();
-
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, _meta: ())
-    where
-        T: AsRef<Transaction>,
-    {
+    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         fill_tx_env(tx_env, transaction, sender)
     }
 
@@ -55,7 +55,16 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvm for EthEvmConfig {}
+impl ConfigureEvm for EthEvmConfig {
+    type DefaultExternalContext<'a> = ();
+
+    fn evm<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+    ) -> reth_revm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
+        EvmBuilder::default().with_db(db).build()
+    }
+}
 
 #[cfg(test)]
 mod tests {

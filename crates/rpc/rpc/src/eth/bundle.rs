@@ -52,7 +52,7 @@ where
                 EthBundleError::EmptyBundleTransactions.to_string(),
             ))
         }
-        if block_number.to::<u64>() == 0 {
+        if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             ))

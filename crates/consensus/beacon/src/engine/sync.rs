@@ -1,8 +1,8 @@
 //! Sync management for the engine implementation.
 
 use crate::{
-    engine::metrics::EngineSyncMetrics, BeaconConsensus, BeaconConsensusEngineEvent,
-    ConsensusEngineLiveSyncProgress,
+    engine::metrics::EngineSyncMetrics, BeaconConsensusEngineEvent,
+    ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
 use futures::FutureExt;
 use reth_db::database::Database;
@@ -11,7 +11,7 @@ use reth_interfaces::p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
+use reth_primitives::{stage::PipelineTarget, BlockNumber, ChainSpec, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventListeners;
@@ -44,7 +44,7 @@ where
     /// The pipeline is used for large ranges.
     pipeline_state: PipelineState<DB>,
     /// Pending target block for the pipeline to sync
-    pending_pipeline_target: Option<B256>,
+    pending_pipeline_target: Option<PipelineTarget>,
     /// In-flight full block requests in progress.
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
@@ -81,7 +81,7 @@ where
         Self {
             full_block_client: FullBlockClient::new(
                 client,
-                Arc::new(BeaconConsensus::new(chain_spec)),
+                Arc::new(EthBeaconConsensus::new(chain_spec)),
             ),
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
@@ -216,8 +216,12 @@ where
     /// Sets a new target to sync the pipeline to.
     ///
     /// But ensures the target is not the zero hash.
-    pub(crate) fn set_pipeline_sync_target(&mut self, target: B256) {
-        if target.is_zero() {
+    pub(crate) fn set_pipeline_sync_target(&mut self, target: PipelineTarget) {
+        if target.sync_target().is_some_and(|target| target.is_zero()) {
+            trace!(
+                target: "consensus::engine::sync",
+                "Pipeline target cannot be zero hash."
+            );
             // precaution to never sync to the zero hash
             return
         }
@@ -384,7 +388,7 @@ pub(crate) enum EngineSyncEvent {
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.
-    PipelineStarted(Option<B256>),
+    PipelineStarted(Option<PipelineTarget>),
     /// Pipeline finished
     ///
     /// If this is returned, the pipeline is idle.
@@ -436,8 +440,8 @@ mod tests {
         Header, PruneModes, SealedHeader, MAINNET,
     };
     use reth_provider::{
-        test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
-        BundleStateWithReceipts,
+        test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
+        StaticFileProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_static_file::StaticFileProducer;
@@ -487,9 +491,6 @@ mod tests {
         /// Builds the pipeline.
         fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
             reth_tracing::init_test_tracing();
-
-            let executor_factory = TestExecutorFactory::default();
-            executor_factory.extend(self.executor_results);
 
             // Setup pipeline
             let (tip_tx, _tip_rx) = watch::channel(B256::default());
@@ -590,7 +591,7 @@ mod tests {
             .build(pipeline, chain_spec);
 
         let tip = client.highest_block().expect("there should be blocks here");
-        sync_controller.set_pipeline_sync_target(tip.hash());
+        sync_controller.set_pipeline_sync_target(tip.hash().into());
 
         let sync_future = poll_fn(|cx| sync_controller.poll(cx));
         let next_event = poll!(sync_future);
@@ -598,7 +599,7 @@ mod tests {
         // can assert that the first event here is PipelineStarted because we set the sync target,
         // and we should get Ready because the pipeline should be spawned immediately
         assert_matches!(next_event, Poll::Ready(EngineSyncEvent::PipelineStarted(Some(target))) => {
-            assert_eq!(target, tip.hash());
+            assert_eq!(target.sync_target().unwrap(), tip.hash());
         });
 
         // the next event should be the pipeline finishing in a good state

@@ -21,6 +21,7 @@ reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
+reth-evm-optimism.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 
@@ -36,7 +37,7 @@ sha2.workspace = true
 [features]
 optimism = [
     "reth-primitives/optimism",
-    "reth-revm/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
+    "reth-evm-optimism/optimism",
 ]

@@ -361,25 +361,17 @@ where
                     }
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
-                    if let Some(eip4844) = transaction.as_eip4844() {
-                        // validate the blob
-                        if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
-                            return TransactionValidationOutcome::Invalid(
-                                transaction,
-                                InvalidPoolTransactionError::Eip4844(
-                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                                ),
-                            )
-                        }
-                        // store the extracted blob
-                        maybe_blob_sidecar = Some(blob);
-                    } else {
-                        // this should not happen
+                    // validate the blob
+                    if let Err(err) = transaction.validate_blob(&blob, &self.kzg_settings) {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
-                            InvalidTransactionError::TxTypeNotSupported.into(),
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                            ),
                         )
                     }
+                    // store the extracted blob
+                    maybe_blob_sidecar = Some(blob);
                 }
             }
         }

@@ -37,9 +37,8 @@ use reth_node_api::{
     EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{
-    node::{EthereumNetworkBuilder, EthereumPoolBuilder},
-    EthEvmConfig,
+use reth_node_ethereum::node::{
+    EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
@@ -187,12 +186,6 @@ impl NodeTypes for MyCustomNode {
     type Primitives = ();
     // use the custom engine types
     type Engine = CustomEngineTypes;
-    // use the default ethereum EVM config
-    type Evm = EthEvmConfig;
-
-    fn evm_config(&self) -> Self::Evm {
-        Self::Evm::default()
-    }
 }
 
 /// Implement the Node trait for the custom node
@@ -207,6 +200,7 @@ where
         EthereumPoolBuilder,
         CustomPayloadServiceBuilder,
         EthereumNetworkBuilder,
+        EthereumExecutorBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -215,6 +209,7 @@ where
             .pool(EthereumPoolBuilder::default())
             .payload(CustomPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
+            .executor(EthereumExecutorBuilder::default())
     }
 }
 
@@ -240,8 +235,7 @@ where
             .interval(conf.interval())
             .deadline(conf.deadline())
             .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes())
-            .max_gas_limit(conf.max_gas_limit());
+            .extradata(conf.extradata_bytes());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),

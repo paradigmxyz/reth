@@ -53,7 +53,7 @@ pub struct Block {
 }
 
 impl Block {
-    /// Create SealedBLock that will create all header hashes.
+    /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
         SealedBlock {
             header: self.header.seal_slow(),
@@ -180,7 +180,7 @@ impl TryFrom<reth_rpc_types::Block> for Block {
                     .collect(),
                 reth_rpc_types::BlockTransactions::Hashes(_) |
                 reth_rpc_types::BlockTransactions::Uncle => {
-                    return Err(ConversionError::MissingFullTransactions);
+                    return Err(ConversionError::MissingFullTransactions)
                 }
             };
             transactions?
@@ -217,6 +217,12 @@ impl BlockWithSenders {
     pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
         let Self { block, senders } = self;
         SealedBlockWithSenders { block: block.seal(hash), senders }
+    }
+
+    /// Calculate the header hash and seal the block with senders so that it can't be changed.
+    #[inline]
+    pub fn seal_slow(self) -> SealedBlockWithSenders {
+        SealedBlockWithSenders { block: self.block.seal_slow(), senders: self.senders }
     }
 
     /// Split Structure to its components
@@ -461,7 +467,7 @@ impl std::ops::DerefMut for SealedBlock {
 }
 
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SealedBlockWithSenders {
     /// Sealed block
     pub block: SealedBlock,

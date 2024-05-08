@@ -1,14 +1,7 @@
 //! Unwinding a certain block range
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 use clap::{Parser, Subcommand};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{Config, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
@@ -21,10 +14,10 @@ use reth_node_core::{
     args::{get_secret_key, NetworkArgs},
     dirs::ChainPath,
 };
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_stages::{
@@ -40,6 +33,15 @@ use reth_static_file::StaticFileProducer;
 use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
 use tracing::info;
+
+use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
+};
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -82,16 +84,16 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         if !db_path.exists() {
             eyre::bail!("Database {db_path:?} does not exist.")
         }
-        let config_path = data_dir.config_path();
+        let config_path = data_dir.config();
         let config: Config = confy::load_path(config_path).unwrap_or_default();
 
         let db = Arc::new(open_db(db_path.as_ref(), self.db.database_args())?);
         let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {
@@ -147,9 +149,9 @@ impl Command {
         // Even though we are not planning to download anything, we need to initialize Body and
         // Header stage with a network client
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let p2p_secret_key = get_secret_key(&network_secret_path)?;
-        let default_peers_path = data_dir.known_peers_path();
+        let default_peers_path = data_dir.known_peers();
         let network = self
             .network
             .network_config(
@@ -163,7 +165,7 @@ impl Command {
             .await?;
 
         let consensus: Arc<dyn Consensus> =
-            Arc::new(BeaconConsensus::new(provider_factory.chain_spec()));
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // building network downloaders using the fetch client
         let fetch_client = network.fetch_client().await?;
@@ -177,10 +179,7 @@ impl Command {
         let stage_conf = &config.stages;
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory = reth_revm::EvmProcessorFactory::new(
-            provider_factory.chain_spec(),
-            EthEvmConfig::default(),
-        );
+        let executor = block_executor!(provider_factory.chain_spec());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
@@ -192,14 +191,14 @@ impl Command {
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
-                    factory.clone(),
+                    executor.clone(),
                     stage_conf.etl.clone(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
                 .set(ExecutionStage::new(
-                    factory,
+                    executor,
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,

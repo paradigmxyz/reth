@@ -387,7 +387,9 @@ mod tests {
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
     };
-    use reth_provider::{BlockWriter, BundleStateWithReceipts, ProviderFactory};
+    use reth_provider::{
+        BlockWriter, BundleStateWithReceipts, ProviderFactory, StaticFileProviderFactory,
+    };
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use test_runner::HeadersTestRunner;
 

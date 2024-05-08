@@ -1,4 +1,5 @@
 use crate::{U64, U8};
+use alloy_rlp::{Decodable, Encodable};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
@@ -181,8 +182,30 @@ impl PartialEq<TxType> for u8 {
     }
 }
 
+impl Encodable for TxType {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        (*self as u8).encode(out);
+    }
+
+    fn length(&self) -> usize {
+        1
+    }
+}
+
+impl Decodable for TxType {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let ty = u8::decode(buf)?;
+
+        TxType::try_from(ty).map_err(alloy_rlp::Error::Custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
+
+    use crate::hex;
+
     use super::*;
 
     #[test]
@@ -247,6 +270,38 @@ mod tests {
                 remaining_buf.is_empty(),
                 "Buffer not fully consumed for identifier {identifier}",
             );
+        }
+    }
+
+    #[test]
+    fn decode_tx_type() {
+        // Test for Legacy transaction
+        let tx_type = TxType::decode(&mut &hex!("80")[..]).unwrap();
+        assert_eq!(tx_type, TxType::Legacy);
+
+        // Test for EIP2930 transaction
+        let tx_type = TxType::decode(&mut &[1u8][..]).unwrap();
+        assert_eq!(tx_type, TxType::Eip2930);
+
+        // Test for EIP1559 transaction
+        let tx_type = TxType::decode(&mut &[2u8][..]).unwrap();
+        assert_eq!(tx_type, TxType::Eip1559);
+
+        // Test for EIP4844 transaction
+        let tx_type = TxType::decode(&mut &[3u8][..]).unwrap();
+        assert_eq!(tx_type, TxType::Eip4844);
+
+        // Test random byte not in range
+        let buf = [rand::thread_rng().gen_range(4..=u8::MAX)];
+        println!("{buf:?}");
+        assert!(TxType::decode(&mut &buf[..]).is_err());
+
+        // Test for Deposit transaction
+        #[cfg(feature = "optimism")]
+        {
+            let buf = [126u8];
+            let tx_type = TxType::decode(&mut &buf[..]).unwrap();
+            assert_eq!(tx_type, TxType::Deposit);
         }
     }
 }

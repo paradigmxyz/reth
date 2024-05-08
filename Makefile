@@ -227,6 +227,50 @@ define docker_build_push
 		--push
 endef
 
+##@ Optimism docker
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push
+op-docker-build-push: ## Build and push a cross-arch Docker image tagged with the latest git tag.
+	$(call op_docker_build_push,$(GIT_TAG),$(GIT_TAG))
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --driver docker-container --name cross-builder`
+.PHONY: op-docker-build-push-latest
+op-docker-build-push-latest: ## Build and push a cross-arch Docker image tagged with the latest git tag and `latest`.
+	$(call op_docker_build_push,$(GIT_TAG),latest)
+
+# Note: This requires a buildx builder with emulation support. For example:
+#
+# `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
+# `docker buildx create --use --name cross-builder`
+.PHONY: op-docker-build-push-nightly
+op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
+	$(call op_docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+
+# Create a cross-arch Docker image with the given tags and push it
+define op_docker_build_push
+	$(MAKE) op-build-x86_64-unknown-linux-gnu
+	mkdir -p $(BIN_DIR)/amd64
+	cp $(BUILD_PATH)/x86_64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/amd64/op-reth
+
+	$(MAKE) op-build-aarch64-unknown-linux-gnu
+	mkdir -p $(BIN_DIR)/arm64
+	cp $(BUILD_PATH)/aarch64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/arm64/op-reth
+
+	docker buildx build --file ./DockerfileOp.cross . \
+		--platform linux/amd64,linux/arm64 \
+		--tag $(DOCKER_IMAGE_NAME):$(1) \
+		--tag $(DOCKER_IMAGE_NAME):$(2) \
+		--provenance=false \
+		--push
+endef
+
 ##@ Other
 
 .PHONY: clean
@@ -262,6 +306,10 @@ update-book-cli: ## Update book cli documentation.
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+
+.PHONY: maxperf-op
+maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak,optimism --bin op-reth
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
@@ -414,8 +462,11 @@ test:
 	make test-doc && \
 	make test-other-targets
 
+cfg-check:
+	cargo +nightly -Zcheck-cfg c
+
 pr:
-	make fmt && \
+	make cfg-check && \
 	make lint && \
 	make docs && \
 	make test

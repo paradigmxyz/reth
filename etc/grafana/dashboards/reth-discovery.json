@@ -1,976 +1,1194 @@
 {
-    "__inputs": [
-      {
-        "name": "DS_PROMETHEUS",
-        "label": "Prometheus",
-        "description": "",
-        "type": "datasource",
-        "pluginId": "prometheus",
-        "pluginName": "Prometheus"
-      }
-    ],
-    "__elements": {},
-    "__requires": [
-      {
-        "type": "grafana",
-        "id": "grafana",
-        "name": "Grafana",
-        "version": "10.3.3"
-      },
-      {
-        "type": "datasource",
-        "id": "prometheus",
-        "name": "Prometheus",
-        "version": "1.0.0"
-      },
-      {
-        "type": "panel",
-        "id": "stat",
-        "name": "Stat",
-        "version": ""
-      },
-      {
-        "type": "panel",
-        "id": "timeseries",
-        "name": "Time series",
-        "version": ""
-      }
-    ],
-    "annotations": {
-      "list": [
-        {
-          "builtIn": 1,
-          "datasource": {
-            "type": "grafana",
-            "uid": "-- Grafana --"
-          },
-          "enable": true,
-          "hide": true,
-          "iconColor": "rgba(0, 211, 255, 1)",
-          "name": "Annotations & Alerts",
-          "type": "dashboard"
-        }
-      ]
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__elements": {},
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.3.3"
     },
-    "editable": true,
-    "fiscalYearStartMonth": 0,
-    "graphTooltip": 0,
-    "id": null,
-    "links": [],
-    "liveNow": false,
-    "panels": [
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": [
       {
-        "collapsed": false,
-        "gridPos": {
-          "h": 1,
-          "w": 24,
-          "x": 0,
-          "y": 0
-        },
-        "id": 96,
-        "panels": [],
-        "repeat": "instance",
-        "repeatDirection": "h",
-        "title": "Overview",
-        "type": "row"
-      },
-      {
+        "builtIn": 1,
         "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
+          "type": "grafana",
+          "uid": "-- Grafana --"
         },
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "thresholds"
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                }
-              ]
-            },
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 3,
-          "w": 3,
-          "x": 0,
-          "y": 1
-        },
-        "id": 22,
-        "options": {
-          "colorMode": "value",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "calcs": [
-              "lastNotNull"
-            ],
-            "fields": "",
-            "values": false
-          },
-          "showPercentChange": false,
-          "text": {
-            "valueSize": 20
-          },
-          "textMode": "name",
-          "wideLayout": true
-        },
-        "pluginVersion": "10.3.3",
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "editorMode": "builder",
-            "exemplar": false,
-            "expr": "reth_info{instance=~\"$instance\"}",
-            "instant": true,
-            "legendFormat": "{{version}}",
-            "range": false,
-            "refId": "A"
-          }
-        ],
-        "title": "Version",
-        "transparent": true,
-        "type": "stat"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "thresholds"
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                }
-              ]
-            },
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 3,
-          "w": 6,
-          "x": 3,
-          "y": 1
-        },
-        "id": 192,
-        "options": {
-          "colorMode": "value",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "calcs": [
-              "lastNotNull"
-            ],
-            "fields": "",
-            "values": false
-          },
-          "showPercentChange": false,
-          "text": {
-            "valueSize": 20
-          },
-          "textMode": "name",
-          "wideLayout": true
-        },
-        "pluginVersion": "10.3.3",
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "editorMode": "builder",
-            "exemplar": false,
-            "expr": "reth_info{instance=~\"$instance\"}",
-            "instant": true,
-            "legendFormat": "{{build_timestamp}}",
-            "range": false,
-            "refId": "A"
-          }
-        ],
-        "title": "Build Timestamp",
-        "transparent": true,
-        "type": "stat"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "thresholds"
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                }
-              ]
-            },
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 3,
-          "w": 3,
-          "x": 9,
-          "y": 1
-        },
-        "id": 193,
-        "options": {
-          "colorMode": "value",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "calcs": [
-              "lastNotNull"
-            ],
-            "fields": "",
-            "values": false
-          },
-          "showPercentChange": false,
-          "text": {
-            "valueSize": 20
-          },
-          "textMode": "name",
-          "wideLayout": true
-        },
-        "pluginVersion": "10.3.3",
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "editorMode": "builder",
-            "exemplar": false,
-            "expr": "reth_info{instance=~\"$instance\"}",
-            "instant": true,
-            "legendFormat": "{{git_sha}}",
-            "range": false,
-            "refId": "A"
-          }
-        ],
-        "title": "Git SHA",
-        "transparent": true,
-        "type": "stat"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "thresholds"
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                }
-              ]
-            },
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 3,
-          "w": 2,
-          "x": 12,
-          "y": 1
-        },
-        "id": 195,
-        "options": {
-          "colorMode": "value",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "calcs": [
-              "lastNotNull"
-            ],
-            "fields": "",
-            "values": false
-          },
-          "showPercentChange": false,
-          "text": {
-            "valueSize": 20
-          },
-          "textMode": "name",
-          "wideLayout": true
-        },
-        "pluginVersion": "10.3.3",
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "editorMode": "builder",
-            "exemplar": false,
-            "expr": "reth_info{instance=~\"$instance\"}",
-            "instant": true,
-            "legendFormat": "{{build_profile}}",
-            "range": false,
-            "refId": "A"
-          }
-        ],
-        "title": "Build Profile",
-        "transparent": true,
-        "type": "stat"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "thresholds"
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                }
-              ]
-            },
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 3,
-          "w": 5,
-          "x": 14,
-          "y": 1
-        },
-        "id": 196,
-        "options": {
-          "colorMode": "value",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "calcs": [
-              "lastNotNull"
-            ],
-            "fields": "",
-            "values": false
-          },
-          "showPercentChange": false,
-          "text": {
-            "valueSize": 20
-          },
-          "textMode": "name",
-          "wideLayout": true
-        },
-        "pluginVersion": "10.3.3",
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "editorMode": "builder",
-            "exemplar": false,
-            "expr": "reth_info{instance=~\"$instance\"}",
-            "instant": true,
-            "legendFormat": "{{target_triple}}",
-            "range": false,
-            "refId": "A"
-          }
-        ],
-        "title": "Target Triple",
-        "transparent": true,
-        "type": "stat"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "thresholds"
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                }
-              ]
-            },
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 3,
-          "w": 5,
-          "x": 19,
-          "y": 1
-        },
-        "id": 197,
-        "options": {
-          "colorMode": "value",
-          "graphMode": "area",
-          "justifyMode": "auto",
-          "orientation": "auto",
-          "reduceOptions": {
-            "calcs": [
-              "lastNotNull"
-            ],
-            "fields": "",
-            "values": false
-          },
-          "showPercentChange": false,
-          "text": {
-            "valueSize": 20
-          },
-          "textMode": "name",
-          "wideLayout": true
-        },
-        "pluginVersion": "10.3.3",
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "editorMode": "builder",
-            "exemplar": false,
-            "expr": "reth_info{instance=~\"$instance\"}",
-            "instant": true,
-            "legendFormat": "{{cargo_features}}",
-            "range": false,
-            "refId": "A"
-          }
-        ],
-        "title": "Cargo Features",
-        "transparent": true,
-        "type": "stat"
-      },
-      {
-        "collapsed": false,
-        "gridPos": {
-          "h": 1,
-          "w": 24,
-          "x": 0,
-          "y": 4
-        },
-        "id": 89,
-        "panels": [],
-        "repeat": "instance",
-        "repeatDirection": "h",
-        "title": "Discv5",
-        "type": "row"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "description": "Peers managed by underlying sigp/discv5 node. \n\nOnly peers in the kbuckets are queried in FINDNODE lookups, and included in NODES responses to other peers.\n\nNot all peers with an established session will make it into the kbuckets, due to e.g. reachability issues (NAT) and capacity of kbuckets furthest log2distance away from local node (XOR metrics).",
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "palette-classic"
-            },
-            "custom": {
-              "axisBorderShow": false,
-              "axisCenteredZero": false,
-              "axisColorMode": "text",
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 0,
-              "gradientMode": "none",
-              "hideFrom": {
-                "legend": false,
-                "tooltip": false,
-                "viz": false
-              },
-              "insertNulls": false,
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": {
-                "type": "linear"
-              },
-              "showPoints": "auto",
-              "spanNulls": false,
-              "stacking": {
-                "group": "A",
-                "mode": "none"
-              },
-              "thresholdsStyle": {
-                "mode": "off"
-              }
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                },
-                {
-                  "color": "red",
-                  "value": 80
-                }
-              ]
-            },
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 8,
-          "w": 12,
-          "x": 0,
-          "y": 5
-        },
-        "id": 198,
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom",
-            "showLegend": true
-          },
-          "tooltip": {
-            "mode": "single",
-            "sort": "none"
-          }
-        },
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "reth_discv5_total_kbucket_peers_raw{instance=\"$instance\"}",
-            "fullMetaSearch": false,
-            "includeNullMetadata": true,
-            "instant": false,
-            "legendFormat": "Total peers kbuckets",
-            "range": true,
-            "refId": "A",
-            "useBackend": false
-          },
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "reth_discv5_total_sessions_raw{instance=\"$instance\"}",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": true,
-            "instant": false,
-            "legendFormat": "Total connected sessions",
-            "range": true,
-            "refId": "B",
-            "useBackend": false
-          }
-        ],
-        "title": "Peers",
-        "type": "timeseries"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a  UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.\n\n",
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "palette-classic"
-            },
-            "custom": {
-              "axisBorderShow": false,
-              "axisCenteredZero": false,
-              "axisColorMode": "text",
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 0,
-              "gradientMode": "none",
-              "hideFrom": {
-                "legend": false,
-                "tooltip": false,
-                "viz": false
-              },
-              "insertNulls": false,
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": {
-                "type": "linear"
-              },
-              "showPoints": "auto",
-              "spanNulls": false,
-              "stacking": {
-                "group": "A",
-                "mode": "none"
-              },
-              "thresholdsStyle": {
-                "mode": "off"
-              }
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                },
-                {
-                  "color": "red",
-                  "value": 80
-                }
-              ]
-            },
-            "unit": "cps",
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 8,
-          "w": 12,
-          "x": 12,
-          "y": 5
-        },
-        "id": 199,
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom",
-            "showLegend": true
-          },
-          "tooltip": {
-            "mode": "single",
-            "sort": "none"
-          }
-        },
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "rate(reth_discv5_total_inserted_kbucket_peers_raw{instance=\"$instance\"}[$__rate_interval])",
-            "fullMetaSearch": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "Total KBucket Insertions",
-            "range": true,
-            "refId": "A",
-            "useBackend": false
-          },
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "Total Session Establishments",
-            "range": true,
-            "refId": "B",
-            "useBackend": false
-          },
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "rate(reth_discv5_total_established_sessions_unreachable_enr{instance=\"$instance\"}[$__rate_interval])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "Session Establishments (unreachable ENR)",
-            "range": true,
-            "refId": "C",
-            "useBackend": false
-          },
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval]) - rate(reth_discv5_total_established_sessions_custom_filtered{instance=\"$instance\"}[$__rate_interval])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "Session Establishments (pass filter)",
-            "range": true,
-            "refId": "D",
-            "useBackend": false
-          }
-        ],
-        "title": "Peer Churn",
-        "type": "timeseries"
-      },
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "description": "Frequency of discovering peers from some popular networks.\n\nSome nodes miss advertising a fork ID kv-pair in their ENR. They will be counted as 'unknown', but may belong to a popular network.",
-        "fieldConfig": {
-          "defaults": {
-            "color": {
-              "mode": "palette-classic"
-            },
-            "custom": {
-              "axisBorderShow": false,
-              "axisCenteredZero": false,
-              "axisColorMode": "text",
-              "axisLabel": "",
-              "axisPlacement": "auto",
-              "barAlignment": 0,
-              "drawStyle": "line",
-              "fillOpacity": 0,
-              "gradientMode": "none",
-              "hideFrom": {
-                "legend": false,
-                "tooltip": false,
-                "viz": false
-              },
-              "insertNulls": false,
-              "lineInterpolation": "linear",
-              "lineWidth": 1,
-              "pointSize": 5,
-              "scaleDistribution": {
-                "type": "linear"
-              },
-              "showPoints": "auto",
-              "spanNulls": false,
-              "stacking": {
-                "group": "A",
-                "mode": "none"
-              },
-              "thresholdsStyle": {
-                "mode": "off"
-              }
-            },
-            "mappings": [],
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                },
-                {
-                  "color": "red",
-                  "value": 80
-                }
-              ]
-            },
-            "unit": "cps",
-            "unitScale": true
-          },
-          "overrides": []
-        },
-        "gridPos": {
-          "h": 8,
-          "w": 12,
-          "x": 0,
-          "y": 13
-        },
-        "id": 200,
-        "options": {
-          "legend": {
-            "calcs": [],
-            "displayMode": "list",
-            "placement": "bottom",
-            "showLegend": true
-          },
-          "tooltip": {
-            "mode": "single",
-            "sort": "none"
-          }
-        },
-        "targets": [
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "code",
-            "expr": "rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval])",
-            "fullMetaSearch": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "Eth",
-            "range": true,
-            "refId": "A",
-            "useBackend": false
-          },
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "code",
-            "expr": "rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "Eth2",
-            "range": true,
-            "refId": "B",
-            "useBackend": false
-          },
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "code",
-            "expr": "rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "OP",
-            "range": true,
-            "refId": "C",
-            "useBackend": false
-          },
-          {
-            "datasource": {
-              "type": "prometheus",
-              "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "code",
-            "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval]) - (rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval]))",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": false,
-            "instant": false,
-            "legendFormat": "Unknown",
-            "range": true,
-            "refId": "D",
-            "useBackend": false
-          }
-        ],
-        "title": "Advertised Networks",
-        "type": "timeseries"
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
       }
-    ],
-    "refresh": "30s",
-    "schemaVersion": 39,
-    "tags": [],
-    "templating": {
-      "list": [
+    ]
+  },
+  "description": "Devp2p peer discovery protocols",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 96,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "light-purple",
+                "value": null
+              }
+            ]
+          },
+          "unitScale": true
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "id": 22,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.3.3",
+      "targets": [
         {
-          "current": {},
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "definition": "query_result(reth_info)",
-          "hide": 0,
-          "includeAll": false,
-          "multi": false,
-          "name": "instance",
-          "options": [],
-          "query": {
-            "query": "query_result(reth_info)",
-            "refId": "PrometheusVariableQueryEditor-VariableQuery"
-          },
-          "refresh": 1,
-          "regex": "/.*instance=\\\"([^\\\"]*).*/",
-          "skipUrlSync": false,
-          "sort": 0,
-          "type": "query"
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{version}}",
+          "range": false,
+          "refId": "A"
         }
-      ]
+      ],
+      "title": "Version",
+      "transparent": true,
+      "type": "stat"
     },
-    "time": {
-      "from": "now-1h",
-      "to": "now"
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "light-purple",
+                "value": null
+              }
+            ]
+          },
+          "unitScale": true
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 3,
+        "y": 1
+      },
+      "id": 192,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{build_timestamp}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Timestamp",
+      "transparent": true,
+      "type": "stat"
     },
-    "timepicker": {},
-    "timezone": "",
-    "title": "reth - discovery",
-    "uid": "de6e87b2-7630-40b2-b2c4-a500476e799d",
-    "version": 11,
-    "weekStart": ""
-  }
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "light-purple",
+                "value": null
+              }
+            ]
+          },
+          "unitScale": true
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "id": 193,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{git_sha}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Git SHA",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "light-purple",
+                "value": null
+              }
+            ]
+          },
+          "unitScale": true
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 12,
+        "y": 1
+      },
+      "id": 195,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{build_profile}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Profile",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "light-purple",
+                "value": null
+              }
+            ]
+          },
+          "unitScale": true
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      },
+      "id": 196,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{target_triple}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Target Triple",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "light-purple",
+                "value": null
+              }
+            ]
+          },
+          "unitScale": true
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "id": 197,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 20
+        },
+        "textMode": "name",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.3.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_info{instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{cargo_features}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Cargo Features",
+      "transparent": true,
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "id": 89,
+      "panels": [],
+      "repeat": "instance",
+      "repeatDirection": "h",
+      "title": "Discv5",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Peers managed by underlying sigp/discv5 node. \n\nOnly peers in the kbuckets are queried in FINDNODE lookups, and included in NODES responses to other peers.\n\nNot all peers with an established session will make it into the kbuckets, due to e.g. reachability issues (NAT) and capacity of kbuckets furthest log2distance away from local node (XOR metrics).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unitScale": true
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total peers kbuckets"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9b73d6",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total connected sessions"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "super-light-red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 198,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_discv5_kbucket_peers_raw_total{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Total peers kbuckets",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_discv5_sessions_raw_total{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Total connected sessions",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        }
+      ],
+      "title": "Peers",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a  UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.\n\nSessions will succeed to peers that advertise no UDP socket in their ENR. This allows peers to discover their reachable socket. On the other hand, for DoS protection, peers that advertise a different socket than the socket from which they make the connection, are denied a sigp/discv5 session. These peers have an unverifiable ENR. The peers are passed to RLPx nonetheless (some EL implementations of discv5 are more lax about ENR and source socket matching). ",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cps",
+          "unitScale": true
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Session Establishments"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total KBucket Insertions"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9958f4",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Session Establishments (pass filter)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#ff0ada",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Session Establishments (unreachable ENR)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Session Establishment Failed (unverifiable ENR)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8ab8ff",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failed Session Establishments (unverifiable ENR)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8ab8ff",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 199,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_discv5_inserted_kbucket_peers_raw_total{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Total KBucket Insertions",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Total Session Establishments",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_discv5_established_sessions_unreachable_enr_total{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Session Establishments (unreachable ENR)",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval]) - rate(reth_discv5_established_sessions_custom_filtered_total{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Session Establishments (pass filter)",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_discv5_unverifiable_enrs_raw_total{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Session Establishments (unverifiable ENR)",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        }
+      ],
+      "title": "Peer Churn",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Frequency of discovering peers from some popular network stacks.\n\nSome nodes miss advertising a fork ID kv-pair in their ENR. They will be counted as 'unknown', but may belong to a popular network.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cps",
+          "unitScale": true
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Eth"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#b677d9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Eth2"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Unknown"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#ff0ae5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OP EL"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8AB8FF",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "id": 200,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Eth",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Eth2",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(reth_discv5_opel{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "OP EL",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "OP CL",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "(rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_unverifiable_enrs_raw_total{instance=\"$instance\"}[$__rate_interval])) - (rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opel{instance=\"$instance\"}[$__rate_interval]))",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Unknown",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        }
+      ],
+      "title": "Advertised Network Stacks",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "query_result(reth_info)",
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "query": "query_result(reth_info)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "/.*instance=\\\"([^\\\"]*).*/",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Reth - Peer Discovery",
+  "uid": "fd2d69b5-ca32-45d0-946e-c00ddcd7052c",
+  "version": 1,
+  "weekStart": ""
+}

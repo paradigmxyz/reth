@@ -12,17 +12,16 @@ description = "Reth RPC types"
 workspace = true
 
 [dependencies]
+
 # ethereum
-alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp", "serde"] }
 alloy-rpc-types = { workspace = true, features = ["jsonrpsee-types"] }
 alloy-rpc-types-anvil.workspace = true
 alloy-rpc-types-trace.workspace = true
+alloy-rpc-types-beacon.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
 ethereum_ssz_derive = { version = "0.5", optional = true }
 ethereum_ssz = { version = "0.5", optional = true }
-alloy-genesis.workspace = true
-enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 
 # misc
 thiserror.workspace = true
@@ -30,19 +29,10 @@ serde = { workspace = true, features = ["derive"] }
 serde_with = "3.3"
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
-url = "2.3"
-# necessary so we don't hit a "undeclared 'std'":
-# https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198
-secp256k1.workspace = true
-
-# arbitrary
-arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 
 [features]
 default = ["jsonrpsee-types"]
-arbitrary = ["dep:arbitrary", "dep:proptest-derive", "dep:proptest", "alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
+arbitrary = ["alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
 ssz = ["dep:ethereum_ssz" ,"dep:ethereum_ssz_derive", "alloy-primitives/ssz", "alloy-rpc-types/ssz", "alloy-rpc-types-engine/ssz"]
 
 

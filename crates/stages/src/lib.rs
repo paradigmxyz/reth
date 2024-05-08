@@ -16,7 +16,7 @@
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestHeadersClient};
-//! # use reth_revm::EvmProcessorFactory;
+//! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! # use reth_primitives::{MAINNET, B256, PruneModes};
 //! # use reth_network_types::PeerId;
 //! # use reth_stages::Pipeline;
@@ -24,6 +24,7 @@
 //! # use tokio::sync::watch;
 //! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
+//! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
@@ -44,7 +45,7 @@
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
-//! # let executor_factory = EvmProcessorFactory::new(chain_spec.clone(), EthEvmConfig::default());
+//! # let executor_provider = EthExecutorProvider::mainnet();
 //! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
 //! #    provider_factory.static_file_provider(),
@@ -54,17 +55,15 @@
 //! # let pipeline =
 //! Pipeline::builder()
 //!     .with_tip_sender(tip_tx)
-//!     .add_stages(
-//!         DefaultStages::new(
-//!             provider_factory.clone(),
-//!             HeaderSyncMode::Tip(tip_rx),
-//!             consensus,
-//!             headers_downloader,
-//!             bodies_downloader,
-//!             executor_factory,
-//!             EtlConfig::default(),
-//!         )
-//!     )
+//!     .add_stages(DefaultStages::new(
+//!         provider_factory.clone(),
+//!         HeaderSyncMode::Tip(tip_rx),
+//!         consensus,
+//!         headers_downloader,
+//!         bodies_downloader,
+//!         executor_provider,
+//!         EtlConfig::default(),
+//!     ))
 //!     .build(provider_factory, static_file_producer);
 //! ```
 //!

@@ -193,7 +193,7 @@ impl TxEip1559 {
         self.input.len() // input
     }
 
-    /// Encodes the legacy transaction in RLP for signing.
+    /// Encodes the EIP-1559 transaction in RLP for signing.
     ///
     /// This encodes the transaction as:
     /// `tx_type || rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to,
@@ -243,7 +243,7 @@ mod tests {
             chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
-            to: TxKind::Call( hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
+            to: TxKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
             value: U256::ZERO,
             input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
             max_fee_per_gas: 0x4a817c800,

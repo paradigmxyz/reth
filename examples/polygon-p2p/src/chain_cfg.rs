@@ -1,6 +1,5 @@
 use reth_primitives::{
-    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, ForkTimestamps, Hardfork, Head,
-    NodeRecord, B256,
+    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork, Head, NodeRecord, B256,
 };
 
 use std::{collections::BTreeMap, sync::Arc};
@@ -15,7 +14,6 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         // <https://github.com/maticnetwork/bor/blob/d521b8e266b97efe9c8fdce8167e9dd77b04637d/builder/files/genesis-mainnet-v1.json>
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
         genesis_hash: Some(GENESIS),
-        fork_timestamps: ForkTimestamps::default().shanghai(1681338455),
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
             (Hardfork::Petersburg, ForkCondition::Block(0)),

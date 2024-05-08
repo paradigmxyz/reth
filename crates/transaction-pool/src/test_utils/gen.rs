@@ -306,7 +306,7 @@ impl TransactionBuilder {
 
     /// Sets the recipient or contract address for the transaction, mutable reference version.
     pub fn set_to(&mut self, to: Address) -> &mut Self {
-        self.to = TxKind::Call(to);
+        self.to = to.into();
         self
     }
 

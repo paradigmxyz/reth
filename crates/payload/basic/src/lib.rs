@@ -18,7 +18,7 @@ use reth_payload_builder::{
     PayloadJobGenerator,
 };
 use reth_primitives::{
-    constants::{EMPTY_WITHDRAWALS, ETHEREUM_BLOCK_GAS_LIMIT, RETH_CLIENT_VERSION, SLOT_DURATION},
+    constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
@@ -35,6 +35,7 @@ use revm::{
 };
 use std::{
     future::Future,
+    ops::Deref,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
     task::{Context, Poll},
@@ -53,9 +54,9 @@ mod metrics;
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
-    /// txpool
+    /// The transaction pool to pull transactions from.
     pool: Pool,
-    /// How to spawn building tasks
+    /// The task executor to spawn payload building tasks on.
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
@@ -228,6 +229,14 @@ pub struct PrecachedState {
 #[derive(Debug, Clone)]
 pub struct PayloadTaskGuard(Arc<Semaphore>);
 
+impl Deref for PayloadTaskGuard {
+    type Target = Semaphore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 // === impl PayloadTaskGuard ===
 
 impl PayloadTaskGuard {
@@ -242,8 +251,6 @@ impl PayloadTaskGuard {
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
     extradata: Bytes,
-    /// Target gas ceiling for built blocks, defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
-    max_gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
@@ -287,21 +294,12 @@ impl BasicPayloadJobGeneratorConfig {
         self.extradata = extradata;
         self
     }
-
-    /// Sets the target gas ceiling for mined blocks.
-    ///
-    /// Defaults to [ETHEREUM_BLOCK_GAS_LIMIT] gas.
-    pub fn max_gas_limit(mut self, max_gas_limit: u64) -> Self {
-        self.max_gas_limit = max_gas_limit;
-        self
-    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
         Self {
             extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,
@@ -385,7 +383,7 @@ where
                 let builder = this.builder.clone();
                 this.executor.spawn_blocking(Box::pin(async move {
                     // acquire the permit for executing the task
-                    let _permit = guard.0.acquire().await;
+                    let _permit = guard.acquire().await;
                     let args = BuildArguments {
                         client,
                         pool,
@@ -528,11 +526,11 @@ where
 #[derive(Debug)]
 pub struct ResolveBestPayload<Payload> {
     /// Best payload so far.
-    best_payload: Option<Payload>,
+    pub best_payload: Option<Payload>,
     /// Regular payload job that's currently running that might produce a better payload.
-    maybe_better: Option<PendingPayload<Payload>>,
+    pub maybe_better: Option<PendingPayload<Payload>>,
     /// The empty payload building job in progress.
-    empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
+    pub empty_payload: Option<oneshot::Receiver<Result<Payload, PayloadBuilderError>>>,
 }
 
 impl<Payload> Future for ResolveBestPayload<Payload>

@@ -17,7 +17,7 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
 };
-use reth_revm::database::{StateProviderDatabase, SubState};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -323,14 +323,11 @@ where
                             self.inner
                                 .eth_api
                                 .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                    let (res, _, db) = this.eth_api().inspect_and_return_db(
-                                        db,
-                                        env,
-                                        &mut inspector,
-                                    )?;
+                                    let (res, _) =
+                                        this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                     let frame = inspector
                                         .into_geth_builder()
-                                        .geth_prestate_traces(&res, prestate_config, &db)?;
+                                        .geth_prestate_traces(&res, prestate_config, db)?;
                                     Ok(frame)
                                 })
                                 .await?;
@@ -348,12 +345,9 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                let (res, _, db) = this.eth_api().inspect_and_return_db(
-                                    db,
-                                    env,
-                                    &mut inspector,
-                                )?;
-                                let frame = inspector.try_into_mux_frame(&res, &db)?;
+                                let (res, _) =
+                                    this.eth_api().inspect(&mut *db, env, &mut inspector)?;
+                                let frame = inspector.try_into_mux_frame(&res, db)?;
                                 Ok(frame.into())
                             })
                             .await?;
@@ -370,12 +364,9 @@ where
                         .eth_api
                         .spawn_with_call_at(call, at, overrides, move |db, env| {
                             let mut inspector = JsInspector::new(code, config)?;
-                            let (res, _, db) = this.eth_api().inspect_and_return_db(
-                                db,
-                                env.clone(),
-                                &mut inspector,
-                            )?;
-                            Ok(inspector.json_result(res, &env, &db)?)
+                            let (res, _) =
+                                this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
+                            Ok(inspector.json_result(res, &env, db)?)
                         })
                         .await?;
 
@@ -526,7 +517,7 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
-        db: &mut SubState<StateProviderBox>,
+        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
@@ -564,8 +555,7 @@ where
                         let mut inspector = TracingInspector::new(
                             TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
-                        let (res, _, db) =
-                            self.eth_api().inspect_and_return_db(db, env, &mut inspector)?;
+                        let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                         let frame = inspector.into_geth_builder().geth_prestate_traces(
                             &res,
@@ -585,8 +575,7 @@ where
 
                         let mut inspector = MuxInspector::try_from_config(mux_config)?;
 
-                        let (res, _, db) =
-                            self.eth_api().inspect_and_return_db(db, env, &mut inspector)?;
+                        let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
                         let frame = inspector.try_into_mux_frame(&res, db)?;
                         return Ok((frame.into(), res.state))
                     }
@@ -598,8 +587,7 @@ where
                         config,
                         transaction_context.unwrap_or_default(),
                     )?;
-                    let (res, env, db) =
-                        self.eth_api().inspect_and_return_db(db, env, &mut inspector)?;
+                    let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                     let state = res.state.clone();
                     let result = inspector.json_result(res, &env, db)?;
