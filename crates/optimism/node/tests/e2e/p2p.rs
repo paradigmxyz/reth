@@ -12,6 +12,7 @@ use reth_primitives::{ChainId, ChainSpecBuilder, Genesis};
 use reth_rpc_types::engine::PayloadStatusEnum;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::info;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
@@ -32,9 +33,9 @@ async fn can_sync() -> eyre::Result<()> {
 
     let mut nodes = TestNetworkBuilder::<OptimismNode>::new(3, chain_spec, exec).build().await?;
 
-    let first_node = nodes.pop().unwrap();
-    let mut second_node = nodes.pop().unwrap();
     let third_node = nodes.pop().unwrap();
+    let mut second_node = nodes.pop().unwrap();
+    let first_node = nodes.pop().unwrap();
 
     let mut first_node = first_node.with_wallets(chain_id, 1);
     let wallet = first_node.wallets.pop().unwrap();
@@ -44,15 +45,17 @@ async fn can_sync() -> eyre::Result<()> {
     let tip_index: usize = tip - 1;
     let reorg_depth = 2;
 
-    // On first node, create a chain up to block number 300a
+    // On first node, create a chain up to block number 90a
     let canonical_payload_chain = first_node
         .advance_many(
             tip as u64,
-            |nonce: u64| {
+            |_: u64| {
                 let wallet = wallet.clone();
                 Box::pin(async move {
-                    let wallet = wallet.lock().await;
-                    wallet.optimism_block_info(nonce).await
+                    let mut wallet = wallet.lock().await;
+                    let raw_tx = wallet.optimism_block_info(wallet.nonce).await;
+                    wallet.nonce += 1;
+                    raw_tx
                 })
             },
             optimism_payload_attributes,
@@ -85,11 +88,13 @@ async fn can_sync() -> eyre::Result<()> {
     let side_payload_chain = second_node
         .advance_many(
             reorg_depth as u64,
-            |nonce: u64| {
+            |_: u64| {
                 let wallet = wallet.clone();
                 Box::pin(async move {
-                    let wallet = wallet.lock().await;
-                    wallet.optimism_block_info(nonce).await
+                    let mut wallet = wallet.lock().await;
+                    let raw_tx = wallet.optimism_block_info(wallet.nonce).await;
+                    wallet.nonce += 1;
+                    raw_tx
                 })
             },
             optimism_payload_attributes,
@@ -100,7 +105,7 @@ async fn can_sync() -> eyre::Result<()> {
 
     // Creates fork chain by submitting 89b payload.
     // By returning Valid here, op-node will finally return a finalized hash
-    let _ = third_node
+    third_node
         .engine_api
         .submit_payload(
             side_payload_chain[0].0.clone(),
@@ -108,13 +113,19 @@ async fn can_sync() -> eyre::Result<()> {
             PayloadStatusEnum::Valid,
             Default::default(),
         )
-        .await;
+        .await
+        .unwrap();
 
     // It will issue a pipeline reorg to 88a, and then make 89b canonical AND finalized.
     third_node.engine_api.update_forkchoice(side_chain[0], side_chain[0]).await?;
 
+    let block = side_payload_chain[0].0.clone();
+    let number = block.block().number;
+    let n = (tip - reorg_depth) as u64;
+    info!("fcu to block: {:?} waiting unwind to: {:?}", number, n);
+
     // Make sure we have the updated block
-    third_node.wait_unwind((tip - reorg_depth) as u64).await?;
+    third_node.wait_unwind(n).await?;
     third_node
         .wait_until_block_is_available(
             side_payload_chain[0].0.block().number,

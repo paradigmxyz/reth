@@ -11,6 +11,7 @@ use reth_node_builder::{
 use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
 use std::{marker::PhantomData, sync::Arc};
+use tracing::{span, Level};
 
 /// Wrapper type to create test nodes
 pub mod node;
@@ -42,13 +43,19 @@ pub mod runner;
 /// The nodes are interconnected in a chain.
 pub struct TestNetworkBuilder<N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>>
 where
-    N: Default + Node<TmpNodeAdapter<N>>,
+    N: Node<TmpNodeAdapter<N>>,
 {
+    /// `Network` is a vector that holds the context of each node in the network.
+    /// Each `NodeTestCtx` in the vector represents a node in the network.
     network: Vec<NodeTestCtx<N>>,
+
+    /// `Node_generator` is an instance of `TestNodeGenerator` that is used to generate new nodes.
+    /// It is initialized with a chain specification and an executor, and can be used to generate
+    /// nodes for the network.
     node_generator: TestNodeGenerator<N>,
 }
 
-impl<N: Default + reth_node_builder::Node<TmpNodeAdapter<N>>> TestNetworkBuilder<N>
+impl<N> TestNetworkBuilder<N>
 where
     N: Default + Node<TmpNodeAdapter<N>>,
 {
@@ -62,6 +69,8 @@ where
     pub async fn build(mut self) -> eyre::Result<Vec<NodeTestCtx<N>>> {
         let len = self.network.capacity();
         for node_index in 0..len {
+            let span = span!(Level::INFO, "node", node_index);
+            let _enter = span.enter();
             let mut node = self.node_generator.gen().await?;
             self.connect_nodes(&mut node, node_index).await;
 
@@ -72,18 +81,16 @@ where
 
     /// Connects the nodes in the network in a chain.
     async fn connect_nodes(&mut self, node: &mut NodeTestCtx<N>, node_index: usize) {
-        let has_previous_node = self.network.last_mut().is_some();
-        let is_last_node = node_index + 1 == self.network.len();
-        let has_more_than_two_nodes = self.network.len() > 2;
-
-        if has_previous_node {
-            let previous_node = self.network.last_mut().unwrap();
+        // Connect with the previous node if it exists
+        if let Some(previous_node) = self.network.last_mut() {
             previous_node.network.connect(node).await;
         }
 
-        if is_last_node && has_more_than_two_nodes {
-            let first_node = self.network.first_mut().unwrap();
-            node.network.connect(first_node).await;
+        // Connect with the first node if this is the last node and there are more than two nodes
+        if node_index + 1 == self.network.capacity() && self.network.capacity() > 2 {
+            if let Some(first_node) = self.network.first_mut() {
+                node.network.connect(first_node).await;
+            }
         }
     }
 }

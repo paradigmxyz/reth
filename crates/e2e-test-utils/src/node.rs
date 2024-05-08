@@ -61,9 +61,29 @@ where
         self
     }
 
-    /// Advances the chain `length` blocks.
+    /// Advances the state of the node by generating and processing multiple transactions.
     ///
-    /// Returns the added chain as a Vec of block hashes.
+    /// This function generates a specified number of transactions using the provided `tx_generator`
+    /// and `attributes_generator` functions. Each transaction is then processed by the node,
+    /// advancing its state. The resulting payloads and their associated attributes are
+    /// collected into a vector and returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The number of transactions to generate and process.
+    /// * `tx_generator` - A function that generates a new transaction. This function is called with
+    ///   an index and should return a `Future` that resolves to the raw bytes of the transaction.
+    /// * `attributes_generator` - A function that generates the attributes for a new payload. This
+    ///   function is called with an index and should return the attributes for the payload.
+    ///
+    /// # Returns
+    ///
+    /// This function returns a `Result` that, if `Ok`, contains a `Vec` of tuples. Each tuple
+    /// contains the payload resulting from processing a transaction and its associated attributes.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an `Err` if there is an error advancing the state of the node.
     pub async fn advance_many(
         &mut self,
         length: u64,
@@ -80,10 +100,7 @@ where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
             From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
-        let mut chain: Vec<(
-            <<Node as NodeTypes>::Engine as EngineTypes>::BuiltPayload,
-            <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
-        )> = Vec::with_capacity(length as usize);
+        let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
             let raw_tx = tx_generator(i).await;
             let (payload, attr, _) = self.advance(vec![], attributes_generator, raw_tx).await?;
@@ -160,50 +177,36 @@ where
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }
 
-    /// Waits for block to be available on node.
+    /// Waits for a block to be available on the node, ensuring it reaches the finish checkpoint.
     pub async fn wait_until_block_is_available(
         &self,
-        block_number: BlockNumber,
+        number: BlockNumber,
         expected_block_hash: BlockHash,
     ) -> eyre::Result<()> {
-        let mut has_reached_finish_checkpoint = false;
-
-        while !self
-            .is_block_available(block_number, &expected_block_hash, has_reached_finish_checkpoint)
-            .await?
-        {
+        // Loop until the finish checkpoint is reached and the block matches the expected hash.
+        loop {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            if !has_reached_finish_checkpoint {
-                has_reached_finish_checkpoint =
-                    self.has_reached_finish_checkpoint(block_number).await?;
+
+            // Check if the finish checkpoint has been reached.
+            if self.has_reached_finish_checkpoint(number).await? {
+                // Attempt to fetch the block matching the expected hash.
+                if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
+                    // Assert the block's hash matches the expected hash to proceed.
+                    assert_eq!(latest_block.hash_slow(), expected_block_hash);
+                    break;
+                } else {
+                    // Panic if the finish checkpoint matches but the block could not be fetched.
+                    panic!("Finish checkpoint matches, but could not fetch block.");
+                }
             }
         }
-
         Ok(())
     }
 
-    async fn is_block_available(
-        &self,
-        block_number: BlockNumber,
-        expected_block_hash: &BlockHash,
-        has_reached_finish_checkpoint: bool,
-    ) -> eyre::Result<bool> {
-        if has_reached_finish_checkpoint {
-            if let Some(latest_block) = self.inner.provider.block_by_number(block_number)? {
-                if latest_block.hash_slow() == *expected_block_hash {
-                    return Ok(true);
-                }
-            }
-            panic!("Finish checkpoint has been reached, but the block could not be fetched.");
-        }
-        Ok(false)
-    }
-
+    /// Checks if the node has reached the finish checkpoint for the given block number.
     async fn has_reached_finish_checkpoint(&self, block_number: BlockNumber) -> eyre::Result<bool> {
         if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Finish)? {
-            if checkpoint.block_number >= block_number {
-                return Ok(true);
-            }
+            return Ok(checkpoint.block_number >= block_number);
         }
         Ok(false)
     }
