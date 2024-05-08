@@ -1,5 +1,4 @@
-use crate::{BlockNumHash, BlockNumber, B256};
-
+use reth_primitives::{BlockNumHash, BlockNumber, B256};
 /// Current status of the blockchain's head.
 #[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ChainInfo {
