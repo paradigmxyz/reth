@@ -594,7 +594,7 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "super-light-red",
+                  "fixedColor": "#FFA6B0",
                   "mode": "fixed"
                 }
               }
@@ -664,7 +664,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a  UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.\n\nSessions will succeed to peers that advertise no UDP socket in their ENR. This allows peers to discover their reachable socket. On the other hand, for DoS protection, peers that advertise a different socket than the socket from which they make the connection, are denied a sigp/discv5 session. These peers are passed to RLPx nonetheless (some EL implementations of discv5 are more lax about ENR and source socket matching). ",
+      "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -868,26 +868,9 @@
           "range": true,
           "refId": "D",
           "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_discv5_total_unverifiable_enrs_raw{instance=\"$instance\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Session Establishment Failed (unverifiable ENR)",
-          "range": true,
-          "refId": "E",
-          "useBackend": false
         }
       ],
-      "title": "Peer Churn",
+      "title": "Peer Churn - Established Sessions",
       "type": "timeseries"
     },
     {
@@ -1105,6 +1088,185 @@
       ],
       "title": "Advertised Network Stacks",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Frequency of failed session establishment.\n\nFor DoS protection, peers that advertise a different socket than the socket from which they make the connection, are denied a sigp/discv5 session. These peers have an unverifiable ENR.  \n\nThe peers are passed to RLPx nonetheless (some EL implementations of discv5 are more lax about ENR and source socket matching). ",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cps",
+          "unitScale": true
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total Session Establishments"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total KBucket Insertions"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9958f4",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Session Establishments (pass filter)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#ff0ada",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Session Establishments (unreachable ENR)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "light-orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Session Establishment Failed (unverifiable ENR)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#eb5edd",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "id": 201,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_discv5_total_unverifiable_enrs_raw{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Session Establishment Failed (unverifiable ENR)",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Peer Churn - Failed Session Establishment",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -1144,6 +1306,6 @@
   "timezone": "",
   "title": "Reth - Peer Discovery",
   "uid": "fd2d69b5-ca32-45d0-946e-c00ddcd7052c",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
