@@ -194,11 +194,8 @@ impl Command {
                     body_downloader,
                     executor.clone(),
                     stage_conf.clone(),
-                    prune_modes,
+                    prune_modes.clone(),
                 )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })
                 .set(ExecutionStage::new(
                     executor,
                     ExecutionStageThresholds {
@@ -207,20 +204,10 @@ impl Command {
                         max_cumulative_gas: None,
                         max_duration: None,
                     },
-                    stage_conf
-                        .merkle
-                        .clean_threshold
-                        .max(stage_conf.account_hashing.clean_threshold)
-                        .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    stage_conf.execution_external_clean_threshold(),
+                    prune_modes,
                     ExExManagerHandle::empty(),
-                ))
-                .set(AccountHashingStage::default())
-                .set(StorageHashingStage::default())
-                .set(MerkleStage::default_unwind())
-                .set(TransactionLookupStage::default())
-                .set(IndexAccountHistoryStage::default())
-                .set(IndexStorageHistoryStage::default()),
+                )),
             )
             .build(
                 provider_factory.clone(),
