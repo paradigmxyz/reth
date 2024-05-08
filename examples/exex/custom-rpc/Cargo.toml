@@ -19,8 +19,12 @@ reth-rpc.workspace = true
 eyre.workspace = true
 tokio.workspace = true
 futures.workspace = true
+reth-db.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 alloy-rpc-types.workspace = true
 clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 async-trait.workspace = true
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+serde_json.workspace = true
+

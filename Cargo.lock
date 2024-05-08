@@ -2923,6 +2923,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "reth",
+ "reth-db",
  "reth-exex",
  "reth-node-api",
  "reth-node-core",
@@ -2932,6 +2933,8 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-tracing",
+ "rusqlite",
+ "serde_json",
  "tokio",
 ]
 
