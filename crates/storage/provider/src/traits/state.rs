@@ -232,10 +232,10 @@ pub trait BundleStateDataProvider: Send + Sync {
     fn canonical_fork(&self) -> BlockNumHash;
 }
 
-/// A helper trait for [BundleStateWithReceipts] write state data to storage.
+/// A helper trait for [BundleStateWithReceipts] to write state and receipts to storage.
 pub trait StateWriter {
-    /// Write the data to the database or static files if `static_file_producer` is `Some`. It
-    /// should be `None` if there is any kind of pruning/filtering over the receipts.
+    /// Write the data and receipts to the database or static files if `static_file_producer` is
+    /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
     fn write_to_storage<TX>(
         self,
         tx: &TX,
