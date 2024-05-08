@@ -3,7 +3,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "",
+      "description": "Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol, in Rust",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -8511,7 +8511,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "reth",
+  "title": "Reth",
   "uid": "2k8BXz24x",
   "version": 1,
   "weekStart": ""

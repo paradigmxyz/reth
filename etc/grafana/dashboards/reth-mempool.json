@@ -3,7 +3,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "",
+      "description": "P2P transaction gossip and the local view of mempool (transaction pool) data",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
