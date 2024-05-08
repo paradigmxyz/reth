@@ -11,7 +11,7 @@ use std::{ops::RangeInclusive, task::Poll};
 pub struct NoopBodiesDownloader;
 
 impl BodyDownloader for NoopBodiesDownloader {
-    fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
+    fn set_download_range(&mut self, _: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         Ok(())
     }
 }
@@ -21,7 +21,7 @@ impl Stream for NoopBodiesDownloader {
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         Poll::Ready(None)
     }

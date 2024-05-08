@@ -23,7 +23,7 @@ impl Stream for NoopHeaderDownloader {
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         Poll::Ready(None)
     }

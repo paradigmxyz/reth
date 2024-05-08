@@ -5,15 +5,9 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{Config, PruneConfig};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
-use reth_downloaders::{
-    bodies::{bodies::BodiesDownloaderBuilder, noop::NoopBodiesDownloader},
-    headers::{noop::NoopHeaderDownloader, reverse_headers::ReverseHeadersDownloaderBuilder},
-};
+use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_exex::ExExManagerHandle;
-use reth_node_core::{
-    args::{get_secret_key, NetworkArgs},
-    dirs::ChainPath,
-};
+use reth_node_core::{args::NetworkArgs, dirs::ChainPath};
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
@@ -110,8 +104,7 @@ impl Command {
             .filter(|highest_static_file_block| highest_static_file_block >= range.start())
         {
             info!(target: "reth::cli", ?range, ?highest_static_block, "Executing a pipeline unwind.");
-            let mut pipeline =
-                self.build_pipeline(data_dir, config, provider_factory.clone()).await?;
+            let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
 
             // Move all applicable data from database to static files.
             pipeline.produce_static_files()?;
@@ -142,7 +135,6 @@ impl Command {
 
     async fn build_pipeline<DB: Database + 'static>(
         self,
-        data_dir: ChainPath<DataDirPath>,
         config: Config,
         provider_factory: ProviderFactory<Arc<DB>>,
     ) -> Result<Pipeline<Arc<DB>>, eyre::Error> {
@@ -161,8 +153,8 @@ impl Command {
                     provider_factory.clone(),
                     header_mode,
                     Arc::clone(&consensus),
-                    NoopHeaderDownloader::default(),
-                    NoopBodiesDownloader::default(),
+                    NoopHeaderDownloader,
+                    NoopBodiesDownloader,
                     executor.clone(),
                     stage_conf.etl.clone(),
                 )
