@@ -31,7 +31,7 @@ jobs:
     needs: extract-version
     strategy:
       matrix:
-        build: [{command: build, binary: reth}, {command: build-op, binary: op-reth}]
+        build: [{command: build, binary: reth}, {command: op-build, binary: op-reth}]
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-20.04
