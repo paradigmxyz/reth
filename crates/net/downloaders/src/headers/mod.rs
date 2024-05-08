@@ -1,7 +1,7 @@
 /// A Linear downloader implementation.
 pub mod reverse_headers;
 
-/// A dummy header downloader. Can be useful to build unwind-only pipelines
+/// A body header that does nothing. Useful to build unwind-only pipelines.
 pub mod noop;
 
 /// A downloader implementation that spawns a downloader to a task
