@@ -288,8 +288,8 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
             (Hardfork::Delta, ForkCondition::Timestamp(1708560000)),
+            (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
@@ -2354,6 +2354,11 @@ Post-merge hard forks (timestamp based):
                     Head { number: 105235063, ..Default::default() },
                     ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
                 ),
+                // Shanghai
+                (
+                    Head { number: 105235063, timestamp: 1704992401, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]), next: 1708560000 },
+                ),
                 // OP activation timestamps
                 // https://specs.optimism.io/protocol/superchain-upgrades.html#activation-timestamps
                 // Canyon
@@ -2365,6 +2370,11 @@ Post-merge hard forks (timestamp based):
                 (
                     Head { number: 105235063, timestamp: 1708560000, ..Default::default() },
                     ForkId { hash: ForkHash([0x58, 0xe4, 0xbf, 0x60]), next: 1710374401 },
+                ),
+                // Cancun
+                (
+                    Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x6a, 0x38, 0x16, 0x61]), next: 0 },
                 ),
                 // Ecotone
                 (
