@@ -5,7 +5,7 @@ use crate::{
         utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
         DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
         RpcServerArgs, TxPoolArgs,
-    }, commands::bitfinity_import::BitfinityImportCommand, dirs::{DataDirPath, MaybePlatformPath}
+    }, dirs::{DataDirPath, MaybePlatformPath}
 };
 use clap::{value_parser, Args, Parser};
 use reth_cli_runner::CliContext;
