@@ -394,7 +394,7 @@ where
             Ok(outcome) => {
                 let should_update_head = match &outcome {
                     CanonicalOutcome::AlreadyCanonical { header } => {
-                        self.on_head_already_canonical(header, &mut attrs)
+                        self.on_head_already_canonical(header, &mut attrs)?
                     }
                     CanonicalOutcome::Committed { head } => {
                         // new VALID update that moved the canonical chain forward
@@ -450,17 +450,19 @@ where
         &self,
         header: &SealedHeader,
         attrs: &mut Option<EngineT::PayloadAttributes>,
-    ) -> bool {
+    ) -> ProviderResult<bool> {
         // On Optimism, the proposers are allowed to reorg their own chain at will.
         #[cfg(feature = "optimism")]
-        if self.blockchain.chain_spec().is_optimism() {
+        if self.blockchain.chain_spec().is_optimism() &&
+            self.blockchain.finalized_block_number()?.is_some_and(|block| block < header.number)
+        {
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,
                 current_head_num=?self.blockchain.canonical_tip().number,
                 "[Optimism] Allowing beacon reorg to old head"
             );
-            return true
+            return Ok(true)
         }
 
         // 2. Client software MAY skip an update of the forkchoice state and MUST NOT begin a
@@ -479,7 +481,7 @@ where
             current_head_num=?self.blockchain.canonical_tip().number,
             "Ignoring beacon update to old head"
         );
-        false
+        Ok(false)
     }
 
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
