@@ -24,6 +24,6 @@ impl Stream for NoopBodiesDownloader {
         self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        Poll::Pending
+        panic!("NoopBodiesDownloader shouldn't be polled.")
     }
 }
