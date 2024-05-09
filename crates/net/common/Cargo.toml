@@ -17,4 +17,5 @@ alloy-primitives.workspace = true
 
 # async
 pin-project.workspace = true
+url.workspace = true
 tokio = { workspace = true, features = ["full"] }

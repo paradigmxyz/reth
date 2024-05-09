@@ -24,6 +24,9 @@ pub type PeerId = B512;
 pub mod node_record;
 pub use node_record::{NodeRecord, NodeRecordParseError};
 
+pub mod dns_node_record;
+pub use dns_node_record::DNSNodeRecord;
+
 /// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
 /// uncompressed pubkey.
 ///
