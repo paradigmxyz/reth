@@ -17,7 +17,7 @@ use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::{
-    config::{EtlConfig, HashingConfig, SenderRecoveryConfig},
+    config::{EtlConfig, HashingConfig, SenderRecoveryConfig, TransactionLookupConfig},
     Config,
 };
 use reth_db::init_db;
@@ -252,7 +252,7 @@ impl Command {
                 }
                 StageEnum::TxLookup => (
                     Box::new(TransactionLookupStage::new(
-                        batch_size,
+                        TransactionLookupConfig { chunk_size: batch_size },
                         etl_config,
                         prune_modes.transaction_lookup,
                     )),
