@@ -2358,18 +2358,18 @@ Post-merge hard forks (timestamp based):
                 // https://specs.optimism.io/protocol/superchain-upgrades.html#activation-timestamps
                 // Canyon
                 (
-                    Head { timestamp: 1704992401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x0, 0x0, 0x0, 0x0]), next: 1708560000 },
+                    Head { number: 105235063, timestamp: 1704992401, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbd, 0xd4, 0xfd, 0xb2]), next: 1708560000 },
                 ),
                 // Delta
                 (
-                    Head { timestamp: 1708560000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x0, 0x0, 0x0, 0x0]), next: 1710374401 },
+                    Head { number: 105235063, timestamp: 1708560000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x58, 0xe4, 0xbf, 0x60]), next: 1710374401 },
                 ),
                 // Ecotone
                 (
-                    Head { number: 0, timestamp: 1710374401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 0 },
+                    Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
+                    ForkId { hash: ForkHash([0x6a, 0x38, 0x16, 0x61]), next: 0 },
                 ),
             ],
         );
