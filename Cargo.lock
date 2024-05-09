@@ -157,6 +157,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-contract"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/alloy?rev=77c1240#77c1240533b411ed0eb5533f94396eba8d7f6ab6"
+dependencies = [
+ "alloy-dyn-abi",
+ "alloy-json-abi",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=77c1240)",
+ "alloy-sol-types",
+ "alloy-transport",
+ "futures",
+ "futures-util",
+ "thiserror",
+]
+
+[[package]]
 name = "alloy-dyn-abi"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3734,7 +3752,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.6",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -5428,6 +5446,26 @@ name = "oorandom"
 version = "11.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
+
+[[package]]
+name = "op-proposer"
+version = "0.2.0-beta.7"
+dependencies = [
+ "alloy-contract",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "eyre",
+ "futures",
+ "reth",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tracing",
+ "tokio",
+]
 
 [[package]]
 name = "opaque-debug"
