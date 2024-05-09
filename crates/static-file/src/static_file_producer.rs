@@ -4,7 +4,7 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
+use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, trace};
 
 /// Result of [StaticFileProducerInner::run] execution.
@@ -111,7 +111,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     }
 
     /// Listen for events on the static_file_producer.
-    pub fn events(&mut self) -> UnboundedReceiverStream<StaticFileProducerEvent> {
+    pub fn events(&mut self) -> BroadcastStream<StaticFileProducerEvent> {
         self.listeners.new_listener()
     }
 
@@ -133,7 +133,9 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             self.static_file_provider.get_highest_static_files()
         ));
 
-        self.listeners.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
+        self.listeners
+            .notify(StaticFileProducerEvent::Started { targets: targets.clone() })
+            .map_err(|e| RethError::Custom(format!("{e}")))?;
 
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
@@ -174,7 +176,8 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         debug!(target: "static_file", ?targets, ?elapsed, "StaticFileProducer finished");
 
         self.listeners
-            .notify(StaticFileProducerEvent::Finished { targets: targets.clone(), elapsed });
+            .notify(StaticFileProducerEvent::Finished { targets: targets.clone(), elapsed })
+            .map_err(|e| RethError::Custom(format!("{e}")))?;
 
         Ok(targets)
     }
