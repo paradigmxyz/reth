@@ -2354,6 +2354,8 @@ Post-merge hard forks (timestamp based):
                     Head { number: 105235063, ..Default::default() },
                     ForkId { hash: ForkHash([0xe3, 0x39, 0x8d, 0x7c]), next: 1704992401 },
                 ),
+                // OP activation timestamps
+                // https://specs.optimism.io/protocol/superchain-upgrades.html#activation-timestamps
                 // Canyon
                 (
                     Head { timestamp: 1704992401, ..Default::default() },
