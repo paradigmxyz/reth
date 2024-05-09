@@ -17,7 +17,7 @@
 //! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
-//! # use reth_config::config::EtlConfig;
+//! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
 //!
 //! # fn create(exec: impl BlockExecutorProvider) {
@@ -30,7 +30,7 @@
 //! );
 //! // Build a pipeline with all offline stages.
 //! let pipeline = Pipeline::builder()
-//!     .add_stages(OfflineStages::new(exec, EtlConfig::default()))
+//!     .add_stages(OfflineStages::new(exec, StageConfig::default(), PruneModes::default()))
 //!     .build(provider_factory, static_file_producer);
 //!
 //! # }

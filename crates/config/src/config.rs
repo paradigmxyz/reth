@@ -97,10 +97,10 @@ pub struct StageConfig {
 }
 
 impl StageConfig {
-    /// The highest threshold (in number of blocks) for switching between incremental
-    /// and full calculations across [`super::MerkleStage`], [`super::AccountHashingStage`] and
-    /// [`super::StorageHashingStage`]. This is required to figure out if can prune or not
-    /// changesets on subsequent pipeline runs.
+    /// The highest threshold (in number of blocks) for switching between incremental and full
+    /// calculations across `MerkleStage`, `AccountHashingStage` and `StorageHashingStage`. This is
+    /// required to figure out if can prune or not changesets on subsequent pipeline runs during
+    /// `ExecutionStage`
     pub fn execution_external_clean_threshold(&self) -> u64 {
         self.merkle
             .clean_threshold
