@@ -59,7 +59,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
         // parallel root
         group.bench_function(BenchmarkId::new("parallel root", size), |b| {
             b.to_async(&runtime).iter_with_setup(
-                || ParallelStateRoot::new(view.clone(), updated_state.clone()),
+                || ParallelStateRoot::new(view.clone(), updated_state.clone(), None),
                 |calculator| async { calculator.incremental_root() },
             );
         });

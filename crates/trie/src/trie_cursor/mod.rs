@@ -20,9 +20,10 @@ pub use self::{
 
 /// Factory for creating trie cursors.
 pub trait TrieCursorFactory {
+    type AccountTrieCursor: TrieCursor;
     type StorageTrieCursor: TrieCursor;
     /// Create an account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError>;
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError>;
 
     /// Create a storage tries cursor.
     fn storage_tries_cursor(

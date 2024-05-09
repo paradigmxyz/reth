@@ -9,10 +9,11 @@ use reth_primitives::trie::{BranchNodeCompact, Nibbles};
 pub struct NoopTrieCursorFactory;
 
 impl TrieCursorFactory for NoopTrieCursorFactory {
+    type AccountTrieCursor = NoopAccountTrieCursor;
     type StorageTrieCursor = NoopStorageTrieCursor;
     /// Generates a Noop account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::<NoopAccountTrieCursor>::default())
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+        Ok(NoopAccountTrieCursor::default())
     }
 
     /// Generates a Noop storage trie cursor.

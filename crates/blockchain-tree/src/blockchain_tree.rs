@@ -1724,7 +1724,7 @@ mod tests {
         );
         let block2_chain_id = tree.state.block_indices.get_blocks_chain_id(&block2.hash()).unwrap();
         let block2_chain = tree.state.chains.get(&block2_chain_id).unwrap();
-        assert!(block2_chain.trie_updates().is_none());
+        assert!(block2_chain.trie_updates().is_some());
 
         assert_eq!(
             tree.make_canonical(block2.hash()).unwrap(),
@@ -1759,7 +1759,7 @@ mod tests {
 
         let block5_chain_id = tree.state.block_indices.get_blocks_chain_id(&block5.hash()).unwrap();
         let block5_chain = tree.state.chains.get(&block5_chain_id).unwrap();
-        assert!(block5_chain.trie_updates().is_none());
+        assert!(block5_chain.trie_updates().is_some());
 
         assert_eq!(
             tree.make_canonical(block5.hash()).unwrap(),

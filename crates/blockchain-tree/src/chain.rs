@@ -98,6 +98,7 @@ impl AppendableChain {
             externals,
             block_attachment,
             block_validation_kind,
+            None,
         )?;
 
         Ok(Self { chain: Chain::new(vec![block], bundle_state, trie_updates) })
@@ -136,13 +137,14 @@ impl AppendableChain {
             canonical_block_hashes,
             canonical_fork,
         };
-        let (block_state, _) = Self::validate_and_execute(
+        let (block_state, trie_updates) = Self::validate_and_execute(
             block.clone(),
             parent,
             bundle_state_data,
             externals,
             BlockAttachment::HistoricalFork,
             block_validation_kind,
+            self.chain.trie_updates().cloned(),
         )?;
         // extending will also optimize few things, mostly related to selfdestruct and wiping of
         // storage.
@@ -156,7 +158,7 @@ impl AppendableChain {
         state.set_first_block(block.number);
 
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(Self { chain: Chain::from_block(block, state, None) })
+        Ok(Self { chain: Chain::from_block(block, state, trie_updates) })
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
@@ -175,6 +177,7 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
+        trie_updates: Option<TrieUpdates>,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
         BSDP: BundleStateDataProvider,
@@ -226,7 +229,7 @@ impl AppendableChain {
                 let mut state = provider.bundle_state_data_provider.state().clone();
                 state.extend(bundle_state.clone());
                 let hashed_state = state.hash_state_slow();
-                ParallelStateRoot::new(consistent_view, hashed_state)
+                ParallelStateRoot::new(consistent_view, hashed_state, trie_updates)
                     .incremental_root_with_updates()
                     .map(|(root, updates)| (root, Some(updates)))
                     .map_err(ProviderError::from)?
@@ -290,16 +293,17 @@ impl AppendableChain {
             canonical_fork,
         };
 
-        let (block_state, _) = Self::validate_and_execute(
+        let (block_state, trie_updates) = Self::validate_and_execute(
             block.clone(),
             parent_block,
             bundle_state_data,
             externals,
             block_attachment,
             block_validation_kind,
+            self.chain.trie_updates().cloned(),
         )?;
         // extend the state.
-        self.chain.append_block(block, block_state);
+        self.chain.append_block(block, block_state, trie_updates);
 
         Ok(())
     }

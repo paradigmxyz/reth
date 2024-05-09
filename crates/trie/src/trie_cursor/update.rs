@@ -1,16 +1,17 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::updates::{TrieKey, TrieOp, TrieUpdates, TrieUpdatesSorted};
+use crate::updates::{TrieKey, TrieOp, TrieUpdatesSorted};
 use reth_db::DatabaseError;
 use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles, StoredNibblesSubKey},
+    trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
     B256,
 };
 
 #[derive(Debug, Clone)]
-pub struct TrieUpdatesCursorFactory<'a, CF: 'a> {
+pub struct TrieUpdatesCursorFactory<'a, CF> {
     cursor_factory: CF,
     trie_updates: &'a TrieUpdatesSorted,
 }
+
 impl<'a, CF> TrieUpdatesCursorFactory<'a, CF> {
     pub fn new(cursor_factory: CF, trie_updates: &'a TrieUpdatesSorted) -> Self {
         Self { cursor_factory, trie_updates }
@@ -18,12 +19,12 @@ impl<'a, CF> TrieUpdatesCursorFactory<'a, CF> {
 }
 
 impl<'a, CF: TrieCursorFactory> TrieCursorFactory for TrieUpdatesCursorFactory<'a, CF> {
+    type AccountTrieCursor = TrieUpdatesAccountTrieCursor<'a, CF::AccountTrieCursor>;
     type StorageTrieCursor = TrieUpdatesStorageTrieCursor<'a, CF::StorageTrieCursor>;
 
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
-        todo!()
-        // Ok(Box::new(TrieUpdatesAccountTrieCursor::new(cursor, self.trie_updates)))
+        Ok(TrieUpdatesAccountTrieCursor::new(cursor, self.trie_updates))
     }
 
     fn storage_tries_cursor(
@@ -35,17 +36,80 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for TrieUpdatesCursorFactory<'
     }
 }
 
-struct TrieUpdatesAccountTrieCursor<'a> {
-    cursor: Box<dyn TrieCursor + 'a>,
-    trie_updates: &'a TrieUpdates,
+#[derive(Debug)]
+pub struct TrieUpdatesAccountTrieCursor<'a, C> {
+    cursor: C,
+    trie_updates: &'a TrieUpdatesSorted,
+    last_key: Option<TrieKey>,
 }
 
-impl<'a> TrieUpdatesAccountTrieCursor<'a> {
-    fn new(cursor: Box<dyn TrieCursor + 'a>, trie_updates: &'a TrieUpdates) -> Self {
-        Self { cursor, trie_updates }
+impl<'a, C> TrieUpdatesAccountTrieCursor<'a, C> {
+    fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
+        Self { cursor, trie_updates, last_key: None }
     }
 }
 
+impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
+    fn seek_exact(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        if let Some((trie_key, trie_op)) =
+            self.trie_updates.find_account_node(&StoredNibbles(key.clone()))
+        {
+            self.last_key = Some(trie_key);
+            match trie_op {
+                TrieOp::Update(node) => Ok(Some((key, node))),
+                TrieOp::Delete => Ok(None),
+            }
+        } else {
+            let result = self.cursor.seek_exact(key)?;
+            self.last_key =
+                result.as_ref().map(|(k, _)| TrieKey::AccountNode(StoredNibbles(k.clone())));
+            Ok(result)
+        }
+    }
+
+    fn seek(
+        &mut self,
+        key: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let stored_nibbles = StoredNibbles(key.clone());
+        let trie_update_entry = self
+            .trie_updates
+            .trie_operations
+            .iter()
+            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles <= &stored_nibbles))
+            .cloned();
+
+        if let Some((trie_key, trie_op)) = trie_update_entry {
+            let nibbles = match &trie_key {
+                TrieKey::AccountNode(nibbles) => nibbles.clone(),
+                _ => panic!("Invalid trie key"),
+            };
+            self.last_key = Some(trie_key);
+            match trie_op {
+                TrieOp::Update(node) => return Ok(Some((nibbles.0, node))),
+                TrieOp::Delete => return Ok(None),
+            }
+        }
+
+        let result = self.cursor.seek(key)?;
+        self.last_key =
+            result.as_ref().map(|(k, _)| TrieKey::AccountNode(StoredNibbles(k.clone())));
+        Ok(result)
+    }
+
+    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
+        if self.last_key.is_some() {
+            Ok(self.last_key.clone())
+        } else {
+            self.cursor.current()
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct TrieUpdatesStorageTrieCursor<'a, C> {
     cursor: C,
     trie_update_index: usize,
@@ -65,19 +129,16 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        if let Some((trie_key,trie_op)) = self
+        if let Some((trie_key, trie_op)) = self
             .trie_updates
-            .trie_operations
-            .iter()
-            .find(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address && nibbles == &StoredNibblesSubKey(key.clone())))
+            .find_storage_node(&self.hashed_address, &StoredNibblesSubKey(key.clone()))
         {
-            self.last_key = Some(trie_key.clone());
+            self.last_key = Some(trie_key);
             match trie_op {
-                TrieOp::Update(node) => Ok(Some((key, node.clone()))),
+                TrieOp::Update(node) => Ok(Some((key, node))),
                 TrieOp::Delete => Ok(None),
             }
-        }
-        else {
+        } else {
             let result = self.cursor.seek_exact(key)?;
             self.last_key = result.as_ref().map(|(k, _)| {
                 TrieKey::StorageNode(self.hashed_address, StoredNibblesSubKey(k.clone()))
@@ -90,22 +151,23 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let nibbles_sub_key = StoredNibblesSubKey(key.clone());
         let mut trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
         while trie_update_entry
-            .filter(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address &&  nibbles < &StoredNibblesSubKey(key.clone()))).is_some()
+            .filter(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address &&  nibbles < &nibbles_sub_key)).is_some()
         {
             self.trie_update_index += 1;
             trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
         }
 
-        if let Some((trie_key, trie_op)) = trie_update_entry {
-            let nibbles = match trie_key {
+        if let Some((trie_key, trie_op)) = trie_update_entry.cloned() {
+            let nibbles = match &trie_key {
                 TrieKey::StorageNode(_, nibbles) => nibbles.clone(),
                 _ => panic!("Invalid trie key"),
             };
-            self.last_key = Some(trie_key.clone());
+            self.last_key = Some(trie_key);
             match trie_op {
-                TrieOp::Update(node) => return Ok(Some((nibbles.0, node.clone()))),
+                TrieOp::Update(node) => return Ok(Some((nibbles.0, node))),
                 TrieOp::Delete => return Ok(None),
             }
         }

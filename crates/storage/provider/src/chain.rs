@@ -226,10 +226,16 @@ impl Chain {
 
     /// Append a single block with state to the chain.
     /// This method assumes that blocks attachment to the chain has already been validated.
-    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BundleStateWithReceipts) {
+    pub fn append_block(
+        &mut self,
+        block: SealedBlockWithSenders,
+        state: BundleStateWithReceipts,
+        trie_updates: Option<TrieUpdates>,
+    ) {
         self.blocks.insert(block.number, block);
         self.state.extend(state);
-        self.trie_updates.take(); // reset
+        self.append_trie_updates(trie_updates);
+        // self.trie_updates.take(); // reset
     }
 
     /// Merge two chains by appending the given chain into the current one.
@@ -249,9 +255,22 @@ impl Chain {
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
         self.state.extend(other.state);
-        self.trie_updates.take(); // reset
+        self.append_trie_updates(other.trie_updates);
+        // self.trie_updates.take(); // reset
 
         Ok(())
+    }
+
+    /// Append trie updates.
+    /// If existing or incoming trie updates are not set, reset as neither is valid anymore.
+    fn append_trie_updates(&mut self, other_trie_updates: Option<TrieUpdates>) {
+        if let Some((trie_updates, other)) = self.trie_updates.as_mut().zip(other_trie_updates) {
+            // Extend trie updates.
+            trie_updates.extend(other);
+        } else {
+            // Reset trie updates as they are no longer valid.
+            self.trie_updates.take();
+        }
     }
 
     /// Split this chain at the given block.

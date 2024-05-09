@@ -11,7 +11,7 @@ use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, Provid
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{AccountNode, AccountNodeIter},
-    trie_cursor::TrieCursorFactory,
+    trie_cursor::{TrieCursorFactory, TrieUpdatesCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
     HashedPostState, StorageRoot,
@@ -41,6 +41,8 @@ pub struct ParallelStateRoot<DB, Provider> {
     view: ConsistentDbView<DB, Provider>,
     /// Changed hashed state.
     hashed_state: HashedPostState,
+    /// Trie updates.
+    trie_updates: Option<TrieUpdates>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -48,10 +50,15 @@ pub struct ParallelStateRoot<DB, Provider> {
 
 impl<DB, Provider> ParallelStateRoot<DB, Provider> {
     /// Create new parallel state root calculator.
-    pub fn new(view: ConsistentDbView<DB, Provider>, hashed_state: HashedPostState) -> Self {
+    pub fn new(
+        view: ConsistentDbView<DB, Provider>,
+        hashed_state: HashedPostState,
+        trie_updates: Option<TrieUpdates>,
+    ) -> Self {
         Self {
             view,
             hashed_state,
+            trie_updates,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -87,6 +94,9 @@ where
         );
         let hashed_state_sorted = self.hashed_state.into_sorted();
 
+        let trie_updates_sorted =
+            self.trie_updates.map_or(Default::default(), |updates| updates.into_sorted());
+
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
@@ -95,7 +105,7 @@ where
             .map(|(hashed_address, prefix_set)| {
                 let provider_ro = self.view.provider_ro()?;
                 let storage_root_result = StorageRoot::new_hashed(
-                    provider_ro.tx_ref(),
+                    TrieUpdatesCursorFactory::new(provider_ro.tx_ref(), &trie_updates_sorted),
                     HashedPostStateCursorFactory::new(provider_ro.tx_ref(), &hashed_state_sorted),
                     hashed_address,
                     #[cfg(feature = "metrics")]
@@ -265,7 +275,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view.clone(), HashedPostState::default())
+            ParallelStateRoot::new(consistent_view.clone(), HashedPostState::default(), None)
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -297,7 +307,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view, hashed_state).incremental_root().unwrap(),
+            ParallelStateRoot::new(consistent_view, hashed_state, None).incremental_root().unwrap(),
             test_utils::state_root(state)
         );
     }
