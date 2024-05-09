@@ -18,7 +18,7 @@ use reth_provider::{
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::EventListeners;
-use std::{pin::Pin, time::Duration};
+use std::pin::Pin;
 use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
