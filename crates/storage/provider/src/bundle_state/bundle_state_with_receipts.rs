@@ -1,4 +1,4 @@
-use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts};
+use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts, StateWriter};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
@@ -309,14 +309,10 @@ impl BundleStateWithReceipts {
         // swap bundles
         std::mem::swap(&mut self.bundle, &mut other)
     }
+}
 
-    /// Write the [BundleStateWithReceipts] to database and receipts to either database or static
-    /// files if `static_file_producer` is `Some`. It should be none if there is any kind of
-    /// pruning/filtering over the receipts.
-    ///
-    /// `omit_changed_check` should be set to true if bundle has some of its data detached. This
-    /// would make some original values not known.
-    pub fn write_to_storage<TX>(
+impl StateWriter for BundleStateWithReceipts {
+    fn write_to_storage<TX>(
         self,
         tx: &TX,
         mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,

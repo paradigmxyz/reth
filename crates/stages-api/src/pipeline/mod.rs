@@ -7,7 +7,7 @@ use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
-    stage::{StageCheckpoint, StageId},
+    stage::{PipelineTarget, StageCheckpoint, StageId},
     static_file::HighestStaticFiles,
     BlockNumber, B256,
 };
@@ -130,17 +130,31 @@ where
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, tip: Option<B256>) -> PipelineFut<DB> {
+    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         let _ = self.register_metrics(); // ignore error
         Box::pin(async move {
             // NOTE: the tip should only be None if we are in continuous sync mode.
-            if let Some(tip) = tip {
-                self.set_tip(tip);
+            if let Some(target) = target {
+                match target {
+                    PipelineTarget::Sync(tip) => self.set_tip(tip),
+                    PipelineTarget::Unwind(target) => {
+                        if let Err(err) = self.produce_static_files() {
+                            return (self, Err(err.into()))
+                        }
+                        if let Err(err) = self.unwind(target, None) {
+                            return (self, Err(err))
+                        }
+                        self.progress.update(target);
+
+                        return (self, Ok(ControlFlow::Continue { block_number: target }))
+                    }
+                }
             }
+
             let result = self.run_loop().await;
-            trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
+            trace!(target: "sync::pipeline", ?target, ?result, "Pipeline finished");
             (self, result)
         })
     }

@@ -2,7 +2,6 @@
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
 
-use alloy_eips::eip2718::Eip2718Error;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -11,7 +10,6 @@ use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::mem;
 
@@ -25,12 +23,12 @@ pub use error::{
 };
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
-#[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
-pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
+pub use sidecar::BlobTransactionValidationError;
+pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use signature::{extract_chain_id, Signature};
 pub use tx_type::{
@@ -45,9 +43,7 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
-#[cfg(feature = "c-kzg")]
 mod pooled;
-#[cfg(feature = "c-kzg")]
 mod sidecar;
 mod signature;
 mod tx_type;
@@ -616,10 +612,14 @@ impl From<TxEip4844> for Transaction {
     }
 }
 
-impl TryFrom<reth_rpc_types::Transaction> for Transaction {
-    type Error = ConversionError;
+#[cfg(feature = "alloy-compat")]
+impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
+    type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        use alloy_eips::eip2718::Eip2718Error;
+        use alloy_rpc_types::ConversionError;
+
         match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
             ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
                 tx.transaction_type.unwrap(),
@@ -1698,7 +1698,6 @@ impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
-#[cfg(feature = "c-kzg")]
 pub trait FromRecoveredPooledTransaction {
     /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
@@ -1720,10 +1719,12 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
-    type Error = ConversionError;
+#[cfg(feature = "alloy-compat")]
+impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedEcRecovered {
+    type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
+        use alloy_rpc_types::ConversionError;
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
 
         let transaction: Transaction = tx.try_into()?;

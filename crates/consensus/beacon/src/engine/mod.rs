@@ -15,8 +15,9 @@ use reth_interfaces::{
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    constants::EPOCH_SLOTS, stage::StageId, BlockNumHash, BlockNumber, Head, Header, SealedBlock,
-    SealedHeader, B256,
+    constants::EPOCH_SLOTS,
+    stage::{PipelineTarget, StageId},
+    BlockNumHash, BlockNumber, Head, Header, SealedBlock, SealedHeader, B256,
 };
 use reth_provider::{
     BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
@@ -316,7 +317,7 @@ where
         };
 
         if let Some(target) = maybe_pipeline_target {
-            this.sync.set_pipeline_sync_target(target);
+            this.sync.set_pipeline_sync_target(target.into());
         }
 
         Ok((this, handle))
@@ -668,6 +669,21 @@ where
                             // threshold
                             return Some(state.finalized_block_hash)
                         }
+
+                        // OPTIMISTIC SYNCING
+                        //
+                        // It can happen when the node is doing an
+                        // optimistic sync, where the CL has no knowledge of the finalized hash,
+                        // but is expecting the EL to sync as high
+                        // as possible before finalizing.
+                        //
+                        // This usually doesn't happen on ETH mainnet since CLs use the more
+                        // secure checkpoint syncing.
+                        //
+                        // However, optimism chains will do this. The risk of a reorg is however
+                        // low.
+                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic pipeline target.");
+                        return Some(state.head_block_hash)
                     }
                     Ok(Some(_)) => {
                         // we're fully synced to the finalized block
@@ -981,6 +997,10 @@ where
                 // so we should not warn the user, since this will result in us attempting to sync
                 // to a new target and is considered normal operation during sync
             }
+            CanonicalError::OptimisticTargetRevert(block_number) => {
+                self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(*block_number));
+                return PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            }
             _ => {
                 warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
                 // TODO(mattsse) better error handling before attempting to sync (FCU could be
@@ -1011,7 +1031,7 @@ where
         if self.pipeline_run_threshold == 0 {
             // use the pipeline to sync to the target
             trace!(target: "consensus::engine", %target, "Triggering pipeline run to sync missing ancestors of the new head");
-            self.sync.set_pipeline_sync_target(target);
+            self.sync.set_pipeline_sync_target(target.into());
         } else {
             // trigger a full block download for missing hash, or the parent of its lowest buffered
             // ancestor
@@ -1361,7 +1381,7 @@ where
         ) {
             // we don't have the block yet and the distance exceeds the allowed
             // threshold
-            self.sync.set_pipeline_sync_target(target);
+            self.sync.set_pipeline_sync_target(target.into());
             // we can exit early here because the pipeline will take care of syncing
             return
         }
@@ -1445,6 +1465,8 @@ where
                         // TODO: do not ignore this
                         let _ = self.blockchain.make_canonical(*target_hash.as_ref());
                     }
+                } else if let Some(block_number) = err.optimistic_revert_block_number() {
+                    self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(block_number));
                 }
 
                 Err((target.head_block_hash, err))
@@ -1506,13 +1528,7 @@ where
 
         // update the canon chain if continuous is enabled
         if self.sync.run_pipeline_continuously() {
-            let max_block = ctrl.block_number().unwrap_or_default();
-            let max_header = self.blockchain.sealed_header(max_block)
-            .inspect_err(|error| {
-                error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
-            })?
-            .ok_or_else(|| ProviderError::HeaderNotFound(max_block.into()))?;
-            self.blockchain.set_canonical_head(max_header);
+            self.set_canonical_head(ctrl.block_number().unwrap_or_default())?;
         }
 
         let sync_target_state = match self.forkchoice_state_tracker.sync_target_state() {
@@ -1524,6 +1540,14 @@ where
                 return Ok(())
             }
         };
+
+        if sync_target_state.finalized_block_hash.is_zero() {
+            self.set_canonical_head(ctrl.block_number().unwrap_or_default())?;
+            self.blockchain.update_block_hashes_and_clear_buffered()?;
+            self.blockchain.connect_buffered_blocks_to_canonical_hashes()?;
+            // We are on an optimistic syncing process, better to wait for the next FCU to handle
+            return Ok(())
+        }
 
         // Next, we check if we need to schedule another pipeline run or transition
         // to live sync via tree.
@@ -1580,7 +1604,7 @@ where
         // the tree update from executing too many blocks and blocking.
         if let Some(target) = pipeline_target {
             // run the pipeline to the target since the distance is sufficient
-            self.sync.set_pipeline_sync_target(target);
+            self.sync.set_pipeline_sync_target(target.into());
         } else if let Some(number) =
             self.blockchain.block_number(sync_target_state.finalized_block_hash)?
         {
@@ -1592,8 +1616,19 @@ where
         } else {
             // We don't have the finalized block in the database, so we need to
             // trigger another pipeline run.
-            self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash);
+            self.sync.set_pipeline_sync_target(sync_target_state.finalized_block_hash.into());
         }
+
+        Ok(())
+    }
+
+    fn set_canonical_head(&self, max_block: BlockNumber) -> RethResult<()> {
+        let max_header = self.blockchain.sealed_header(max_block)
+        .inspect_err(|error| {
+            error!(target: "consensus::engine", %error, "Error getting canonical header for continuous sync");
+        })?
+        .ok_or_else(|| ProviderError::HeaderNotFound(max_block.into()))?;
+        self.blockchain.set_canonical_head(max_header);
 
         Ok(())
     }
@@ -1746,16 +1781,20 @@ where
                                 Err(BeaconOnNewPayloadError::Internal(Box::new(error.clone())));
                             let _ = tx.send(response);
                             return Err(RethError::Canonical(error))
+                        } else if error.optimistic_revert_block_number().is_some() {
+                            // engine already set the pipeline unwind target on
+                            // `try_make_sync_target_canonical`
+                            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+                        } else {
+                            // If we could not make the sync target block canonical,
+                            // we should return the error as an invalid payload status.
+                            PayloadStatus::new(
+                                PayloadStatusEnum::Invalid { validation_error: error.to_string() },
+                                // TODO: return a proper latest valid hash
+                                // See: <https://github.com/paradigmxyz/reth/issues/7146>
+                                self.forkchoice_state_tracker.last_valid_head(),
+                            )
                         }
-
-                        // If we could not make the sync target block canonical,
-                        // we should return the error as an invalid payload status.
-                        PayloadStatus::new(
-                            PayloadStatusEnum::Invalid { validation_error: error.to_string() },
-                            // TODO: return a proper latest valid hash
-                            // See: <https://github.com/paradigmxyz/reth/issues/7146>
-                            self.forkchoice_state_tracker.last_valid_head(),
-                        )
                     }
                 };
 

@@ -11,7 +11,7 @@ use futures::{future, future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngine, EthBeaconConsensus,
 };
 use reth_blockchain_tree::{
     noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
@@ -116,7 +116,7 @@ where
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
             Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
         } else {
-            Arc::new(BeaconConsensus::new(ctx.chain_spec()))
+            Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
         };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");

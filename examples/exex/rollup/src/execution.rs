@@ -1,3 +1,4 @@
+use crate::{db::Database, RollupContract, CHAIN_ID, CHAIN_SPEC};
 use alloy_consensus::{Blob, SidecarCoder, SimpleCoder};
 use alloy_rlp::Decodable as _;
 use eyre::OptionExt;
@@ -19,8 +20,6 @@ use reth_revm::{
     DBBox, DatabaseCommit, Evm, StateBuilder, StateDBBox,
 };
 use reth_tracing::tracing::debug;
-
-use crate::{db::Database, RollupContract, CHAIN_ID, CHAIN_SPEC};
 
 /// Execute a rollup block and return (block with recovered senders)[BlockWithSenders], (bundle
 /// state)[BundleState] and list of (receipts)[Receipt].
@@ -154,7 +153,7 @@ async fn decode_transactions<Pool: TransactionPool>(
         let blobs = blobs
             .into_iter()
             // Convert blob KZG commitments to versioned hashes
-            .map(|(blob, commitment)| (blob, kzg_to_versioned_hash((*commitment).into())))
+            .map(|(blob, commitment)| (blob, kzg_to_versioned_hash(commitment.as_slice())))
             // Filter only blobs that are present in the block data
             .filter(|(_, hash)| blob_hashes.contains(hash))
             .map(|(blob, _)| Blob::from(*blob))
@@ -461,7 +460,7 @@ mod tests {
                     SidecarBuilder::<SimpleCoder>::from_slice(&encoded_transactions).build()?;
                 let blob_hashes = alloy_rlp::encode(sidecar.versioned_hashes().collect::<Vec<_>>());
 
-                let mut mock_transaction = MockTransaction::eip4844_with_sidecar(sidecar.into());
+                let mut mock_transaction = MockTransaction::eip4844_with_sidecar(sidecar);
                 let transaction =
                     sign_tx_with_key_pair(key_pair, Transaction::from(mock_transaction.clone()));
                 mock_transaction.set_hash(transaction.hash);

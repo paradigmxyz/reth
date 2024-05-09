@@ -1,7 +1,7 @@
 use crate::{
-    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine,
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
@@ -322,7 +322,7 @@ where
 
         let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
             TestConsensusConfig::Real => {
-                Arc::new(BeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
+                Arc::new(EthBeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
             }
             TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
         };

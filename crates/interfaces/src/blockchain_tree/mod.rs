@@ -78,6 +78,13 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
         last_finalized_block: BlockNumber,
     ) -> RethResult<()>;
 
+    /// Update all block hashes. iterate over present and new list of canonical hashes and compare
+    /// them. Remove all mismatches, disconnect them, removes all chains and clears all buffered
+    /// blocks before the tip.
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>>;
+
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///

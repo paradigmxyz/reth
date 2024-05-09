@@ -2,23 +2,20 @@
 
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db::{
-    database::Database,
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
+use reth_db::{database::Database, tables, transaction::DbTxMut};
 use reth_etl::Collector;
 use reth_interfaces::{db::DatabaseError, provider::ProviderResult};
 use reth_primitives::{
-    stage::StageId, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
-    StaticFileSegment, StorageEntry, B256, U256,
+    stage::{StageCheckpoint, StageId},
+    Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
+    StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
     DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, StaticFileProviderFactory,
+    ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
@@ -114,18 +111,18 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
     // Insert header
-    let tx = provider_rw.into_tx();
+    let tx = provider_rw.tx_ref();
     let static_file_provider = factory.static_file_provider();
-    insert_genesis_header::<DB>(&tx, &static_file_provider, chain.clone())?;
+    insert_genesis_header::<DB>(tx, &static_file_provider, chain.clone())?;
 
-    insert_genesis_state::<DB>(&tx, alloc.len(), alloc.iter())?;
+    insert_genesis_state::<DB>(tx, alloc.len(), alloc.iter())?;
 
     // insert sync stage
-    for stage in StageId::ALL.iter() {
-        tx.put::<tables::StageCheckpoints>(stage.to_string(), Default::default())?;
+    for stage in StageId::ALL {
+        provider_rw.save_stage_checkpoint(stage, Default::default())?;
     }
 
-    tx.commit()?;
+    provider_rw.commit()?;
     static_file_provider.commit()?;
 
     Ok(hash)
@@ -343,6 +340,11 @@ pub fn init_from_state_dump<DB: Database>(
         );
     }
 
+    // insert sync stages for stages that require state
+    for stage in StageId::STATE_REQUIRED {
+        provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(block))?;
+    }
+
     provider_rw.commit()?;
 
     Ok(hash)
@@ -524,6 +526,7 @@ mod tests {
         cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
+        transaction::DbTx,
         DatabaseEnv,
     };
     use reth_primitives::{

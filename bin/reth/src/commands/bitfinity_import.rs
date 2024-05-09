@@ -5,7 +5,7 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{database_metrics::DatabaseMetadata, DatabaseEnv};
 
@@ -131,7 +131,7 @@ impl BitfinityImportCommand {
     where
         DB: Database + DatabaseMetadata + Clone + Unpin + 'static,
     {
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
         debug!(target: "reth::cli - BitfinityImportCommand", "Consensus engine initialized");
 
         // Get the local block number
