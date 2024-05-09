@@ -6399,6 +6399,7 @@ dependencies = [
  "reth-exex",
  "reth-fs-util",
  "reth-interfaces",
+ "reth-net-common",
  "reth-network",
  "reth-network-api",
  "reth-nippy-jar",
@@ -6702,6 +6703,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -7131,6 +7133,7 @@ dependencies = [
  "alloy-primitives",
  "pin-project",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -7289,6 +7292,7 @@ dependencies = [
  "reth-evm",
  "reth-exex",
  "reth-interfaces",
+ "reth-net-common",
  "reth-network",
  "reth-node-api",
  "reth-node-core",

@@ -31,6 +31,7 @@ futures.workspace = true
 
 # io
 rand.workspace = true
+url.workspace = true
 
 # misc
 derive_more.workspace = true

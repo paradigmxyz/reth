@@ -9,8 +9,9 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
+use reth_primitives::{Bytes, DNSNodeRecord, EnrForkIdEntry, ForkId};
 use tracing::warn;
+use url::Host;
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
@@ -129,9 +130,12 @@ impl ConfigBuilder {
     }
 
     /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
-    pub fn add_unsigned_boot_nodes(mut self, enodes: impl Iterator<Item = NodeRecord>) -> Self {
+    pub fn add_unsigned_boot_nodes<T: Into<DNSNodeRecord>>(
+        mut self,
+        enodes: impl Iterator<Item = T>,
+    ) -> Self {
         for node in enodes {
-            if let Ok(node) = BootNode::from_unsigned(node) {
+            if let Ok(node) = BootNode::from_unsigned(node.into()) {
                 self.bootstrap_nodes.insert(node);
             }
         }
@@ -425,14 +429,17 @@ pub enum BootNode {
 }
 
 impl BootNode {
-    /// Parses a [`NodeRecord`] and serializes according to CL format. Note: [`discv5`] is
+    /// Parses a [`DNSNodeRecord`] and serializes according to CL format. Note: [`discv5`] is
     /// originally a CL library hence needs this format to add the node.
-    pub fn from_unsigned(node_record: NodeRecord) -> Result<Self, secp256k1::Error> {
-        let NodeRecord { address, udp_port, id, .. } = node_record;
+    pub fn from_unsigned(node_record: DNSNodeRecord) -> Result<Self, secp256k1::Error> {
+        let DNSNodeRecord { host, udp_port, id, .. } = node_record;
         let mut multi_address = Multiaddr::empty();
-        match address {
-            IpAddr::V4(ip) => multi_address.push(Protocol::Ip4(ip)),
-            IpAddr::V6(ip) => multi_address.push(Protocol::Ip6(ip)),
+        match host {
+            Host::Ipv4(ip) => multi_address.push(Protocol::Ip4(ip)),
+            Host::Ipv6(ip) => multi_address.push(Protocol::Ip6(ip)),
+            Host::Domain(domain) => {
+                multi_address.push(Protocol::Dns(domain.into()));
+            }
         }
 
         multi_address.push(Protocol::Udp(udp_port));

@@ -92,7 +92,7 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config)?
+            .with_loaded_toml_config(config).await?
             // attach the database
             .attach(database.clone())
             // ensure certain settings take effect
