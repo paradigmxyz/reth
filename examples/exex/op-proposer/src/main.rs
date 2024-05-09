@@ -5,7 +5,7 @@ use reth_node_ethereum::EthereumNode;
 sol! {
     #[sol(rpc)]
     contract L2OutputOracle {
-        function proposeL2Output(bytes32 _outputRoot, uint256 _l2BlockNumber, bytes32 _l1BlockHash,uint256 _l1BlockNumber) external payable;
+        function proposeL2Output(bytes32 _outputRoot, uint256 _l2BlockNumber, bytes32 _l1BlockHash, uint256 _l1BlockNumber) external payable;
         function latestBlockNumber() public view returns (uint256);
     }
     #[sol(rpc)]
@@ -48,6 +48,13 @@ pub struct OutputRootProof {
     state_root: B256,
     message_passer_storage_root: B256,
     latest_blockhash: B256,
+}
+
+pub struct L2Output {
+    output_root: B256,
+    l2_block_number: u64,
+    l1_block_hash: B256,
+    l1_block_number: u64,
 }
 
 fn main() -> eyre::Result<()> {
