@@ -63,7 +63,7 @@ pub struct L2Output {
 
 /// Create SQLite tables if they do not exist.
 fn create_tables(connection: &mut Connection) -> rusqlite::Result<()> {
-    // Create deposits and withdrawals tables
+    // Create tables to store L2 outputs
     connection.execute(
         r#"
             CREATE TABLE IF NOT EXISTS deposits (
