@@ -49,10 +49,9 @@ curl -X POST -H 'content-Type: application/json' --data '{"jsonrpc":"2.0","metho
 
 ### Docker Image
 
-To build the docker image, use the following command:
-
+The simplest way to build locally the docker image is by using the provided `docker-compose.yml` file
 ```sh
-make docker
+docker compose build
 ```
 
 ### To run the docker image
