@@ -2648,8 +2648,8 @@ dependencies = [
 
 [[package]]
 name = "did"
-version = "0.17.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.17.x#d45561baa1f2c30415e262507f400d09372daf85"
+version = "0.18.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.18.x#a05b5870e837204816e8ea15c444bed7601f3df0"
 dependencies = [
  "alloy-primitives",
  "bincode",
@@ -2660,7 +2660,7 @@ dependencies = [
  "ethers-core",
  "hex",
  "ic-log",
- "ic-stable-structures 0.15.0",
+ "ic-stable-structures 0.16.0",
  "jsonrpc-core",
  "log",
  "murmur3",
@@ -3070,8 +3070,8 @@ dependencies = [
 
 [[package]]
 name = "ethereum-json-rpc-client"
-version = "0.17.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.17.x#d45561baa1f2c30415e262507f400d09372daf85"
+version = "0.18.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.18.x#a05b5870e837204816e8ea15c444bed7601f3df0"
 dependencies = [
  "anyhow",
  "candid",
@@ -4178,9 +4178,9 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk"
-version = "0.12.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f3d204af0b11c45715169c997858edb58fa8407d08f4fae78a6b415dd39a362"
+checksum = "f8859bc2b863a77750acf199e1fb7e3fc403e1b475855ba13f59cb4e4036d238"
 dependencies = [
  "candid",
  "ic-cdk-macros",
@@ -4191,9 +4191,9 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk-macros"
-version = "0.8.4"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5a618e4020cea88e933d8d2f8c7f86d570ec06213506a80d4f2c520a9bba512"
+checksum = "a45800053d80a6df839a71aaea5797e723188c0b992618208ca3b941350c7355"
 dependencies = [
  "candid",
  "proc-macro2",
@@ -4205,9 +4205,9 @@ dependencies = [
 
 [[package]]
 name = "ic-cdk-timers"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c43b9706fef3ad10c4192a14801d16bd9539068239f0f06f257857441364329"
+checksum = "054727a3a1c486528b96349817d54290ff70df6addf417def456ea708a16f7fb"
 dependencies = [
  "futures",
  "ic-cdk",
@@ -4250,16 +4250,16 @@ dependencies = [
 
 [[package]]
 name = "ic-crypto-getrandom-for-wasm"
-version = "0.15.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.15.x#53d2ec163f6601ae2994b9501e86e18d7ab3e56b"
+version = "0.16.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.16.x#9c956259f11966953e99dbeb806e652f0970bcab"
 dependencies = [
  "getrandom 0.2.14",
 ]
 
 [[package]]
 name = "ic-exports"
-version = "0.15.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.15.x#53d2ec163f6601ae2994b9501e86e18d7ab3e56b"
+version = "0.16.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.16.x#9c956259f11966953e99dbeb806e652f0970bcab"
 dependencies = [
  "candid",
  "ic-cdk",
@@ -4272,8 +4272,8 @@ dependencies = [
 
 [[package]]
 name = "ic-kit"
-version = "0.15.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.15.x#53d2ec163f6601ae2994b9501e86e18d7ab3e56b"
+version = "0.16.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.16.x#9c956259f11966953e99dbeb806e652f0970bcab"
 dependencies = [
  "candid",
  "futures",
@@ -4285,8 +4285,8 @@ dependencies = [
 
 [[package]]
 name = "ic-log"
-version = "0.15.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.15.x#53d2ec163f6601ae2994b9501e86e18d7ab3e56b"
+version = "0.16.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.16.x#9c956259f11966953e99dbeb806e652f0970bcab"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -4310,8 +4310,8 @@ dependencies = [
 
 [[package]]
 name = "ic-stable-structures"
-version = "0.15.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.15.x#53d2ec163f6601ae2994b9501e86e18d7ab3e56b"
+version = "0.16.0"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.16.x#9c956259f11966953e99dbeb806e652f0970bcab"
 dependencies = [
  "ic-stable-structures 0.6.4",
  "parking_lot 0.12.2",
@@ -5262,9 +5262,9 @@ dependencies = [
 
 [[package]]
 name = "lightspeed_scheduler"
-version = "0.57.0"
+version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49cc9732d655ecbd6b3e39a6b54873835cb08b4da68dad5ab28c110184c35eb6"
+checksum = "f7092edd2184ecd92bb7238f19e6355101cafe802792bb1ec60c18578937446d"
 dependencies = [
  "arc-swap",
  "chrono",
