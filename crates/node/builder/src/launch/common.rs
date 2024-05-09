@@ -10,6 +10,7 @@ use reth_auto_seal_consensus::MiningMode;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_net_common::dns_node_record_resolve::resolve_dns_node_record;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -50,17 +51,19 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub fn with_loaded_toml_config(
+    pub async fn with_loaded_toml_config(
         self,
         config: NodeConfig,
     ) -> eyre::Result<LaunchContextWith<WithConfigs>> {
-        let toml_config = self.load_toml_config(&config)?;
+        let toml_config = self.load_toml_config(&config).await?;
         Ok(self.with(WithConfigs { config, toml_config }))
     }
 
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the
     /// `config`.
-    pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
+    ///
+    /// This is async because the trusted peers may have to be resolved.
+    pub async fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
@@ -75,9 +78,14 @@ impl LaunchContext {
 
         if !config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
-            config.network.trusted_peers.iter().for_each(|peer| {
-                toml_config.peers.trusted_nodes.insert(*peer);
-            });
+
+            // resolve trusted peers if they use a domain instead of dns
+            for peer in &config.network.trusted_peers {
+                let resolved = resolve_dns_node_record(peer.clone())
+                    .await
+                    .wrap_err_with(|| format!("Could not resolve trusted peer {peer}"))?;
+                toml_config.peers.trusted_nodes.insert(resolved);
+            }
         }
 
         Ok(toml_config)

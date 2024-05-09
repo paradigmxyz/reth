@@ -42,7 +42,9 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_net_common::bandwidth_meter::BandwidthMeter;
+use reth_net_common::{
+    bandwidth_meter::BandwidthMeter, dns_node_record_resolve::resolve_dns_node_record,
+};
 use reth_network_api::ReputationChangeKind;
 use reth_network_types::PeerId;
 use reth_primitives::{ForkId, NodeRecord};
@@ -206,9 +208,16 @@ where
         })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
+        // resolve boot nodes
+        let mut resolved_boot_nodes = vec![];
+        for record in boot_nodes.iter() {
+            let resolved = resolve_dns_node_record(record.clone()).await?;
+            resolved_boot_nodes.push(resolved);
+        }
+
         discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
-            disc_config.bootstrap_nodes.extend(boot_nodes.clone());
+            disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
             disc_config.add_eip868_pair("eth", status.forkid);
             disc_config
         });

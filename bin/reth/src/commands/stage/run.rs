@@ -20,6 +20,7 @@ use reth_config::{config::EtlConfig, Config};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
+use reth_net_common::dns_node_record_resolve::resolve_dns_node_record;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
@@ -174,9 +175,10 @@ impl Command {
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
                     if !self.network.trusted_peers.is_empty() {
-                        self.network.trusted_peers.iter().for_each(|peer| {
-                            config.peers.trusted_nodes.insert(*peer);
-                        });
+                        for peer in &self.network.trusted_peers {
+                            let peer = resolve_dns_node_record(peer.clone()).await?;
+                            config.peers.trusted_nodes.insert(peer);
+                        }
                     }
 
                     let network_secret_path = self

@@ -17,7 +17,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
+use reth_primitives::{mainnet_nodes, ChainSpec, DNSNodeRecord};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -37,7 +37,7 @@ pub struct NetworkArgs {
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
     #[arg(long, value_delimiter = ',')]
-    pub trusted_peers: Vec<NodeRecord>,
+    pub trusted_peers: Vec<DNSNodeRecord>,
 
     /// Connect only to trusted peers
     #[arg(long)]
@@ -47,7 +47,7 @@ pub struct NetworkArgs {
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
-    pub bootnodes: Option<Vec<NodeRecord>>,
+    pub bootnodes: Option<Vec<DNSNodeRecord>>,
 
     /// The path to the known peers file. Connected peers are dumped to this file on nodes
     /// shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
@@ -118,7 +118,12 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
+        let chain_bootnodes = chain_spec
+            .bootnodes()
+            .unwrap_or_else(mainnet_nodes)
+            .into_iter()
+            .map(DNSNodeRecord::from)
+            .collect();
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
@@ -258,12 +263,12 @@ pub struct DiscoveryArgs {
 
     /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
     /// times, at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval", 
+    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval",
         default_value_t = DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL)]
     pub discv5_bootstrap_lookup_interval: u64,
 
     /// The number of times to carry out boost lookup queries at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown", 
+    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown",
         default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
     pub discv5_bootstrap_lookup_countdown: u64,
 }
