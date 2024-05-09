@@ -102,7 +102,7 @@ impl Default for PrunerBuilder {
             segments: PruneModes::none(),
             max_reorg_depth: 64,
             prune_delete_limit: MAINNET.prune_delete_limit,
-            timeout: Some(Self::DEFAULT_TIMEOUT),
+            timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }
     }
