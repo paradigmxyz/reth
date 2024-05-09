@@ -4,7 +4,7 @@ use reth_interfaces::p2p::{
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::BlockNumber;
-use std::{ops::RangeInclusive, task::Poll};
+use std::ops::RangeInclusive;
 
 /// A [BodyDownloader] implementation that does nothing.
 #[derive(Debug, Default)]

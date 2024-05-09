@@ -4,7 +4,6 @@ use reth_interfaces::p2p::headers::{
     error::HeadersDownloaderError,
 };
 use reth_primitives::SealedHeader;
-use std::task::Poll;
 
 /// A [HeaderDownloader] implementation that does nothing.
 #[derive(Debug, Default)]
