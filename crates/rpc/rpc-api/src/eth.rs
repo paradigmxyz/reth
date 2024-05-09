@@ -1,11 +1,10 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
-};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
-    StateContext, SyncStatus, Transaction, TransactionRequest, Work,
+    serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
+    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
+    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
+    TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
