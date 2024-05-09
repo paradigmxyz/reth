@@ -1,3 +1,13 @@
-fn main() {
-    println!("Hello, world!");
+use reth_node_ethereum::EthereumNode;
+
+fn main() -> eyre::Result<()> {
+    reth::cli::Cli::parse_args().run(|builder, _| async move {
+        let handle = builder
+            .node(EthereumNode::default())
+            // .install_exex("OpProposer", |ctx| async move { todo!("implement here") })
+            .launch()
+            .await?;
+
+        handle.wait_for_node_exit().await
+    })
 }
