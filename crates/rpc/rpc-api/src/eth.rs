@@ -1,18 +1,15 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{
-    serde_helper::{num::U64HexOrNumber, JsonStorageKey},
-    Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
-};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
-    StateContext, SyncStatus, Transaction, TransactionReceipt, TransactionRequest, Work,
+    serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
+    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
+    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
+    TransactionRequest, Work,
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-#[async_trait]
 pub trait EthApi {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
@@ -28,7 +25,7 @@ pub trait EthApi {
 
     /// Returns a list of addresses owned by client.
     #[method(name = "accounts")]
-    async fn accounts(&self) -> RpcResult<Vec<Address>>;
+    fn accounts(&self) -> RpcResult<Vec<Address>>;
 
     /// Returns the number of most recent block.
     #[method(name = "blockNumber")]
@@ -74,8 +71,10 @@ pub trait EthApi {
 
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
-    async fn block_receipts(&self, block_id: BlockId)
-        -> RpcResult<Option<Vec<TransactionReceipt>>>;
+    async fn block_receipts(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<Option<Vec<AnyTransactionReceipt>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
@@ -93,9 +92,23 @@ pub trait EthApi {
         index: Index,
     ) -> RpcResult<Option<RichBlock>>;
 
+    /// Returns the EIP-2718 encoded transaction if it exists.
+    ///
+    /// If this is a EIP-4844 transaction that is in the pool it will include the sidecar.
+    #[method(name = "getRawTransactionByHash")]
+    async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>>;
+
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "getTransactionByHash")]
     async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>>;
+
+    /// Returns information about a raw transaction by block hash and transaction index position.
+    #[method(name = "getRawTransactionByBlockHashAndIndex")]
+    async fn raw_transaction_by_block_hash_and_index(
+        &self,
+        hash: B256,
+        index: Index,
+    ) -> RpcResult<Option<Bytes>>;
 
     /// Returns information about a transaction by block hash and transaction index position.
     #[method(name = "getTransactionByBlockHashAndIndex")]
@@ -104,6 +117,15 @@ pub trait EthApi {
         hash: B256,
         index: Index,
     ) -> RpcResult<Option<Transaction>>;
+
+    /// Returns information about a raw transaction by block number and transaction index
+    /// position.
+    #[method(name = "getRawTransactionByBlockNumberAndIndex")]
+    async fn raw_transaction_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> RpcResult<Option<Bytes>>;
 
     /// Returns information about a transaction by block number and transaction index position.
     #[method(name = "getTransactionByBlockNumberAndIndex")]
@@ -115,7 +137,7 @@ pub trait EthApi {
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
-    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<TransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<AnyTransactionReceipt>>;
 
     /// Returns the balance of the account of given address.
     #[method(name = "getBalance")]
@@ -209,9 +231,9 @@ pub trait EthApi {
     #[method(name = "maxPriorityFeePerGas")]
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
-    /// Introduced in EIP-4844, returns the current blob gas price in wei.
-    #[method(name = "blobGasPrice")]
-    async fn blob_gas_price(&self) -> RpcResult<U256>;
+    /// Introduced in EIP-4844, returns the current blob base fee in wei.
+    #[method(name = "blobBaseFee")]
+    async fn blob_base_fee(&self) -> RpcResult<U256>;
 
     /// Returns the Transaction fee history
     ///
@@ -223,7 +245,7 @@ pub trait EthApi {
     #[method(name = "feeHistory")]
     async fn fee_history(
         &self,
-        block_count: U64HexOrNumber,
+        block_count: u64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> RpcResult<FeeHistory>;

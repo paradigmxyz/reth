@@ -1,5 +1,8 @@
 //! Round-trip encoding fuzzing for the `eth-wire` crate.
 
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
+
 use alloy_rlp::{Decodable, Encodable};
 use serde::Serialize;
 use std::fmt::Debug;
@@ -45,7 +48,7 @@ macro_rules! fuzz_type_and_name {
     };
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(test)]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};

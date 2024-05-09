@@ -3,3 +3,8 @@ pre-build = [
     # rust-bindgen dependencies: llvm-dev libclang-dev (>= 5.0) clang (>= 5.0)
     "apt-get update && apt-get install --assume-yes --no-install-recommends llvm-dev libclang-6.0-dev clang-6.0"
 ]
+
+[build.env]
+passthrough = [
+    "JEMALLOC_SYS_WITH_LG_PAGE",
+]

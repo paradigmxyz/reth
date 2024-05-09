@@ -11,13 +11,14 @@ use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{IntoRecoveredTransaction, TxHash};
+use reth_primitives::{ChainInfo, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
+
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -97,6 +98,7 @@ where
     }
 
     /// Endless future that [Self::clear_stale_filters] every `stale_filter_ttl` interval.
+    /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
         let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -187,10 +189,9 @@ where
                         (start_block, best_number)
                     }
                 };
-
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(&filter, from_block_number, to_block_number)
+                    .get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -202,7 +203,7 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    pub async fn filter_logs(&self, id: FilterId) -> Result<FilterChanges, FilterError> {
+    pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, FilterError> {
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
             if let FilterKind::Log(ref filter) =
@@ -215,8 +216,7 @@ where
             }
         };
 
-        let logs = self.inner.logs_for_filter(filter).await?;
-        Ok(FilterChanges::Logs(logs))
+        self.inner.logs_for_filter(filter).await
     }
 }
 
@@ -277,7 +277,7 @@ where
     /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    async fn filter_logs(&self, id: FilterId) -> RpcResult<FilterChanges> {
+    async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
         Ok(EthFilter::filter_logs(self, id).await?)
     }
@@ -349,21 +349,33 @@ where
     async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, FilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
+                // for all matching logs in the block
+                // get the block header with the hash
+                let block = self
+                    .provider
+                    .header_by_hash_or_number(block_hash.into())?
+                    .ok_or(ProviderError::HeaderNotFound(block_hash.into()))?;
+
+                // we also need to ensure that the receipts are available and return an error if
+                // not, in case the block hash been reorged
+                let receipts = self
+                    .eth_cache
+                    .get_receipts(block_hash)
+                    .await?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
                 let mut all_logs = Vec::new();
-                // all matching logs in the block, if it exists
-                if let Some(block_number) = self.provider.block_number_for_id(block_hash.into())? {
-                    if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
-                        let filter = FilteredParams::new(Some(filter));
-                        logs_utils::append_matching_block_logs(
-                            &mut all_logs,
-                            &self.provider,
-                            &filter,
-                            (block_hash, block_number).into(),
-                            &receipts,
-                            false,
-                        )?;
-                    }
-                }
+                let filter = FilteredParams::new(Some(filter));
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &self.provider,
+                    &filter,
+                    (block_hash, block.number).into(),
+                    &receipts,
+                    false,
+                    block.timestamp,
+                )?;
+
                 Ok(all_logs)
             }
             FilterBlockOption::Range { from_block, to_block } => {
@@ -382,7 +394,8 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number).await
+                self.get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
+                    .await
             }
         }
     }
@@ -413,8 +426,10 @@ where
         filter: &Filter,
         from_block: u64,
         to_block: u64,
+        chain_info: ChainInfo,
     ) -> Result<Vec<Log>, FilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
+        let best_number = chain_info.best_number;
 
         if to_block - from_block > self.max_blocks_per_filter {
             return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
@@ -423,7 +438,28 @@ where
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        // derive bloom filters from filter input
+        if (to_block == best_number) && (from_block == best_number) {
+            // only one block to check and it's the current best block which we can fetch directly
+            // Note: In case of a reorg, the best block's hash might have changed, hence we only
+            // return early of we were able to fetch the best block's receipts
+            // perf: we're fetching the best block here which is expected to be cached
+            if let Some((block, receipts)) =
+                self.eth_cache.get_block_and_receipts(chain_info.best_hash).await?
+            {
+                logs_utils::append_matching_block_logs(
+                    &mut all_logs,
+                    &self.provider,
+                    &filter_params,
+                    chain_info.into(),
+                    &receipts,
+                    false,
+                    block.header.timestamp,
+                )?;
+            }
+            return Ok(all_logs)
+        }
+
+        // derive bloom filters from filter input, so we can check headers for matching logs
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&filter.topics);
 
@@ -446,7 +482,7 @@ where
                         None => self
                             .provider
                             .block_hash(header.number)?
-                            .ok_or(ProviderError::BlockNotFound(header.number.into()))?,
+                            .ok_or(ProviderError::HeaderNotFound(header.number.into()))?,
                     };
 
                     if let Some(receipts) = self.eth_cache.get_receipts(block_hash).await? {
@@ -457,6 +493,7 @@ where
                             BlockNumHash::new(header.number, block_hash),
                             &receipts,
                             false,
+                            header.timestamp,
                         )?;
 
                         // size check but only if range is multiple blocks, so we always return all
@@ -639,6 +676,7 @@ enum FilterKind {
     Block,
     PendingTransaction(PendingTransactionKind),
 }
+
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]
 pub enum FilterError {

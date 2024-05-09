@@ -12,6 +12,9 @@
 //!
 //! TODO(onbjerg): Find appropriate format for this...
 
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
+
 pub mod codecs;
 pub mod models;
 
@@ -28,6 +31,7 @@ use crate::{
         models::{
             accounts::{AccountBeforeTx, BlockNumberAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
+            client_version::ClientVersion,
             storage_sharded_key::StorageShardedKey,
             ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
         },
@@ -42,7 +46,7 @@ use reth_primitives::{
 use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TableType {
     /// key value table
     Table,
@@ -97,6 +101,7 @@ pub trait TableViewer<R> {
     }
 }
 
+#[macro_export]
 /// Defines all the tables in the database.
 macro_rules! tables {
     (@bool) => { false };
@@ -243,7 +248,7 @@ tables! {
     table CanonicalHeaders<Key = BlockNumber, Value = HeaderHash>;
 
     /// Stores the total difficulty from a block header.
-    table HeaderTD<Key = BlockNumber, Value = CompactU256>;
+    table HeaderTerminalDifficulties<Key = BlockNumber, Value = CompactU256>;
 
     /// Stores the block number corresponding to a header.
     table HeaderNumbers<Key = BlockHash, Value = BlockNumber>;
@@ -266,12 +271,12 @@ tables! {
     table Transactions<Key = TxNumber, Value = TransactionSignedNoHash>;
 
     /// Stores the mapping of the transaction hash to the transaction number.
-    table TxHashNumber<Key = TxHash, Value = TxNumber>;
+    table TransactionHashNumbers<Key = TxHash, Value = TxNumber>;
 
     /// Stores the mapping of transaction number to the blocks number.
     ///
     /// The key is the highest transaction ID in the block.
-    table TransactionBlock<Key = TxNumber, Value = BlockNumber>;
+    table TransactionBlocks<Key = TxNumber, Value = BlockNumber>;
 
     /// Canonical only Stores transaction receipts.
     table Receipts<Key = TxNumber, Value = Receipt>;
@@ -306,7 +311,7 @@ tables! {
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    table AccountHistory<Key = ShardedKey<Address>, Value = BlockNumberList>;
+    table AccountsHistory<Key = ShardedKey<Address>, Value = BlockNumberList>;
 
     /// Stores pointers to block number changeset with changes for each storage key.
     ///
@@ -326,29 +331,29 @@ tables! {
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
-    table StorageHistory<Key = StorageShardedKey, Value = BlockNumberList>;
+    table StoragesHistory<Key = StorageShardedKey, Value = BlockNumberList>;
 
     /// Stores the state of an account before a certain transaction changed it.
     /// Change on state can be: account is created, selfdestructed, touched while empty
     /// or changed balance,nonce.
-    table AccountChangeSet<Key = BlockNumber, Value = AccountBeforeTx, SubKey = Address>;
+    table AccountChangeSets<Key = BlockNumber, Value = AccountBeforeTx, SubKey = Address>;
 
     /// Stores the state of a storage key before a certain transaction changed it.
     /// If [`StorageEntry::value`] is zero, this means storage was not existing
     /// and needs to be removed.
-    table StorageChangeSet<Key = BlockNumberAddress, Value = StorageEntry, SubKey = B256>;
+    table StorageChangeSets<Key = BlockNumberAddress, Value = StorageEntry, SubKey = B256>;
 
     /// Stores the current state of an [`Account`] indexed with `keccak256Address`
     /// This table is in preparation for merkelization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
     /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.
-    table HashedAccount<Key = B256, Value = Account>;
+    table HashedAccounts<Key = B256, Value = Account>;
 
     /// Stores the current storage values indexed with `keccak256Address` and
     /// hash of storage key `keccak256key`.
     /// This table is in preparation for merkelization and calculation of state root.
     /// Benefit for merklization is that hashed addresses/keys are sorted.
-    table HashedStorage<Key = B256, Value = StorageEntry, SubKey = B256>;
+    table HashedStorages<Key = B256, Value = StorageEntry, SubKey = B256>;
 
     /// Stores the current state's Merkle Patricia Tree.
     table AccountsTrie<Key = StoredNibbles, Value = StoredBranchNode>;
@@ -359,16 +364,19 @@ tables! {
     /// Stores the transaction sender for each canonical transaction.
     /// It is needed to speed up execution stage and allows fetching signer without doing
     /// transaction signed recovery
-    table TxSenders<Key = TxNumber, Value = Address>;
+    table TransactionSenders<Key = TxNumber, Value = Address>;
 
     /// Stores the highest synced block number and stage-specific checkpoint of each stage.
-    table SyncStage<Key = StageId, Value = StageCheckpoint>;
+    table StageCheckpoints<Key = StageId, Value = StageCheckpoint>;
 
     /// Stores arbitrary data to keep track of a stage first-sync progress.
-    table SyncStageProgress<Key = StageId, Value = Vec<u8>>;
+    table StageCheckpointProgresses<Key = StageId, Value = Vec<u8>>;
 
     /// Stores the highest pruned block number and prune mode of each prune segment.
     table PruneCheckpoints<Key = PruneSegment, Value = PruneCheckpoint>;
+
+    /// Stores the history of client versions that have accessed the database with write privileges by unix timestamp in seconds.
+    table VersionHistory<Key = u64, Value = ClientVersion>;
 }
 
 // Alias types.
@@ -387,7 +395,7 @@ mod tests {
     #[test]
     fn parse_table_from_str() {
         for table in Tables::ALL {
-            assert_eq!(format!("{:?}", table), table.name());
+            assert_eq!(format!("{table:?}"), table.name());
             assert_eq!(table.to_string(), table.name());
             assert_eq!(Tables::from_str(table.name()).unwrap(), *table);
         }

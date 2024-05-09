@@ -20,7 +20,7 @@ pub trait HashingWriter: Send + Sync {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
-    /// Inserts all accounts into [reth_db::tables::AccountHistory] table.
+    /// Inserts all accounts into [reth_db::tables::AccountsHistory] table.
     ///
     /// # Returns
     ///

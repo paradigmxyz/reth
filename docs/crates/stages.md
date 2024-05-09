@@ -94,10 +94,6 @@ This process continues until all of the headers have been downloaded and written
 
 <br>
 
-## TotalDifficultyStage
-* TODO: explain stage
-<br>
-
 ## BodyStage
 
 Once the `HeaderStage` completes successfully, the `BodyStage` will start execution. The body stage downloads block bodies for all of the new block headers that were stored locally in the database. The `BodyStage` first determines which block bodies to download by checking if the block body has an ommers hash and transaction root. 

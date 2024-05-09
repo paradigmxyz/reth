@@ -1,7 +1,7 @@
 //! Helpers for testing trace calls.
 
 use futures::{Stream, StreamExt};
-use jsonrpsee::core::Error as RpcError;
+use jsonrpsee::core::client::Error as RpcError;
 use reth_primitives::{BlockId, Bytes, TxHash, B256};
 use reth_rpc_api::clients::TraceApiClient;
 use reth_rpc_types::{
@@ -17,6 +17,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+
 /// A type alias that represents the result of a raw transaction trace stream.
 type RawTransactionTraceResult<'a> =
     Pin<Box<dyn Stream<Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>> + 'a>>;
@@ -46,7 +47,6 @@ pub type TraceFilterResult =
 pub type TraceCallResult = Result<TraceResults, (RpcError, TraceCallRequest)>;
 
 /// An extension trait for the Trace API.
-#[async_trait::async_trait]
 pub trait TraceApiExt {
     /// The provider type that is used to make the requests.
     type Provider;
@@ -236,7 +236,6 @@ impl<'a> std::fmt::Debug for ReplayTransactionStream<'a> {
     }
 }
 
-#[async_trait::async_trait]
 impl<T: TraceApiClient + Sync> TraceApiExt for T {
     type Provider = T;
 
@@ -467,10 +466,9 @@ where
                 }
                 (Err((ref err1, ref block1)), Err((ref err2, ref block2))) => {
                     assert_eq!(
-                        format!("{:?}", err1),
-                        format!("{:?}", err2),
-                        "Different errors for block: {:?}",
-                        block1
+                        format!("{err1:?}"),
+                        format!("{err2:?}"),
+                        "Different errors for block: {block1:?}"
                     );
                     assert_eq!(block1, block2, "Mismatch in block ids.");
                 }
@@ -497,17 +495,15 @@ where
                     similar_asserts::assert_eq!(
                         trace1_data,
                         trace2_data,
-                        "Mismatch in trace results for transaction: {:?}",
-                        tx_hash1
+                        "Mismatch in trace results for transaction: {tx_hash1:?}",
                     );
                     assert_eq!(tx_hash1, tx_hash2, "Mismatch in transaction hashes.");
                 }
                 (Err((ref err1, ref tx_hash1)), Err((ref err2, ref tx_hash2))) => {
                     assert_eq!(
-                        format!("{:?}", err1),
-                        format!("{:?}", err2),
-                        "Different errors for transaction: {:?}",
-                        tx_hash1
+                        format!("{err1:?}"),
+                        format!("{err2:?}"),
+                        "Different errors for transaction: {tx_hash1:?}",
                     );
                     assert_eq!(tx_hash1, tx_hash2, "Mismatch in transaction hashes.");
                 }
@@ -556,20 +552,20 @@ mod tests {
         while let Some(result) = stream.next().await {
             match result {
                 Ok((trace_result, tx_hash)) => {
-                    println!("Success for tx_hash {:?}: {:?}", tx_hash, trace_result);
+                    println!("Success for tx_hash {tx_hash:?}: {trace_result:?}");
                     successes += 1;
                     all_results.push(Ok((trace_result, tx_hash)));
                 }
                 Err((error, tx_hash)) => {
-                    println!("Error for tx_hash {:?}: {:?}", tx_hash, error);
+                    println!("Error for tx_hash {tx_hash:?}: {error:?}");
                     failures += 1;
                     all_results.push(Err((error, tx_hash)));
                 }
             }
         }
 
-        println!("Total successes: {}", successes);
-        println!("Total failures: {}", failures);
+        println!("Total successes: {successes}");
+        println!("Total failures: {failures}");
     }
 
     #[tokio::test]
@@ -589,10 +585,10 @@ mod tests {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(trace_result) => {
-                    println!("Success: {:?}", trace_result);
+                    println!("Success: {trace_result:?}");
                 }
                 Err(error) => {
-                    println!("Error: {:?}", error);
+                    println!("Error: {error:?}");
                 }
             }
         }
@@ -611,10 +607,10 @@ mod tests {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(trace) => {
-                    println!("Received trace: {:?}", trace);
+                    println!("Received trace: {trace:?}");
                 }
                 Err(e) => {
-                    println!("Error fetching trace: {:?}", e);
+                    println!("Error fetching trace: {e:?}");
                 }
             }
         }
@@ -641,10 +637,10 @@ mod tests {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(trace) => {
-                    println!("Received trace: {:?}", trace);
+                    println!("Received trace: {trace:?}");
                 }
                 Err(e) => {
-                    println!("Error fetching trace: {:?}", e);
+                    println!("Error fetching trace: {e:?}");
                 }
             }
         }
@@ -667,19 +663,19 @@ mod tests {
         while let Some(result) = stream.next().await {
             match result {
                 Ok(trace_result) => {
-                    println!("Success: {:?}", trace_result);
+                    println!("Success: {trace_result:?}");
                     successes += 1;
                     all_results.push(Ok(trace_result));
                 }
                 Err((error, request)) => {
-                    println!("Error for request {:?}: {:?}", request, error);
+                    println!("Error for request {request:?}: {error:?}");
                     failures += 1;
                     all_results.push(Err((error, request)));
                 }
             }
         }
 
-        println!("Total successes: {}", successes);
-        println!("Total failures: {}", failures);
+        println!("Total successes: {successes}");
+        println!("Total failures: {failures}");
     }
 }

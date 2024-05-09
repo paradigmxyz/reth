@@ -42,8 +42,9 @@ impl TaskDownloader {
     /// # Example
     ///
     /// ```
+    /// use reth_consensus::Consensus;
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
-    /// use reth_interfaces::{consensus::Consensus, p2p::bodies::client::BodiesClient};
+    /// use reth_interfaces::p2p::bodies::client::BodiesClient;
     /// use reth_provider::HeaderProvider;
     /// use std::sync::Arc;
     ///
@@ -117,7 +118,7 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
             while let Poll::Ready(update) = this.updates.poll_next_unpin(cx) {
                 if let Some(range) = update {
                     if let Err(err) = this.downloader.set_download_range(range) {
-                        tracing::error!(target: "downloaders::bodies", ?err, "Failed to set bodies download range");
+                        tracing::error!(target: "downloaders::bodies", %err, "Failed to set bodies download range");
 
                         // Clone the sender ensure its availability. See [PollSender::clone].
                         let mut bodies_tx = this.bodies_tx.clone();
@@ -169,20 +170,19 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
-    use reth_db::test_utils::create_test_rw_db;
-    use reth_interfaces::{p2p::error::DownloadError, test_utils::TestConsensus};
-    use reth_primitives::MAINNET;
-    use reth_provider::ProviderFactory;
+    use reth_consensus::test_utils::TestConsensus;
+    use reth_interfaces::p2p::error::DownloadError;
+    use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn download_one_by_one_on_task() {
         reth_tracing::init_test_tracing();
 
-        let db = create_test_rw_db();
+        let factory = create_test_provider_factory();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(db.db(), &headers);
+        insert_headers(factory.db_ref().db(), &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
@@ -190,7 +190,7 @@ mod tests {
         let downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            factory,
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
@@ -207,12 +207,12 @@ mod tests {
     #[allow(clippy::reversed_empty_ranges)]
     async fn set_download_range_error_returned() {
         reth_tracing::init_test_tracing();
+        let factory = create_test_provider_factory();
 
-        let db = create_test_rw_db();
         let downloader = BodiesDownloaderBuilder::default().build(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone()),
+            factory,
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 

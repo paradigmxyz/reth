@@ -20,8 +20,7 @@ use reth_eth_wire::{
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
-
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -293,7 +292,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
-                debug!(target: "net", ?err, "Failed to respond to received request");
+                debug!(target: "net", %err, "Failed to respond to received request");
             }
         }
     }
@@ -408,7 +407,7 @@ impl ActiveSession {
                 self.poll_disconnect(cx)
             }
             Err(err) => {
-                debug!(target: "net::session", ?err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
+                debug!(target: "net::session", %err, remote_peer_id=?self.remote_peer_id, "could not send disconnect");
                 self.close_on_error(err, cx)
             }
         }
@@ -557,7 +556,7 @@ impl Future for ActiveSession {
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                     };
                     if let Err(err) = res {
-                        debug!(target: "net::session", ?err,  remote_peer_id=?this.remote_peer_id, "failed to send message");
+                        debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to send message");
                         // notify the manager
                         return this.close_on_error(err, cx)
                     }
@@ -614,7 +613,7 @@ impl Future for ActiveSession {
                                         progress = true;
                                     }
                                     OnIncomingMessageOutcome::BadMessage { error, message } => {
-                                        debug!(target: "net::session", ?error, msg=?message,  remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
+                                        debug!(target: "net::session", %error, msg=?message, remote_peer_id=?this.remote_peer_id, "received invalid protocol message");
                                         return this.close_on_error(error, cx)
                                     }
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {
@@ -625,7 +624,7 @@ impl Future for ActiveSession {
                                 }
                             }
                             Err(err) => {
-                                debug!(target: "net::session", ?err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
+                                debug!(target: "net::session", %err, remote_peer_id=?this.remote_peer_id, "failed to receive message");
                                 return this.close_on_error(err, cx)
                             }
                         }
@@ -705,7 +704,7 @@ impl InflightRequest {
 enum OnIncomingMessageOutcome {
     /// Message successfully handled.
     Ok,
-    /// Message is considered to be in violation fo the protocol
+    /// Message is considered to be in violation of the protocol
     BadMessage { error: EthStreamError, message: EthMessage },
     /// Currently no capacity to handle the message
     NoCapacity(ActiveSessionMessage),
@@ -764,12 +763,13 @@ mod tests {
         config::PROTOCOL_BREACH_REQUEST_TIMEOUT, handle::PendingSessionEvent,
         start_pending_incoming_session,
     };
-    use reth_ecies::{stream::ECIESStream, util::pk2id};
+    use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
         EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
         UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
+    use reth_network_types::pk2id;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{

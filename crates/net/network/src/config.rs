@@ -9,16 +9,18 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
-use reth_ecies::util::pk2id;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
+use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET,
+    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+
 // re-export for convenience
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use secp256k1::SecretKey;
@@ -42,10 +44,12 @@ pub struct NetworkConfig<C> {
     pub boot_nodes: HashSet<NodeRecord>,
     /// How to set up discovery over DNS.
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
+    /// Address to use for discovery v4.
+    pub discovery_v4_addr: SocketAddr,
     /// How to set up discovery.
     pub discovery_v4_config: Option<Discv4Config>,
-    /// Address to use for discovery
-    pub discovery_addr: SocketAddr,
+    /// How to set up discovery version 5.
+    pub discovery_v5_config: Option<reth_discv5::Config>,
     /// Address to listen for incoming connections
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
@@ -77,17 +81,6 @@ pub struct NetworkConfig<C> {
     pub tx_gossip_disabled: bool,
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
-    /// Optimism Network Config
-    #[cfg(feature = "optimism")]
-    pub optimism_network_config: OptimismNetworkConfig,
-}
-
-/// Optimism Network Config
-#[cfg(feature = "optimism")]
-#[derive(Debug, Clone, Default)]
-pub struct OptimismNetworkConfig {
-    /// The sequencer HTTP endpoint, if provided via CLI flag
-    pub sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfig ===
@@ -111,10 +104,52 @@ impl<C> NetworkConfig<C> {
         self
     }
 
-    /// Sets the address for the incoming connection listener.
+    /// Sets the config to use for the discovery v5 protocol, with help of the
+    /// [`reth_discv5::ConfigBuilder`].
+    /// ```
+    /// use reth_network::NetworkConfigBuilder;
+    /// use secp256k1::{rand::thread_rng, SecretKey};
+    ///
+    /// let sk = SecretKey::new(&mut thread_rng());
+    /// let network_config = NetworkConfigBuilder::new(sk).build(());
+    /// let fork_id = network_config.status.forkid;
+    /// let network_config = network_config
+    ///     .discovery_v5_with_config_builder(|builder| builder.fork(b"eth", fork_id).build());
+    /// ```
+
+    pub fn discovery_v5_with_config_builder(
+        self,
+        f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::Config,
+    ) -> Self {
+        let network_stack_id = NetworkStackId::id(&self.chain_spec);
+        let fork_id = self.chain_spec.latest_fork_id();
+        let boot_nodes = self.boot_nodes.clone();
+
+        let mut builder = reth_discv5::Config::builder(self.listener_addr)
+            .add_unsigned_boot_nodes(boot_nodes.into_iter());
+
+        if let Some(id) = network_stack_id {
+            builder = builder.fork(id, fork_id)
+        }
+
+        self.set_discovery_v5(f(builder))
+    }
+
+    /// Sets the config to use for the discovery v5 protocol.
+    pub fn set_discovery_v5(mut self, discv5_config: reth_discv5::Config) -> Self {
+        self.discovery_v5_config = Some(discv5_config);
+        self
+    }
+
+    /// Sets the address for the incoming RLPx connection listener.
     pub fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
         self
+    }
+
+    /// Returns the address for the incoming RLPx connection listener.
+    pub fn listener_addr(&self) -> &SocketAddr {
+        &self.listener_addr
     }
 }
 
@@ -143,7 +178,7 @@ pub struct NetworkConfigBuilder {
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
     dns_discovery_config: Option<DnsDiscoveryConfig>,
-    /// How to set up discovery.
+    /// How to set up discovery version 4.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
@@ -176,18 +211,6 @@ pub struct NetworkConfigBuilder {
     block_import: Option<Box<dyn BlockImport>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
-    /// Optimism Network Config Builder
-    #[cfg(feature = "optimism")]
-    optimism_network_config: OptimismNetworkConfigBuilder,
-}
-
-/// Optimism Network Config Builder
-#[cfg(feature = "optimism")]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Default)]
-pub struct OptimismNetworkConfigBuilder {
-    /// The sequencer HTTP endpoint, if provided via CLI flag
-    sequencer_endpoint: Option<String>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -212,8 +235,6 @@ impl NetworkConfigBuilder {
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
-            #[cfg(feature = "optimism")]
-            optimism_network_config: OptimismNetworkConfigBuilder::default(),
             transactions_manager_config: Default::default(),
         }
     }
@@ -327,6 +348,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the discv4 config to use.
+    //
     pub fn discovery(mut self, builder: Discv4ConfigBuilder) -> Self {
         self.discovery_v4_builder = Some(builder);
         self
@@ -416,13 +438,6 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Sets the sequencer HTTP endpoint.
-    #[cfg(feature = "optimism")]
-    pub fn sequencer_endpoint(mut self, endpoint: Option<String>) -> Self {
-        self.optimism_network_config.sequencer_endpoint = endpoint;
-        self
-    }
-
     /// Convenience function for creating a [NetworkConfig] with a noop provider that does nothing.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn build_with_noop_provider(
@@ -456,8 +471,6 @@ impl NetworkConfigBuilder {
             head,
             tx_gossip_disabled,
             block_import,
-            #[cfg(feature = "optimism")]
-                optimism_network_config: OptimismNetworkConfigBuilder { sequencer_endpoint },
             transactions_manager_config,
         } = self;
 
@@ -498,12 +511,13 @@ impl NetworkConfigBuilder {
             boot_nodes,
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
-            discovery_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
+            discovery_v5_config: None,
+            discovery_v4_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
             chain_spec,
-            block_import: block_import.unwrap_or(Box::<ProofOfStakeBlockImport>::default()),
+            block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,
@@ -511,8 +525,6 @@ impl NetworkConfigBuilder {
             extra_protocols,
             fork_filter,
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-            optimism_network_config: OptimismNetworkConfig { sequencer_endpoint },
             transactions_manager_config,
         }
     }

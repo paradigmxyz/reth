@@ -9,10 +9,12 @@ macro_rules! stage_test_suite {
                 let runner = $runner::default();
 
                 // Execute the stage with empty database
-                let input = crate::stage::ExecInput::default();
+                let input = reth_stages_api::ExecInput::default();
 
                 // Run stage execution
                 let result = runner.execute(input).await;
+                reth_provider::StaticFileProviderFactory::static_file_provider(&runner.db().factory).commit().unwrap();
+
                 // Check that the result is returned and the stage does not panic.
                 // The return result with empty db is stage-specific.
                 assert_matches::assert_matches!(result, Ok(_));
@@ -32,7 +34,7 @@ macro_rules! stage_test_suite {
 
                 // Set up the runner
                 let mut runner = $runner::default();
-                let input = crate::stage::ExecInput {
+                let input = reth_stages_api::ExecInput {
                     target: Some(target),
                     checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
                 };
@@ -44,6 +46,8 @@ macro_rules! stage_test_suite {
 
                 // Assert the successful result
                 let result = rx.await.unwrap();
+                reth_provider::StaticFileProviderFactory::static_file_provider(&runner.db().factory).commit().unwrap();
+
                 assert_matches::assert_matches!(
                     result,
                     Ok(ExecOutput { done, checkpoint })
@@ -63,15 +67,17 @@ macro_rules! stage_test_suite {
             async fn [< unwind_no_new_entries_ $name>] () {
                 // Set up the runner
                 let mut runner = $runner::default();
-                let input = crate::stage::UnwindInput::default();
+                let input = reth_stages_api::UnwindInput::default();
 
                 // Seed the database
-                runner.seed_execution(crate::stage::ExecInput::default()).expect("failed to seed");
+                runner.seed_execution(reth_stages_api::ExecInput::default()).expect("failed to seed");
 
                 runner.before_unwind(input).expect("failed to execute before_unwind hook");
 
                 // Run stage unwind
                 let rx = runner.unwind(input).await;
+                reth_provider::StaticFileProviderFactory::static_file_provider(&runner.db().factory).commit().unwrap();
+
                 assert_matches::assert_matches!(
                     rx,
                     Ok(UnwindOutput { checkpoint }) if checkpoint.block_number == input.unwind_to
@@ -92,7 +98,7 @@ macro_rules! stage_test_suite {
 
                 // Set up the runner
                 let mut runner = $runner::default();
-                let execute_input = crate::stage::ExecInput {
+                let execute_input = reth_stages_api::ExecInput {
                     target: Some(target),
                     checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
                 };
@@ -104,6 +110,8 @@ macro_rules! stage_test_suite {
 
                 // Assert the successful execution result
                 let result = rx.await.unwrap();
+                reth_provider::StaticFileProviderFactory::static_file_provider(&runner.db().factory).commit().unwrap();
+
                 assert_matches::assert_matches!(
                     result,
                     Ok(ExecOutput { done, checkpoint })
@@ -117,7 +125,7 @@ macro_rules! stage_test_suite {
 
 
                 // Run stage unwind
-                let unwind_input = crate::stage::UnwindInput {
+                let unwind_input = reth_stages_api::UnwindInput {
                     unwind_to: current_checkpoint,
                     checkpoint: reth_primitives::stage::StageCheckpoint::new(target),
                     bad_block: None,
@@ -157,7 +165,7 @@ macro_rules! stage_test_suite_ext {
 
                 // Set up the runner
                 let mut runner = $runner::default();
-                let input = crate::stage::ExecInput {
+                let input = reth_stages_api::ExecInput {
                     target: Some(current_checkpoint),
                     checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
                 };
@@ -171,6 +179,8 @@ macro_rules! stage_test_suite_ext {
 
                 // Assert the successful result
                 let result = rx.await.unwrap();
+                reth_provider::StaticFileProviderFactory::static_file_provider(&runner.db().factory).commit().unwrap();
+
                 assert_matches::assert_matches!(
                     result,
                     Ok(ExecOutput { done, checkpoint })

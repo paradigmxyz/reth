@@ -16,9 +16,10 @@ use reth_interfaces::p2p::{
 };
 
 use alloy_rlp::Decodable;
+use reth_network_types::PeerId;
 use reth_primitives::{
     ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig,
-    ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, PeerId,
+    ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection,
     B256, U256,
 };
 use rlp::Encodable;
@@ -263,7 +264,6 @@ impl BitfinityEvmClient {
                     ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
                 ),
             ]),
-            rpc_url: Some(rpc),
             ..Default::default()
         };
 

@@ -104,13 +104,13 @@ impl BlockBuffer {
         removed
     }
 
-    /// Discard all blocks that precede finalized block number from the buffer.
-    pub fn remove_old_blocks(&mut self, finalized_number: BlockNumber) {
+    /// Discard all blocks that precede block number from the buffer.
+    pub fn remove_old_blocks(&mut self, block_number: BlockNumber) {
         let mut block_hashes_to_remove = Vec::new();
 
         // discard all blocks that are before the finalized number.
         while let Some(entry) = self.earliest_blocks.first_entry() {
-            if *entry.key() > finalized_number {
+            if *entry.key() > block_number {
                 break
             }
             let block_hashes = entry.remove();
@@ -215,7 +215,7 @@ mod tests {
 
     /// Assert that the block was removed from all buffer collections.
     fn assert_block_removal(buffer: &BlockBuffer, block: &SealedBlockWithSenders) {
-        assert!(buffer.blocks.get(&block.hash()).is_none());
+        assert!(!buffer.blocks.contains_key(&block.hash()));
         assert!(buffer
             .parent_to_child
             .get(&block.parent_hash)

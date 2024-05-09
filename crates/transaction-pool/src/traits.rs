@@ -8,19 +8,21 @@ use crate::{
     AllTransactionsEvents,
 };
 use futures_util::{ready, Stream};
-use reth_eth_wire::HandleAnnouncement;
+use reth_eth_wire::HandleMempoolData;
+use reth_network_types::PeerId;
 use reth_primitives::{
-    kzg::KzgSettings, AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError,
-    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId,
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxEip4844, TxHash, B256, EIP1559_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, U256,
+    kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
+    BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
+    IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
+    SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash,
+    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -35,7 +37,6 @@ use tokio::sync::mpsc::Receiver;
 ///
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
-#[async_trait::async_trait]
 #[auto_impl::auto_impl(Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
@@ -55,19 +56,22 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// p2p network.
     ///
     /// Consumer: P2P
-    async fn add_external_transaction(&self, transaction: Self::Transaction) -> PoolResult<TxHash> {
-        self.add_transaction(TransactionOrigin::External, transaction).await
+    fn add_external_transaction(
+        &self,
+        transaction: Self::Transaction,
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
+        self.add_transaction(TransactionOrigin::External, transaction)
     }
 
     /// Imports all _external_ transactions
     ///
     ///
     /// Consumer: Utility
-    async fn add_external_transactions(
+    fn add_external_transactions(
         &self,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>> {
-        self.add_transactions(TransactionOrigin::External, transactions).await
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send {
+        self.add_transactions(TransactionOrigin::External, transactions)
     }
 
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
@@ -76,31 +80,31 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// given transaction.
     ///
     /// Consumer: Custom
-    async fn add_transaction_and_subscribe(
+    fn add_transaction_and_subscribe(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TransactionEvents>;
+    ) -> impl Future<Output = PoolResult<TransactionEvents>> + Send;
 
     /// Adds an _unvalidated_ transaction into the pool.
     ///
     /// Consumer: RPC
-    async fn add_transaction(
+    fn add_transaction(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TxHash>;
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
     /// Returns a list of results.
     ///
     /// Consumer: RPC
-    async fn add_transactions(
+    fn add_transactions(
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>>;
+    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
 
     /// Returns a new transaction change event stream for the given transaction.
     ///
@@ -114,15 +118,15 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// inserted into the pool that are allowed to be propagated.
     ///
     /// Note: This is intended for networking and will __only__ yield transactions that are allowed
-    /// to be propagated over the network.
+    /// to be propagated over the network, see also [TransactionListenerKind].
     ///
     /// Consumer: RPC/P2P
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
         self.pending_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
-    /// Returns a new Stream that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pool depending on the given [TransactionListenerKind] argument.
+    /// Returns a new [Receiver] that yields transactions hashes for new __pending__ transactions
+    /// inserted into the pending pool depending on the given [TransactionListenerKind] argument.
     fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
@@ -130,7 +134,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
 
-    /// Returns a new Stream that yields blob "sidecars" (blobs w/ assoc. kzg
+    /// Returns a new [Receiver] that yields blob "sidecars" (blobs w/ assoc. kzg
     /// commitments/proofs) for eip-4844 transactions inserted into the pool
     fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
 
@@ -221,6 +225,16 @@ pub trait TransactionPool: Send + Sync + Clone {
         limit: GetPooledTransactionLimit,
     ) -> Vec<PooledTransactionsElement>;
 
+    /// Returns converted [PooledTransactionsElement] for the given transaction hash.
+    ///
+    /// This adheres to the expected behavior of
+    /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
+    ///
+    /// If the transaction is a blob transaction, the sidecar will be included.
+    ///
+    /// Consumer: P2P
+    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement>;
+
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
     /// Consumer: Block production
@@ -288,9 +302,9 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// the pool. Returns hashes already known to the pool.
     ///
     /// Consumer: P2P
-    fn retain_unknown<A>(&self, announcement: &mut A) -> Option<A>
+    fn retain_unknown<A>(&self, announcement: &mut A)
     where
-        A: HandleAnnouncement;
+        A: HandleMempoolData;
 
     /// Returns if the transaction for the given hash is already included in this pool.
     fn contains(&self, tx_hash: &TxHash) -> bool {
@@ -481,8 +495,7 @@ impl PropagateKind {
     /// Returns the peer the transaction was sent to
     pub const fn peer(&self) -> &PeerId {
         match self {
-            PropagateKind::Full(peer) => peer,
-            PropagateKind::Hash(peer) => peer,
+            PropagateKind::Full(peer) | PropagateKind::Hash(peer) => peer,
         }
     }
 }
@@ -490,8 +503,7 @@ impl PropagateKind {
 impl From<PropagateKind> for PeerId {
     fn from(value: PropagateKind) -> Self {
         match value {
-            PropagateKind::Full(peer) => peer,
-            PropagateKind::Hash(peer) => peer,
+            PropagateKind::Full(peer) | PropagateKind::Hash(peer) => peer,
         }
     }
 }
@@ -519,7 +531,7 @@ pub struct NewBlobSidecar {
     /// hash of the EIP-4844 transaction.
     pub tx_hash: TxHash,
     /// the blob transaction sidecar.
-    pub sidecar: BlobTransactionSidecar,
+    pub sidecar: Arc<BlobTransactionSidecar>,
 }
 
 /// Where the transaction originates from.
@@ -568,7 +580,7 @@ impl TransactionOrigin {
 /// known block hash.
 ///
 /// This is used to update the pool state accordingly.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct CanonicalStateUpdate<'a> {
     /// Hash of the tip block.
     pub new_tip: &'a SealedBlock,
@@ -613,10 +625,16 @@ impl<'a> CanonicalStateUpdate<'a> {
     }
 }
 
-impl<'a> fmt::Display for CanonicalStateUpdate<'a> {
+impl fmt::Display for CanonicalStateUpdate<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ hash: {}, number: {}, pending_block_base_fee: {}, pending_block_blob_fee: {:?}, changed_accounts: {}, mined_transactions: {} }}",
-            self.hash(), self.number(), self.pending_block_base_fee, self.pending_block_blob_fee,  self.changed_accounts.len(), self.mined_transactions.len())
+        f.debug_struct("CanonicalStateUpdate")
+            .field("hash", &self.hash())
+            .field("number", &self.number())
+            .field("pending_block_base_fee", &self.pending_block_base_fee)
+            .field("pending_block_blob_fee", &self.pending_block_blob_fee)
+            .field("changed_accounts", &self.changed_accounts.len())
+            .field("mined_transactions", &self.mined_transactions.len())
+            .finish()
     }
 }
 
@@ -739,7 +757,7 @@ pub trait PoolTransaction:
     + Send
     + Sync
     + FromRecoveredPooledTransaction
-    + FromRecoveredTransaction
+    + TryFromRecoveredTransaction
     + IntoRecoveredTransaction
 {
     /// Hash of the transaction.
@@ -793,14 +811,14 @@ pub trait PoolTransaction:
     /// otherwise returns the gas price.
     fn priority_fee_or_price(&self) -> u128;
 
-    /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
-    /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> &TransactionKind;
+    /// Returns the transaction's [`TxKind`], which is the address of the recipient or
+    /// [`TxKind::Create`] if the transaction is a contract creation.
+    fn kind(&self) -> &TxKind;
 
-    /// Returns the recipient of the transaction if it is not a [TransactionKind::Create]
+    /// Returns the recipient of the transaction if it is not a [TxKind::Create]
     /// transaction.
     fn to(&self) -> Option<Address> {
-        (*self.kind()).to()
+        (*self.kind()).to().copied()
     }
 
     /// Returns the input data of this transaction.
@@ -829,10 +847,6 @@ pub trait PoolTransaction:
 
     /// Returns chain_id
     fn chain_id(&self) -> Option<u64>;
-
-    /// Returns whether or not the transaction is an Optimism Deposited transaction.
-    #[cfg(feature = "optimism")]
-    fn is_deposit(&self) -> bool;
 }
 
 /// An extension trait that provides additional interfaces for the
@@ -842,12 +856,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
     /// Returns the number of blobs this transaction has.
-    fn blob_count(&self) -> usize {
-        self.as_eip4844().map(|tx| tx.blob_versioned_hashes.len()).unwrap_or_default()
-    }
-
-    /// Returns the transaction as EIP-4844 transaction if it is one.
-    fn as_eip4844(&self) -> Option<&TxEip4844>;
+    fn blob_count(&self) -> usize;
 
     /// Validates the blob sidecar of the transaction with the given settings.
     fn validate_blob(
@@ -894,27 +903,49 @@ pub enum EthBlobTransactionSidecar {
     Present(BlobTransactionSidecar),
 }
 
+impl EthBlobTransactionSidecar {
+    /// Returns the blob sidecar if it is present
+    pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecar> {
+        match self {
+            EthBlobTransactionSidecar::Present(sidecar) => Some(sidecar),
+            _ => None,
+        }
+    }
+}
+
 impl EthPooledTransaction {
     /// Create new instance of [Self].
+    ///
+    /// Caution: In case of blob transactions, this does marks the blob sidecar as
+    /// [EthBlobTransactionSidecar::Missing]
     pub fn new(transaction: TransactionSignedEcRecovered, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
+
+        #[allow(unreachable_patterns)]
         let gas_cost = match &transaction.transaction {
-            Transaction::Legacy(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip2930(t) => U256::from(t.gas_price) * U256::from(t.gas_limit),
-            Transaction::Eip1559(t) => U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit),
+            Transaction::Legacy(t) => {
+                U256::from(t.gas_price).saturating_mul(U256::from(t.gas_limit))
+            }
+            Transaction::Eip2930(t) => {
+                U256::from(t.gas_price).saturating_mul(U256::from(t.gas_limit))
+            }
+            Transaction::Eip1559(t) => {
+                U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
+            }
             Transaction::Eip4844(t) => {
                 blob_sidecar = EthBlobTransactionSidecar::Missing;
-                U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit)
+                U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
             }
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => U256::ZERO,
+            _ => U256::ZERO,
         };
-        let mut cost: U256 = transaction.value().into();
-        cost += gas_cost;
+        let mut cost = transaction.value();
+        cost = cost.saturating_add(gas_cost);
 
         if let Some(blob_tx) = transaction.as_eip4844() {
-            // add max blob cost
-            cost += U256::from(blob_tx.max_fee_per_blob_gas * blob_tx.blob_gas() as u128);
+            // Add max blob cost using saturating math to avoid overflow
+            cost = cost.saturating_add(U256::from(
+                blob_tx.max_fee_per_blob_gas.saturating_mul(blob_tx.blob_gas() as u128),
+            ));
         }
 
         Self { transaction, cost, encoded_length, blob_sidecar }
@@ -985,13 +1016,13 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
+        #[allow(unreachable_patterns)]
         match &self.transaction.transaction {
             Transaction::Legacy(tx) => tx.gas_price,
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => 0,
+            _ => 0,
         }
     }
 
@@ -1003,12 +1034,12 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        #[allow(unreachable_patterns)]
         match &self.transaction.transaction {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
+            _ => None,
         }
     }
 
@@ -1030,9 +1061,9 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.priority_fee_or_price()
     }
 
-    /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
-    /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> &TransactionKind {
+    /// Returns the transaction's [`TxKind`], which is the address of the recipient or
+    /// [`TxKind::Create`] if the transaction is a contract creation.
+    fn kind(&self) -> &TxKind {
         self.transaction.kind()
     }
 
@@ -1059,12 +1090,6 @@ impl PoolTransaction for EthPooledTransaction {
     fn chain_id(&self) -> Option<u64> {
         self.transaction.chain_id()
     }
-
-    /// Returns whether or not the transaction is an Optimism Deposited transaction.
-    #[cfg(feature = "optimism")]
-    fn is_deposit(&self) -> bool {
-        matches!(self.transaction.transaction, Transaction::Deposit(_))
-    }
 }
 
 impl EthPoolTransaction for EthPooledTransaction {
@@ -1076,8 +1101,11 @@ impl EthPoolTransaction for EthPooledTransaction {
         }
     }
 
-    fn as_eip4844(&self) -> Option<&TxEip4844> {
-        self.transaction.as_eip4844()
+    fn blob_count(&self) -> usize {
+        match &self.transaction.transaction {
+            Transaction::Eip4844(tx) => tx.blob_versioned_hashes.len(),
+            _ => 0,
+        }
     }
 
     fn validate_blob(
@@ -1092,12 +1120,32 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl FromRecoveredTransaction for EthPooledTransaction {
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        // CAUTION: this should not be done for EIP-4844 transactions, as the blob sidecar is
-        // missing.
+impl TryFromRecoveredTransaction for EthPooledTransaction {
+    type Error = TryFromRecoveredTransactionError;
+
+    fn try_from_recovered_transaction(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, Self::Error> {
+        // ensure we can handle the transaction type and its format
+        match tx.tx_type() as u8 {
+            0..=EIP1559_TX_TYPE_ID => {
+                // supported
+            }
+            EIP4844_TX_TYPE_ID => {
+                // doesn't have a blob sidecar
+                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing)
+            }
+            unsupported => {
+                // unsupported transaction type
+                return Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
+                    unsupported,
+                ))
+            }
+        };
+
         let encoded_length = tx.length_without_header();
-        EthPooledTransaction::new(tx, encoded_length)
+        let transaction = EthPooledTransaction::new(tx, encoded_length);
+        Ok(transaction)
     }
 }
 

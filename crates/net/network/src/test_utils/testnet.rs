@@ -14,7 +14,8 @@ use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::{PeerId, MAINNET};
+use reth_network_types::PeerId;
+use reth_primitives::MAINNET;
 use reth_provider::{
     test_utils::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
@@ -491,10 +492,12 @@ impl<Pool> PeerHandle<Pool> {
         self.network.peer_id()
     }
 
+    /// Returns the [`PeersHandle`] from the network.
     pub fn peer_handle(&self) -> &PeersHandle {
         self.network.peers_handle()
     }
 
+    /// Returns the local socket as configured for the network.
     pub fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
     }

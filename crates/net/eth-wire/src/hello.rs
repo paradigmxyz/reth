@@ -2,7 +2,8 @@ use crate::{capability::Capability, EthVersion, ProtocolVersion};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_primitives::{constants::RETH_CLIENT_VERSION, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::constants::RETH_CLIENT_VERSION;
 
 use crate::protocol::Protocol;
 #[cfg(feature = "serde")]
@@ -37,8 +38,8 @@ impl HelloMessageWithProtocols {
     /// Starts a new `HelloMessageProtocolsBuilder`
     ///
     /// ```
-    /// use reth_ecies::util::pk2id;
     /// use reth_eth_wire::HelloMessageWithProtocols;
+    /// use reth_network_types::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
@@ -95,7 +96,7 @@ impl HelloMessageWithProtocols {
 /// Raw rlpx protocol message used in the `p2p` handshake, containing information about the
 /// supported RLPx protocol version and capabilities.
 ///
-/// See als <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
+/// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -119,8 +120,8 @@ impl HelloMessage {
     /// Starts a new `HelloMessageBuilder`
     ///
     /// ```
-    /// use reth_ecies::util::pk2id;
     /// use reth_eth_wire::HelloMessage;
+    /// use reth_network_types::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
@@ -209,7 +210,7 @@ impl HelloMessageBuilder {
 mod tests {
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_ecies::util::pk2id;
+    use reth_network_types::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
 
     use crate::{

@@ -12,7 +12,7 @@
 //!
 //! To avoid this, all blocking or CPU intensive handlers must be spawned to a separate task. See
 //! the [EthApi] handler implementations for examples. The rpc-api traits make no use of the
-//! available jsonrpsee `blocking` attribute to give implementors more freedom because the
+//! available jsonrpsee `blocking` attribute to give implementers more freedom because the
 //! `blocking` attribute and async handlers are mutually exclusive. However, as mentioned above, a
 //! lot of handlers make use of async functions, caching for example, but are also using blocking
 //! disk-io, hence these calls are spawned as futures to a blocking task manually.
@@ -23,6 +23,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod admin;
 mod debug;
@@ -37,11 +38,13 @@ mod trace;
 mod txpool;
 mod web3;
 pub use admin::AdminApi;
-pub use blocking_pool::{BlockingTaskGuard, BlockingTaskPool};
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
-pub use layers::{AuthLayer, AuthValidator, Claims, JwtAuthValidator, JwtError, JwtSecret};
+pub use layers::{
+    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, AuthValidator, Claims,
+    JwtAuthValidator, JwtError, JwtSecret,
+};
 pub use net::NetApi;
 pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
@@ -49,5 +52,4 @@ pub use rpc::RPCApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
-pub mod blocking_pool;
 pub mod result;

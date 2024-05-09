@@ -1,15 +1,14 @@
 use super::headers::client::HeadersRequest;
-use crate::{
-    consensus::{Consensus, ConsensusError},
-    p2p::{
-        bodies::client::{BodiesClient, SingleBodyRequest},
-        error::PeerRequestResult,
-        headers::client::{HeadersClient, SingleHeaderRequest},
-    },
+use crate::p2p::{
+    bodies::client::{BodiesClient, SingleBodyRequest},
+    error::PeerRequestResult,
+    headers::client::{HeadersClient, SingleHeaderRequest},
 };
 use futures::Stream;
+use reth_consensus::{Consensus, ConsensusError};
+use reth_network_types::WithPeerId;
 use reth_primitives::{
-    BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
+    BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, B256,
 };
 use std::{
     cmp::Reverse,
@@ -38,7 +37,7 @@ impl<Client> FullBlockClient<Client> {
     /// Returns a client with Test consensus
     #[cfg(any(test, feature = "test-utils"))]
     pub fn test_client(client: Client) -> Self {
-        Self::new(client, Arc::new(crate::test_utils::TestConsensus::default()))
+        Self::new(client, Arc::new(reth_consensus::test_utils::TestConsensus::default()))
     }
 }
 
@@ -81,12 +80,6 @@ where
         count: u64,
     ) -> FetchFullBlockRangeFuture<Client> {
         let client = self.client.clone();
-
-        // Optimization: if we only want one block, we don't need to wait for the headers request
-        // to complete, and can send the block bodies request right away.
-        let bodies_request =
-            if count == 1 { None } else { Some(client.get_block_bodies(vec![hash])) };
-
         FetchFullBlockRangeFuture {
             start_hash: hash,
             count,
@@ -96,7 +89,7 @@ where
                     limit: count,
                     direction: HeadersDirection::Falling,
                 })),
-                bodies: bodies_request,
+                bodies: None,
             },
             client,
             headers: None,
@@ -150,7 +143,7 @@ where
             BodyResponse::PendingValidation(resp) => {
                 // ensure the block is valid, else retry
                 if let Err(err) = ensure_valid_body_response(&header, resp.data()) {
-                    debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body");
+                    debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                     self.client.report_bad_message(resp.peer_id());
                     self.header = Some(header);
                     self.request.body = Some(self.client.get_block_body(self.hash));
@@ -164,7 +157,7 @@ where
     fn on_block_response(&mut self, resp: WithPeerId<BlockBody>) {
         if let Some(ref header) = self.header {
             if let Err(err) = ensure_valid_body_response(header, resp.data()) {
-                debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body");
+                debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body");
                 self.client.report_bad_message(resp.peer_id());
                 return
             }
@@ -410,7 +403,7 @@ where
     /// Returns the remaining hashes for the bodies request, based on the headers that still exist
     /// in the `root_map`.
     fn remaining_bodies_hashes(&self) -> Vec<B256> {
-        self.pending_headers.iter().map(|h| h.hash()).collect::<Vec<_>>()
+        self.pending_headers.iter().map(|h| h.hash()).collect()
     }
 
     /// Returns the [SealedBlock]s if the request is complete and valid.
@@ -438,7 +431,7 @@ where
                     BodyResponse::PendingValidation(resp) => {
                         // ensure the block is valid, else retry
                         if let Err(err) = ensure_valid_body_response(header, resp.data()) {
-                            debug!(target: "downloaders", ?err,  hash=?header.hash(), "Received wrong body in range response");
+                            debug!(target: "downloaders", %err, hash=?header.hash(), "Received wrong body in range response");
                             self.client.report_bad_message(resp.peer_id());
 
                             // get body that doesn't match, put back into vecdeque, and retry it

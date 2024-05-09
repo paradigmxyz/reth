@@ -75,7 +75,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     /// stored in file.
     pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<RefRow<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallize both?
+            // TODO: is it worth to parallelize both?
 
             // May have false positives
             if filter.contains(key)? {
@@ -143,7 +143,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         mask: usize,
     ) -> Result<Option<RefRow<'_>>, NippyJarError> {
         if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallize both?
+            // TODO: is it worth to parallelize both?
 
             // May have false positives
             if filter.contains(key)? {
@@ -213,13 +213,13 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     ) -> Result<(), NippyJarError> {
         // Find out the offset of the column value
         let offset_pos = self.row as usize * self.jar.columns + column;
-        let value_offset = self.reader.offset(offset_pos) as usize;
+        let value_offset = self.reader.offset(offset_pos)? as usize;
 
         let column_offset_range = if self.jar.rows * self.jar.columns == offset_pos + 1 {
             // It's the last column of the last row
             value_offset..self.reader.size()
         } else {
-            let next_value_offset = self.reader.offset(offset_pos + 1) as usize;
+            let next_value_offset = self.reader.offset(offset_pos + 1)? as usize;
             value_offset..next_value_offset
         };
 

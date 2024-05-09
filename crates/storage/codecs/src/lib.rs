@@ -1,18 +1,27 @@
 //! Compact codec.
+//!
+//! ## Feature Flags
+//!
+//! - `alloy`: [Compact] implementation for various alloy types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![warn(unused_crate_dependencies)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use codecs_derive::*;
+pub use reth_codecs_derive::*;
 
 use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
 use bytes::Buf;
+
+#[cfg(any(test, feature = "alloy"))]
+mod alloy;
 
 /// Trait that implements the `Compact` codec.
 ///

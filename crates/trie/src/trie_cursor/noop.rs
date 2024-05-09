@@ -29,16 +29,16 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
 pub struct NoopAccountTrieCursor;
 
 impl TrieCursor for NoopAccountTrieCursor {
-    /// Seeks within the account trie.
-    fn seek(
+    /// Seeks an exact match within the account trie.
+    fn seek_exact(
         &mut self,
         _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(None)
     }
 
-    /// Seeks an exact match within the account trie.
-    fn seek_exact(
+    /// Seeks within the account trie.
+    fn seek(
         &mut self,
         _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
@@ -57,16 +57,16 @@ impl TrieCursor for NoopAccountTrieCursor {
 pub struct NoopStorageTrieCursor;
 
 impl TrieCursor for NoopStorageTrieCursor {
-    /// Seeks a key in storage tries.
-    fn seek(
+    /// Seeks an exact match in storage tries.
+    fn seek_exact(
         &mut self,
         _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(None)
     }
 
-    /// Seeks an exact match in storage tries.
-    fn seek_exact(
+    /// Seeks a key in storage tries.
+    fn seek(
         &mut self,
         _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {

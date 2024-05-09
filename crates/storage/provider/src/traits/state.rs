@@ -1,12 +1,16 @@
 use super::AccountReader;
-use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts};
+use crate::{
+    providers::StaticFileProviderRWRefMut, BlockHashReader, BlockIdReader, BundleStateWithReceipts,
+    StateRootProvider,
+};
 use auto_impl::auto_impl;
+use reth_db::transaction::{DbTx, DbTxMut};
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
-use reth_trie::updates::TrieUpdates;
+use revm::db::OriginalValuesKnown;
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -98,6 +102,7 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
+#[auto_impl(&, Arc, Box)]
 pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
@@ -215,7 +220,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 /// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 /// * canonical fork, the block on what pending chain was forked from.
-#[auto_impl[Box,&]]
+#[auto_impl(&, Box)]
 pub trait BundleStateDataProvider: Send + Sync {
     /// Return post state
     fn state(&self) -> &BundleStateWithReceipts;
@@ -227,20 +232,16 @@ pub trait BundleStateDataProvider: Send + Sync {
     fn canonical_fork(&self) -> BlockNumHash;
 }
 
-/// A type that can compute the state root of a given post state.
-#[auto_impl[Box,&, Arc]]
-pub trait StateRootProvider: Send + Sync {
-    /// Returns the state root of the `BundleState` on top of the current state.
-    ///
-    /// NOTE: It is recommended to provide a different implementation from
-    /// `state_root_with_updates` since it affects the memory usage during state root
-    /// computation.
-    fn state_root(&self, bundle_state: &BundleStateWithReceipts) -> ProviderResult<B256>;
-
-    /// Returns the state root of the BundleState on top of the current state with trie
-    /// updates to be committed to the database.
-    fn state_root_with_updates(
-        &self,
-        bundle_state: &BundleStateWithReceipts,
-    ) -> ProviderResult<(B256, TrieUpdates)>;
+/// A helper trait for [BundleStateWithReceipts] to write state and receipts to storage.
+pub trait StateWriter {
+    /// Write the data and receipts to the database or static files if `static_file_producer` is
+    /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
+    fn write_to_storage<TX>(
+        self,
+        tx: &TX,
+        static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
+        is_value_known: OriginalValuesKnown,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut + DbTx;
 }

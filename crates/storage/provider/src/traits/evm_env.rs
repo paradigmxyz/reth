@@ -1,5 +1,5 @@
+use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::provider::ProviderResult;
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{BlockHashOrNumber, Header};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 

@@ -54,6 +54,9 @@ pub enum ECIESErrorImpl {
     /// Error when converting to integer
     #[error(transparent)]
     FromInt(std::num::TryFromIntError),
+    /// The encrypted data is not large enough for all fields
+    #[error("encrypted data is not large enough for all fields")]
+    EncryptedDataTooSmall,
     /// Error when trying to split an array beyond its length
     #[error("requested {idx} but array len is {len}")]
     OutOfBounds {
@@ -78,6 +81,9 @@ pub enum ECIESErrorImpl {
     /// a message from the (partially filled) buffer.
     #[error("stream closed due to not being readable")]
     UnreadableStream,
+    // Error when data is not received from peer for a prolonged period.
+    #[error("never received data from remote peer")]
+    StreamTimeout,
 }
 
 impl From<ECIESErrorImpl> for ECIESError {

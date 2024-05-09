@@ -11,17 +11,22 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod admin;
+mod anvil;
 mod bundle;
 mod debug;
 mod engine;
 mod eth;
 mod eth_filter;
 mod eth_pubsub;
+mod ganache;
+mod hardhat;
 mod mev;
 mod net;
+mod optimism;
 mod otterscan;
 mod reth;
 mod rpc;
@@ -64,11 +69,14 @@ pub use clients::*;
 pub mod clients {
     pub use crate::{
         admin::AdminApiClient,
+        anvil::AnvilApiClient,
         bundle::{EthBundleApiClient, EthCallBundleApiClient},
         debug::DebugApiClient,
         engine::{EngineApiClient, EngineEthApiClient},
         eth::EthApiClient,
         eth_filter::EthFilterApiClient,
+        ganache::GanacheApiClient,
+        hardhat::HardhatApiClient,
         mev::MevApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,

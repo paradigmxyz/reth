@@ -2,8 +2,8 @@ use crate::{
     constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer_unchecked,
     revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, B256, U256,
+    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionSignedEcRecovered, TxKind,
+    B256, U256,
 };
 
 #[cfg(feature = "optimism")]
@@ -49,7 +49,18 @@ pub fn fill_block_env_with_coinbase(
 
 /// Return the coinbase address for the given header and chain spec.
 pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
-    if chain_spec.chain == Chain::goerli() && !after_merge {
+    // Clique consensus fills the EXTRA_SEAL (last 65 bytes) of the extra data with the
+    // signer's signature.
+    //
+    // On the genesis block, the extra data is filled with zeros, so we should not attempt to
+    // recover the signer on the genesis block.
+    //
+    // From EIP-225:
+    //
+    // * `EXTRA_SEAL`: Fixed number of extra-data suffix bytes reserved for signer seal.
+    //   * 65 bytes fixed as signatures are based on the standard `secp256k1` curve.
+    //   * Filled with zeros on genesis block.
+    if chain_spec.chain == Chain::goerli() && !after_merge && header.number > 0 {
         recover_header_signer(header).unwrap_or_else(|err| {
             panic!(
                 "Failed to recover goerli Clique Consensus signer from header ({}, {}) using extradata {}: {:?}",
@@ -156,7 +167,9 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
             source_hash: None,
             mint: None,
             is_system_transaction: Some(false),
-            enveloped_tx: None,
+            // The L1 fee is not charged for the EIP-4788 transaction, submit zero bytes for the
+            // enveloped tx size.
+            enveloped_tx: Some(Bytes::default()),
         },
     };
 
@@ -195,10 +208,10 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TransactTo::Call(to),
+                TxKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = tx.chain_id;
             tx_env.nonce = Some(tx.nonce);
@@ -211,10 +224,10 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TransactTo::Call(to),
+                TxKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
@@ -234,10 +247,10 @@ where
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
             tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TransactTo::Call(to),
+                TxKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
@@ -257,10 +270,10 @@ where
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
             tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TransactTo::Call(to),
+                TxKind::Create => TransactTo::create(),
             };
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
@@ -272,7 +285,7 @@ where
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
                 })
                 .collect();
-            tx_env.blob_hashes = tx.blob_versioned_hashes.clone();
+            tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
             tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
         }
         #[cfg(feature = "optimism")]
@@ -282,10 +295,10 @@ where
             tx_env.gas_price = U256::ZERO;
             tx_env.gas_priority_fee = None;
             match tx.to {
-                TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
-                TransactionKind::Create => tx_env.transact_to = TransactTo::create(),
+                TxKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
+                TxKind::Create => tx_env.transact_to = TransactTo::create(),
             }
-            tx_env.value = tx.value.into();
+            tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
             tx_env.nonce = None;
@@ -320,5 +333,20 @@ pub fn fill_op_tx_env<T: AsRef<Transaction>>(
                 enveloped_tx: Some(envelope),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GOERLI;
+
+    #[test]
+    fn test_recover_genesis_goerli_signer() {
+        // just ensures that `block_coinbase` does not panic on the genesis block
+        let chain_spec = GOERLI.clone();
+        let header = chain_spec.genesis_header();
+        let block_coinbase = block_coinbase(&chain_spec, &header, false);
+        assert_eq!(block_coinbase, header.beneficiary);
     }
 }

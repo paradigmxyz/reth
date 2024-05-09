@@ -13,10 +13,7 @@ pub(crate) use runner::{
 };
 
 mod test_db;
-pub use test_db::TestStageDB;
-
-mod stage;
-pub use stage::TestStage;
+pub use test_db::{StorageKind, TestStageDB};
 
 mod set;
 pub use set::TestStages;

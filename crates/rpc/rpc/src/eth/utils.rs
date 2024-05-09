@@ -13,7 +13,7 @@ pub(crate) fn recover_raw_transaction(
         return Err(EthApiError::EmptyRawTransactionData)
     }
 
-    let transaction = PooledTransactionsElement::decode_enveloped(data)
+    let transaction = PooledTransactionsElement::decode_enveloped(&mut data.as_ref())
         .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
     transaction.try_into_ecrecovered().or(Err(EthApiError::InvalidTransactionSignature))

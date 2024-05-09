@@ -1,10 +1,15 @@
 //! Reth task management.
+//!
+//! # Feature Flags
+//!
+//! - `rayon`: Enable rayon thread pool for blocking tasks.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
@@ -14,12 +19,12 @@ use crate::{
 use dyn_clone::DynClone;
 use futures_util::{
     future::{select, BoxFuture},
-    pin_mut, Future, FutureExt, TryFutureExt,
+    Future, FutureExt, TryFutureExt,
 };
 use std::{
     any::Any,
     fmt::{Display, Formatter},
-    pin::Pin,
+    pin::{pin, Pin},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -36,6 +41,9 @@ use tracing_futures::Instrument;
 
 pub mod metrics;
 pub mod shutdown;
+
+#[cfg(feature = "rayon")]
+pub mod pool;
 
 /// A type that can spawn tasks.
 ///
@@ -298,12 +306,6 @@ impl TaskExecutor {
         &self.on_shutdown
     }
 
-    /// Runs a future to completion on this Handle's associated Runtime.
-    #[track_caller]
-    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.handle.block_on(future)
-    }
-
     /// Spawns a future on the tokio runtime depending on the [TaskKind]
     fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
     where
@@ -332,7 +334,7 @@ impl TaskExecutor {
             async move {
                 // Create an instance of IncCounterOnDrop with the counter to increment
                 let _inc_counter_on_drop = IncCounterOnDrop::new(finished_regular_tasks_metrics);
-                pin_mut!(fut);
+                let fut = pin!(fut);
                 let _ = select(on_shutdown, fut).await;
             }
         }
@@ -407,7 +409,7 @@ impl TaskExecutor {
         let task = async move {
             // Create an instance of IncCounterOnDrop with the counter to increment
             let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_metrics);
-            pin_mut!(task);
+            let task = pin!(task);
             let _ = select(on_shutdown, task).await;
         };
 
@@ -709,7 +711,7 @@ mod tests {
     fn test_manager_graceful_shutdown() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle.clone());
+        let manager = TaskManager::new(handle);
         let executor = manager.executor();
 
         let val = Arc::new(AtomicBool::new(false));
@@ -728,9 +730,8 @@ mod tests {
     fn test_manager_graceful_shutdown_many() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle.clone());
+        let manager = TaskManager::new(handle);
         let executor = manager.executor();
-        let _e = executor.clone();
 
         let counter = Arc::new(AtomicUsize::new(0));
         let num = 10;
@@ -754,7 +755,7 @@ mod tests {
     fn test_manager_graceful_shutdown_timeout() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
-        let manager = TaskManager::new(handle.clone());
+        let manager = TaskManager::new(handle);
         let executor = manager.executor();
 
         let timeout = Duration::from_millis(500);

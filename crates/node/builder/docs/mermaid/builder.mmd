@@ -1,0 +1,23 @@
+graph TD;
+    CLI::parse-->NodeCommand
+    NodeCommand--execute-->NodeBuilder
+    subgraph "Builder"
+        NodeBuilder--"with_types"-->NodeBuilderT
+        NodeBuilderT("NodeBuilder(Types)")--"with_components"-->NodeBuilderC
+        NodeBuilderC("NodeBuilder(Types, Components)")--"extend_rpc_modules"-->NodeBuilderC
+        NodeBuilderC--"on_rpc_started"-->NodeBuilderC
+    end
+    NodeBuilderC--"launch"-->launch
+    subgraph launch
+        database("database init")-->tree("blockchain tree init")
+        tree--BuilderContext-->components{"build_components"}
+        subgraph components
+            ComponentsBuilder--"first creates"-->Pool
+            Pool--"then creates"-->PayloadService
+            Pool--"then creates"-->Network
+        end
+        components--"launch rpc"-->RpcContext
+        RpcContext--invokes-->extend_rpc_modules
+        RpcContext--invokes-->on_rpc_started
+    end
+    launch--"FullNode"-->NodeHandle

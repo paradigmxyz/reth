@@ -5,6 +5,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(unreachable_pub, missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
@@ -38,64 +39,6 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
 #[rustfmt::skip]
 #[allow(unreachable_code)]
 pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
-    #[cfg(feature = "compact")]
-    return use_compact(args, input);
-
-    #[cfg(feature = "scale")]
-    return use_scale(args, input);
-
-    #[cfg(feature = "postcard")]
-    return use_postcard(args, input);
-
-    #[cfg(feature = "no_codec")]
-    return no_codec(args, input);
-
-    // no features
-    no_codec(args, input)
-}
-
-#[proc_macro_attribute]
-pub fn use_scale(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let mut ast = parse_macro_input!(input as DeriveInput);
-    let compactable_types = ["u8", "u16", "u32", "i32", "i64", "u64", "f32", "f64"];
-
-    if let syn::Data::Struct(ref mut data) = &mut ast.data {
-        if let syn::Fields::Named(fields) = &mut data.fields {
-            for field in fields.named.iter_mut() {
-                if let syn::Type::Path(ref path) = field.ty {
-                    if !path.path.segments.is_empty() {
-                        let _type = format!("{}", path.path.segments[0].ident);
-                        if compactable_types.contains(&_type.as_str()) {
-                            field.attrs.push(syn::parse_quote! {
-                                #[codec(compact)]
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    quote! {
-        #[derive(parity_scale_codec::Encode, parity_scale_codec::Decode, serde::Serialize, serde::Deserialize)]
-        #ast
-    }
-    .into()
-}
-
-#[proc_macro_attribute]
-pub fn use_postcard(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let ast = parse_macro_input!(input as DeriveInput);
-
-    quote! {
-        #[derive(serde::Serialize, serde::Deserialize)]
-        #ast
-    }
-    .into()
-}
-
-#[proc_macro_attribute]
-pub fn use_compact(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
@@ -174,10 +117,4 @@ pub fn add_arbitrary_tests(args: TokenStream, input: TokenStream) -> TokenStream
         #tests
     }
     .into()
-}
-
-#[proc_macro_attribute]
-pub fn no_codec(_args: TokenStream, input: TokenStream) -> TokenStream {
-    let ast = parse_macro_input!(input as DeriveInput);
-    quote! { #ast }.into()
 }

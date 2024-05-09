@@ -3,6 +3,7 @@
 use crate::{
     message::PeerMessage,
     session::{conn::EthRlpxConnection, Direction, SessionId},
+    PendingSessionHandshakeError,
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
@@ -11,7 +12,7 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_network_api::PeerInfo;
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},
@@ -188,7 +189,7 @@ pub enum PendingSessionEvent {
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
         /// The error that caused the disconnect
-        error: Option<EthStreamError>,
+        error: Option<PendingSessionHandshakeError>,
     },
     /// Thrown when unable to establish a [`TcpStream`](tokio::net::TcpStream).
     OutgoingConnectionError {

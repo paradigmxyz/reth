@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
+
 use alloy_primitives::hex;
-use c_kzg::{KzgCommitment, KzgSettings};
+use c_kzg::KzgSettings;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -10,8 +11,7 @@ use proptest::{
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
 use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, eip4844::kzg_to_versioned_hash,
-    BlobTransactionSidecar, TxEip4844,
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, BlobTransactionSidecar, TxEip4844,
 };
 use revm_primitives::MAX_BLOB_NUMBER_PER_BLOCK;
 use std::sync::Arc;
@@ -62,24 +62,18 @@ fn validate_blob_tx(
             }
         }
 
-        tx.blob_versioned_hashes = blob_sidecar
-            .commitments
-            .iter()
-            .map(|commitment| {
-                kzg_to_versioned_hash(KzgCommitment::from_bytes(&commitment.into_inner()).unwrap())
-            })
-            .collect();
+        tx.blob_versioned_hashes = blob_sidecar.versioned_hashes().collect();
 
         (tx, blob_sidecar)
     };
 
-    let group_id = format!("validate_blob | num blobs: {} | {}", num_blobs, description,);
+    let group_id = format!("validate_blob | num blobs: {num_blobs} | {description}");
 
     // for now we just use the default SubPoolLimit
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |(tx, blob_sidecar)| {
             if let Err(err) = std::hint::black_box(tx.validate_blob(&blob_sidecar, &kzg_settings)) {
-                println!("Validation failed: {:?}", err);
+                println!("Validation failed: {err:?}");
             }
         });
     });

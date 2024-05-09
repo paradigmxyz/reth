@@ -11,6 +11,8 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
+use reth_provider::providers::StaticFileProvider;
+use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
@@ -38,13 +40,19 @@ pub(crate) async fn serve_with_hooks<F: Hook + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     hooks: impl IntoIterator<Item = F>,
+    task_executor: TaskExecutor,
 ) -> eyre::Result<()> {
     let hooks: Vec<_> = hooks.into_iter().collect();
 
     // Start endpoint
-    start_endpoint(listen_addr, handle, Arc::new(move || hooks.iter().for_each(|hook| hook())))
-        .await
-        .wrap_err("Could not start Prometheus endpoint")?;
+    start_endpoint(
+        listen_addr,
+        handle,
+        Arc::new(move || hooks.iter().for_each(|hook| hook())),
+        task_executor,
+    )
+    .await
+    .wrap_err("Could not start Prometheus endpoint")?;
 
     Ok(())
 }
@@ -54,6 +62,7 @@ async fn start_endpoint<F: Hook + 'static>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     hook: Arc<F>,
+    task_executor: TaskExecutor,
 ) -> eyre::Result<()> {
     let make_svc = make_service_fn(move |_| {
         let handle = handle.clone();
@@ -66,10 +75,20 @@ async fn start_endpoint<F: Hook + 'static>(
             }))
         }
     });
+
     let server =
         Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
 
-    tokio::spawn(async move { server.await.expect("Metrics endpoint crashed") });
+    task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
+        if let Err(error) = server
+            .with_graceful_shutdown(async move {
+                let _ = signal.await;
+            })
+            .await
+        {
+            tracing::error!(%error, "metrics endpoint crashed")
+        }
+    });
 
     Ok(())
 }
@@ -79,22 +98,30 @@ pub async fn serve<Metrics>(
     listen_addr: SocketAddr,
     handle: PrometheusHandle,
     db: Metrics,
+    static_file_provider: StaticFileProvider,
     process: metrics_process::Collector,
+    task_executor: TaskExecutor,
 ) -> eyre::Result<()>
 where
     Metrics: DatabaseMetrics + 'static + Send + Sync,
 {
     let db_metrics_hook = move || db.report_metrics();
+    let static_file_metrics_hook = move || {
+        let _ = static_file_provider.report_metrics().map_err(
+            |error| tracing::error!(%error, "Failed to report static file provider metrics"),
+        );
+    };
 
     // Clone `process` to move it into the hook and use the original `process` for describe below.
     let cloned_process = process.clone();
     let hooks: Vec<Box<dyn Hook<Output = ()>>> = vec![
         Box::new(db_metrics_hook),
+        Box::new(static_file_metrics_hook),
         Box::new(move || cloned_process.collect()),
         Box::new(collect_memory_stats),
         Box::new(collect_io_stats),
     ];
-    serve_with_hooks(listen_addr, handle, hooks).await?;
+    serve_with_hooks(listen_addr, handle, hooks, task_executor).await?;
 
     // We describe the metrics after the recorder is installed, otherwise this information is not
     // registered
@@ -102,6 +129,19 @@ where
     describe_gauge!("db.table_pages", "The number of database pages for a table");
     describe_gauge!("db.table_entries", "The number of entries for a table");
     describe_gauge!("db.freelist", "The number of pages on the freelist");
+    describe_gauge!("db.page_size", Unit::Bytes, "The size of a database page (in bytes)");
+    describe_gauge!(
+        "db.timed_out_not_aborted_transactions",
+        "Number of timed out transactions that were not aborted by the user yet"
+    );
+
+    describe_gauge!("static_files.segment_size", Unit::Bytes, "The size of a static file segment");
+    describe_gauge!("static_files.segment_files", "The number of files for a static file segment");
+    describe_gauge!(
+        "static_files.segment_entries",
+        "The number of entries for a static file segment"
+    );
+
     process.describe();
     describe_memory_stats();
     describe_io_stats();
@@ -112,47 +152,47 @@ where
 
 #[cfg(all(feature = "jemalloc", unix))]
 fn collect_memory_stats() {
-    use jemalloc_ctl::{epoch, stats};
     use metrics::gauge;
+    use tikv_jemalloc_ctl::{epoch, stats};
     use tracing::error;
 
-    if epoch::advance().map_err(|error| error!(?error, "Failed to advance jemalloc epoch")).is_err()
+    if epoch::advance().map_err(|error| error!(%error, "Failed to advance jemalloc epoch")).is_err()
     {
         return
     }
 
     if let Ok(value) = stats::active::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.active"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.active"))
     {
         gauge!("jemalloc.active", value as f64);
     }
 
     if let Ok(value) = stats::allocated::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.allocated"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.allocated"))
     {
         gauge!("jemalloc.allocated", value as f64);
     }
 
     if let Ok(value) = stats::mapped::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.mapped"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.mapped"))
     {
         gauge!("jemalloc.mapped", value as f64);
     }
 
     if let Ok(value) = stats::metadata::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.metadata"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.metadata"))
     {
         gauge!("jemalloc.metadata", value as f64);
     }
 
     if let Ok(value) = stats::resident::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.resident"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.resident"))
     {
         gauge!("jemalloc.resident", value as f64);
     }
 
     if let Ok(value) = stats::retained::read()
-        .map_err(|error| error!(?error, "Failed to read jemalloc.stats.retained"))
+        .map_err(|error| error!(%error, "Failed to read jemalloc.stats.retained"))
     {
         gauge!("jemalloc.retained", value as f64);
     }
@@ -205,14 +245,14 @@ fn collect_io_stats() {
     use tracing::error;
 
     let Ok(process) = procfs::process::Process::myself()
-        .map_err(|error| error!(?error, "Failed to get currently running process"))
+        .map_err(|error| error!(%error, "Failed to get currently running process"))
     else {
         return
     };
 
-    let Ok(io) = process.io().map_err(|error| {
-        error!(?error, "Failed to get IO stats for the currently running process")
-    }) else {
+    let Ok(io) = process.io().map_err(
+        |error| error!(%error, "Failed to get IO stats for the currently running process"),
+    ) else {
         return
     };
 

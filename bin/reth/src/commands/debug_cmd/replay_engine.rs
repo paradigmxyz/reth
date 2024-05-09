@@ -4,40 +4,35 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    commands::debug_cmd::engine_api_store::{EngineApiStore, StoredEngineApiMessage},
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
 };
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine};
+use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeaconConsensus};
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_runner::CliContext;
 use reth_config::Config;
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
-use reth_interfaces::consensus::Consensus;
+use reth_consensus::Consensus;
+use reth_db::{init_db, DatabaseEnv};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-#[cfg(not(feature = "optimism"))]
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig};
-#[cfg(feature = "optimism")]
-use reth_node_optimism::{OptimismEngineTypes, OptimismEvmConfig};
+use reth_node_core::engine::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{fs, ChainSpec};
-use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory};
-use reth_revm::EvmProcessorFactory;
+use reth_primitives::{fs, ChainSpec, PruneModes};
+use reth_provider::{
+    providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory,
+    StaticFileProviderFactory,
+};
 use reth_stages::Pipeline;
+use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::noop::NoopTransactionPool;
-use std::{
-    net::{SocketAddr, SocketAddrV4},
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
-use tokio::sync::{mpsc, oneshot};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::oneshot;
 use tracing::*;
 
 /// `reth debug replay-engine` command
@@ -67,10 +62,10 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     db: DatabaseArgs,
 
-    #[clap(flatten)]
+    #[command(flatten)]
     network: NetworkArgs,
 
     /// The path to read engine API messages from.
@@ -96,12 +91,16 @@ impl Command {
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::V4(SocketAddrV4::new(self.network.addr, self.network.port)))
-            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
+            .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 self.network.discovery.port,
-            )))
-            .build(ProviderFactory::new(db, self.chain.clone()))
+            ))
+            .build(ProviderFactory::new(
+                db,
+                self.chain.clone(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+            )?)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -115,45 +114,38 @@ impl Command {
 
         // Add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         // Initialize the database
-        let db =
-            Arc::new(init_db(db_path, DatabaseArguments::default().log_level(self.db.log_level))?);
-        let provider_factory = ProviderFactory::new(db.clone(), self.chain.clone());
+        let db = Arc::new(init_db(db_path, self.db.database_args())?);
+        let provider_factory =
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
-        #[cfg(not(feature = "optimism"))]
-        let evm_config = EthEvmConfig::default();
-
-        #[cfg(feature = "optimism")]
-        let evm_config = OptimismEvmConfig::default();
+        let executor = block_executor!(self.chain.clone());
 
         // Configure blockchain tree
-        let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
-            Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone(), evm_config),
-        );
+        let tree_externals =
+            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
-        let blockchain_db =
-            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
 
         // Set up network
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
                 db.clone(),
                 network_secret_path,
-                data_dir.known_peers_path(),
+                data_dir.known_peers(),
             )
             .await?;
 
@@ -163,7 +155,10 @@ impl Command {
 
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::default();
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+            self.chain.clone(),
+            reth_node_optimism::OptimismEvmConfig::default(),
+        );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             blockchain_db.clone(),
@@ -177,21 +172,29 @@ impl Command {
         #[cfg(feature = "optimism")]
         let (payload_service, payload_builder): (
             _,
-            PayloadBuilderHandle<OptimismEngineTypes>,
+            PayloadBuilderHandle<reth_node_optimism::OptimismEngineTypes>,
         ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
 
         #[cfg(not(feature = "optimism"))]
-        let (payload_service, payload_builder): (_, PayloadBuilderHandle<EthEngineTypes>) =
-            PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
+        let (payload_service, payload_builder): (
+            _,
+            PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
+        ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
 
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
         // Configure the consensus engine
         let network_client = network.fetch_client().await?;
-        let (consensus_engine_tx, consensus_engine_rx) = mpsc::unbounded_channel();
-        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
+        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::new(
             network_client,
-            Pipeline::builder().build(provider_factory),
+            Pipeline::builder().build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),
             Box::new(network),
@@ -200,8 +203,6 @@ impl Command {
             payload_builder,
             None,
             u64::MAX,
-            consensus_engine_tx,
-            consensus_engine_rx,
             EngineHooks::new(),
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
@@ -214,7 +215,7 @@ impl Command {
             let _ = tx.send(res);
         });
 
-        let engine_api_store = EngineApiStore::new(self.engine_api_store.clone());
+        let engine_api_store = EngineMessageStore::new(self.engine_api_store.clone());
         for filepath in engine_api_store.engine_messages_iter()? {
             let contents =
                 fs::read(&filepath).wrap_err(format!("failed to read: {}", filepath.display()))?;
