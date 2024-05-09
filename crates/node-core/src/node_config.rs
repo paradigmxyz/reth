@@ -149,7 +149,7 @@ pub struct NodeConfig {
     pub pruning: PruningArgs,
 
     /// All bitfinity import related arguments
-    pub bitfinity_import_arg: crate::args::BitfinityArgs,
+    pub bitfinity_import_arg: crate::args::BitfinityImportArgs,
 
 }
 

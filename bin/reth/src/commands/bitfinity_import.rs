@@ -16,7 +16,7 @@ use reth_downloaders::{
 };
 use reth_consensus::Consensus;
 use reth_exex::ExExManagerHandle;
-use reth_node_core::{args::BitfinityArgs, dirs::ChainPath};
+use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{ChainSpec, PruneModes, B256};
 use reth_provider::providers::BlockchainProvider;
@@ -45,7 +45,7 @@ pub struct BitfinityImportCommand {
     chain: Arc<ChainSpec>,
 
     /// Bitfinity Related Args
-    bitfinity: BitfinityArgs,
+    bitfinity: BitfinityImportArgs,
 
     provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
 
@@ -71,7 +71,7 @@ impl BitfinityImportCommand {
         config: Option<PathBuf>,
         datadir: ChainPath<DataDirPath>,
         chain: Arc<ChainSpec>,
-        bitfinity: BitfinityArgs,
+        bitfinity: BitfinityImportArgs,
         provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
     ) -> Self {

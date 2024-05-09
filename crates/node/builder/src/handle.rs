@@ -1,6 +1,6 @@
 use crate::node::FullNode;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_node_core::{args::BitfinityArgs, exit::NodeExitFuture};
+use reth_node_core::{args::BitfinityImportArgs, exit::NodeExitFuture};
 use reth_provider::ProviderFactory;
 use std::fmt;
 
@@ -12,7 +12,7 @@ pub struct NodeHandle<Node: FullNodeComponents> {
     /// The exit future of the node.
     pub node_exit_future: NodeExitFuture,
     /// Bitfinity import command.
-    pub bitfinity_import: Option<(ProviderFactory<<Node as FullNodeTypes>::DB>, BitfinityArgs)>,
+    pub bitfinity_import: Option<(ProviderFactory<<Node as FullNodeTypes>::DB>, BitfinityImportArgs)>,
 }
 
 impl<Node: FullNodeComponents> NodeHandle<Node> {

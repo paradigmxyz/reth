@@ -2,7 +2,8 @@
 
 /// BitfinityArgs struct for configuring the bitfinity
 mod bitfinity_args;
-pub use bitfinity_args::BitfinityArgs;
+pub use bitfinity_args::{BitfinityImportArgs, BitfinityExportToEvmArgs};
+
 /// NetworkArg struct for configuring the network
 mod network;
 pub use network::{DiscoveryArgs, NetworkArgs};

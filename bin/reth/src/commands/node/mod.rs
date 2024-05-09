@@ -77,7 +77,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
 
     /// Bitfinity Args
     #[command(flatten)]
-    pub bitfinity: crate::args::BitfinityArgs,
+    pub bitfinity: crate::args::BitfinityImportArgs,
 
     /// All networking related arguments
     #[command(flatten)]

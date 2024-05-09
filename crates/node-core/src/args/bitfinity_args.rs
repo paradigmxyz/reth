@@ -7,7 +7,7 @@ const IC_MAINNET_KEY: &str = "308182301d060d2b0601040182dc7c0503010201060c2b0601
 /// Bitfinity Related Args
 #[derive(Debug, Args, PartialEq, Default, Clone)]
 #[clap(next_help_heading = "Bitfinity Args")]
-pub struct BitfinityArgs {
+pub struct BitfinityImportArgs {
     /// Remote node to connect to
     #[arg(long, short = 'r', value_name = "BITFINITY_RPC_URL")]
     pub rpc_url: String,
@@ -34,4 +34,30 @@ pub struct BitfinityArgs {
     /// Root key for the IC network
     #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
     pub ic_root_key: String,
+
+}
+
+/// Bitfinity Related Args
+#[derive(Debug, Args, PartialEq, Default, Clone)]
+#[clap(next_help_heading = "Bitfinity Args")]
+pub struct BitfinityExportToEvmArgs {
+
+    /// Canister principal
+    /// Default value corresponds to testnet
+    #[arg(long, value_name = "EVMC_PRINCIPAL", default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]
+    pub evmc_principal: String,
+
+    /// Root key for the IC network
+    #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
+    pub ic_root_key: String,
+
+    /// Path to an identity PEM file to perform state recovery IC calls.
+    /// The identity must have permissions to stop the EVM canister and to
+    /// update the blockchain.
+    #[arg(long = "ic-identity-file-path", value_name = "IDENTITY_FILE")]
+    pub ic_identity_file_path: std::path::PathBuf,
+
+    /// Network url
+    #[arg(long = "evm-url")]
+    pub evm_url: String,
 }
