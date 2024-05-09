@@ -315,7 +315,7 @@ where
 {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(SenderRecoveryStage::from_config(self.stages_config.sender_recovery))
+            .add_stage(SenderRecoveryStage::new(self.stages_config.sender_recovery))
             .add_stage(ExecutionStage::from_config(
                 self.executor_factory,
                 self.stages_config.execution,
@@ -329,7 +329,7 @@ where
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct HashingStages {
-    /// ETL configuration
+    /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
 }
 
@@ -337,11 +337,11 @@ impl<DB: Database> StageSet<DB> for HashingStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(MerkleStage::default_unwind())
-            .add_stage(AccountHashingStage::from_config(
+            .add_stage(AccountHashingStage::new(
                 self.stages_config.account_hashing,
                 self.stages_config.etl.clone(),
             ))
-            .add_stage(StorageHashingStage::from_config(
+            .add_stage(StorageHashingStage::new(
                 self.stages_config.storage_hashing,
                 self.stages_config.etl.clone(),
             ))
@@ -353,25 +353,26 @@ impl<DB: Database> StageSet<DB> for HashingStages {
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct HistoryIndexingStages {
-    /// ETL configuration
+    /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
+    /// Prune configuration for every segment that can be pruned
     prune_modes: PruneModes,
 }
 
 impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(TransactionLookupStage::from_config(
+            .add_stage(TransactionLookupStage::new(
                 self.stages_config.transaction_lookup,
                 self.stages_config.etl.clone(),
                 self.prune_modes.transaction_lookup,
             ))
-            .add_stage(IndexStorageHistoryStage::from_config(
+            .add_stage(IndexStorageHistoryStage::new(
                 self.stages_config.index_storage_history,
                 self.stages_config.etl.clone(),
                 self.prune_modes.account_history,
             ))
-            .add_stage(IndexAccountHistoryStage::from_config(
+            .add_stage(IndexAccountHistoryStage::new(
                 self.stages_config.index_account_history,
                 self.stages_config.etl.clone(),
                 self.prune_modes.storage_history,

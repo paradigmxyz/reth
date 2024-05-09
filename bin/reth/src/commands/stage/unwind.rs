@@ -22,11 +22,7 @@ use reth_provider::{
 use reth_prune::PrunerBuilder;
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
-    },
+    stages::{ExecutionStage, ExecutionStageThresholds},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;

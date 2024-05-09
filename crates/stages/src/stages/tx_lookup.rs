@@ -45,12 +45,7 @@ impl Default for TransactionLookupStage {
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
-        Self { chunk_size, etl_config, prune_mode }
-    }
-
-    /// Create new instance of [TransactionLookupStage] from configuration.
-    pub fn from_config(
+    pub fn new(
         config: TransactionLookupConfig,
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,

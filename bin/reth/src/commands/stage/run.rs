@@ -16,7 +16,10 @@ use crate::{
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
-use reth_config::{config::EtlConfig, Config};
+use reth_config::{
+    config::{EtlConfig, HashingConfig, SenderRecoveryConfig},
+    Config,
+};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
@@ -223,7 +226,12 @@ impl Command {
                     );
                     (Box::new(stage), None)
                 }
-                StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
+                StageEnum::Senders => (
+                    Box::new(SenderRecoveryStage::new(SenderRecoveryConfig {
+                        commit_threshold: batch_size,
+                    })),
+                    None,
+                ),
                 StageEnum::Execution => {
                     let executor = block_executor!(self.chain.clone());
                     (
@@ -243,7 +251,7 @@ impl Command {
                     )
                 }
                 StageEnum::TxLookup => (
-                    Box::new(TransactionLookupStage::from_config(
+                    Box::new(TransactionLookupStage::new(
                         config.stages.transaction_lookup,
                         etl_config,
                         prune_modes.transaction_lookup,
@@ -252,16 +260,20 @@ impl Command {
                 ),
                 StageEnum::AccountHashing => (
                     Box::new(AccountHashingStage::new(
-                        1,
-                        config.stages.account_hashing.commit_threshold,
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: config.stages.account_hashing.commit_threshold,
+                        },
                         etl_config,
                     )),
                     None,
                 ),
                 StageEnum::StorageHashing => (
                     Box::new(StorageHashingStage::new(
-                        1,
-                        config.stages.storage_hashing.commit_threshold,
+                        HashingConfig {
+                            clean_threshold: 1,
+                            commit_threshold: config.stages.storage_hashing.commit_threshold,
+                        },
                         etl_config,
                     )),
                     None,
@@ -271,7 +283,7 @@ impl Command {
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (
-                    Box::new(IndexAccountHistoryStage::from_config(
+                    Box::new(IndexAccountHistoryStage::new(
                         config.stages.index_account_history,
                         etl_config,
                         prune_modes.account_history,
@@ -279,7 +291,7 @@ impl Command {
                     None,
                 ),
                 StageEnum::StorageHistory => (
-                    Box::new(IndexStorageHistoryStage::from_config(
+                    Box::new(IndexStorageHistoryStage::new(
                         config.stages.index_storage_history,
                         etl_config,
                         prune_modes.storage_history,

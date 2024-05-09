@@ -31,15 +31,6 @@ pub struct IndexAccountHistoryStage {
 impl IndexAccountHistoryStage {
     /// Create new instance of [IndexAccountHistoryStage].
     pub fn new(
-        commit_threshold: u64,
-        prune_mode: Option<PruneMode>,
-        etl_config: EtlConfig,
-    ) -> Self {
-        Self { commit_threshold, prune_mode, etl_config }
-    }
-
-    /// Create new instance of [IndexAccountHistoryStage] from configuration.
-    pub fn from_config(
         config: IndexHistoryConfig,
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,

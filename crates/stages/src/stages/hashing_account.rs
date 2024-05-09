@@ -44,12 +44,7 @@ pub struct AccountHashingStage {
 
 impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
-    pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
-        Self { clean_threshold, commit_threshold, etl_config }
-    }
-
-    /// Create new instance of [AccountHashingStage] from configuration.
-    pub fn from_config(config: HashingConfig, etl_config: EtlConfig) -> Self {
+    pub fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
         Self {
             clean_threshold: config.clean_threshold,
             commit_threshold: config.commit_threshold,
