@@ -199,7 +199,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         }
 
         let builder = NodeBuilder::new(node_config)
-            .with_database(database.clone())
+            .with_database(database)
             .with_launch_context(ctx.task_executor, data_dir);
         
         launcher(builder, ext).await

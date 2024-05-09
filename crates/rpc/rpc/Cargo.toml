@@ -79,9 +79,6 @@ futures.workspace = true
 derive_more.workspace = true
 dyn-clone.workspace = true
 
-# Bitfinity
-ethereum-json-rpc-client.workspace = true
-
 [dev-dependencies]
 reth-evm-ethereum.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
