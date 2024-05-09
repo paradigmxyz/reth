@@ -12,7 +12,7 @@ pub struct NodeHandle<Node: FullNodeComponents> {
     /// The exit future of the node.
     pub node_exit_future: NodeExitFuture,
     /// Bitfinity import command.
-    pub bitfinity_import: Option<(<Node as FullNodeTypes>::DB, ProviderFactory<<Node as FullNodeTypes>::DB>, BitfinityArgs)>,
+    pub bitfinity_import: Option<(ProviderFactory<<Node as FullNodeTypes>::DB>, BitfinityArgs)>,
 }
 
 impl<Node: FullNodeComponents> NodeHandle<Node> {

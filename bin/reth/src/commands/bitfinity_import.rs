@@ -16,12 +16,11 @@ use reth_downloaders::{
 };
 use reth_consensus::Consensus;
 use reth_exex::ExExManagerHandle;
-use reth_node_builder::NodeHandle;
 use reth_node_core::{args::BitfinityArgs, dirs::ChainPath};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{ChainSpec, PruneModes, B256};
 use reth_provider::providers::BlockchainProvider;
-use reth_provider::{BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, HeaderSyncMode, ProviderError, ProviderFactory, StaticFileProviderFactory};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
@@ -31,8 +30,6 @@ use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
 use tracing::{debug, info};
-
-use super::node;
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Clone)]
@@ -50,9 +47,6 @@ pub struct BitfinityImportCommand {
     /// Bitfinity Related Args
     bitfinity: BitfinityArgs,
 
-    /// The database configuration.
-    db: Arc<DatabaseEnv>,
-
     provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
 
     blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
@@ -66,7 +60,6 @@ impl std::fmt::Debug for BitfinityImportCommand {
             .field("datadir", &self.datadir)
             .field("chain", &self.chain)
             .field("bitfinity", &self.bitfinity)
-            .field("db", &"...")
             .finish()
     }
 }
@@ -79,11 +72,10 @@ impl BitfinityImportCommand {
         datadir: ChainPath<DataDirPath>,
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityArgs,
-        db: Arc<DatabaseEnv>,
         provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
     ) -> Self {
-        Self { config, datadir, chain, bitfinity, db, provider_factory, blockchain_provider }
+        Self { config, datadir, chain, bitfinity, provider_factory, blockchain_provider }
     }
 
     /// Execute `import` command
@@ -102,13 +94,8 @@ impl BitfinityImportCommand {
         }
 
         info!(target: "reth::cli - BitfinityImportCommand", "Database opened");
-        // let provider_factory =
-        //     ProviderFactory::new(self.db.clone(), self.chain.clone(), self.datadir.static_files())?;
 
         let provider_factory = self.provider_factory.clone();
-
-        // debug!(target: "reth::cli - BitfinityImportCommand", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        // init_genesis(provider_factory.clone())?;
 
         let job_executor = JobExecutor::new_with_local_tz();
         
@@ -123,17 +110,8 @@ impl BitfinityImportCommand {
                     let config = config.clone();
                     let provider_factory = provider_factory.clone();
                     Box::pin(async move {
-
-                        import.import(config, provider_factory.clone()).await?;
-
-                        let last_block_number = provider_factory.last_block_number()?;
-                        println!("IMPORT JOB: Last block number: {}", last_block_number);
-                        println!("IMPORT JOB: Last block number: {}", last_block_number);
-                        println!("IMPORT JOB: Last block number: {}", last_block_number);
-                        println!("IMPORT JOB: Last block number: {}", last_block_number);
-                        println!("IMPORT JOB: Last block number: {}", last_block_number);
-
-                        import.blockchain_provider.update_chain_info()?;
+                        import.import(config, provider_factory).await?;
+                        import.update_chain_info()?;
                         Ok(())
                     })
                 }),
@@ -208,6 +186,20 @@ impl BitfinityImportCommand {
         info!(target: "reth::cli - BitfinityImportCommand", "Finishing up");
         Ok(())
     }
+
+    /// Update the chain info tracker with the latest header from the database.
+    fn update_chain_info(&self) -> eyre::Result<()> {
+        let provider = self.blockchain_provider.database_provider_ro()?;
+        let chain_info = provider.chain_info()?;
+        match provider.header_by_number(chain_info.best_number)? {
+            Some(header) => {
+                self.blockchain_provider.set_canonical_head(header.seal(chain_info.best_hash));
+                Ok(())
+            }
+            None => Err(ProviderError::HeaderNotFound(chain_info.best_number.into()))?,
+        }
+    }
+
 
     fn build_import_pipeline<DB, C>(
         &self,

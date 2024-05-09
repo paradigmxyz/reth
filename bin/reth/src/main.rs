@@ -1,8 +1,5 @@
 #![allow(missing_docs)]
 
-use reth::commands::bitfinity_import::BitfinityImportCommand;
-use reth_provider::DatabaseProviderFactory;
-
 // We use jemalloc for performance reasons.
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -14,6 +11,7 @@ compile_error!("Cannot build the `reth` binary with the `optimism` feature flag 
 #[cfg(not(feature = "optimism"))]
 fn main() {
     use reth::cli::Cli;
+    use reth::commands::bitfinity_import::BitfinityImportCommand;
     use reth_node_ethereum::EthereumNode;
 
     reth::sigsegv_handler::install();
@@ -30,11 +28,11 @@ fn main() {
         let config = handle.node.config.config.clone();
         let chain = handle.node.chain_spec().clone();
         let datadir = handle.node.data_dir.clone();
-        let (db, provider_factory, bitfinity ) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");
+        let (provider_factory, bitfinity ) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");
         
         // Init bitfinity import
         {
-            let import = BitfinityImportCommand::new(config, datadir, chain, bitfinity, db, provider_factory, blockchain_provider);
+            let import = BitfinityImportCommand::new(config, datadir, chain, bitfinity, provider_factory, blockchain_provider);
             let _import_handle = import.execute().await?;
         }
 

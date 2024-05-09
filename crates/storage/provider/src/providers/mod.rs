@@ -116,26 +116,6 @@ where
         }
     }
 
-    /// Update the chain info tracker with the latest header from the database.
-    pub fn update_chain_info(&self) -> ProviderResult<()> {
-        let provider = self.database.provider()?;
-
-        let last_block_number = provider.last_block_number()?;
-        println!("last_block_number: {:?}", last_block_number);
-        println!("last_block_number: {:?}", last_block_number);
-        println!("last_block_number: {:?}", last_block_number);
-        println!("last_block_number: {:?}", last_block_number);
-        println!("last_block_number: {:?}", last_block_number);
-
-        let best: ChainInfo = provider.chain_info()?;
-        match provider.header_by_number(best.best_number)? {
-            Some(header) => {
-                self.chain_info.set_canonical_head(header.seal(best.best_hash));
-                Ok(())
-            }
-            None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
-        }
-    }
 }
 
 impl<DB> BlockchainProvider<DB>
