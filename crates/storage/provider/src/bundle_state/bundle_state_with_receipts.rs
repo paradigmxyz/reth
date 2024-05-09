@@ -189,7 +189,7 @@ impl BundleStateWithReceipts {
 
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
+    /// of receipt. This is an expensive operation.
     #[cfg(feature = "optimism")]
     pub fn optimism_receipts_root_slow(
         &self,
