@@ -252,7 +252,7 @@ impl Command {
                 }
                 StageEnum::TxLookup => (
                     Box::new(TransactionLookupStage::new(
-                        config.stages.transaction_lookup,
+                        batch_size,
                         etl_config,
                         prune_modes.transaction_lookup,
                     )),
@@ -260,20 +260,14 @@ impl Command {
                 ),
                 StageEnum::AccountHashing => (
                     Box::new(AccountHashingStage::new(
-                        HashingConfig {
-                            clean_threshold: 1,
-                            commit_threshold: config.stages.account_hashing.commit_threshold,
-                        },
+                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
                         etl_config,
                     )),
                     None,
                 ),
                 StageEnum::StorageHashing => (
                     Box::new(StorageHashingStage::new(
-                        HashingConfig {
-                            clean_threshold: 1,
-                            commit_threshold: config.stages.storage_hashing.commit_threshold,
-                        },
+                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
                         etl_config,
                     )),
                     None,
