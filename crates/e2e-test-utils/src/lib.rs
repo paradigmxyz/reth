@@ -70,7 +70,7 @@ where
 
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        let NodeHandle { node, node_exit_future: _, bitfinity_import: _ } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
             .node(Default::default())
             .launch()

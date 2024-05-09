@@ -33,7 +33,7 @@ fn main() {
     Cli::<RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
-            let NodeHandle { mut node, node_exit_future } =
+            let NodeHandle { mut node, node_exit_future, bitfinity_import: _ } =
                 builder.node(EthereumNode::default()).launch().await?;
 
             // create a new subscription to pending transactions

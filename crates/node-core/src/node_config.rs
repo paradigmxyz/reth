@@ -148,6 +148,9 @@ pub struct NodeConfig {
     /// All pruning related arguments
     pub pruning: PruningArgs,
 
+    /// All bitfinity import related arguments
+    pub bitfinity_import_arg: crate::args::BitfinityArgs,
+
 }
 
 impl NodeConfig {
@@ -549,6 +552,7 @@ impl Default for NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
+            bitfinity_import_arg: Default::default(),
         }
     }
 }

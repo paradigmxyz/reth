@@ -181,6 +181,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             db,
             dev,
             pruning,
+            bitfinity_import_arg: bitfinity,
         };
 
         // Register the prometheus recorder before creating the database,
@@ -200,13 +201,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let builder = NodeBuilder::new(node_config)
             .with_database(database.clone())
             .with_launch_context(ctx.task_executor, data_dir);
-
-        // Init bitfinity import
-        {
-            let import = BitfinityImportCommand::new(config, datadir, chain, bitfinity, database);
-            let _import_handle = import.execute().await?;
-        }
-
+        
         launcher(builder, ext).await
     }
 }

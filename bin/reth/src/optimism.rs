@@ -27,7 +27,7 @@ fn main() {
     }
 
     if let Err(err) = Cli::<RollupArgs>::parse().run(|builder, rollup_args| async move {
-        let NodeHandle { node, node_exit_future } = builder
+        let NodeHandle { node, node_exit_future, bitfinity_import: _ } = builder
             .node(OptimismNode::new(rollup_args.clone()))
             .extend_rpc_modules(move |ctx| {
                 // register sequencer tx forwarder

@@ -1,7 +1,7 @@
 //! Command that initializes the node by importing a chain from a file.
 
 use crate::{
-    commands::import::load_config, dirs::{DataDirPath, MaybePlatformPath}, macros::block_executor, version::SHORT_VERSION
+    commands::import::load_config, dirs::DataDirPath, macros::block_executor, version::SHORT_VERSION
 };
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
@@ -16,9 +16,10 @@ use reth_downloaders::{
 };
 use reth_consensus::Consensus;
 use reth_exex::ExExManagerHandle;
-use reth_node_core::args::BitfinityArgs;
+use reth_node_core::{args::BitfinityArgs, dirs::ChainPath};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{ChainSpec, PruneModes, B256};
+use reth_provider::providers::BlockchainProvider;
 use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory};
 use reth_stages::{
     prelude::*,
@@ -31,12 +32,12 @@ use tokio::sync::watch;
 use tracing::{debug, info};
 
 /// Syncs RLP encoded blocks from a file.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BitfinityImportCommand {
     /// The path to the configuration file to use.
     config: Option<PathBuf>,
 
-    datadir: MaybePlatformPath<DataDirPath>,
+    datadir: ChainPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -48,18 +49,34 @@ pub struct BitfinityImportCommand {
 
     /// The database configuration.
     db: Arc<DatabaseEnv>,
+
+    blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
+}
+
+/// Manually implement `Debug` for `ImportCommand` because BlockchainProvider doesn't implement it.
+impl std::fmt::Debug for BitfinityImportCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImportCommand")
+            .field("config", &self.config)
+            .field("datadir", &self.datadir)
+            .field("chain", &self.chain)
+            .field("bitfinity", &self.bitfinity)
+            .field("db", &"...")
+            .finish()
+    }
 }
 
 impl BitfinityImportCommand {
     /// Create a new `ImportCommand` with the given arguments.
     pub fn new(
         config: Option<PathBuf>,
-        datadir: MaybePlatformPath<DataDirPath>,
+        datadir: ChainPath<DataDirPath>,
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityArgs,
         db: Arc<DatabaseEnv>,
+        blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
     ) -> Self {
-        Self { config, datadir, chain, bitfinity, db }
+        Self { config, datadir, chain, bitfinity, db, blockchain_provider }
     }
 
     /// Execute `import` command
@@ -67,20 +84,19 @@ impl BitfinityImportCommand {
         info!(target: "reth::cli - BitfinityImportCommand", "reth {} starting", SHORT_VERSION);
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or(data_dir.config());
+        let config_path = self.config.clone().unwrap_or(self.datadir.config());
        
         let mut config: Config = load_config(config_path.clone())?;
         info!(target: "reth::cli - BitfinityImportCommand", path = ?config_path, "Configuration loaded");
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
-            config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(self.datadir.data_dir()));
         }
 
         info!(target: "reth::cli - BitfinityImportCommand", "Database opened");
         let provider_factory =
-            ProviderFactory::new(self.db.clone(), self.chain.clone(), data_dir.static_files())?;
+            ProviderFactory::new(self.db.clone(), self.chain.clone(), self.datadir.static_files())?;
 
         // debug!(target: "reth::cli - BitfinityImportCommand", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         // init_genesis(provider_factory.clone())?;
@@ -90,7 +106,6 @@ impl BitfinityImportCommand {
         // Schedule the import job
         {
             let interval = Duration::from_secs(self.bitfinity.import_interval);
-            let db = Arc::clone(&self.db);
             job_executor
             .add_job_with_scheduler(
                 Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
@@ -98,12 +113,9 @@ impl BitfinityImportCommand {
                     let import = self.clone();
                     let config = config.clone();
                     let provider_factory = provider_factory.clone();
-                    let db = db.clone();
-                    // let blockchain_db = blockchain_db.clone();
                     Box::pin(async move {
                         import.import(config, provider_factory).await?;
-                        // blockchain_db.update_chain_info()?;
-                        
+                        import.blockchain_provider.update_chain_info()?;
                         Ok(())
                     })
                 }),
