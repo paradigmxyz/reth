@@ -7937,6 +7937,7 @@ dependencies = [
  "reth-stages",
  "reth-tokio-util",
  "tempfile",
+ "tokio",
  "tokio-stream",
  "tracing",
 ]
