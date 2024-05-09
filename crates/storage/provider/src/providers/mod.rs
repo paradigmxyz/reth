@@ -115,7 +115,6 @@ where
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
     }
-
 }
 
 impl<DB> BlockchainProvider<DB>
