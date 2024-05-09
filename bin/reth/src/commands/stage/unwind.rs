@@ -2,7 +2,7 @@
 
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_config::{Config, PruneConfig};
+use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
@@ -13,7 +13,6 @@ use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
     StaticFileProviderFactory,
 };
-use reth_prune::PrunerBuilder;
 use reth_stages::{
     sets::DefaultStages,
     stages::{
@@ -107,14 +106,7 @@ impl Command {
             let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
 
             // Move all applicable data from database to static files.
-            pipeline.produce_static_files()?;
-
-            // Run the pruner so we don't potentially end up with higher height in the database vs
-            // static files.
-            let mut pruner = PrunerBuilder::new(PruneConfig::default())
-                .prune_delete_limit(usize::MAX)
-                .build(provider_factory);
-            pruner.run(*range.end())?;
+            pipeline.move_to_static_files()?;
 
             pipeline.unwind((*range.start()).saturating_sub(1), None)?;
         } else {
