@@ -209,7 +209,7 @@ impl TrieUpdatesSorted {
     pub fn find_account_node(&self, key: &StoredNibbles) -> Option<(TrieKey, TrieOp)> {
         self.trie_operations
             .iter()
-            .find(|(k, op)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles == key))
+            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles == key))
             .cloned()
     }
 
@@ -218,7 +218,7 @@ impl TrieUpdatesSorted {
         hashed_address: &B256,
         key: &StoredNibblesSubKey,
     ) -> Option<(TrieKey, TrieOp)> {
-        self.trie_operations.iter().find(|(k, op)| {
+        self.trie_operations.iter().find(|(k, _)| {
             matches!(k, TrieKey::StorageNode(address, nibbles) if address == hashed_address && nibbles == key)
         }).cloned()
     }

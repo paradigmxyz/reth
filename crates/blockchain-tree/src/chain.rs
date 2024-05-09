@@ -137,7 +137,7 @@ impl AppendableChain {
             canonical_block_hashes,
             canonical_fork,
         };
-        let (block_state, trie_updates) = Self::validate_and_execute(
+        let (block_state, _) = Self::validate_and_execute(
             block.clone(),
             parent,
             bundle_state_data,
@@ -158,7 +158,7 @@ impl AppendableChain {
         state.set_first_block(block.number);
 
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(Self { chain: Chain::from_block(block, state, trie_updates) })
+        Ok(Self { chain: Chain::from_block(block, state, None) })
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
