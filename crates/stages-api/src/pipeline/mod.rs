@@ -326,7 +326,7 @@ where
             );
             while checkpoint.block_number > to {
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
-                self.listeners.notify(PipelineEvent::Unwind { stage_id, input });
+                self.listeners.notify(PipelineEvent::Unwind { stage_id, input })?;
 
                 let output = stage.unwind(&provider_rw, input);
                 match output {
@@ -352,7 +352,7 @@ where
                         provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
                         self.listeners
-                            .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
+                            .notify(PipelineEvent::Unwound { stage_id, result: unwind_output })?;
 
                         self.provider_factory.static_file_provider().commit()?;
                         provider_rw.commit()?;
@@ -397,7 +397,7 @@ where
                     prev_block = prev_checkpoint.map(|progress| progress.block_number),
                     "Stage reached target block, skipping."
                 );
-                self.listeners.notify(PipelineEvent::Skipped { stage_id });
+                self.listeners.notify(PipelineEvent::Skipped { stage_id })?;
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
@@ -415,7 +415,7 @@ where
                 stage_id,
                 checkpoint: prev_checkpoint,
                 target,
-            });
+            })?;
 
             if let Err(err) = stage.execute_ready(exec_input).await {
                 self.listeners.notify(PipelineEvent::Error { stage_id });
@@ -434,7 +434,7 @@ where
                 stage_id,
                 checkpoint: prev_checkpoint,
                 target,
-            });
+            })?;
 
             let provider_rw = self.provider_factory.provider_rw()?;
             match stage.execute(&provider_rw, exec_input) {
@@ -458,7 +458,7 @@ where
                         },
                         stage_id,
                         result: out.clone(),
-                    });
+                    })?;
 
                     self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
