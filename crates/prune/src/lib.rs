@@ -14,6 +14,7 @@ mod error;
 mod event;
 mod metrics;
 mod pruner;
+pub mod segment_ring;
 pub mod segments;
 
 use crate::metrics::Metrics;
@@ -21,3 +22,5 @@ pub use builder::PrunerBuilder;
 pub use error::PrunerError;
 pub use event::PrunerEvent;
 pub use pruner::{Pruner, PrunerResult, PrunerWithResult};
+pub use segment_ring::{CycleSegments, TableRef, TableRing};
+pub use segments::Segment;

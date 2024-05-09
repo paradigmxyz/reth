@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{segments::SegmentSet, Pruner};
+use crate::Pruner;
 use reth_config::PruneConfig;
 use reth_db::database::Database;
 use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
@@ -81,11 +81,9 @@ impl PrunerBuilder {
 
     /// Builds a [Pruner] from the current configuration.
     pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
-        let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
-
         Pruner::new(
             provider_factory,
-            segments.into_vec(),
+            self.segments,
             self.block_interval,
             self.prune_delete_limit,
             self.max_reorg_depth,

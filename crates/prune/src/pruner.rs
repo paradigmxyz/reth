@@ -1,18 +1,13 @@
 //! Support for pruning.
 
 use crate::{
-    segments,
-    segments::{PruneInput, Segment},
-    Metrics, PrunerError, PrunerEvent,
+    segments::PruneInput, CycleSegments, Metrics, PrunerError, PrunerEvent, TableRef, TableRing,
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    BlockNumber, FinishedExExHeight, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
-    PruneSegment, StaticFileSegment,
+    BlockNumber, FinishedExExHeight, PruneLimiter, PruneModes, PruneProgress, PruneSegment,
 };
-use reth_provider::{
-    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
-};
+use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
@@ -34,7 +29,7 @@ type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
 #[derive(Debug)]
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
-    segments: Vec<Box<dyn Segment<DB>>>,
+    prune_modes: PruneModes,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
@@ -51,6 +46,8 @@ pub struct Pruner<DB> {
     timeout: Option<Duration>,
     /// The finished height of all ExEx's.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
+    /// The next static file table to prune, ensuring fair pruning between static file tables.
+    current_table: TableRef,
     #[doc(hidden)]
     metrics: Metrics,
     listeners: EventListeners<PrunerEvent>,
@@ -60,7 +57,7 @@ impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        segments: Vec<Box<dyn Segment<DB>>>,
+        prune_modes: PruneModes,
         min_block_interval: usize,
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
@@ -69,13 +66,14 @@ impl<DB: Database> Pruner<DB> {
     ) -> Self {
         Self {
             provider_factory,
-            segments,
+            prune_modes,
             min_block_interval,
             previous_tip_block_number: None,
             delete_limit_per_block: delete_limit,
             prune_max_blocks_per_run,
             timeout,
             finished_exex_height,
+            current_table: TableRef::default(),
             metrics: Metrics::default(),
             listeners: Default::default(),
         }
@@ -170,17 +168,18 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
         limiter: &mut PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let static_file_segments = self.static_file_segments();
-        let segments = static_file_segments
-            .iter()
-            .map(|segment| (segment, PrunePurpose::StaticFile))
-            .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
+        let prune_modes = &self.prune_modes;
+        let mut segments = TableRing::new(
+            provider.static_file_provider().clone(),
+            self.current_table,
+            prune_modes,
+        );
 
         let mut stats = PrunerStats::new();
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in segments {
+        for (segment, purpose) in &mut segments {
             if limiter.is_limit_reached() {
                 break
             }
@@ -245,37 +244,9 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
+        self.current_table = segments.current_table();
+
         Ok((stats, pruned, progress))
-    }
-
-    /// Returns pre-configured segments that needs to be pruned according to the highest
-    /// static_files for [PruneSegment::Transactions], [PruneSegment::Headers] and
-    /// [PruneSegment::Receipts].
-    fn static_file_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
-        let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
-
-        let static_file_provider = self.provider_factory.static_file_provider();
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions)
-        {
-            segments
-                .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers)
-        {
-            segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
-        {
-            segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        segments
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.
@@ -335,7 +306,7 @@ mod tests {
 
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::{FinishedExExHeight, MAINNET};
+    use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
     use reth_provider::ProviderFactory;
 
     #[test]
@@ -348,8 +319,15 @@ mod tests {
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let mut pruner =
-            Pruner::new(provider_factory, vec![], 5, 0, 5, None, finished_exex_height_rx);
+        let mut pruner = Pruner::new(
+            provider_factory,
+            PruneModes::default(),
+            5,
+            0,
+            5,
+            None,
+            finished_exex_height_rx,
+        );
 
         // No last pruned block number was set before
         let first_block_number = 1;
