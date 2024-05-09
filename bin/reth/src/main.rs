@@ -30,11 +30,11 @@ fn main() {
         let config = handle.node.config.config.clone();
         let chain = handle.node.chain_spec().clone();
         let datadir = handle.node.data_dir.clone();
-        let (db, bitfinity ) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");
+        let (db, provider_factory, bitfinity ) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");
         
         // Init bitfinity import
         {
-            let import = BitfinityImportCommand::new(config, datadir, chain, bitfinity, db, blockchain_provider);
+            let import = BitfinityImportCommand::new(config, datadir, chain, bitfinity, db, provider_factory, blockchain_provider);
             let _import_handle = import.execute().await?;
         }
 

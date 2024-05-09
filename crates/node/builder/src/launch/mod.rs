@@ -461,7 +461,7 @@ where
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(rx, full_node.config.debug.terminate),
             node: full_node,
-            bitfinity_import: Some((database, ctx.node_config().bitfinity_import_arg.clone()))};
+            bitfinity_import: Some((database, ctx.provider_factory().clone(), ctx.node_config().bitfinity_import_arg.clone()))};
 
         Ok(handle)
     }
