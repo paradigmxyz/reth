@@ -23,4 +23,6 @@ futures.workspace = true
 alloy-primitives.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 alloy-contract ={ git = "https://github.com/alloy-rs/alloy", rev = "77c1240"}
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+
 

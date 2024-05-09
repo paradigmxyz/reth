@@ -5464,6 +5464,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-tracing",
+ "rusqlite",
  "tokio",
 ]
 

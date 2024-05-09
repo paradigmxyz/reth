@@ -5,7 +5,7 @@ use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
-
+use rusqlite::Connection;
 sol! {
     #[sol(rpc)]
     contract L2OutputOracle {
@@ -61,14 +61,36 @@ pub struct L2Output {
     l1_block_number: u64,
 }
 
+/// Create SQLite tables if they do not exist.
+fn create_tables(connection: &mut Connection) -> rusqlite::Result<()> {
+    // Create deposits and withdrawals tables
+    connection.execute(
+        r#"
+            CREATE TABLE IF NOT EXISTS deposits (
+                output_root      TEXT PRIMARY KEY,
+                l2_block_number     INTEGER NOT NULL,
+                l1_block_hash          TEXT NOT NULL UNIQUE,
+                l1_block_number INTEGER NOT NULL,
+            );
+            "#,
+        (),
+    )?;
+    info!("Initialized database tables");
+
+    Ok(())
+}
+
 async fn init_exex<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
+    mut connection: Connection,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
-    Ok(op_proposer_exex(ctx))
+    create_tables(&mut connection)?;
+    Ok(OpProposer::new().spawn(ctx, connection)?)
 }
 
 async fn op_proposer_exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
+    _connection: Connection,
 ) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
@@ -98,6 +120,7 @@ impl OpProposer {
     fn spawn<Node: FullNodeComponents>(
         &self,
         mut ctx: ExExContext<Node>,
+        _connection: Connection,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         //TODO: initialization logic
 
@@ -127,7 +150,10 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("OpProposer", |ctx| async move { OpProposer::new().spawn(ctx) })
+            .install_exex("OpProposer", |ctx| async move {
+                let connection = Connection::open("l2_outputs.db")?;
+                init_exex(ctx, connection).await
+            })
             .launch()
             .await?;
 
