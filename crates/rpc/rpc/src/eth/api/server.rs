@@ -385,7 +385,11 @@ where
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
+    async fn send_raw_transaction(&self, _tx: Bytes) -> Result<B256> {
+        //
+        // This forwards the raw transaction to the configured RPC URL.
+        // It is currently disabled because the RPC URL provider is usually the one of the evm-block-extractor
+        //
         // let Some(rpc_url) = &self.provider().chain_spec().rpc_url else {
         //     return Err(internal_rpc_err("no url found for eth_sendRawTransaction"))
         // };
