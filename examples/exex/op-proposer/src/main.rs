@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use alloy_network::{EthereumSigner, Network};
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_wallet::LocalWallet;
 use alloy_sol_types::sol;
@@ -10,8 +10,12 @@ use futures::Future;
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
+use reth_primitives::{BlockId, BlockNumberOrTag};
+use reth_provider::StateProviderFactory;
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
+
+use crate::L2OutputOracle::L2OutputOracleCalls;
 sol! {
     #[sol(rpc)]
     contract L2OutputOracle {
@@ -155,23 +159,58 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         mut ctx: ExExContext<Node>,
         _connection: Connection,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
+        let l2_oo = L2OutputOracle::new(self.l2_output_oracle, self.provider.clone());
+        let l2_provider = ctx.provider().clone();
         //TODO: initialization logic
         let fut = async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 match &notification {
                     ExExNotification::ChainCommitted { new } => {
+                        let current_block = ctx.head.number.clone();
+
                         // TODO: Fetch the next block number from the L2OutputOracle contract
-                        // If the next block number is equal to the current cononical tip
-                        //  - Get the account root of the l2_to_l1_message_passer contract
-                        //  - Construct the L2Output.
-                        //  - Send the L2Output to the L2OutputOracle contract
-                        //  - Write the L2Output to the database
+                        let next_block = l2_oo.latestBlockNumber().call().await?._0.to::<u64>();
+
+                        if next_block == current_block {
+                            let l1_block = self
+                                .provider
+                                .get_block(BlockId::Number(BlockNumberOrTag::Latest), false)
+                                .await?;
+                            if let Some(l1_block) = l1_block {
+                                // Get the l2_to_l1_message_passer accounts root
+                                let state_provider = l2_provider.state_by_block_id(
+                                    BlockId::Number(BlockNumberOrTag::Number(current_block)),
+                                )?;
+                                let proof =
+                                    state_provider.proof(self.l2_to_l1_message_passer, &[])?;
+                                // Propose the L2Output to the L2OutputOracle contract
+                                l2_oo
+                                    .proposeL2Output(
+                                        proof.storage_root,
+                                        U256::from(next_block),
+                                        l1_block.header.hash.unwrap(),
+                                        U256::from(l1_block.header.number.unwrap()),
+                                    )
+                                    .send()
+                                    .await?;
+
+                                info!(
+                                    output_root = ?proof.storage_root,
+                                    l2_block_number = ?next_block,
+                                    l1_block_hash = ?l1_block.header.hash.unwrap(),
+                                    l1_block_number = ?l1_block.header.number.unwrap(),
+                                    "Successfully Proposed L2Output"
+                                );
+                            }
+                        }
                         info!(committed_chain = ?new.range(), "Received commit");
                     }
                     ExExNotification::ChainReorged { old, new } => {
+                        // TODO:
                         info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
                     }
                     ExExNotification::ChainReverted { old } => {
+                        // TODO:
                         info!(reverted_chain = ?old.range(), "Received revert");
                     }
                 };
