@@ -160,9 +160,11 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                 //TODO: package this into function
                 match &notification {
                     ExExNotification::ChainReorged { old, new } => {
-                        // for block in old..new {
-                        //     l2_output_db.delete_l2_output(block)?;
-                        // }
+                        let from = old.blocks().iter().last().expect("TODO: Can we expect here?").0;
+                        let to = new.blocks().iter().last().expect("TODO: Can we expect here?").0;
+                        for block_number in *from..=*to {
+                            l2_output_db.delete_l2_output(block_number)?;
+                        }
                     }
                     ExExNotification::ChainReverted { old } => {
                         // TODO:
