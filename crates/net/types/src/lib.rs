@@ -11,12 +11,18 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_primitives::B512;
 use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 use std::{net::IpAddr, str::FromStr};
 
 // Re-export PeerId for ease of use.
 pub use enr::Enr;
-pub use reth_rpc_types::{NodeRecord, PeerId};
+
+/// Alias for a peer identifier
+pub type PeerId = B512;
+
+pub mod node_record;
+pub use node_record::{NodeRecord, NodeRecordParseError};
 
 /// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
 /// uncompressed pubkey.

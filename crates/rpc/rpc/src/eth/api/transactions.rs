@@ -24,10 +24,7 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
-use reth_revm::{
-    database::StateProviderDatabase,
-    tracing::{TracingInspector, TracingInspectorConfig},
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
@@ -47,6 +44,7 @@ use revm::{
     },
     GetInspector, Inspector,
 };
+use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::future::Future;
 
 use crate::eth::revm_utils::FillableTransaction;

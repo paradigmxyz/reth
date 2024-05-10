@@ -114,13 +114,13 @@ impl Database {
         if reverts.accounts.len() > 1 {
             eyre::bail!("too many blocks in account reverts");
         }
-        for (address, account) in
-            reverts.accounts.first().ok_or(eyre::eyre!("no account reverts"))?
-        {
-            tx.execute(
-                "INSERT INTO account_revert (block_number, address, data) VALUES (?, ?, ?) ON CONFLICT(block_number, address) DO UPDATE SET data = excluded.data",
-                (block.header.number.to_string(), address.to_string(), serde_json::to_string(account)?),
-            )?;
+        if let Some(account_reverts) = reverts.accounts.into_iter().next() {
+            for (address, account) in account_reverts {
+                tx.execute(
+                    "INSERT INTO account_revert (block_number, address, data) VALUES (?, ?, ?) ON CONFLICT(block_number, address) DO UPDATE SET data = excluded.data",
+                    (block.header.number.to_string(), address.to_string(), serde_json::to_string(&account)?),
+                )?;
+            }
         }
 
         for PlainStorageChangeset { address, wipe_storage, storage } in changeset.storage {
@@ -139,19 +139,19 @@ impl Database {
         if reverts.storage.len() > 1 {
             eyre::bail!("too many blocks in storage reverts");
         }
-        for PlainStorageRevert { address, wiped, storage_revert } in
-            reverts.storage.into_iter().next().ok_or(eyre::eyre!("no storage reverts"))?
-        {
-            let storage = storage_revert
-                .into_iter()
-                .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
-                .collect::<Vec<_>>();
-            let wiped_storage = if wiped { get_storages(&tx, address)? } else { Vec::new() };
-            for (key, data) in StorageRevertsIter::new(storage, wiped_storage) {
-                tx.execute(
+        if let Some(storage_reverts) = reverts.storage.into_iter().next() {
+            for PlainStorageRevert { address, wiped, storage_revert } in storage_reverts {
+                let storage = storage_revert
+                    .into_iter()
+                    .map(|(k, v)| (B256::new(k.to_be_bytes()), v))
+                    .collect::<Vec<_>>();
+                let wiped_storage = if wiped { get_storages(&tx, address)? } else { Vec::new() };
+                for (key, data) in StorageRevertsIter::new(storage, wiped_storage) {
+                    tx.execute(
                     "INSERT INTO storage_revert (block_number, address, key, data) VALUES (?, ?, ?, ?) ON CONFLICT(block_number, address, key) DO UPDATE SET data = excluded.data",
                     (block.header.number.to_string(), address.to_string(), key.to_string(), data.to_string()),
                 )?;
+                }
             }
         }
 

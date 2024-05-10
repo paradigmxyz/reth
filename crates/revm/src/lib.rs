@@ -22,4 +22,3 @@ pub mod test_utils;
 
 // Convenience re-exports.
 pub use revm::{self, *};
-pub use revm_inspectors::*;

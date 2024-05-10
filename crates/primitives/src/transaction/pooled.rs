@@ -1,8 +1,6 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 
-#![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
-
 use super::error::TransactionConversionError;
 use crate::{
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, Signature, Transaction,

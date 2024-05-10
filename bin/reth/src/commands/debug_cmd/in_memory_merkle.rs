@@ -23,7 +23,7 @@ use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec, Receipts
 use reth_provider::{
     AccountExtReader, BundleStateWithReceipts, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory, StorageReader,
+    StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::TaskExecutor;

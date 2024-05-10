@@ -18,7 +18,11 @@ use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ProviderFactory;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{SocketAddrV4, SocketAddrV6},
+    path::PathBuf,
+    sync::Arc,
+};
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
@@ -143,19 +147,23 @@ impl Command {
         {
             network_config = network_config.discovery_v5_with_config_builder(|builder| {
                 let DiscoveryArgs {
-                    discv5_addr,
-                    discv5_port,
+                    discv5_addr: discv5_addr_ipv4,
+                    discv5_addr_ipv6,
+                    discv5_port: discv5_port_ipv4,
+                    discv5_port_ipv6,
                     discv5_lookup_interval,
                     discv5_bootstrap_lookup_interval,
                     discv5_bootstrap_lookup_countdown,
                     ..
                 } = self.discovery;
+
                 builder
                     .discv5_config(
-                        discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
-                            discv5_addr,
-                            discv5_port,
-                        ))))
+                        discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                            discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
+                            discv5_addr_ipv6
+                                .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                        ))
                         .build(),
                     )
                     .lookup_interval(discv5_lookup_interval)
