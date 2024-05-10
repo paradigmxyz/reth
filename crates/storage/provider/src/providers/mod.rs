@@ -60,8 +60,8 @@ mod chain_info;
 use chain_info::ChainInfoTracker;
 
 mod consistent_view;
+use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
-use reth_rpc_types::engine::ForkchoiceState;
 
 /// The main type for interacting with the blockchain.
 ///
