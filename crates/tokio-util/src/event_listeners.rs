@@ -3,6 +3,8 @@ use tokio::sync::broadcast::{self, error::SendError, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{error, warn};
 
+const DEFAULT_BROADCAST_CHANNEL_SIZE: usize = 1000;
+
 /// A bounded broadcast channel for a task.
 #[derive(Debug)]
 pub struct EventListeners<T> {
@@ -23,14 +25,14 @@ impl<T: Clone> Clone for EventListeners<T> {
 
 impl<T: Clone + Send + Sync + 'static> Default for EventListeners<T> {
     fn default() -> Self {
-        Self::new()
+        Self::new(DEFAULT_BROADCAST_CHANNEL_SIZE)
     }
 }
 
 impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
     /// Creates a new `EventListeners`.
-    pub fn new() -> Self {
-        let (sender, _) = broadcast::channel(100);
+    pub fn new(broadcast_channel_size: usize) -> Self {
+        let (sender, _) = broadcast::channel(broadcast_channel_size);
         Self { sender, subscriber_count: 0.into() }
     }
 
