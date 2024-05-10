@@ -22,8 +22,6 @@ mod account;
 pub mod basefee;
 mod block;
 mod chain;
-#[cfg(feature = "alloy-compat")]
-mod compat;
 #[cfg(feature = "zstd-codec")]
 mod compression;
 pub mod constants;
