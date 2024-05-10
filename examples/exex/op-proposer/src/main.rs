@@ -35,12 +35,12 @@ pub struct L2BlockInfo {
     pub number: u64,
     pub parent_hash: FixedBytes<32>,
     pub timestamp: u64,
-    pub l1_origin: BlockAttributes,
+    pub l1_origin: L1BlockAttributes,
 }
 
 #[derive(Deserialize, Debug)]
 
-pub struct BlockAttributes {
+pub struct L1BlockAttributes {
     hash: FixedBytes<32>,
     number: u64,
 }
@@ -97,7 +97,7 @@ async fn init_exex<Node: FullNodeComponents>(
     .spawn(ctx, connection)?)
 }
 
-async fn get_l1_block_attributes<T, N, P>(provider: Arc<P>) -> eyre::Result<BlockAttributes>
+async fn get_l1_block_attributes<T, N, P>(provider: Arc<P>) -> eyre::Result<L1BlockAttributes>
 where
     T: Transport + Clone,
     N: Network,
@@ -111,7 +111,7 @@ where
     let l1_block_hash = l1_block.header.hash.ok_or(eyre!("L1 Block hash not found"))?;
     let l1_block_number = l1_block.header.number.ok_or(eyre!("L1 block number not found"))?;
 
-    Ok(BlockAttributes { hash: l1_block_hash, number: l1_block_number })
+    Ok(L1BlockAttributes { hash: l1_block_hash, number: l1_block_number })
 }
 
 async fn get_l2_safe_head<T, N, P>(provider: Arc<P>) -> eyre::Result<u64>
