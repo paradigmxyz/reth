@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, str::FromStr, sync::Arc};
 
 use alloy_network::{EthereumSigner, Network};
 use alloy_primitives::{Address, FixedBytes, U256};
@@ -38,11 +38,10 @@ impl L2OutputDb {
         self.connection.execute(
             r#"
         CREATE TABLE IF NOT EXISTS l2Outputs (
-            l2_block_number     INTEGER NOT NULL PRIMARY KEY, //TODO: decide on the pk
+            l2_block_number     INTEGER NOT NULL PRIMARY KEY,
             output_root            TEXT NOT,
             l1_block_hash          TEXT NOT NULL UNIQUE,
-            l1_block_number INTEGER NOT NULL, //TODO: add a way to index
-        );
+            l1_block_number INTEGER NOT NULL, 
         "#,
             (),
         )?;
@@ -52,14 +51,50 @@ impl L2OutputDb {
     }
 
     pub fn get_l2_output(&self, l2_block_number: u64) -> eyre::Result<Option<L2Output>> {
-        todo!("not implemented yet")
+        let l2_output = self.connection.query_row(
+            r#"
+            SELECT FROM l2Outputs (l2_block_number, output_root, l1_block_hash, l1_block_number)
+            WHERE l2_block_number = ?
+            "#,
+            (l2_block_number,),
+            |row| {
+                let l1_block_hash = B256::from_str(&row.get::<_, String>(2)?).unwrap();
+
+                if l1_block_hash.is_zero() {
+                    return Ok(None);
+                }
+
+                let l2_block_number = row.get::<_, u64>(0)?;
+                let output_root = B256::from_str(&row.get::<_, String>(1)?).unwrap();
+                let l1_block_hash = B256::from_str(&row.get::<_, String>(2)?).unwrap();
+                let l1_block_number = row.get::<_, u64>(3)?;
+
+                Ok(Some(L2Output { output_root, l2_block_number, l1_block_hash, l1_block_number }))
+            },
+        )?;
+
+        Ok(l2_output)
     }
 
     pub fn insert_l2_output(&mut self, l2_output: L2Output) -> eyre::Result<()> {
+        self.connection.execute(
+            r#"
+            INSERT INTO l2Outputs (l2_block_number, output_root, l1_block_hash, l1_block_number)
+            VALUES (?, ?, ?, ?)
+            "#,
+            (
+                l2_output.l1_block_number,
+                l2_output.output_root.to_string(),
+                l2_output.l1_block_hash.to_string(),
+                l2_output.l1_block_number,
+            ),
+        )?;
         Ok(())
     }
 
     pub fn delete_l2_output(&mut self, l2_block_number: u64) -> eyre::Result<()> {
+        self.connection
+            .execute("DELETE FROM l2Outputs WHERE l2_block_number = ?;", (l2_block_number,))?;
         Ok(())
     }
 }
@@ -191,8 +226,6 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                         l1_block_hash: l1_block_attr.hash,
                         l1_block_number: l1_block_attr.number,
                     };
-
-                    // TODO: Commit the proof at the block height to the db
 
                     l2_output_db.insert_l2_output(l2_output.clone())?;
 
