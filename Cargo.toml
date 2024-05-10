@@ -6,7 +6,7 @@ members = [
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
-    "crates/consensus/beacon-core/",
+    "crates/ethereum/consensus/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
     "crates/ethereum-forks/",
@@ -33,7 +33,6 @@ members = [
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
-    "crates/payload/optimism/",
     "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
@@ -52,8 +51,9 @@ members = [
     "crates/ethereum/node",
     "crates/node/builder/",
     "crates/optimism/consensus",
-    "crates/optimism/node/",
     "crates/optimism/evm/",
+    "crates/optimism/node/",
+    "crates/optimism/payload/",
     "crates/node-core/",
     "crates/node/api/",
     "crates/stages/",
@@ -87,9 +87,7 @@ members = [
     "examples/txpool-tracing/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
-    "examples/exex/minimal/",
-    "examples/exex/op-bridge/",
-    "examples/exex/rollup/",
+    "examples/exex/*",
     "examples/db-access",
     "testing/ef-tests/",
     "testing/testing-utils",
@@ -167,7 +165,7 @@ unnecessary_struct_initialization = "allow"
 use_self = "allow"
 
 [workspace.package]
-version = "0.2.0-beta.6"
+version = "0.2.0-beta.7"
 edition = "2021"
 rust-version = "1.76"
 license = "MIT OR Apache-2.0"
@@ -210,7 +208,7 @@ reth = { path = "bin/reth" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
-reth-beacon-consensus-core = { path = "crates/consensus/beacon-core" }
+reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
@@ -240,7 +238,7 @@ reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-exex = { path = "crates/exex" }
-reth-optimism-payload-builder = { path = "crates/payload/optimism" }
+reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
@@ -282,7 +280,7 @@ reth-testing-utils = { path = "testing/testing-utils" }
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "42f01d0" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "c1b5dd0" }
 
 # eth
 alloy-chains = "0.1.15"
@@ -291,20 +289,21 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "0bb7604" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "0bb7604" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "899fc51" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
 
 # misc
 auto_impl = "1"
@@ -312,6 +311,7 @@ aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+dashmap = "5.5"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"
 eyre = "0.6"
@@ -340,6 +340,7 @@ smallvec = "1"
 dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
+url = "2.3"
 
 # proc-macros
 proc-macro2 = "1.0"

@@ -5,13 +5,11 @@ use crate::{
     EthApi,
 };
 use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, U256,
-};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_rpc_types::EIP1186AccountProofResponse;
+use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 

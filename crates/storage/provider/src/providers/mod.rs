@@ -60,8 +60,8 @@ mod chain_info;
 use chain_info::ChainInfoTracker;
 
 mod consistent_view;
+use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
-use reth_rpc_types::engine::ForkchoiceState;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -667,6 +667,10 @@ where
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
         self.tree.finalize_block(finalized_block)
+    }
+
+    fn update_block_hashes_and_clear_buffered(&self) -> RethResult<BTreeMap<BlockNumber, B256>> {
+        self.tree.update_block_hashes_and_clear_buffered()
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(

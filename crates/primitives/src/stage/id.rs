@@ -53,6 +53,17 @@ impl StageId {
         StageId::Finish,
     ];
 
+    /// Stages that require state.
+    pub const STATE_REQUIRED: [StageId; 7] = [
+        StageId::Execution,
+        StageId::MerkleUnwind,
+        StageId::AccountHashing,
+        StageId::StorageHashing,
+        StageId::MerkleExecute,
+        StageId::IndexStorageHistory,
+        StageId::IndexAccountHistory,
+    ];
+
     /// Return stage id formatted as string.
     pub fn as_str(&self) -> &str {
         match self {

@@ -517,7 +517,7 @@ mod tests {
         let chain2 =
             Chain { blocks: BTreeMap::from([(3, block3), (4, block4)]), ..Default::default() };
 
-        assert_eq!(chain1.append_chain(chain2.clone()), Ok(()));
+        assert!(chain1.append_chain(chain2.clone()).is_ok());
 
         // chain1 got changed so this will fail
         assert!(chain1.append_chain(chain2).is_err());

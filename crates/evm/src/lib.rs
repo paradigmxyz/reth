@@ -8,7 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_primitives::{revm::env::fill_block_env, Address, ChainSpec, Header, Transaction, U256};
+use reth_primitives::{
+    revm::env::fill_block_env, Address, ChainSpec, Header, TransactionSigned, U256,
+};
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
@@ -92,17 +94,8 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
-    /// The type of the transaction metadata that should be used to fill fields in the transaction
-    /// environment.
-    ///
-    /// On ethereum mainnet, this is `()`, and on optimism these are the L1 fee fields and
-    /// additional L1 block info.
-    type TxMeta;
-
-    /// Fill transaction environment from a [Transaction] and the given sender address.
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Self::TxMeta)
-    where
-        T: AsRef<Transaction>;
+    /// Fill transaction environment from a [TransactionSigned] and the given sender address.
+    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
 
     /// Fill [CfgEnvWithHandlerCfg] fields according to the chain spec and given header
     fn fill_cfg_env(

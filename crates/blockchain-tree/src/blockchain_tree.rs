@@ -19,13 +19,14 @@ use reth_interfaces::{
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, U256,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
     chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     ChainSpecProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
+    StaticFileProviderFactory,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use std::{
@@ -783,6 +784,11 @@ where
         Ok(InsertPayloadOk::Inserted(status))
     }
 
+    /// Discard all blocks that precede block number from the buffer.
+    pub fn remove_old_blocks(&mut self, block: BlockNumber) {
+        self.state.buffered_blocks.remove_old_blocks(block);
+    }
+
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     pub fn finalize_block(&mut self, finalized_block: BlockNumber) {
         // remove blocks
@@ -797,7 +803,7 @@ where
             }
         }
         // clean block buffer.
-        self.state.buffered_blocks.remove_old_blocks(finalized_block);
+        self.remove_old_blocks(finalized_block);
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -817,6 +823,16 @@ where
     ) -> RethResult<()> {
         self.finalize_block(last_finalized_block);
 
+        let last_canonical_hashes = self.update_block_hashes()?;
+
+        self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
+
+        Ok(())
+    }
+
+    /// Update all block hashes. iterate over present and new list of canonical hashes and compare
+    /// them. Remove all mismatches, disconnect them and removes all chains.
+    pub fn update_block_hashes(&mut self) -> RethResult<BTreeMap<BlockNumber, B256>> {
         let last_canonical_hashes = self
             .externals
             .fetch_latest_canonical_hashes(self.config.num_of_canonical_hashes() as usize)?;
@@ -831,9 +847,22 @@ where
             }
         }
 
-        self.connect_buffered_blocks_to_hashes(last_canonical_hashes)?;
+        Ok(last_canonical_hashes)
+    }
 
-        Ok(())
+    /// Update all block hashes. iterate over present and new list of canonical hashes and compare
+    /// them. Remove all mismatches, disconnect them, removes all chains and clears all buffered
+    /// blocks before the tip.
+    pub fn update_block_hashes_and_clear_buffered(
+        &mut self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        let chain = self.update_block_hashes()?;
+
+        if let Some((block, _)) = chain.last_key_value() {
+            self.remove_old_blocks(*block);
+        }
+
+        Ok(chain)
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -1220,6 +1249,28 @@ where
         &self,
         revert_until: BlockNumber,
     ) -> Result<Option<Chain>, CanonicalError> {
+        // This should only happen when an optimistic sync target was re-orged.
+        //
+        // Static files generally contain finalized data. The blockchain tree only deals
+        // with unfinalized data. The only scenario where canonical reverts go past the highest
+        // static file is when an optimistic sync occured and unfinalized data was written to
+        // static files.
+        if self
+            .externals
+            .provider_factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .unwrap_or_default() >
+            revert_until
+        {
+            trace!(
+                target: "blockchain_tree",
+                "Reverting optimistic canonical chain to block {}",
+                revert_until
+            );
+            return Err(CanonicalError::OptimisticTargetRevert(revert_until))
+        }
+
         // read data that is needed for new sidechain
         let provider_rw = self.externals.provider_factory.provider_rw()?;
 
@@ -2162,7 +2213,7 @@ mod tests {
             .assert(&tree);
 
         // unwind canonical
-        assert_eq!(tree.unwind(block1.number), Ok(()));
+        assert!(tree.unwind(block1.number).is_ok());
         // Trie state:
         //    b2   b2a (pending block)
         //   /    /
@@ -2226,7 +2277,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12), Ok(()));
+        assert!(tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(12).is_ok());
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),

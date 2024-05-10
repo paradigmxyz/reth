@@ -14,7 +14,6 @@ use rand::{
 };
 use reth_primitives::{
     constants::{eip4844::DATA_GAS_PER_BLOB, MIN_PROTOCOL_BASE_FEE},
-    eip4844::kzg_to_versioned_hash,
     transaction::TryFromRecoveredTransactionError,
     AccessList, Address, BlobTransactionSidecar, BlobTransactionValidationError, Bytes, ChainId,
     FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
@@ -987,11 +986,7 @@ impl From<MockTransaction> for Transaction {
                 to,
                 value,
                 access_list,
-                blob_versioned_hashes: sidecar
-                    .commitments
-                    .into_iter()
-                    .map(|commitment| kzg_to_versioned_hash((*commitment).into()))
-                    .collect(),
+                blob_versioned_hashes: sidecar.versioned_hashes().collect(),
                 max_fee_per_blob_gas,
                 input,
             }),

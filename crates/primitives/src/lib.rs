@@ -4,6 +4,7 @@
 //!
 //! ## Feature Flags
 //!
+//! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 
@@ -38,7 +39,6 @@ mod prune;
 mod receipt;
 /// Helpers for working with revm
 pub mod revm;
-pub mod serde_helper;
 pub mod stage;
 pub mod static_file;
 mod storage;
@@ -85,12 +85,13 @@ pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
-#[cfg(feature = "c-kzg")]
 pub use transaction::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError,
-    FromRecoveredPooledTransaction, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered,
+    BlobTransaction, BlobTransactionSidecar, FromRecoveredPooledTransaction,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered,
 };
+
+#[cfg(feature = "c-kzg")]
+pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},

@@ -5,7 +5,7 @@ use clap::Args;
 use reth_config::Config;
 use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
-    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR, DEFAULT_DISCOVERY_V5_PORT,
+    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 use reth_net_nat::NatResolver;
@@ -19,7 +19,11 @@ use reth_network::{
 };
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
-use std::{net::IpAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    path::PathBuf,
+    sync::Arc,
+};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -89,7 +93,7 @@ pub struct NetworkArgs {
     /// `GetPooledTransactions` request. Spec'd at 2 MiB.
     ///
     /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, help = "Sets the soft limit for the byte size of pooled transactions response. Specified at 2 MiB by default. This is a spec'd value that should only be set for experimental purposes on a testnet.")]
+    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, help = "Sets the soft limit for the byte size of pooled transactions response. Specified at 2 MiB by default. This is a spec'd value that should only be set for experimental purposes on a testnet.",long_help = None)]
     pub soft_limit_byte_size_pooled_transactions_response: usize,
 
     /// Default soft limit for the byte size of a `PooledTransactions` response on assembling a
@@ -97,7 +101,7 @@ pub struct NetworkArgs {
     /// than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when
     /// assembling a `PooledTransactions` response. Default
     /// is 128 KiB.
-    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ)]
+    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,help = "Sets the soft limit for the byte size of a single pooled transactions response when packing multiple responses into a single packet for a `GetPooledTransactions` request. Specified at 128 Kib by default.",long_help = None)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 }
 
@@ -227,31 +231,40 @@ pub struct DiscoveryArgs {
     #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// The UDP address to use for devp2p peer discovery version 5.
-    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR",
-    default_value_t = DEFAULT_DISCOVERY_V5_ADDR)]
-    pub discv5_addr: IpAddr,
+    /// The UDP IPv4 address to use for devp2p peer discovery version 5.
+    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR", default_value = None)]
+    pub discv5_addr: Option<Ipv4Addr>,
 
-    /// The UDP port to use for devp2p peer discovery version 5.
+    /// The UDP IPv6 address to use for devp2p peer discovery version 5.
+    #[arg(id = "discovery.v5.addr.ipv6", long = "discovery.v5.addr.ipv6", value_name = "DISCOVERY_V5_ADDR_IPV6", default_value = None)]
+    pub discv5_addr_ipv6: Option<Ipv6Addr>,
+
+    /// The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
+    /// IPv4, or `--discv5.addr` is set.
     #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
     default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port: u16,
 
+    /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
+    /// IPv6, or `--discv5.addr.ipv6` is set.
+    #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
+    default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    pub discv5_port_ipv6: u16,
+
     /// The interval in seconds at which to carry out periodic lookup queries, for the whole
     /// run of the program.
-    #[arg(id = "discovery.v5.lookup-interval", long = "discovery.v5.lookup-interval", value_name = "DISCOVERY_V5_LOOKUP_INTERVAL",
-    default_value_t = DEFAULT_SECONDS_LOOKUP_INTERVAL)]
+    #[arg(id = "discovery.v5.lookup-interval", long = "discovery.v5.lookup-interval", value_name = "DISCOVERY_V5_LOOKUP_INTERVAL", default_value_t = DEFAULT_SECONDS_LOOKUP_INTERVAL)]
     pub discv5_lookup_interval: u64,
 
     /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
     /// times, at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval",
+    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval", 
         default_value_t = DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL)]
     pub discv5_bootstrap_lookup_interval: u64,
 
     /// The number of times to carry out boost lookup queries at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown",
-                        default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
+    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown", 
+        default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
     pub discv5_bootstrap_lookup_countdown: u64,
 }
 
@@ -289,8 +302,10 @@ impl Default for DiscoveryArgs {
             enable_discv5_discovery: cfg!(feature = "optimism"),
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
-            discv5_addr: DEFAULT_DISCOVERY_V5_ADDR,
+            discv5_addr: None,
+            discv5_addr_ipv6: None,
             discv5_port: DEFAULT_DISCOVERY_V5_PORT,
+            discv5_port_ipv6: DEFAULT_DISCOVERY_V5_PORT,
             discv5_lookup_interval: DEFAULT_SECONDS_LOOKUP_INTERVAL,
             discv5_bootstrap_lookup_interval: DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
             discv5_bootstrap_lookup_countdown: DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,

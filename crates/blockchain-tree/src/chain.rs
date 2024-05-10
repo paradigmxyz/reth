@@ -120,7 +120,8 @@ impl AppendableChain {
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
-        let parent_number = block.number - 1;
+        let parent_number =
+            block.number.checked_sub(1).ok_or(BlockchainTreeError::GenesisBlockHasNoParent)?;
         let parent = self.blocks().get(&parent_number).ok_or(
             BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
         )?;
