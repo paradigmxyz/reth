@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use alloy_network::{EthereumSigner, Network};
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, FixedBytes, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_wallet::LocalWallet;
 use alloy_sol_types::sol;
@@ -20,7 +20,7 @@ sol! {
     #[sol(rpc)]
     contract L2OutputOracle {
         function proposeL2Output(bytes32 _outputRoot, uint256 _l2BlockNumber, bytes32 _l1BlockHash, uint256 _l1BlockNumber) external payable;
-        function latestBlockNumber() public view returns (uint256);
+        function nextBlockNumber() public view returns (uint256);
     }
 }
 
@@ -29,16 +29,16 @@ fn create_tables(connection: &mut Connection) -> rusqlite::Result<()> {
     // Create tables to store L2 outputs
     connection.execute(
         r#"
-            CREATE TABLE IF NOT EXISTS deposits (
-                output_root      TEXT PRIMARY KEY,
-                l2_block_number     INTEGER NOT NULL,
+            CREATE TABLE IF NOT EXISTS l2Outputs (
+                l2_block_number     INTEGER NOT NULL PRIMARY KEY, //TODO: decide on the pk
+                output_root            TEXT NOT,
                 l1_block_hash          TEXT NOT NULL UNIQUE,
-                l1_block_number INTEGER NOT NULL,
+                l1_block_number INTEGER NOT NULL, //TODO: add a way to index
             );
             "#,
         (),
     )?;
-    info!("Initialized database tables");
+    info!("Initialized l2Outputs table");
 
     Ok(())
 }
@@ -48,7 +48,6 @@ struct ProposerConfig {
     l1_rpc: String,
     l2_output_oracle: Address,
     l2_to_l1_message_passer: Address,
-    submission_interval: u64,
     proposer_private_key: String,
 }
 
@@ -67,14 +66,33 @@ async fn init_exex<Node: FullNodeComponents>(
         .signer(EthereumSigner::from(config.proposer_private_key.parse::<LocalWallet>().unwrap()))
         .on_http(config.l1_rpc.parse().unwrap());
 
-    Ok(OpProposer::new(
-        provider,
-        config.l2_output_oracle,
-        config.l2_to_l1_message_passer,
-        config.submission_interval,
-    )
-    .spawn(ctx, connection)?)
+    Ok(OpProposer::new(provider, config.l2_output_oracle, config.l2_to_l1_message_passer)
+        .spawn(ctx, connection)?)
 }
+
+pub struct L1BlockAttributes {
+    hash: FixedBytes<32>,
+    number: u64,
+}
+
+async fn get_l1_block_attributes<T, N, P>(provider: Arc<P>) -> eyre::Result<L1BlockAttributes>
+where
+    T: Transport + Clone,
+    N: Network,
+    P: Provider<T, N>,
+{
+    let l1_block = provider
+        .get_block(BlockId::from(BlockNumberOrTag::Latest), false)
+        .await?
+        .ok_or(eyre!("L1 block not found"))?;
+
+    let l1_block_hash = l1_block.header.hash.ok_or(eyre!("L1 Block hash not found"))?;
+    let l1_block_number = l1_block.header.number.ok_or(eyre!("L1 block number not found"))?;
+
+    Ok(L1BlockAttributes { hash: l1_block_hash, number: l1_block_number })
+}
+
+async fn get_l2_oo_data() {}
 
 struct OpProposer<T, N, P>
 where
@@ -85,22 +103,15 @@ where
     provider: Arc<P>,
     l2_output_oracle: Address,
     l2_to_l1_message_passer: Address,
-    _submission_interval: u64,
     _pd: PhantomData<fn() -> (T, N)>,
 }
 
 impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
-    fn new(
-        provider: P,
-        l2_output_oracle: Address,
-        l2_to_l1_message_passer: Address,
-        _submission_interval: u64,
-    ) -> Self {
+    fn new(provider: P, l2_output_oracle: Address, l2_to_l1_message_passer: Address) -> Self {
         Self {
             provider: Arc::new(provider),
             l2_output_oracle,
             l2_to_l1_message_passer,
-            _submission_interval,
             _pd: PhantomData,
         }
     }
@@ -110,62 +121,78 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         mut ctx: ExExContext<Node>,
         _connection: Connection,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
+        // TODO: add some logging for submission interval
+
         let l2_oo = L2OutputOracle::new(self.l2_output_oracle, self.provider.clone());
         let l2_provider = ctx.provider().clone(); //TODO: update this to not clone
         let l1_provider = self.provider.clone();
         let l2_to_l1_message_passer = self.l2_to_l1_message_passer.clone();
+
+        //NOTE: prune data older than some config or just keep everything, think about how much
+        // data
+
         let fut = async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 match &notification {
                     ExExNotification::ChainCommitted { new } => {
-                        let current_block = l2_provider.last_block_number()?;
+                        let target_block = l2_oo.nextBlockNumber().call().await?._0.to::<u64>();
+                        let current_l2_block = l2_provider.last_block_number()?;
 
-                        // TODO: We dont need to check this every time
-                        let next_block = l2_oo.latestBlockNumber().call().await?._0.to::<u64>();
-                        if next_block == current_block {
-                            if let Some(l1_block) = l1_provider
-                                .get_block(BlockId::from(BlockNumberOrTag::Latest), false)
-                                .await?
-                            {
-                                // Get the l2_to_l1_message_passer storage root
-                                let state_provider = l2_provider
-                                    .state_by_block_id(BlockId::from(BlockNumberOrTag::Latest))?;
-                                let proof = state_provider.proof(l2_to_l1_message_passer, &[])?;
+                        //NOTE: also need to check if the tx has already been sent but not yet
+                        // included
+                        //TODO: bind the proof data here
 
-                                // TODO: Commit the proof at the block height to the db
+                        if target_block < current_l2_block {
 
-                                let l1_block_hash =
-                                    l1_block.header.hash.ok_or(eyre!("L1 Block hash not found"))?;
-                                let l1_block_number = l1_block
-                                    .header
-                                    .number
-                                    .ok_or(eyre!("L1 block number not found"))?;
+                            //TODO: check the "transaction manager" to see if the proof has already
+                            // been submitted but not yet included
+                            //TODO: get the proof data from the db
+                        } else if target_block == current_l2_block {
+                            let l1_block_attr =
+                                get_l1_block_attributes(l1_provider.clone()).await?;
 
-                                // Propose the L2Output to the L2OutputOracle contract
-                                let _pending_txn = l2_oo
-                                    .proposeL2Output(
-                                        proof.storage_root,
-                                        U256::from(next_block),
-                                        l1_block_hash,
-                                        U256::from(l1_block_number),
-                                    )
-                                    .send()
-                                    .await?;
-                                // TODO: Wait for transaction inclusion, and add retries
-                                info!(
-                                    output_root = ?proof.storage_root,
-                                    l2_block_number = ?next_block,
-                                    ?l1_block_hash,
-                                    ?l1_block_number,
-                                    "Successfully Proposed L2Output"
-                                );
-                            }
+                            // Get the l2_to_l1_message_passer storage root
+                            let proof =
+                                l2_provider.latest()?.proof(l2_to_l1_message_passer, &[])?;
+
+                            // TODO: Commit the proof at the block height to the db
+
+                            // Propose the L2Output to the L2OutputOracle contract
+                            //TODO: move this to a separate function
+                            let _pending_txn = l2_oo
+                                .proposeL2Output(
+                                    proof.storage_root,
+                                    U256::from(target_block),
+                                    l1_block_attr.hash,
+                                    U256::from(l1_block_attr.number),
+                                )
+                                .send()
+                                .await?;
+
+                            // TODO: Wait for transaction inclusion, and add retries
+                            info!(
+                                output_root = ?proof.storage_root,
+                                l2_block_number = ?current_l2_block,
+                                l1_block_hash = ?l1_block_attr.hash,
+                                l1_block_number = ?l1_block_attr.number,
+                                "Successfully Proposed L2Output"
+                            );
+                        } else {
+                            //TODO: might not need this
+                            continue;
                         }
+
+                        //TODO: we need to check if the block is within the safe head, if not then
+                        // continue
+
                         info!(committed_chain = ?new.range(), "Received commit");
                     }
                     ExExNotification::ChainReorged { old, new } => {
                         // TODO:
                         info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+                        // Fetch the updated latest block number
+                        //TODO: delete entries from the db where the l2 block number is greater
+                        // TODO: post the proof data if applicable or re run the logic
                     }
                     ExExNotification::ChainReverted { old } => {
                         // TODO:
@@ -182,6 +209,8 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
 }
 
 fn main() -> eyre::Result<()> {
+    //TODO: use config crate
+    //TODO: specify the db path in the config
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
