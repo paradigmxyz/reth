@@ -90,7 +90,8 @@ members = [
     "examples/exex/*",
     "examples/db-access",
     "testing/ef-tests/",
-    "testing/testing-utils", "crates/rpc/rpc-layer",
+    "testing/testing-utils",
+    "crates/rpc/rpc-layer",
 ]
 default-members = ["bin/reth"]
 
