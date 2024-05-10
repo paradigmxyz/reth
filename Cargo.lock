@@ -4606,7 +4606,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -8125,6 +8125,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "8.0.0"
+source = "git+https://github.com/danipopes/revm?rev=1914696de833600f28d895be6c2621714402419c#1914696de833600f28d895be6c2621714402419c"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8156,6 +8157,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "4.0.0"
+source = "git+https://github.com/danipopes/revm?rev=1914696de833600f28d895be6c2621714402419c#1914696de833600f28d895be6c2621714402419c"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8224,6 +8226,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "6.0.0"
+source = "git+https://github.com/danipopes/revm?rev=1914696de833600f28d895be6c2621714402419c#1914696de833600f28d895be6c2621714402419c"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
@@ -8239,6 +8242,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "3.1.1"
+source = "git+https://github.com/danipopes/revm?rev=1914696de833600f28d895be6c2621714402419c#1914696de833600f28d895be6c2621714402419c"
 dependencies = [
  "alloy-primitives",
  "auto_impl",

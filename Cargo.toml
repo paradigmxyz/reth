@@ -399,22 +399,18 @@ toml = "0.8"
 # misc-testing
 arbitrary = "1.3"
 assert_matches = "1.5.0"
-tempfile = "3.8"
 criterion = "0.5"
 pprof = "0.13"
 proptest = "1.4"
 proptest-derive = "0.4"
 serial_test = "3"
 similar-asserts = "1.5.0"
+tempfile = "3.8"
 test-fuzz = "5"
-walkdir = "2"
+walkdir = "2.5"
 
 [patch.crates-io]
-# revm = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
-# revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
-# revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
-# revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "5f4717f8e658fdf2f04f162c25a0b365ce8c7b66" }
-revm = { path = "../../danipopes/revm/crates/revm" }
-revm-interpreter = { path = "../../danipopes/revm/crates/interpreter" }
-revm-precompile = { path = "../../danipopes/revm/crates/precompile" }
-revm-primitives = { path = "../../danipopes/revm/crates/primitives" }
+revm = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
+revm-interpreter = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
+revm-precompile = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
+revm-primitives = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
