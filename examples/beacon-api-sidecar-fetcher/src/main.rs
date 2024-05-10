@@ -11,7 +11,6 @@ use std::{
 };
 
 use eyre::Result;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
@@ -19,9 +18,9 @@ use reqwest::{Error, StatusCode};
 use reth::{
     primitives::{BlobTransaction, B256},
     providers::CanonStateNotification,
-    rpc::types::{beacon::sidecar::BeaconBlobBundle, engine::BlobsBundleV1},
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
+use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle,SidecarIterator};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -203,7 +202,7 @@ where
                                 Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
                             };
 
-                            let mut blobs_bundle: BlobsBundleV1 =
+                            let mut blobs_bundle: BeaconBlobBundle =
                                 match serde_json::from_slice(&bytes) {
                                     Ok(b) => b,
                                     Err(e) => {
@@ -213,18 +212,21 @@ where
                                     }
                                 };
 
-                            // TODO: Change this to use BeaconBlobBundle
-                            // Blob_len is used to retrieve the BlobTransaction from the bundle
-                            let sidecars: Vec<BlobTransaction> = txs
-                                .iter()
-                                .map(|(tx, blob_len)| {
-                                    let sidecar = blobs_bundle.pop_sidecar(*blob_len);
+                            let sidecar_iterator = SidecarIterator::new(blobs_bundle);
+
+                            let sidecars: Vec<BlobTransaction> = txs.iter().map(|(tx, blob_len)| {
+                                if let Some(sidecar) = sidecar_iterator.next_sidecar(*blob_len) {
+                                    index += *blob_len; // Update index to skip past the blobs just fetched
+                            
                                     BlobTransaction::try_from_signed(
                                         tx.clone(),
-                                        sidecar.into(),
+                                        sidecar,
                                     ).expect("should not fail to convert blob tx if it is already eip4844")
-                                })
-                                .collect();
+                                } else {
+                                    panic!("Expected to find a matching sidecar for every transaction");
+                                }
+                            }).collect();
+
 
                             Ok(sidecars)
                         });
