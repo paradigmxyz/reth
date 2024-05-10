@@ -24,7 +24,7 @@ use reth_provider::{
     BundleStateDataProvider, BundleStateWithReceipts, Chain, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_trie::updates::TrieUpdates;
+use reth_trie::updates::{TrieUpdates, TrieUpdatesSorted};
 use reth_trie_parallel::parallel_root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
@@ -145,7 +145,7 @@ impl AppendableChain {
             externals,
             BlockAttachment::HistoricalFork,
             block_validation_kind,
-            self.chain.trie_updates().cloned(),
+            None,
         )?;
         // extending will also optimize few things, mostly related to selfdestruct and wiping of
         // storage.
@@ -178,7 +178,7 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
-        trie_updates: Option<TrieUpdates>,
+        trie_updates: Option<TrieUpdatesSorted>,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
         BSDP: BundleStateDataProvider,
@@ -301,7 +301,7 @@ impl AppendableChain {
             externals,
             block_attachment,
             block_validation_kind,
-            self.chain.trie_updates().cloned(),
+            self.chain.trie_updates().map(|u| u.sorted()),
         )?;
         // extend the state.
         self.chain.append_block(block, block_state, trie_updates);

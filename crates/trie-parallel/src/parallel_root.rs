@@ -12,7 +12,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{AccountNode, AccountNodeIter},
     trie_cursor::{TrieCursorFactory, TrieUpdatesCursorFactory},
-    updates::TrieUpdates,
+    updates::{TrieUpdates, TrieUpdatesSorted},
     walker::TrieWalker,
     HashedPostState, StorageRoot,
 };
@@ -42,7 +42,7 @@ pub struct ParallelStateRoot<DB, Provider> {
     /// Changed hashed state.
     hashed_state: HashedPostState,
     /// Trie updates.
-    trie_updates: Option<TrieUpdates>,
+    trie_updates: Option<TrieUpdatesSorted>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -53,7 +53,7 @@ impl<DB, Provider> ParallelStateRoot<DB, Provider> {
     pub fn new(
         view: ConsistentDbView<DB, Provider>,
         hashed_state: HashedPostState,
-        trie_updates: Option<TrieUpdates>,
+        trie_updates: Option<TrieUpdatesSorted>,
     ) -> Self {
         Self {
             view,
@@ -93,9 +93,7 @@ where
             prefix_sets.storage_prefix_sets,
         );
         let hashed_state_sorted = self.hashed_state.into_sorted();
-
-        let trie_updates_sorted =
-            self.trie_updates.map_or_else(Default::default, |updates| updates.into_sorted());
+        let trie_updates_sorted = self.trie_updates.unwrap_or_default();
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
