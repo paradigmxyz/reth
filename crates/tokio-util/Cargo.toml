@@ -12,6 +12,7 @@ description = "Additional utilities for working with Tokio in reth."
 workspace = true
 
 [dependencies]
+tracing.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
