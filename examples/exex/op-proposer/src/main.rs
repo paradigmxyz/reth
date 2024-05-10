@@ -1,17 +1,18 @@
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 use alloy_network::{EthereumSigner, Network};
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_wallet::LocalWallet;
 use alloy_sol_types::sol;
 use alloy_transport::Transport;
+use eyre::eyre;
 use futures::Future;
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{BlockId, BlockNumberOrTag};
-use reth_provider::StateProviderFactory;
+use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
 
@@ -21,34 +22,6 @@ sol! {
         function proposeL2Output(bytes32 _outputRoot, uint256 _l2BlockNumber, bytes32 _l1BlockHash, uint256 _l1BlockNumber) external payable;
         function latestBlockNumber() public view returns (uint256);
     }
-}
-
-// ProvenWithdrawalParameters is the set of parameters to pass to the ProveWithdrawalTransaction
-// and FinalizeWithdrawalTransaction functions
-pub struct ProofWithdrawalParameters {
-    nonce: u64,
-    sender: Address,
-    target: Address,
-    value: u64,
-    gas_limit: u64,
-    l2_output_index: u64,
-    data: Bytes,
-    output_root_proof: OutputRootProof,
-    withdrawal_proof: Vec<Bytes>,
-}
-
-pub struct OutputRootProof {
-    version: Bytes,
-    state_root: B256,
-    message_passer_storage_root: B256,
-    latest_blockhash: B256,
-}
-
-pub struct L2Output {
-    output_root: B256,
-    l2_block_number: u64,
-    l1_block_hash: B256,
-    l1_block_number: u64,
 }
 
 /// Create SQLite tables if they do not exist.
@@ -69,6 +42,7 @@ fn create_tables(connection: &mut Connection) -> rusqlite::Result<()> {
 
     Ok(())
 }
+
 #[derive(Debug, serde::Deserialize)]
 struct ProposerConfig {
     l1_rpc: String,
@@ -92,6 +66,7 @@ async fn init_exex<Node: FullNodeComponents>(
         .with_recommended_fillers()
         .signer(EthereumSigner::from(config.proposer_private_key.parse::<LocalWallet>().unwrap()))
         .on_http(config.l1_rpc.parse().unwrap());
+
     Ok(OpProposer::new(
         provider,
         config.l2_output_oracle,
@@ -110,9 +85,8 @@ where
     provider: Arc<P>,
     l2_output_oracle: Address,
     l2_to_l1_message_passer: Address,
-    submission_interval: u64,
-    _network: std::marker::PhantomData<N>,
-    _transport: std::marker::PhantomData<T>,
+    _submission_interval: u64,
+    _pd: PhantomData<fn() -> (T, N)>,
 }
 
 impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
@@ -120,15 +94,14 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         provider: P,
         l2_output_oracle: Address,
         l2_to_l1_message_passer: Address,
-        submission_interval: u64,
+        _submission_interval: u64,
     ) -> Self {
         Self {
             provider: Arc::new(provider),
             l2_output_oracle,
             l2_to_l1_message_passer,
-            submission_interval,
-            _network: std::marker::PhantomData,
-            _transport: std::marker::PhantomData,
+            _submission_interval,
+            _pd: PhantomData,
         }
     }
 
@@ -138,42 +111,52 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         _connection: Connection,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         let l2_oo = L2OutputOracle::new(self.l2_output_oracle, self.provider.clone());
-        let l2_provider = ctx.provider().clone();
+        let l2_provider = ctx.provider().clone(); //TODO: update this to not clone
+        let l1_provider = self.provider.clone();
+        let l2_to_l1_message_passer = self.l2_to_l1_message_passer.clone();
         let fut = async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 match &notification {
                     ExExNotification::ChainCommitted { new } => {
-                        let current_block = ctx.head.number;
-                        let next_block = l2_oo.latestBlockNumber().call().await?._0.to::<u64>();
+                        let current_block = l2_provider.last_block_number()?;
 
+                        // TODO: We dont need to check this every time
+                        let next_block = l2_oo.latestBlockNumber().call().await?._0.to::<u64>();
                         if next_block == current_block {
-                            let l1_block = self
-                                .provider
-                                .get_block(BlockId::Number(BlockNumberOrTag::Latest), false)
-                                .await?;
-                            if let Some(l1_block) = l1_block {
+                            if let Some(l1_block) = l1_provider
+                                .get_block(BlockId::from(BlockNumberOrTag::Latest), false)
+                                .await?
+                            {
                                 // Get the l2_to_l1_message_passer storage root
-                                let state_provider = l2_provider.state_by_block_id(
-                                    BlockId::Number(BlockNumberOrTag::Number(current_block)),
-                                )?;
-                                let proof =
-                                    state_provider.proof(self.l2_to_l1_message_passer, &[])?;
+                                let state_provider = l2_provider
+                                    .state_by_block_id(BlockId::from(BlockNumberOrTag::Latest))?;
+                                let proof = state_provider.proof(l2_to_l1_message_passer, &[])?;
+
+                                // TODO: Commit the proof at the block height to the db
+
+                                let l1_block_hash =
+                                    l1_block.header.hash.ok_or(eyre!("L1 Block hash not found"))?;
+                                let l1_block_number = l1_block
+                                    .header
+                                    .number
+                                    .ok_or(eyre!("L1 block number not found"))?;
+
                                 // Propose the L2Output to the L2OutputOracle contract
-                                l2_oo
+                                let _pending_txn = l2_oo
                                     .proposeL2Output(
                                         proof.storage_root,
                                         U256::from(next_block),
-                                        l1_block.header.hash.unwrap(),
-                                        U256::from(l1_block.header.number.unwrap()),
+                                        l1_block_hash,
+                                        U256::from(l1_block_number),
                                     )
                                     .send()
                                     .await?;
-
+                                // TODO: Wait for transaction inclusion, and add retries
                                 info!(
                                     output_root = ?proof.storage_root,
                                     l2_block_number = ?next_block,
-                                    l1_block_hash = ?l1_block.header.hash.unwrap(),
-                                    l1_block_number = ?l1_block.header.number.unwrap(),
+                                    ?l1_block_hash,
+                                    ?l1_block_number,
                                     "Successfully Proposed L2Output"
                                 );
                             }
