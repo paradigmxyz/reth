@@ -196,6 +196,23 @@ impl Signature {
     }
 }
 
+#[cfg(feature = "alloy-compat")]
+impl TryFrom<alloy_rpc_types::Signature> for Signature {
+    type Error = alloy_rpc_types::ConversionError;
+
+    fn try_from(signature: alloy_rpc_types::Signature) -> Result<Self, Self::Error> {
+        use alloy_rpc_types::ConversionError;
+
+        let odd_y_parity = if let Some(y_parity) = signature.y_parity {
+            y_parity.0
+        } else {
+            extract_chain_id(signature.v.to()).map_err(|_| ConversionError::InvalidSignature)?.0
+        };
+
+        Ok(Self { r: signature.r, s: signature.s, odd_y_parity })
+    }
+}
+
 /// Outputs (odd_y_parity, chain_id) from the `v` value.
 /// This doesn't check validity of the `v` value for optimism.
 #[inline]
