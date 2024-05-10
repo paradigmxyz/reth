@@ -51,22 +51,16 @@ impl L2OutputDb {
         Ok(())
     }
 
-    pub fn get_l2_output(
-        &mut self,
-        l2_block_number: u64,
-    ) -> eyre::Result<Option<(B256, B256, u64)>> {
-        let mut stmt = self.connection.prepare("SELECT output_root, l1_block_hash, l1_block_number FROM l2Outputs WHERE l2_block_number = ?")?;
-        let mut rows = stmt.query([l2_block_number])?;
+    pub fn get_l2_output(&self, l2_block_number: u64) -> eyre::Result<Option<L2Output>> {
+        todo!("not implemented yet")
+    }
 
-        if let Some(row) = rows.next()? {
-            let output_root = row.get(0)?;
-            let l1_block_hash = row.get(1)?;
-            let l1_block_number = row.get(2)?;
+    pub fn insert_l2_output(&mut self, l2_output: L2Output) -> eyre::Result<()> {
+        Ok(())
+    }
 
-            Ok(Some((output_root, l1_block_hash, l1_block_number)))
-        } else {
-            Ok(None)
-        }
+    pub fn delete_l2_output(&mut self, l2_block_number: u64) -> eyre::Result<()> {
+        Ok(())
     }
 }
 
@@ -119,6 +113,7 @@ where
     Ok(L1BlockAttributes { hash: l1_block_hash, number: l1_block_number })
 }
 
+#[derive(Clone)]
 pub struct L2Output {
     pub output_root: B256,
     pub l2_block_number: u64,
@@ -151,7 +146,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
     fn spawn<Node: FullNodeComponents>(
         &self,
         mut ctx: ExExContext<Node>,
-        l2_output_db: L2OutputDb,
+        mut l2_output_db: L2OutputDb,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         let l2_output_oracle = L2OutputOracle::new(self.l2_output_oracle, self.provider.clone());
         let l2_provider = ctx.provider().clone();
@@ -162,11 +157,12 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
             while let Some(notification) = ctx.notifications.recv().await {
                 info!(?notification, "Received ExEx notification");
 
-                //TODO: handle reorgs function
+                //TODO: package this into function
                 match &notification {
                     ExExNotification::ChainReorged { old, new } => {
-                        //TODO: delete entries from the db where the l2 block number is greater
-                        // TODO: post the proof data if applicable or re run the logic
+                        // for block in old..new {
+                        //     l2_output_db.delete_l2_output(block)?;
+                        // }
                     }
                     ExExNotification::ChainReverted { old } => {
                         // TODO:
@@ -177,18 +173,12 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                 let target_block = l2_output_oracle.nextBlockNumber().call().await?._0.to::<u64>();
                 let current_l2_block = l2_provider.last_block_number()?;
 
+                //TODO: we need to check if the block is within the safe head
+
                 // Get the l2 output data to prepare for submission
                 let l2_output = if target_block < current_l2_block {
                     //TODO: check the "transaction manager" to see if the proof has already
-                    // been submitted but not yet included
-                    //TODO: get the proof data from the db
-
-                    L2Output {
-                        output_root: B256::default(),
-                        l2_block_number: target_block,
-                        l1_block_hash: B256::default(),
-                        l1_block_number: 0,
-                    }
+                    l2_output_db.get_l2_output(target_block)?.ok_or(eyre!("L2 output not found"))?
                 } else if target_block == current_l2_block {
                     let l1_block_attr = get_l1_block_attributes(&l1_provider).await?;
                     let proof = l2_provider.latest()?.proof(l2_to_l1_message_passer, &[])?;
@@ -201,6 +191,8 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                     };
 
                     // TODO: Commit the proof at the block height to the db
+
+                    l2_output_db.insert_l2_output(l2_output.clone())?;
 
                     l2_output
                 } else {
@@ -227,9 +219,6 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                 //     l1_block_number = ?l1_block_attr.number,
                 //     "Successfully Proposed L2Output"
                 // );
-
-                //TODO: we need to check if the block is within the safe head, if not then
-                // continue
             }
 
             Ok(())
