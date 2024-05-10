@@ -22,6 +22,7 @@ mod account;
 pub mod basefee;
 mod block;
 mod chain;
+#[cfg(feature = "alloy-compat")]
 mod compat;
 #[cfg(feature = "zstd-codec")]
 mod compression;
@@ -59,9 +60,6 @@ pub use chain::{
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, NamedChain, DEV, GOERLI,
     HOLESKY, MAINNET, SEPOLIA,
 };
-#[allow(unused_imports)]
-#[cfg(feature = "alloy-compat")]
-use compat::*;
 #[cfg(feature = "zstd-codec")]
 pub use compression::*;
 pub use constants::{
