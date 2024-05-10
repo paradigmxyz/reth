@@ -15,6 +15,7 @@ use reth_primitives::{BlockId, BlockNumberOrTag};
 use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
+use serde::Deserialize;
 
 sol! {
     #[sol(rpc)]
@@ -22,6 +23,26 @@ sol! {
         function proposeL2Output(bytes32 _outputRoot, uint256 _l2BlockNumber, bytes32 _l1BlockHash, uint256 _l1BlockNumber) external payable;
         function nextBlockNumber() public view returns (uint256);
     }
+}
+#[derive(Deserialize, Debug)]
+pub struct OptimismSyncStatus {
+    pub safe_l2: L2BlockInfo,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct L2BlockInfo {
+    pub hash: FixedBytes<32>,
+    pub number: u64,
+    pub parent_hash: FixedBytes<32>,
+    pub timestamp: u64,
+    pub l1_origin: L1BlockAttributes,
+}
+
+#[derive(Deserialize, Debug)]
+
+pub struct L1BlockAttributes {
+    hash: FixedBytes<32>,
+    number: u64,
 }
 
 /// Create SQLite tables if they do not exist.
@@ -46,6 +67,7 @@ fn create_tables(connection: &mut Connection) -> rusqlite::Result<()> {
 #[derive(Debug, serde::Deserialize)]
 struct ProposerConfig {
     l1_rpc: String,
+    rollup_rpc: String,
     l2_output_oracle: Address,
     l2_to_l1_message_passer: Address,
     proposer_private_key: String,
@@ -61,18 +83,18 @@ async fn init_exex<Node: FullNodeComponents>(
     )
     .unwrap();
 
-    let provider = ProviderBuilder::new()
+    let l1_provider = ProviderBuilder::new()
         .with_recommended_fillers()
         .signer(EthereumSigner::from(config.proposer_private_key.parse::<LocalWallet>().unwrap()))
         .on_http(config.l1_rpc.parse().unwrap());
 
-    Ok(OpProposer::new(provider, config.l2_output_oracle, config.l2_to_l1_message_passer)
-        .spawn(ctx, connection)?)
-}
-
-pub struct L1BlockAttributes {
-    hash: FixedBytes<32>,
-    number: u64,
+    Ok(OpProposer::new(
+        l1_provider,
+        config.rollup_rpc,
+        config.l2_output_oracle,
+        config.l2_to_l1_message_passer,
+    )
+    .spawn(ctx, connection)?)
 }
 
 async fn get_l1_block_attributes<T, N, P>(provider: Arc<P>) -> eyre::Result<L1BlockAttributes>
@@ -92,6 +114,18 @@ where
     Ok(L1BlockAttributes { hash: l1_block_hash, number: l1_block_number })
 }
 
+async fn get_l2_safe_head<T, N, P>(provider: Arc<P>) -> eyre::Result<u64>
+where
+    T: Transport + Clone,
+    N: Network,
+    P: Provider<T, N>,
+{
+    let sync_status: OptimismSyncStatus =
+        provider.client().request("optimism_syncStatus", ()).await?;
+    let safe_head = sync_status.safe_l2.number;
+    Ok(safe_head)
+}
+
 async fn get_l2_oo_data() {}
 
 struct OpProposer<T, N, P>
@@ -100,16 +134,23 @@ where
     N: Network,
     P: Provider<T, N>,
 {
-    provider: Arc<P>,
+    l1_provider: Arc<P>,
+    rollup_provider: String,
     l2_output_oracle: Address,
     l2_to_l1_message_passer: Address,
     _pd: PhantomData<fn() -> (T, N)>,
 }
 
 impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
-    fn new(provider: P, l2_output_oracle: Address, l2_to_l1_message_passer: Address) -> Self {
+    fn new(
+        l1_provider: P,
+        rollup_provider: String,
+        l2_output_oracle: Address,
+        l2_to_l1_message_passer: Address,
+    ) -> Self {
         Self {
-            provider: Arc::new(provider),
+            l1_provider: Arc::new(l1_provider),
+            rollup_provider,
             l2_output_oracle,
             l2_to_l1_message_passer,
             _pd: PhantomData,
@@ -123,11 +164,12 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         // TODO: add some logging for submission interval
 
-        let l2_oo = L2OutputOracle::new(self.l2_output_oracle, self.provider.clone());
+        let l2_oo = L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone());
         let l2_provider = ctx.provider().clone(); //TODO: update this to not clone
-        let l1_provider = self.provider.clone();
+        let l1_provider = self.l1_provider.clone();
         let l2_to_l1_message_passer = self.l2_to_l1_message_passer.clone();
-
+        let rollup_provider =
+            Arc::new(ProviderBuilder::new().on_http(self.rollup_provider.parse().unwrap()));
         //NOTE: prune data older than some config or just keep everything, think about how much
         // data
 
@@ -184,6 +226,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
 
                         //TODO: we need to check if the block is within the safe head, if not then
                         // continue
+                        let safe_head = get_l2_safe_head(l1_provider.clone()).await?;
 
                         info!(committed_chain = ?new.range(), "Received commit");
                     }
