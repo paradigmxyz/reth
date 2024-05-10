@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::debug;
 
 /// Result of [Pruner::run] execution.
@@ -82,7 +82,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Listen for events on the pruner.
-    pub fn events(&mut self) -> UnboundedReceiverStream<PrunerEvent> {
+    pub fn events(&mut self) -> BroadcastStream<PrunerEvent> {
         self.listeners.new_listener()
     }
 
@@ -100,7 +100,7 @@ impl<DB: Database> Pruner<DB> {
             return Ok(PruneProgress::Finished)
         }
 
-        self.listeners.notify(PrunerEvent::Started { tip_block_number });
+        self.listeners.notify(PrunerEvent::Started { tip_block_number })?;
 
         debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
@@ -154,7 +154,7 @@ impl<DB: Database> Pruner<DB> {
             "{message}",
         );
 
-        self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
+        self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats })?;
 
         Ok(progress)
     }
