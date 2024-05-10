@@ -1,16 +1,15 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, Signature, TransactionSigned,
+    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::{any, prop_compose};
 use reth_codecs::derive_arbitrary;
-use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
-pub use reth_rpc_types::{
+pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
 
@@ -148,33 +147,36 @@ impl Deref for Block {
     }
 }
 
-impl TryFrom<reth_rpc_types::Block> for Block {
-    type Error = ConversionError;
+#[cfg(feature = "alloy-compat")]
+impl TryFrom<alloy_rpc_types::Block> for Block {
+    type Error = alloy_rpc_types::ConversionError;
 
-    fn try_from(block: reth_rpc_types::Block) -> Result<Self, Self::Error> {
+    fn try_from(block: alloy_rpc_types::Block) -> Result<Self, Self::Error> {
+        use alloy_rpc_types::ConversionError;
+
         let body = {
             let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
                 .transactions
             {
-                reth_rpc_types::BlockTransactions::Full(transactions) => transactions
+                alloy_rpc_types::BlockTransactions::Full(transactions) => transactions
                     .into_iter()
                     .map(|tx| {
                         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
                         Ok(TransactionSigned::from_transaction_and_signature(
                             tx.try_into()?,
-                            Signature {
+                            crate::Signature {
                                 r: signature.r,
                                 s: signature.s,
                                 odd_y_parity: signature
                                     .y_parity
-                                    .unwrap_or(reth_rpc_types::Parity(false))
+                                    .unwrap_or(alloy_rpc_types::Parity(false))
                                     .0,
                             },
                         ))
                     })
                     .collect(),
-                reth_rpc_types::BlockTransactions::Hashes(_) |
-                reth_rpc_types::BlockTransactions::Uncle => {
+                alloy_rpc_types::BlockTransactions::Hashes(_) |
+                alloy_rpc_types::BlockTransactions::Uncle => {
                     return Err(ConversionError::MissingFullTransactions)
                 }
             };

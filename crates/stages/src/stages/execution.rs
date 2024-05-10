@@ -14,7 +14,8 @@ use reth_primitives::{
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, BundleStateWithReceipts, Chain, DatabaseProviderRW, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
