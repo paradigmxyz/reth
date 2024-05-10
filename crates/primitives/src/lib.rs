@@ -22,6 +22,7 @@ mod account;
 pub mod basefee;
 mod block;
 mod chain;
+mod compat;
 #[cfg(feature = "zstd-codec")]
 mod compression;
 pub mod constants;
@@ -46,7 +47,6 @@ mod storage;
 pub mod transaction;
 pub mod trie;
 mod withdrawal;
-
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
@@ -59,6 +59,9 @@ pub use chain::{
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, NamedChain, DEV, GOERLI,
     HOLESKY, MAINNET, SEPOLIA,
 };
+#[allow(unused_imports)]
+#[cfg(feature = "alloy-compat")]
+use compat::*;
 #[cfg(feature = "zstd-codec")]
 pub use compression::*;
 pub use constants::{
