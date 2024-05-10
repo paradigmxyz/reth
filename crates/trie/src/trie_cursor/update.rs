@@ -5,7 +5,6 @@ use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
     B256,
 };
-use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct TrieUpdatesCursorFactory<'a, CF> {
@@ -55,20 +54,10 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        debug!(
-            target: "trie::trie_updates_account_trie_cursor",
-            key = ?key,
-            "seek_exact",
-        );
         if let Some((trie_key, trie_op)) =
             self.trie_updates.find_account_node(&StoredNibbles(key.clone()))
         {
             self.last_key = Some(trie_key);
-            debug!(
-                target: "trie::trie_updates_account_trie_cursor",
-                last_key = ?self.last_key,
-                "seek: found",
-            );
             match trie_op {
                 TrieOp::Update(node) => Ok(Some((key, node))),
                 TrieOp::Delete => Ok(None),
@@ -77,11 +66,6 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
             let result = self.cursor.seek_exact(key)?;
             self.last_key =
                 result.as_ref().map(|(k, _)| TrieKey::AccountNode(StoredNibbles(k.clone())));
-            debug!(
-                target: "trie::trie_updates_account_trie_cursor",
-                last_key = ?self.last_key,
-                "seek: found",
-            );
             Ok(result)
         }
     }
@@ -90,11 +74,6 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        debug!(
-            target: "trie::trie_updates_account_trie_cursor",
-            key = ?key,
-            "seek",
-        );
         let stored_nibbles = StoredNibbles(key.clone());
         let trie_update_entry = self
             .trie_updates
@@ -109,11 +88,6 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
                 _ => panic!("Invalid trie key"),
             };
             self.last_key = Some(trie_key);
-            debug!(
-                target: "trie::trie_updates_account_trie_cursor",
-                last_key = ?self.last_key,
-                "seek: found",
-            );
             match trie_op {
                 TrieOp::Update(node) => return Ok(Some((nibbles.0, node))),
                 TrieOp::Delete => return Ok(None),
@@ -123,20 +97,10 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
         let result = self.cursor.seek(key)?;
         self.last_key =
             result.as_ref().map(|(k, _)| TrieKey::AccountNode(StoredNibbles(k.clone())));
-        debug!(
-            target: "trie::trie_updates_account_trie_cursor",
-            last_key = ?self.last_key,
-            "seek: found",
-        );
         Ok(result)
     }
 
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
-        debug!(
-            target: "trie::trie_updates_account_trie_cursor",
-            last_key = ?self.last_key,
-            "current",
-        );
         if self.last_key.is_some() {
             Ok(self.last_key.clone())
         } else {
@@ -165,22 +129,11 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        debug!(
-            target: "trie::trie_updates_storage_trie_cursor",
-            key = ?key,
-            hashed_address = %self.hashed_address,
-            "seek_exact",
-        );
         if let Some((trie_key, trie_op)) = self
             .trie_updates
             .find_storage_node(&self.hashed_address, &StoredNibblesSubKey(key.clone()))
         {
             self.last_key = Some(trie_key);
-            debug!(
-                target: "trie::trie_updates_storage_trie_cursor",
-                last_key = ?self.last_key,
-                "seek: found",
-            );
             match trie_op {
                 TrieOp::Update(node) => Ok(Some((key, node))),
                 TrieOp::Delete => Ok(None),
@@ -190,11 +143,6 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
             self.last_key = result.as_ref().map(|(k, _)| {
                 TrieKey::StorageNode(self.hashed_address, StoredNibblesSubKey(k.clone()))
             });
-            debug!(
-                target: "trie::trie_updates_storage_trie_cursor",
-                last_key = ?self.last_key,
-                "seek: found",
-            );
             Ok(result)
         }
     }
@@ -203,12 +151,6 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        debug!(
-            target: "trie::trie_updates_storage_trie_cursor",
-            key = ?key,
-            hashed_address = %self.hashed_address,
-            "seek",
-        );
         let nibbles_sub_key = StoredNibblesSubKey(key.clone());
         let mut trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
         while trie_update_entry
@@ -226,11 +168,6 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
                 _ => panic!("this should not happen!"),
             };
             self.last_key = Some(trie_key.clone());
-            debug!(
-                target: "trie::trie_updates_storage_trie_cursor",
-                last_key = ?self.last_key,
-                "seek: found",
-            );
             match trie_op {
                 TrieOp::Update(node) => return Ok(Some((nibbles.0, node.clone()))),
                 TrieOp::Delete => return Ok(None),
@@ -241,11 +178,6 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
         self.last_key = result.as_ref().map(|(k, _)| {
             TrieKey::StorageNode(self.hashed_address, StoredNibblesSubKey(k.clone()))
         });
-        debug!(
-            target: "trie::trie_updates_storage_trie_cursor",
-            last_key = ?self.last_key,
-            "seek: found",
-        );
         Ok(result)
     }
 
