@@ -15,31 +15,11 @@ use reth_provider::StateProviderFactory;
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
 
-use crate::L2OutputOracle::L2OutputOracleCalls;
 sol! {
     #[sol(rpc)]
     contract L2OutputOracle {
         function proposeL2Output(bytes32 _outputRoot, uint256 _l2BlockNumber, bytes32 _l1BlockHash, uint256 _l1BlockNumber) external payable;
         function latestBlockNumber() public view returns (uint256);
-    }
-    #[sol(rpc)]
-    contract OptimismPortal {
-        struct OutputRootProof {
-            bytes32 version;
-            bytes32 stateRoot;
-            bytes32 messagePasserStorageRoot;
-            bytes32 latestBlockhash;
-        }
-
-        struct WithdrawalTransaction {
-            uint256 nonce;
-            address sender;
-            address target;
-            uint256 value;
-            uint256 gasLimit;
-            bytes data;
-        }
-        function proveWithdrawalTransaction(WithdrawalTransaction memory _tx, uint256 _l2OutputIndex, OutputRootProof calldata _outputRootProof,bytes[] calldata _withdrawalProof) external;
     }
 }
 
@@ -103,8 +83,6 @@ async fn init_exex<Node: FullNodeComponents>(
     mut connection: Connection,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
     create_tables(&mut connection)?;
-    // TODO: Pull config from the config file
-    // and init provider
     let config = serde_json::from_str::<ProposerConfig>(
         &std::fs::read_to_string("config.json").expect("Could not read config file"),
     )
@@ -161,14 +139,11 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         let l2_oo = L2OutputOracle::new(self.l2_output_oracle, self.provider.clone());
         let l2_provider = ctx.provider().clone();
-        //TODO: initialization logic
         let fut = async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 match &notification {
                     ExExNotification::ChainCommitted { new } => {
-                        let current_block = ctx.head.number.clone();
-
-                        // TODO: Fetch the next block number from the L2OutputOracle contract
+                        let current_block = ctx.head.number;
                         let next_block = l2_oo.latestBlockNumber().call().await?._0.to::<u64>();
 
                         if next_block == current_block {
@@ -177,7 +152,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                                 .get_block(BlockId::Number(BlockNumberOrTag::Latest), false)
                                 .await?;
                             if let Some(l1_block) = l1_block {
-                                // Get the l2_to_l1_message_passer accounts root
+                                // Get the l2_to_l1_message_passer storage root
                                 let state_provider = l2_provider.state_by_block_id(
                                     BlockId::Number(BlockNumberOrTag::Number(current_block)),
                                 )?;
