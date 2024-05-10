@@ -95,7 +95,7 @@ where
         let hashed_state_sorted = self.hashed_state.into_sorted();
 
         let trie_updates_sorted =
-            self.trie_updates.map_or(Default::default(), |updates| updates.into_sorted());
+            self.trie_updates.map_or_else(Default::default, |updates| updates.into_sorted());
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);

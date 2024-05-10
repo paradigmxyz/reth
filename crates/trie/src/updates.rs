@@ -186,12 +186,14 @@ impl TrieUpdates {
         Ok(())
     }
 
+    /// creates [TrieUpdatesSorted] by sorting the trie_operations.
     pub fn sorted(&self) -> TrieUpdatesSorted {
         let mut trie_operations = Vec::from_iter(self.trie_operations.clone());
         trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         TrieUpdatesSorted { trie_operations }
     }
 
+    /// converts trie updates into [TrieUpdatesSorted].
     pub fn into_sorted(self) -> TrieUpdatesSorted {
         let mut trie_operations = Vec::from_iter(self.trie_operations);
         trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -202,10 +204,12 @@ impl TrieUpdates {
 /// The aggregation of trie updates.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deref)]
 pub struct TrieUpdatesSorted {
-    pub trie_operations: Vec<(TrieKey, TrieOp)>,
+    /// Sorted collection of trie operations.
+    pub(crate) trie_operations: Vec<(TrieKey, TrieOp)>,
 }
 
 impl TrieUpdatesSorted {
+    /// Find the account node with the given nibbles.
     pub fn find_account_node(&self, key: &StoredNibbles) -> Option<(TrieKey, TrieOp)> {
         self.trie_operations
             .iter()
@@ -213,6 +217,7 @@ impl TrieUpdatesSorted {
             .cloned()
     }
 
+    /// Find the storage node with the given hashed address and key.
     pub fn find_storage_node(
         &self,
         hashed_address: &B256,

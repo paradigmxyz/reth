@@ -6,6 +6,7 @@ use reth_primitives::{
     B256,
 };
 
+/// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
 pub struct TrieUpdatesCursorFactory<'a, CF> {
     cursor_factory: CF,
@@ -13,6 +14,7 @@ pub struct TrieUpdatesCursorFactory<'a, CF> {
 }
 
 impl<'a, CF> TrieUpdatesCursorFactory<'a, CF> {
+    /// Create a new trie cursor factory.
     pub fn new(cursor_factory: CF, trie_updates: &'a TrieUpdatesSorted) -> Self {
         Self { cursor_factory, trie_updates }
     }
@@ -36,6 +38,8 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for TrieUpdatesCursorFactory<'
     }
 }
 
+/// The cursor to iterate over account trie updates and corresponding database entries.
+/// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
 pub struct TrieUpdatesAccountTrieCursor<'a, C> {
     cursor: C,
@@ -109,6 +113,8 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
     }
 }
 
+/// The cursor to iterate over storage trie updates and corresponding database entries.
+/// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
 pub struct TrieUpdatesStorageTrieCursor<'a, C> {
     cursor: C,
