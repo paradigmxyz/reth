@@ -177,7 +177,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
         {
             self.last_key = Some(trie_key);
             debug!(
-                target: "trie::trie_updates_account_trie_cursor",
+                target: "trie::trie_updates_storage_trie_cursor",
                 last_key = ?self.last_key,
                 "seek: found",
             );
@@ -191,7 +191,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
                 TrieKey::StorageNode(self.hashed_address, StoredNibblesSubKey(k.clone()))
             });
             debug!(
-                target: "trie::trie_updates_account_trie_cursor",
+                target: "trie::trie_updates_storage_trie_cursor",
                 last_key = ?self.last_key,
                 "seek: found",
             );
@@ -227,7 +227,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
             };
             self.last_key = Some(trie_key.clone());
             debug!(
-                target: "trie::trie_updates_account_trie_cursor",
+                target: "trie::trie_updates_storage_trie_cursor",
                 last_key = ?self.last_key,
                 "seek: found",
             );
@@ -242,7 +242,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
             TrieKey::StorageNode(self.hashed_address, StoredNibblesSubKey(k.clone()))
         });
         debug!(
-            target: "trie::trie_updates_account_trie_cursor",
+            target: "trie::trie_updates_storage_trie_cursor",
             last_key = ?self.last_key,
             "seek: found",
         );
