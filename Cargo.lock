@@ -7589,6 +7589,7 @@ name = "reth-provider"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-rlp",
+ "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",
  "dashmap",
@@ -7605,7 +7606,6 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
- "reth-rpc-types",
  "reth-trie",
  "revm",
  "strum",
