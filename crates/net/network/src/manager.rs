@@ -49,6 +49,7 @@ use reth_primitives::{ForkId, NodeRecord};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
+use reth_tokio_util::EventNotifier;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
@@ -60,10 +61,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-use tokio::sync::{
-    broadcast::Sender,
-    mpsc::{self, error::TrySendError},
-};
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
 
@@ -87,7 +85,7 @@ pub struct NetworkManager<C> {
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
     /// Event notifier for high level network events.
-    event_notifier: EventNotifier,
+    event_notifier: EventNotifier<NetworkEvent>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
     to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent>>,
@@ -1037,27 +1035,4 @@ pub enum DiscoveredEvent {
 struct NetworkManagerPollDurations {
     acc_network_handle: Duration,
     acc_swarm: Duration,
-}
-
-#[derive(Default, Debug)]
-pub(crate) struct EventNotifier {
-    sender: Option<Sender<NetworkEvent>>,
-}
-
-impl EventNotifier {
-    pub(crate) fn set_sender(&mut self, sender: Sender<NetworkEvent>) {
-        self.sender = Some(sender);
-    }
-
-    /// Sends an event to all listeners. Returns the number of subscribers the event was sent to.
-    pub(crate) fn notify(&self, event: NetworkEvent) {
-        match self.sender.as_ref().map(|sender| sender.send(event)).unwrap_or(Ok(0)) {
-            Ok(listener_count) => {
-                if listener_count == 0 {
-                    warn!("notification of network event with 0 listeners");
-                }
-            }
-            Err(e) => error!("channel closed: {e}"),
-        };
-    }
 }
