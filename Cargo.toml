@@ -63,7 +63,6 @@ members = [
     "examples/",
     "examples/additional-rpc-namespace-in-cli/",
     "examples/beacon-api-sse/",
-    "examples/beacon-api-sidecar-fetcher/",
     "examples/cli-extension-event-hooks/",
     "examples/custom-evm/",
     "examples/custom-node/",
