@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use alloy_network::Network;
+use alloy_network::{EthereumSigner, Network};
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_signer::k256::ecdsa::SigningKey;
 use alloy_signer_wallet::LocalWallet;
 use alloy_sol_types::sol;
 use alloy_transport::Transport;
@@ -86,6 +85,14 @@ fn create_tables(connection: &mut Connection) -> rusqlite::Result<()> {
 
     Ok(())
 }
+#[derive(Debug, serde::Deserialize)]
+struct ProposerConfig {
+    l1_rpc: String,
+    l2_output_oracle: Address,
+    l2_to_l1_message_passer: Address,
+    submission_interval: u64,
+    proposer_private_key: String,
+}
 
 async fn init_exex<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
@@ -94,7 +101,22 @@ async fn init_exex<Node: FullNodeComponents>(
     create_tables(&mut connection)?;
     // TODO: Pull config from the config file
     // and init provider
-    Ok(OpProposer::new().spawn(ctx, connection)?)
+    let config = serde_json::from_str::<ProposerConfig>(
+        &std::fs::read_to_string("config.json").expect("Could not read config file"),
+    )
+    .unwrap();
+
+    let provider = ProviderBuilder::new()
+        .with_recommended_fillers()
+        .signer(EthereumSigner::from(config.proposer_private_key.parse::<LocalWallet>().unwrap()))
+        .on_http(config.l1_rpc.parse().unwrap());
+    Ok(OpProposer::new(
+        provider,
+        config.l2_output_oracle,
+        config.l2_to_l1_message_passer,
+        config.submission_interval,
+    )
+    .spawn(ctx, connection)?)
 }
 
 struct OpProposer<T, N, P>
@@ -103,7 +125,6 @@ where
     N: Network,
     P: Provider<T, N>,
 {
-    signer: LocalWallet,
     provider: Arc<P>,
     l2_output_oracle: Address,
     l2_to_l1_message_passer: Address,
@@ -114,15 +135,12 @@ where
 
 impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
     fn new(
-        pk: &str,
         provider: P,
         l2_output_oracle: Address,
         l2_to_l1_message_passer: Address,
         submission_interval: u64,
     ) -> Self {
-        let signer = pk.parse().unwrap();
         Self {
-            signer,
             provider: Arc::new(provider),
             l2_output_oracle,
             l2_to_l1_message_passer,
@@ -138,7 +156,6 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         _connection: Connection,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         //TODO: initialization logic
-
         let fut = async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 match &notification {

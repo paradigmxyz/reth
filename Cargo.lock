@@ -5470,6 +5470,8 @@ dependencies = [
  "reth-provider",
  "reth-tracing",
  "rusqlite",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
