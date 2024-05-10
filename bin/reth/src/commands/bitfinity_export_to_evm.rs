@@ -49,79 +49,32 @@ impl Command {
         let evm_client = EvmCanisterClient::new(
             IcAgentClient::with_identity(
                 principal,
-                self.bitfinity.identity_file.clone(),
-                &self.bitfinity.evm_client_network_url,
+                self.bitfinity.ic_identity_file_path.clone(),
+                &self.bitfinity.evm_url,
                 None,
             )
             .await?,
         );
 
         let chain = Arc::new(
-            BitfinityEvmClient::fetch_chain_spec(self.bitfinity.rpc_url.clone().to_owned()).await?,
+            BitfinityEvmClient::fetch_chain_spec(self.bitfinity.evm_url.clone().to_owned()).await?,
         );
 
         let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
 
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         let db = Arc::new(init_db(db_path, Default::default())?);
 
-        debug!(target: "reth::cli", chain=%chain.chain, genesis=?chain.genesis_hash(), "Initializing genesis");
-        init_genesis(db.clone(), chain.clone())?;
-
-        let provider_factory = ProviderFactory::new(Arc::clone(&db), Arc::clone(&chain));
+        let provider_factory =
+            ProviderFactory::new(db.clone(), chain.clone(), data_dir.static_files())?;
 
         // Disable evm execution
 
         {
             evm_client.admin_disable_evm(true).await??;
             evm_client.admin_disable_process_pending_transactions(true).await??;
-        }
-
-        let import = ImportCommand::new(
-            None,
-            self.datadir,
-            chain.clone(),
-            self.bitfinity.clone(),
-            DatabaseArgs::default(),
-        );
-
-        let latest_block = evm_client.eth_block_number().await.map_err(|e| {
-            eyre::eyre!("Failed to fetch latest block number from Ethereum JSON RPC: {}", e)
-        })?;
-
-        let provider_factory = provider_factory.clone();
-        let db = db.clone();
-
-        let max_retries = 10;
-        let mut retry_count = 0;
-        let mut backoff_duration = Duration::from_millis(100);
-
-        // Sync with the chain
-        loop {
-            info!(target: "reth::cli", latest_block=%latest_block, "Syncing with the chain");
-
-            import.import(Config::default(), provider_factory.clone(), db.clone().into()).await?;
-
-            let best_block = provider_factory.last_block_number()? + 1;
-
-            info!(target: "reth::cli", latest_block=%latest_block, best_block=%best_block, "Waiting for best_block to reach latest_block");
-
-            if best_block >= latest_block {
-                break;
-            }
-
-            retry_count += 1;
-
-            if retry_count >= max_retries {
-                return Err(eyre::eyre!("Maximum number of retries reached while waiting for best_block to reach latest_block"));
-            }
-
-            tokio::time::sleep(backoff_duration).await;
-
-            // Increase the backoff duration for the next retry
-            backoff_duration *= 2;
         }
 
         //
@@ -135,10 +88,8 @@ impl Command {
         let mut provider = provider_factory.provider()?;
 
         let tx_mut = provider.tx_mut();
+        
         let mut plain_account_cursor = tx_mut.cursor_read::<tables::PlainAccountState>()?;
-
-        let mut plain_storage_cursor = tx_mut.cursor_read::<tables::PlainStorageState>()?;
-
         let mut contract_storage_cursor = tx_mut.cursor_read::<tables::Bytecodes>()?;
 
         let mut entry = plain_account_cursor.first()?;
