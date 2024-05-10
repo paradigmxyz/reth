@@ -30,8 +30,35 @@ pub struct DebugArgs {
 
     /// Runs a fake consensus client that advances the chain using recent block hashes
     /// on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment
-    #[arg(long = "debug.etherscan", help_heading = "Debug", conflicts_with = "tip")]
+    #[arg(
+        long = "debug.etherscan",
+        help_heading = "Debug",
+        conflicts_with = "tip",
+        conflicts_with = "rpc_consensus_http"
+    )]
     pub etherscan: bool,
+
+    /// Runs a fake consensus client using blocks from an RPC endpoint. HTTP endpoint for getting
+    /// past blocks.
+    #[arg(
+        long = "debug.rpc-consensus-http",
+        help_heading = "Debug",
+        conflicts_with = "tip",
+        conflicts_with = "etherscan",
+        requires = "rpc_consensus_ws"
+    )]
+    pub rpc_consensus_http: Option<String>,
+
+    /// Runs a fake consensus client using blocks from an RPC endpoint. WS endpoint for getting new
+    /// blocks.
+    #[arg(
+        long = "debug.rpc-consensus-ws",
+        help_heading = "Debug",
+        conflicts_with = "tip",
+        conflicts_with = "etherscan",
+        requires = "rpc_consensus_http"
+    )]
+    pub rpc_consensus_ws: Option<String>,
 
     /// If provided, the engine will skip `n` consecutive FCUs.
     #[arg(long = "debug.skip-fcu", help_heading = "Debug")]

@@ -1,5 +1,5 @@
 [package]
-name = "reth-consensus-rpc"
+name = "reth-consensus-debug-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,7 +19,12 @@ reth-rpc-builder.workspace = true
 
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips = { workspace = true }
+alloy-provider = { workspace = true, features = ["ws"] }
+
+futures.workspace = true
 jsonrpsee.workspace = true
 reqwest = { workspace = true, features = ["default-tls", "json"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true }
+
+ringbuffer = "0.15.0"

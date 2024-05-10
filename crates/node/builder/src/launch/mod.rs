@@ -40,7 +40,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub mod common;
 pub use common::LaunchContext;
-use reth_consensus_rpc::RpcConsensusClient;
+use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 
 /// A general purpose trait that launches a new node of any kind.
 ///
@@ -446,16 +446,32 @@ where
 
         if ctx.node_config().debug.etherscan {
             let chain = ctx.node_config().chain.chain;
-            let rpc_consensus_client = RpcConsensusClient::new(
-                rpc_server_handles.auth.clone(),
-                chain
-                    .etherscan_api_key()
-                    .expect("etherscan api key not found for rpc consensus client"),
+            // todo: move this piping into a helperfunction
+            let block_provider = EtherscanBlockProvider::new(
                 chain
                     .etherscan_urls()
                     .expect("etherscan urls not found for rpc consensus client")
                     .0
                     .to_owned(),
+                chain
+                    .etherscan_api_key()
+                    .expect("etherscan api key not found for rpc consensus client"),
+            );
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
+            );
+            ctx.task_executor().spawn_critical("etherscan consensus client", async move {
+                rpc_consensus_client.spawn::<T::Engine>().await
+            });
+        }
+        if let (Some(rpc_http_url), Some(rpc_ws_url)) =
+            (&ctx.node_config().debug.rpc_consensus_http, &ctx.node_config().debug.rpc_consensus_ws)
+        {
+            let block_provider = RpcBlockProvider::new(rpc_http_url.clone(), rpc_ws_url.clone());
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("rpc consensus client", async move {
                 rpc_consensus_client.spawn::<T::Engine>().await

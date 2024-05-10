@@ -1,84 +1,60 @@
-/// TODO: Crate description
-
 use alloy_consensus::TxEnvelope;
 use alloy_eips::eip2718::Encodable2718;
 use reth_node_api::EngineTypes;
 use reth_node_core::{
-    primitives::{B256},
+    primitives::B256,
     rpc::types::{BlockTransactions, ExecutionPayloadV2, ExecutionPayloadV3, RichBlock},
 };
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_types::ExecutionPayloadV1;
-use serde::Deserialize;
-use std::time::Duration;
-use tokio::time::sleep;
+use ringbuffer::{AllocRingBuffer, RingBuffer};
+use std::{future::Future, sync::Arc};
+use tokio::sync::mpsc;
 
-/// Fake consensus client that sends FCUs and new payloads using recent blocks from an external
-/// provider, starting with Etherscan.
-/// TODO: Naming - maybe "ExternalConsensusClient"? Or maybe simpler and just
-///   "EtherscanConsensusClient"?
-#[derive(Debug)]
-pub struct RpcConsensusClient {
-    /// HTTP client to fetch blocks
-    http_client: reqwest::Client,
-    /// Handle to execution client
-    auth_server: AuthServerHandle,
-    /// Etherscan API key
-    etherscan_api_key: String,
-    /// Etherscan base API URL
-    etherscan_base_api_url: String,
+/// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
+/// by number to fetch past finalized and safe blocks.
+pub trait BlockProvider: Send + Sync + 'static {
+    /// Spawn a block provider to send new blocks to the given sender.
+    fn spawn(&self, tx: mpsc::Sender<RichBlock>) -> impl Future<Output = ()> + Send;
+    /// Get a past block by number.
+    fn get_block(&self, block_number: u64) -> impl Future<Output = RichBlock> + Send;
 }
 
-impl RpcConsensusClient {
-    /// Create a new fake consensus client that should sent FCUs and new payloads to `auth_server`.
-    pub fn new(
-        auth_server: AuthServerHandle,
-        etherscan_api_key: String,
-        etherscan_base_api_url: String,
-    ) -> Self {
-        Self {
-            http_client: reqwest::Client::new(),
-            auth_server,
-            etherscan_api_key,
-            etherscan_base_api_url,
-        }
+/// Debyg consensus client that sends FCUs and new payloads using recent blocks from an external
+/// provider like Etherscan or an RPC endpoint.
+#[derive(Debug)]
+pub struct DebugConsensusClient<P: BlockProvider> {
+    /// Handle to execution client.
+    auth_server: AuthServerHandle,
+    /// Provider to get consensus blocks from.
+    block_provider: Arc<P>,
+}
+
+impl<P: BlockProvider> DebugConsensusClient<P> {
+    /// Create a new debug consensus client with the given handle to execution
+    /// client and block provider.
+    pub fn new(auth_server: AuthServerHandle, block_provider: Arc<P>) -> Self {
+        Self { auth_server, block_provider }
     }
 
-    /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent blocks.
+    /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
+    /// blocks.
     pub async fn spawn<T: EngineTypes>(&self) {
         // TODO: Add logs
-        // TODO: Generalize over block-fetching code to support different sources
-
         let execution_client = self.auth_server.http_client();
-        let mut last_block_number: Option<u64> = None;
+        let mut previous_block_hashes = AllocRingBuffer::new(64);
 
-        loop {
-            let block: EtherscanBlockResponse = self
-                .http_client
-                .get(&self.etherscan_base_api_url)
-                .query(&[
-                    ("module", "proxy"),
-                    ("action", "eth_getBlockByNumber"),
-                    ("tag", "latest"),
-                    ("boolean", "true"),
-                    ("apikey", &self.etherscan_api_key),
-                ])
-                .send()
-                .await
-                .unwrap()
-                .json()
-                .await
-                // TODO: Handle errors gracefully and do not stop the loop
-                .unwrap();
+        let mut block_stream = {
+            let (tx, rx) = mpsc::channel::<RichBlock>(64);
+            let block_provider = self.block_provider.clone();
+            tokio::spawn(async move {
+                block_provider.spawn(tx).await;
+            });
+            rx
+        };
 
-            // Sleep if no new block is available
-            if block.result.header.number == last_block_number {
-                // TODO: Allow to configure this
-                sleep(Duration::from_secs(3)).await;
-                continue;
-            }
-
-            let payload = rich_block_to_execution_payload_v3(block.result);
+        while let Some(block) = block_stream.recv().await {
+            let payload = rich_block_to_execution_payload_v3(block);
 
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
@@ -92,27 +68,67 @@ impl RpcConsensusClient {
             )
             .await
             .unwrap();
+
+            previous_block_hashes.push(block_hash);
+
+            // Load previous block hashes. We're using (head - 32) and (head - 64) as the safe and
+            // finalized block hashes.
+            // todo: chdeck for off by ones in offset
+            let safe_block_hash = get_or_fetch_previous_block(
+                self.block_provider.as_ref(),
+                &previous_block_hashes,
+                block_number,
+                32,
+            );
+            let finalized_block_hash = get_or_fetch_previous_block(
+                self.block_provider.as_ref(),
+                &previous_block_hashes,
+                block_number,
+                64,
+            );
+            let (safe_block_hash, finalized_block_hash) =
+                tokio::join!(safe_block_hash, finalized_block_hash);
             reth_rpc_api::EngineApiClient::<T>::fork_choice_updated_v3(
                 &execution_client,
                 reth_rpc_types::engine::ForkchoiceState {
                     head_block_hash: block_hash,
-                    safe_block_hash: block_hash,
-                    finalized_block_hash: block_hash,
+                    safe_block_hash,
+                    finalized_block_hash,
                 },
                 None,
             )
             .await
             .unwrap();
-
-            last_block_number = Some(block_number);
-
-            // TODO: Allow to configure this
-            sleep(Duration::from_secs(3)).await;
         }
     }
 }
 
-/// Context for a Cancun "new payload" with additional metadata.
+/// Get previous block hash using previous block hash buffer. If it isn't available (buffer
+/// started more recently than `offset`), fetch it from block provider.
+async fn get_or_fetch_previous_block<P: BlockProvider>(
+    block_provider: &P,
+    previous_block_hashes: &AllocRingBuffer<B256>,
+    current_block_number: u64,
+    offset: usize,
+) -> B256 {
+    let stored_hash = previous_block_hashes
+        .len()
+        .checked_sub(offset)
+        .and_then(|index| previous_block_hashes.get(index));
+    if let Some(hash) = stored_hash {
+        return *hash;
+    }
+
+    // Return default hash if the chain isn't long enough to have the block at the offset.
+    let previous_block_number = match current_block_number.checked_sub(offset as u64) {
+        Some(number) => number,
+        None => return B256::default(),
+    };
+    let block = block_provider.get_block(previous_block_number).await;
+    block.header.hash.unwrap()
+}
+
+/// Cancun "new payload" event.
 #[derive(Debug)]
 struct ExecutionNewPayload {
     execution_payload_v3: ExecutionPayloadV3,
@@ -121,10 +137,12 @@ struct ExecutionNewPayload {
 }
 
 impl ExecutionNewPayload {
+    /// Get block hash from block in the payload
     fn block_hash(&self) -> B256 {
         self.execution_payload_v3.payload_inner.payload_inner.block_hash
     }
 
+    /// Get block number from block in the payload
     fn block_number(&self) -> u64 {
         self.execution_payload_v3.payload_inner.payload_inner.block_number
     }
@@ -149,7 +167,6 @@ fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
         .flat_map(|tx| tx.blob_versioned_hashes.clone().unwrap_or_default())
         .collect();
 
-    // TODO: Do we want to handle errors more gracefully here or this is fine?
     let payload: ExecutionPayloadV3 = ExecutionPayloadV3 {
         payload_inner: ExecutionPayloadV2 {
             payload_inner: ExecutionPayloadV1 {
@@ -187,9 +204,4 @@ fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
         versioned_hashes,
         parent_beacon_block_root: block.header.parent_beacon_block_root.unwrap(),
     }
-}
-
-#[derive(Deserialize, Debug)]
-struct EtherscanBlockResponse {
-    result: RichBlock,
 }
