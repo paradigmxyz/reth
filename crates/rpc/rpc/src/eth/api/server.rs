@@ -378,30 +378,26 @@ where
 
     /// Handler for: `eth_sendTransaction`
     async fn send_transaction(&self, _request: TransactionRequest) -> Result<B256> {
-        Err(internal_rpc_err("read-only node"))
+        Err(internal_rpc_err("eth_sendTransaction not supported"))
     }
 
     /// Handler for: `eth_sendRawTransaction`
-    async fn send_raw_transaction(&self, _tx: Bytes) -> Result<B256> {
-        //
-        // This forwards the raw transaction to the configured RPC URL.
-        // It is currently disabled because the RPC URL provider is usually the one of the evm-block-extractor
-        //
-        // let Some(rpc_url) = &self.provider().chain_spec().rpc_url else {
-        //     return Err(internal_rpc_err("no url found for eth_sendRawTransaction"))
-        // };
-        // trace!(target: "rpc::eth", ?rpc_url, "Serving eth_sendRawTransaction");
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
 
-        // let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
-        //     ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc_url.to_string())
-        // );
+        let Some(rpc_url) = &self.provider().chain_spec().bitfinity_evm_url else {
+            return Err(internal_rpc_err("no url found for eth_sendRawTransaction"))
+        };
+        trace!(target: "rpc::eth", ?rpc_url, "Serving eth_sendRawTransaction");
 
-        // let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
-        //     internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
-        // })?;
+        let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
+            ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc_url.to_string())
+        );
 
-        // Ok(tx_hash.0.into())
-        Err(internal_rpc_err("read-only node"))
+        let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
+            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+        })?;
+
+        Ok(tx_hash.0.into())
     }
 
     /// Handler for: `eth_sign`

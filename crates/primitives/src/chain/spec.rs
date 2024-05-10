@@ -74,6 +74,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 3500,
+        bitfinity_evm_url: Default::default(),
     }
     .into()
 });
@@ -116,6 +117,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
+        bitfinity_evm_url: Default::default(),
     }
     .into()
 });
@@ -162,6 +164,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
+        bitfinity_evm_url: Default::default(),
     }
     .into()
 });
@@ -203,6 +206,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 1700,
+        bitfinity_evm_url: Default::default(),
     }
     .into()
 });
@@ -527,6 +531,9 @@ pub struct ChainSpec {
     /// data coming in.
     #[serde(default)]
     pub prune_delete_limit: usize,
+
+    /// The URL of the Bitfinity EVM RPC endpoint
+    pub bitfinity_evm_url: Option<String>,
 }
 
 impl Default for ChainSpec {
@@ -540,6 +547,7 @@ impl Default for ChainSpec {
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
+            bitfinity_evm_url: Default::default(),
         }
     }
 }

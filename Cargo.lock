@@ -8245,6 +8245,7 @@ dependencies = [
  "async-trait",
  "derive_more",
  "dyn-clone",
+ "ethereum-json-rpc-client",
  "futures",
  "http 0.2.12",
  "http-body 0.4.6",

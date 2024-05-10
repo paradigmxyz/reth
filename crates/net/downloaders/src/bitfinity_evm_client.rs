@@ -18,9 +18,7 @@ use reth_interfaces::p2p::{
 use alloy_rlp::Decodable;
 use reth_network_types::PeerId;
 use reth_primitives::{
-    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig,
-    ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection,
-    B256, U256,
+    ruint::Uint, BaseFeeParams, BaseFeeParamsKind, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig, ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, B256, U256
 };
 use rlp::Encodable;
 use serde_json::json;
@@ -264,7 +262,10 @@ impl BitfinityEvmClient {
                     ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
                 ),
             ]),
-            ..Default::default()
+            deposit_contract: None,
+            base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+            prune_delete_limit: 0,
+            bitfinity_evm_url: Some(rpc),
         };
 
         tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:#?}", spec);
