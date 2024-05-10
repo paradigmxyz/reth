@@ -47,8 +47,10 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
-use tracing::{debug, trace};
+use tokio_stream::wrappers::{
+    errors::BroadcastStreamRecvError, BroadcastStream, ReceiverStream, UnboundedReceiverStream,
+};
+use tracing::{debug, error, trace};
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -198,7 +200,7 @@ pub struct TransactionsManager<Pool> {
     /// Subscriptions to all network related events.
     ///
     /// From which we get all new incoming transaction related messages.
-    network_events: UnboundedReceiverStream<NetworkEvent>,
+    network_events: BroadcastStream<NetworkEvent>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
@@ -883,15 +885,19 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event: NetworkEvent) {
-        match event {
-            NetworkEvent::SessionClosed { peer_id, .. } => {
+    fn on_network_event(&mut self, event_result: Result<NetworkEvent, BroadcastStreamRecvError>) {
+        match event_result {
+            Ok(NetworkEvent::SessionClosed { peer_id, .. }) => {
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
-            NetworkEvent::SessionEstablished {
-                peer_id, client_version, messages, version, ..
-            } => {
+            Ok(NetworkEvent::SessionEstablished {
+                peer_id,
+                client_version,
+                messages,
+                version,
+                ..
+            }) => {
                 // Insert a new peer into the peerset.
                 let peer = PeerMetadata::new(messages, version, client_version);
                 let peer = match self.peers.entry(peer_id) {
@@ -926,6 +932,7 @@ where
                 let msg = msg_builder.build();
                 self.network.send_transactions_hashes(peer_id, msg);
             }
+            Err(e) => error!("{e}"),
             _ => {}
         }
     }
