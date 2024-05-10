@@ -5452,8 +5452,13 @@ name = "op-proposer"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-contract",
+ "alloy-network",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer",
+ "alloy-signer-wallet",
  "alloy-sol-types",
+ "alloy-transport",
  "eyre",
  "futures",
  "reth",

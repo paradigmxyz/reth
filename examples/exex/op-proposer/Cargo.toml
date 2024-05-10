@@ -22,7 +22,10 @@ tokio.workspace = true
 futures.workspace = true
 alloy-primitives.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
-alloy-contract ={ git = "https://github.com/alloy-rs/alloy", rev = "77c1240"}
+alloy-signer.workspace = true
+alloy-signer-wallet.workspace = true
+alloy-network.workspace = true
+alloy-provider.workspace = true
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
-
-

@@ -1,5 +1,12 @@
+use std::sync::Arc;
+
+use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, B256};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_signer::k256::ecdsa::SigningKey;
+use alloy_signer_wallet::LocalWallet;
 use alloy_sol_types::sol;
+use alloy_transport::Transport;
 use futures::Future;
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
@@ -85,36 +92,44 @@ async fn init_exex<Node: FullNodeComponents>(
     mut connection: Connection,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
     create_tables(&mut connection)?;
+    // TODO: Pull config from the config file
+    // and init provider
     Ok(OpProposer::new().spawn(ctx, connection)?)
 }
 
-async fn op_proposer_exex<Node: FullNodeComponents>(
-    mut ctx: ExExContext<Node>,
-    _connection: Connection,
-) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.recv().await {
-        match &notification {
-            ExExNotification::ChainCommitted { new } => {
-                info!(committed_chain = ?new.range(), "Received commit");
-            }
-            ExExNotification::ChainReorged { old, new } => {
-                info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-            }
-            ExExNotification::ChainReverted { old } => {
-                info!(reverted_chain = ?old.range(), "Received revert");
-            }
-        };
-    }
-    Ok(())
+struct OpProposer<T, N, P>
+where
+    T: Transport + Clone,
+    N: Network,
+    P: Provider<T, N>,
+{
+    signer: LocalWallet,
+    provider: Arc<P>,
+    l2_output_oracle: Address,
+    l2_to_l1_message_passer: Address,
+    submission_interval: u64,
+    _network: std::marker::PhantomData<N>,
+    _transport: std::marker::PhantomData<T>,
 }
 
-struct OpProposer {
-    //TODO: persistent storage configuration
-}
-
-impl OpProposer {
-    fn new() -> Self {
-        Self {}
+impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
+    fn new(
+        pk: &str,
+        provider: P,
+        l2_output_oracle: Address,
+        l2_to_l1_message_passer: Address,
+        submission_interval: u64,
+    ) -> Self {
+        let signer = pk.parse().unwrap();
+        Self {
+            signer,
+            provider: Arc::new(provider),
+            l2_output_oracle,
+            l2_to_l1_message_passer,
+            submission_interval,
+            _network: std::marker::PhantomData,
+            _transport: std::marker::PhantomData,
+        }
     }
 
     fn spawn<Node: FullNodeComponents>(
@@ -128,6 +143,12 @@ impl OpProposer {
             while let Some(notification) = ctx.notifications.recv().await {
                 match &notification {
                     ExExNotification::ChainCommitted { new } => {
+                        // TODO: Fetch the next block number from the L2OutputOracle contract
+                        // If the next block number is equal to the current cononical tip
+                        //  - Get the account root of the l2_to_l1_message_passer contract
+                        //  - Construct the L2Output.
+                        //  - Send the L2Output to the L2OutputOracle contract
+                        //  - Write the L2Output to the database
                         info!(committed_chain = ?new.range(), "Received commit");
                     }
                     ExExNotification::ChainReorged { old, new } => {
