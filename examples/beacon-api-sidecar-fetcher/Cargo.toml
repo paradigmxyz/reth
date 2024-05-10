@@ -16,3 +16,5 @@ tokio = { workspace = true, features = ["time"] }
 eyre.workspace = true
 thiserror.workspace = true
 reqwest = "0.12.3"
+alloy-rpc-types-beacon.workspace = true
+alloy-eips.workspace = true

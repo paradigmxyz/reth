@@ -216,8 +216,7 @@ where
 
                             let sidecars: Vec<BlobTransaction> = txs.iter().map(|(tx, blob_len)| {
                                 if let Some(sidecar) = sidecar_iterator.next_sidecar(*blob_len) {
-                                    index += *blob_len; // Update index to skip past the blobs just fetched
-                            
+                
                                     BlobTransaction::try_from_signed(
                                         tx.clone(),
                                         sidecar,
