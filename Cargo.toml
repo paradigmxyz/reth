@@ -47,6 +47,7 @@ members = [
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
+    "crates/rpc/rpc-layer",
     "crates/engine-primitives/",
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/node",
@@ -91,7 +92,6 @@ members = [
     "examples/db-access",
     "testing/ef-tests/",
     "testing/testing-utils",
-    "crates/rpc/rpc-layer",
 ]
 default-members = ["bin/reth"]
 
