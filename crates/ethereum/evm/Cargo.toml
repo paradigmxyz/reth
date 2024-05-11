@@ -16,9 +16,11 @@ reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-interfaces.workspace = true
+alphanet-instructions = { git = "https://github.com/paradigmxyz/alphanet/" }
 
 # Ethereum
 revm-primitives.workspace = true
+revm-interpreter.workspace = true
 
 # misc
 tracing.workspace = true

@@ -282,6 +282,7 @@ reth-testing-utils = { path = "testing/testing-utils" }
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
+revm-interpreter = { version = "4.0.0", features = ["std"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "c1b5dd0" }
 
 # eth

@@ -638,6 +638,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alphanet-instructions"
+version = "0.0.0"
+source = "git+https://github.com/paradigmxyz/alphanet/#a7f66d66cc59033fe8b5364cbc3a98825384d549"
+dependencies = [
+ "revm",
+ "revm-interpreter",
+ "revm-precompile",
+ "revm-primitives",
+]
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6990,10 +7001,12 @@ dependencies = [
 name = "reth-evm-ethereum"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alphanet-instructions",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
  "reth-revm",
+ "revm-interpreter",
  "revm-primitives",
  "tracing",
 ]
