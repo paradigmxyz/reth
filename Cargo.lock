@@ -7429,6 +7429,7 @@ dependencies = [
  "reth-stages",
  "reth-static-file",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
