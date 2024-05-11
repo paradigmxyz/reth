@@ -452,12 +452,23 @@ impl StaticFileProvider {
         Ok(())
     }
 
-    /// Makes consistency checks across all static file segments.
+    /// Ensures that any broken invariants return a pipeline target to unwind to.
     ///
-    /// invariant: static files and database should have continuity
-    /// invariant: if there are no database entries, stage checkpoints should match static file
+    /// Two types of consistency checks are done for:
     ///
-    /// Returns a [`Option::Some`] of [`PipelineTarget::Unwind`] if any healing was done.
+    /// 1) When a static file fails to commit but the underlying data was changed.
+    /// 2) When a static file was committed, but the required database transaction was not.
+    ///
+    /// For 1) it can self-heal.
+    /// For 2) the invariants below are checked, and if broken, require a pipeline unwind to heal.
+    ///
+    /// For each static file segment:
+    /// * the corresponding database table should overlap or have continuity in their keys
+    ///   ([TxNumber] or [BlockNumber]).
+    /// * its highest block should match the stage checkpoint block number if it's equal or higher
+    ///   than the corresponding database table last entry.
+    ///
+    /// Returns a [`Option`] of [`PipelineTarget::Unwind`] if any healing is required.
     pub fn check_consistency<TX: DbTx>(
         &self,
         provider: &DatabaseProvider<TX>,
@@ -472,12 +483,7 @@ impl StaticFileProvider {
             }
         };
 
-        // Since Header Stage is the first stage, a mismatch with Finish Stage means that we had an
-        // interrupted pipeline run/unwind.
-        let interrupted_pipeline = provider.get_stage_checkpoint(StageId::Finish)? !=
-            provider.get_stage_checkpoint(StageId::Headers)?;
-
-        // TODO: this check is not good enough
+        // TODO: this check might not be good enough
         let is_pruned_node =
             self.get_highest_static_file_block(StaticFileSegment::Receipts).is_none() &&
                 provider.get_stage_checkpoint(StageId::Execution)?.is_some() &&
@@ -502,24 +508,27 @@ impl StaticFileProvider {
             //   everything accordingly.
             let mut writer = self.latest_writer(segment)?;
 
-            // This will commit any inconsistencies found and update the reader index
+            // This will commit any inconsistencies found and update the reader index. If it
+            // happens, it means that the highest block of the segement has decreased.
             writer.commit()?;
 
+            // Only applies to block-based static files. (Headers)
+            //
+            // The updated `highest_block` may have decreased if we healed from a pruning
+            // interruption.
             let mut highest_block = self.get_highest_static_file_block(segment);
             if initial_highest_block != highest_block {
-                // The updated `highest_block` is a consistency heal as a result from some pruning
-                // behavior being interrupted.
                 update_unwind_target(highest_block);
             }
 
-            // Make sure the last transaction matches the last block from its indices.
-            // Only applies to Transaction & Receipt segments
+            // Only applies to transaction-based static files. (Receipts & Transactions)
+            //
+            // Make sure the last transaction matches the last block from its indices, since a heal
+            // from a pruning interruption might have decreased the number of transactions without
+            // being able to update the last block of the static file segment.
             let highest_tx = self.get_highest_static_file_tx(segment);
             if let Some(highest_tx) = highest_tx {
                 let mut last_block = highest_block.unwrap_or_default();
-                // To be extra safe, we make sure that the last tx num matches the last block from
-                // its indices. If not, get it and create an unwind target, since we
-                // are missing data we should have.
                 loop {
                     if let Some(indices) = provider.block_body_indices(last_block)? {
                         if indices.last_tx_num() <= highest_tx {
@@ -536,11 +545,26 @@ impl StaticFileProvider {
                 }
             }
 
-            // There should be no gap between static file & database elements.
-            if let Some(unwind) = if segment.is_headers() {
-                self.ensure_header_continuity(provider, highest_block)?
-            } else {
-                self.ensure_tx_continuity(segment, provider, highest_tx, highest_block)?
+            if let Some(unwind) = match segment {
+                StaticFileSegment::Headers => self.check_invariants::<_, tables::Headers>(
+                    provider,
+                    StageId::Headers,
+                    highest_block,
+                    highest_block,
+                )?,
+                StaticFileSegment::Transactions => self
+                    .check_invariants::<_, tables::Transactions>(
+                        provider,
+                        StageId::Bodies,
+                        highest_tx,
+                        highest_block,
+                    )?,
+                StaticFileSegment::Receipts => self.check_invariants::<_, tables::Receipts>(
+                    provider,
+                    StageId::Execution,
+                    highest_tx,
+                    highest_block,
+                )?,
             } {
                 update_unwind_target(Some(unwind));
             }
@@ -549,61 +573,40 @@ impl StaticFileProvider {
         Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
-    /// Ensures that there are no gaps between static file headers and database headers.
-    ///
-    /// If a gap is found (eg. static block 5 and first db block 7), return a block number to unwind
-    /// to as to restore missing data.
-    fn ensure_header_continuity<TX: DbTx>(
+    /// Check invariants for each corresponding table and static file segment. See
+    /// [Self::check_consistency] for more.
+    fn check_invariants<TX: DbTx, T: Table<Key = u64>>(
         &self,
         provider: &DatabaseProvider<TX>,
-        highest_static: Option<BlockNumber>,
+        stage_id: StageId,
+        static_file_entry: Option<u64>,
+        highest_static_block: Option<BlockNumber>,
     ) -> ProviderResult<Option<BlockNumber>> {
-        let highest_static = highest_static.unwrap_or_default();
-        let mut db_cursor = provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
+        let static_file_entry = static_file_entry.unwrap_or_default();
+        let highest_static_block = highest_static_block.unwrap_or_default();
+        let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
 
-        if let Some((db_header_num, _)) = db_cursor.first()? {
-            // If there is a gap between the header found in static file and
-            // database, then we have most likely lost static file data and need to load it again
-            if !(db_header_num <= highest_static || highest_static + 1 == db_header_num) {
-                return Ok(Some(highest_static))
+        if let Some((db_first_entry, _)) = db_cursor.first()? {
+            // If there is a gap between the entry found in static file and
+            // database, then we have most likely lost static file data and need to unwind so we can
+            // load it again
+            if !(db_first_entry <= static_file_entry || static_file_entry + 1 == db_first_entry) {
+                return Ok(Some(highest_static_block))
+            }
+
+            if let Some((db_last_entry, _)) = db_cursor.last()? {
+                if db_last_entry > static_file_entry {
+                    return Ok(None)
+                }
             }
         }
 
-        Ok(None)
-    }
-
-    /// Ensures that there are no gaps between static file transactions/receipts and database
-    /// transactions/receipts.
-    ///
-    /// If a gap is found (eg. static tx 5 and first db tx 7), return a block number to unwind to as
-    /// to restore missing data.
-    fn ensure_tx_continuity<TX: DbTx>(
-        &self,
-        segment: StaticFileSegment,
-        provider: &DatabaseProvider<TX>,
-        highest_static_tx: Option<TxNumber>,
-        highest_static_block: Option<BlockNumber>,
-    ) -> ProviderResult<Option<BlockNumber>> {
-        let highest_static_tx = highest_static_tx.unwrap_or_default();
-        let first_db_tx_num = match segment {
-            StaticFileSegment::Headers => unreachable!(),
-            StaticFileSegment::Transactions => {
-                let mut cursor = provider.tx_ref().cursor_read::<tables::Transactions>()?;
-                cursor.first()?.map(|(tx_num, _)| tx_num)
-            }
-            StaticFileSegment::Receipts => {
-                let mut cursor = provider.tx_ref().cursor_read::<tables::Receipts>()?;
-                cursor.first()?.map(|(tx_num, _)| tx_num)
-            }
-        };
-
-        if let Some(first_db_tx_num) = first_db_tx_num {
-            // If there is a gap more than one element between the header found in static file and
-            // database, then we have most likely lost static file data and need to load it again
-            if !(first_db_tx_num <= highest_static_tx || highest_static_tx + 1 == first_db_tx_num) {
-                // TODO is this unwrap or default safe
-                return Ok(Some(highest_static_block.unwrap_or_default()))
-            }
+        // If static file entry is ahead of the database entries, then ensure the checkpoint block
+        // number matches.
+        let block_number =
+            provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
+        if block_number != highest_static_block {
+            return Ok(Some(block_number.min(highest_static_block)));
         }
 
         Ok(None)
