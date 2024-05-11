@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, str::FromStr, sync::Arc};
 
 use alloy_network::{EthereumSigner, Network};
 use alloy_primitives::{Address, FixedBytes, U256};
@@ -87,7 +87,7 @@ async fn init_exex<Node: FullNodeComponents>(
     .spawn(ctx, db)?)
 }
 
-async fn get_l1_block_attributes<T, N, P>(provider: Arc<P>) -> eyre::Result<L1BlockAttributes>
+async fn get_l1_block_attributes<T, N, P>(provider: &P) -> eyre::Result<L1BlockAttributes>
 where
     T: Transport + Clone,
     N: Network,
@@ -103,6 +103,7 @@ where
 
     Ok(L1BlockAttributes { hash: l1_block_hash, number: l1_block_number })
 }
+
 
 async fn get_l2_safe_head<T, N, P>(provider: Arc<P>) -> eyre::Result<u64>
 where
@@ -150,6 +151,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         mut ctx: ExExContext<Node>,
         mut l2_output_db: L2OutputDb,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
+
         let l2_output_oracle = L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone());
         let l2_provider = ctx.provider().clone();
         let l1_provider = self.l1_provider.clone();
