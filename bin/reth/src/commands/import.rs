@@ -11,7 +11,7 @@ use crate::{
 };
 use clap::Parser;
 use eyre::Context;
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
@@ -277,7 +277,7 @@ where
         )
         .build(provider_factory, static_file_producer);
 
-    let events = pipeline.events().map(Into::into);
+    let events = reth_node_events::node::handle_broadcast_stream(pipeline.events());
 
     Ok((pipeline, events))
 }
