@@ -4,6 +4,7 @@ use crate::{
     builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
+    launch::node::handle_broadcast_stream,
     node::FullNode,
     BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
@@ -383,19 +384,18 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            node_adapter.components.network().event_listener().map(Into::into),
-            beacon_engine_handle.event_listener().map(Into::into),
-            pipeline_events.map(Into::into),
+            handle_broadcast_stream(node_adapter.components.network().event_listener()),
+            handle_broadcast_stream(beacon_engine_handle.event_listener()),
+            handle_broadcast_stream(pipeline_events),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
-                Either::Left(
-                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone()))
-                        .map(Into::into),
-                )
+                Either::Left(handle_broadcast_stream(
+                    ConsensusLayerHealthEvents::new(Box::new(blockchain_db.clone())).map(Ok),
+                ))
             } else {
                 Either::Right(stream::empty())
             },
-            pruner_events.map(Into::into),
-            static_file_producer_events.map(Into::into)
+            handle_broadcast_stream(pruner_events),
+            handle_broadcast_stream(static_file_producer_events)
         );
         ctx.task_executor().spawn_critical(
             "events task",

@@ -1,7 +1,7 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
@@ -25,6 +25,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::Interval;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
@@ -392,6 +393,9 @@ pub enum NodeEvent {
     Pruner(PrunerEvent),
     /// A static_file_producer event
     StaticFileProducer(StaticFileProducerEvent),
+    /// Used to encapsulate various conditions or situations that do not
+    /// naturally fit into the other more specific variants.
+    Other(String),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -575,6 +579,9 @@ where
                 NodeEvent::StaticFileProducer(event) => {
                     this.state.handle_static_file_producer_event(event);
                 }
+                NodeEvent::Other(event_description) => {
+                    warn!("{event_description}");
+                }
             }
         }
 
@@ -662,6 +669,21 @@ impl Display for Eta {
 
         write!(f, "unknown")
     }
+}
+
+/// Transforms a stream of `Result<T, BroadcastStreamRecvError>` into a stream of `NodeEvent`,
+/// applying a uniform error handling and conversion strategy.
+pub fn handle_broadcast_stream<T>(
+    stream: impl Stream<Item = Result<T, BroadcastStreamRecvError>> + Unpin,
+) -> impl Stream<Item = NodeEvent> + Unpin
+where
+    T: Into<NodeEvent>,
+{
+    stream.map(|result_event| {
+        result_event
+            .map(Into::into)
+            .unwrap_or_else(|err| NodeEvent::Other(format!("Stream error: {:?}", err)))
+    })
 }
 
 #[cfg(test)]
