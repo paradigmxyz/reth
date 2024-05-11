@@ -65,3 +65,7 @@ test-utils = ["triehash"]
 [[bench]]
 name = "prefix_set"
 harness = false
+
+[[bench]]
+name = "post_state"
+harness = false
