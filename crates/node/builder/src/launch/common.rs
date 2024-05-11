@@ -4,11 +4,14 @@ use std::{cmp::max, sync::Arc, thread::available_parallelism};
 
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{mpsc::Receiver, oneshot};
 
 use reth_auto_seal_consensus::MiningMode;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
+use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_evm::execute::NoopBlockExecutorProvider;
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_node_core::{
     cli::config::RethRpcConfig,
@@ -17,9 +20,12 @@ use reth_node_core::{
     node_config::NodeConfig,
 };
 use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, PruneModes, B256};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+};
 use reth_prune::PrunerBuilder;
 use reth_rpc::JwtSecret;
+use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{error, info, warn};
@@ -312,10 +318,10 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
 impl<DB> LaunchContextWith<Attached<WithConfigs, DB>>
 where
-    DB: Clone,
+    DB: Database + Clone + 'static,
 {
     /// Returns the [ProviderFactory] for the attached database.
-    pub fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
+    pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -323,14 +329,52 @@ where
         )?
         .with_static_files_metrics();
 
+        // Check for consistency between database and static files. If it fails, it unwinds to
+        // a previous block.
+        if let Some(unwind_target) =
+            factory.static_file_provider().check_consistency(&factory.provider()?)?
+        {
+            // Builds an unwind-only pipeline
+            let pipeline = Pipeline::builder()
+                .add_stages(DefaultStages::new(
+                    factory.clone(),
+                    HeaderSyncMode::Continuous,
+                    Arc::new(EthBeaconConsensus::new(self.chain_spec())),
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
+                    NoopBlockExecutorProvider::default(),
+                    // TODO: add stage_conf when possible
+                    Default::default(),
+                ))
+                .build(
+                    factory.clone(),
+                    StaticFileProducer::new(
+                        factory.clone(),
+                        factory.static_file_provider(),
+                        self.prune_modes().unwrap_or_default(),
+                    ),
+                );
+
+            // Unwinds to block
+            let (tx, rx) = oneshot::channel();
+            self.task_executor().spawn_critical_blocking(
+                "pipeline task",
+                Box::pin(async move {
+                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                    let _ = tx.send(result);
+                }),
+            );
+            rx.await??;
+        }
+
         Ok(factory)
     }
 
     /// Creates a new [ProviderFactory] and attaches it to the launch context.
-    pub fn with_provider_factory(
+    pub async fn with_provider_factory(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB>>>> {
-        let factory = self.create_provider_factory()?;
+        let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
