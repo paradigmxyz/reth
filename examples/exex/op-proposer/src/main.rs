@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, str::FromStr, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 
 use alloy_network::{EthereumSigner, Network};
 use alloy_primitives::{Address, FixedBytes, U256};
@@ -104,7 +104,6 @@ where
     Ok(L1BlockAttributes { hash: l1_block_hash, number: l1_block_number })
 }
 
-
 async fn get_l2_safe_head<T, N, P>(provider: Arc<P>) -> eyre::Result<u64>
 where
     T: Transport + Clone,
@@ -151,7 +150,6 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         mut ctx: ExExContext<Node>,
         mut l2_output_db: L2OutputDb,
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
-
         let l2_output_oracle = L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone());
         let l2_provider = ctx.provider().clone();
         let l1_provider = self.l1_provider.clone();
@@ -189,7 +187,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                     //TODO: check the "transaction manager" to see if the proof has already
                     l2_output_db.get_l2_output(target_block)?
                 } else if target_block == current_l2_block {
-                    let l1_block_attr = get_l1_block_attributes(l1_provider.clone()).await?;
+                    let l1_block_attr = get_l1_block_attributes(&l1_provider.clone()).await?;
                     let proof = l2_provider.latest()?.proof(l2_to_l1_message_passer, &[])?;
 
                     let l2_output = L2Output {
@@ -258,3 +256,4 @@ fn main() -> eyre::Result<()> {
         handle.wait_for_node_exit().await
     })
 }
+
