@@ -115,6 +115,9 @@ pub enum BlockExecutionError {
     /// Note: this is not feature gated for convenience.
     #[error("execution unavailable for tests")]
     UnavailableForTest,
+    /// Only used for NoopBlockExecutorProvider
+    #[error("execution unavailable for noop")]
+    UnavailableForNoop,
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
