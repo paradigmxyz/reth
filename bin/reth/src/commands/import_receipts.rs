@@ -17,7 +17,7 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::{stage::StageId, ChainSpec, StaticFileSegment};
 use reth_provider::{
     BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory, StaticFileWriter,
+    StateWriter, StaticFileProviderFactory, StaticFileWriter,
 };
 use tracing::{debug, error, info};
 
@@ -55,7 +55,10 @@ pub struct ImportReceiptsCommand {
     #[command(flatten)]
     db: DatabaseArgs,
 
-    /// The path to a receipts file for import.
+    /// The path to a receipts file for import. File must use `HackReceiptCodec` (used for
+    /// exporting OP chain segment below Bedrock block via testinprod/op-geth).
+    ///
+    /// <https://github.com/testinprod-io/op-geth/pull/1>
     #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PathBuf,
 }
