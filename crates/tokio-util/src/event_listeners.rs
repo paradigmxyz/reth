@@ -64,7 +64,7 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
 }
 
 /// Notifies events to the listeners subscribed to the wrapped broadcast sender.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EventNotifier<T> {
     sender: Option<Sender<T>>,
 }
