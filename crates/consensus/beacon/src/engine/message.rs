@@ -15,7 +15,7 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::{broadcast::Sender, oneshot};
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -163,5 +163,5 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     /// Message with exchanged transition configuration.
     TransitionConfigurationExchanged,
     /// Add a new listener for [`BeaconEngineMessage`].
-    EventListener(UnboundedSender<BeaconConsensusEngineEvent>),
+    EventListener(Sender<BeaconConsensusEngineEvent>),
 }
