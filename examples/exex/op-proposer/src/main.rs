@@ -41,11 +41,7 @@ pub struct OptimismSyncStatus {
 
 #[derive(Deserialize, Debug)]
 pub struct L2BlockInfo {
-    pub hash: FixedBytes<32>,
     pub number: u64,
-    pub parent_hash: FixedBytes<32>,
-    pub timestamp: u64,
-    pub l1_origin: L1BlockAttributes,
 }
 
 #[derive(Deserialize, Debug)]
@@ -256,4 +252,3 @@ fn main() -> eyre::Result<()> {
         handle.wait_for_node_exit().await
     })
 }
-
