@@ -29,7 +29,7 @@ use reth_rpc_types::engine::{
 };
 use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::EventNotifier;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -37,6 +37,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
+    broadcast::Sender,
     mpsc::{self, UnboundedSender},
     oneshot,
 };
@@ -202,8 +203,8 @@ where
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
     hooks: EngineHooksController,
-    /// Listeners for engine events.
-    listeners: EventListeners<BeaconConsensusEngineEvent>,
+    /// Notifier for engine events.
+    notifier: EventNotifier<BeaconConsensusEngineEvent>,
     /// Consensus engine metrics.
     metrics: EngineMetrics,
 }
@@ -291,7 +292,7 @@ where
             run_pipeline_continuously,
             max_block,
             blockchain.chain_spec(),
-            listeners.clone(),
+            notifier.clone(),
         );
         let mut this = Self {
             sync,
@@ -306,7 +307,7 @@ where
             blockchain_tree_action: None,
             pipeline_run_threshold,
             hooks: EngineHooksController::new(hooks),
-            listeners,
+            notifier,
             metrics: EngineMetrics::default(),
         };
 
@@ -406,7 +407,7 @@ where
                 if should_update_head {
                     let head = outcome.header();
                     let _ = self.update_head(head.clone());
-                    self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                    self.notifier.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
                         Box::new(head.clone()),
                         elapsed,
                     ));
@@ -543,7 +544,7 @@ where
         }
 
         // notify listeners about new processed FCU
-        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status));
+        self.notifier.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status));
     }
 
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
@@ -1248,7 +1249,7 @@ where
                 } else {
                     BeaconConsensusEngineEvent::ForkBlockAdded(block)
                 };
-                self.listeners.notify(event);
+                self.notifier.notify(event);
                 PayloadStatusEnum::Valid
             }
             InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
@@ -1422,7 +1423,7 @@ where
         match make_canonical_result {
             Ok(outcome) => {
                 if let CanonicalOutcome::Committed { head } = &outcome {
-                    self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                    self.notifier.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
                         Box::new(head.clone()),
                         elapsed,
                     ));
