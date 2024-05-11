@@ -7,6 +7,7 @@ pub const CONFIG_PREFIX: &str = "OP_PROPOSER";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpProposerConfig {
+    pub l2_output_db: String,
     pub l1_rpc: String,
     pub rollup_rpc: String,
     pub l2_output_oracle: Address,

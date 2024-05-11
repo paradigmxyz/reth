@@ -10,6 +10,7 @@ use config::OpProposerConfig;
 use db::L2OutputDb;
 use eyre::eyre;
 use futures::Future;
+use reth::rpc::compat::transaction;
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
@@ -18,8 +19,10 @@ use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
 use serde::Deserialize;
+use tx_manager::TxManager;
 pub mod config;
 pub mod db;
+pub mod tx_manager;
 
 sol! {
     #[sol(rpc)]
@@ -55,7 +58,6 @@ pub struct L1BlockAttributes {
 
 async fn init_exex<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
-    connection: Connection,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
     // NOTE: pass the config path as an arg instead of hardcoding
     let config_file = Path::new("./op_proposer.toml");
@@ -65,15 +67,20 @@ async fn init_exex<Node: FullNodeComponents>(
         .with_recommended_fillers()
         .signer(EthereumSigner::from(config.proposer_private_key.parse::<LocalWallet>().unwrap()))
         .on_http(config.l1_rpc.parse().unwrap());
-    let mut db = L2OutputDb::new(connection);
+
+    // Initialize the L2Output database
+    let connection = Connection::open(config.l2_output_db)?;
+    let mut db: L2OutputDb = L2OutputDb::new(connection);
     db.initialize()?;
-    Ok(OpProposer::new(
+
+    let op_proposer = OpProposer::new(
         l1_provider,
         config.rollup_rpc,
         config.l2_output_oracle,
         config.l2_to_l1_message_passer,
-    )
-    .spawn(ctx, db)?)
+    );
+
+    Ok(op_proposer.spawn(ctx, db)?)
 }
 
 async fn get_l1_block_attributes<T, N, P>(provider: &P) -> eyre::Result<L1BlockAttributes>
@@ -150,6 +157,8 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         let l2_to_l1_message_passer = self.l2_to_l1_message_passer.clone();
 
         let fut = async move {
+            let mut transaction_manager = TxManager::new();
+
             while let Some(notification) = ctx.notifications.recv().await {
                 info!(?notification, "Received ExEx notification");
 
@@ -173,7 +182,11 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
 
                 // Get the l2 output data to prepare for submission
                 let l2_output = if target_block < current_l2_block {
-                    //TODO: check the "transaction manager" to see if the proof has already
+                    // If the l2 output has already been submitted, we can skip this iteration
+                    if transaction_manager.pending_transactions.contains(&target_block) {
+                        continue;
+                    }
+
                     l2_output_db.get_l2_output(target_block)?
                 } else if target_block == current_l2_block {
                     let l1_block_attr = get_l1_block_attributes(&l1_provider.clone()).await?;
@@ -193,33 +206,13 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                     continue;
                 };
 
-                // Get the L2 Safe Head. If the target block is < the safe head. We shouldn't submit
-                // the Proposal.
+                // Get the L2 Safe Head. If the target block is > the safe head. We shouldn't submit
+                // the Proposal yet.
                 let safe_head = get_l2_safe_head(rollup_provider.clone()).await?;
-                if target_block <= safe_head {
-                    // Submit a transaction to propose the L2Output to the L2OutputOracle contract
-                    //TODO: transaction management
-                    let _: <N as Network>::ReceiptResponse = l2_output_oracle
-                        .proposeL2Output(
-                            l2_output.output_root,
-                            U256::from(target_block),
-                            l2_output.l1_block_hash,
-                            U256::from(l2_output.l1_block_number),
-                        )
-                        .send()
-                        .await?
-                        .get_receipt()
-                        .await?;
-                    info!(
-                        output_root = ?l2_output.output_root,
-                        l2_block_number = ?current_l2_block,
-                        l1_block_hash = ?l2_output.l1_block_hash,
-                        l1_block_number = ?l2_output.l1_block_number,
-                        "Successfully Proposed L2Output"
-                    );
-                }
 
-                // // TODO: Wait for transaction inclusion, and add retries
+                if target_block <= safe_head {
+                    transaction_manager.propose_l2_output(&l2_output_oracle, l2_output).await?;
+                }
             }
 
             Ok(())
@@ -230,15 +223,10 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
 }
 
 fn main() -> eyre::Result<()> {
-    //TODO: use config crate
-    //TODO: specify the db path in the config
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("OpProposer", |ctx| async move {
-                let connection = Connection::open("l2_outputs.db")?;
-                init_exex(ctx, connection).await
-            })
+            .install_exex("OpProposer", |ctx| async move { init_exex(ctx).await })
             .launch()
             .await?;
 
