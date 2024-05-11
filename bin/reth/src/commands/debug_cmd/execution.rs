@@ -11,7 +11,7 @@ use crate::{
     utils::get_single_header,
 };
 use clap::Parser;
-use futures::{stream::select as stream_select, StreamExt};
+use futures::stream::select as stream_select;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
@@ -259,8 +259,8 @@ impl Command {
 
         let pipeline_events = pipeline.events();
         let events = stream_select(
-            network.event_listener().map(Into::into),
-            pipeline_events.map(Into::into),
+            reth_node_events::node::handle_broadcast_stream(network.event_listener()),
+            reth_node_events::node::handle_broadcast_stream(pipeline_events),
         );
         ctx.task_executor.spawn_critical(
             "events task",
