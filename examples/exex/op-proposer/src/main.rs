@@ -8,7 +8,7 @@ use alloy_sol_types::sol;
 use alloy_transport::Transport;
 use db::L2OutputDb;
 use eyre::eyre;
-use futures::{select, Future};
+use futures::Future;
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
@@ -173,7 +173,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                             l2_output_db.delete_l2_output(block_number)?;
                         }
                     }
-                    ExExNotification::ChainReverted { old } => {
+                    ExExNotification::ChainReverted { old: _ } => {
                         // TODO:
                     }
                     _ => {}
@@ -204,13 +204,13 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                     continue;
                 };
 
-                // Get the L2 Safe Head. If the target block is < the safe head. We can submit the
-                // Proposal.
+                // Get the L2 Safe Head. If the target block is < the safe head. We shouldn't submit
+                // the Proposal.
                 let safe_head = get_l2_safe_head(rollup_provider.clone()).await?;
-                if target_block >= safe_head {
+                if target_block <= safe_head {
                     // Submit a transaction to propose the L2Output to the L2OutputOracle contract
                     //TODO: transaction management
-                    let pending_txn = l2_output_oracle
+                    let _: <N as Network>::ReceiptResponse = l2_output_oracle
                         .proposeL2Output(
                             l2_output.output_root,
                             U256::from(target_block),
@@ -219,20 +219,18 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                         )
                         .send()
                         .await?
-                        .register()
+                        .get_receipt()
                         .await?;
-
-                    // TODO: Verify inclusion
+                    info!(
+                        output_root = ?l2_output.output_root,
+                        l2_block_number = ?current_l2_block,
+                        l1_block_hash = ?l2_output.l1_block_hash,
+                        l1_block_number = ?l2_output.l1_block_number,
+                        "Successfully Proposed L2Output"
+                    );
                 }
 
                 // // TODO: Wait for transaction inclusion, and add retries
-                // info!(
-                //     output_root = ?proof.storage_root,
-                //     l2_block_number = ?current_l2_block,
-                //     l1_block_hash = ?l1_block_attr.hash,
-                //     l1_block_number = ?l1_block_attr.number,
-                //     "Successfully Proposed L2Output"
-                // );
             }
 
             Ok(())
