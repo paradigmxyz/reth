@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use alloy_network::{EthereumSigner, Network};
 use alloy_primitives::{Address, FixedBytes, U256};
@@ -6,6 +6,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_wallet::LocalWallet;
 use alloy_sol_types::sol;
 use alloy_transport::Transport;
+use config::OpProposerConfig;
 use db::L2OutputDb;
 use eyre::eyre;
 use futures::Future;
@@ -17,7 +18,9 @@ use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
 use serde::Deserialize;
+pub mod config;
 pub mod db;
+
 sol! {
     #[sol(rpc)]
     contract L2OutputOracle {
@@ -50,23 +53,13 @@ pub struct L1BlockAttributes {
     number: u64,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct ProposerConfig {
-    l1_rpc: String,
-    rollup_rpc: String,
-    l2_output_oracle: Address,
-    l2_to_l1_message_passer: Address,
-    proposer_private_key: String,
-}
-
 async fn init_exex<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
     connection: Connection,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
-    let config = serde_json::from_str::<ProposerConfig>(
-        &std::fs::read_to_string("config.json").expect("Could not read config file"),
-    )
-    .unwrap();
+    // NOTE: pass the config path as an arg instead of hardcoding
+    let config_file = Path::new("./op_proposer.toml");
+    let config = OpProposerConfig::load(Some(config_file))?;
 
     let l1_provider = ProviderBuilder::new()
         .with_recommended_fillers()
