@@ -8,7 +8,7 @@ use alloy_sol_types::sol;
 use alloy_transport::Transport;
 use db::L2OutputDb;
 use eyre::eyre;
-use futures::Future;
+use futures::{select, Future};
 use reth_exex::{ExExContext, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
@@ -153,6 +153,11 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         let l2_output_oracle = L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone());
         let l2_provider = ctx.provider().clone();
         let l1_provider = self.l1_provider.clone();
+        let rollup_provider = Arc::new(
+            ProviderBuilder::new()
+                .with_recommended_fillers()
+                .on_http(self.rollup_provider.parse().unwrap()),
+        );
         let l2_to_l1_message_passer = self.l2_to_l1_message_passer.clone();
 
         let fut = async move {
@@ -177,8 +182,6 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                 let target_block = l2_output_oracle.nextBlockNumber().call().await?._0.to::<u64>();
                 let current_l2_block = l2_provider.last_block_number()?;
 
-                //TODO: we need to check if the block is within the safe head
-
                 // Get the l2 output data to prepare for submission
                 let l2_output = if target_block < current_l2_block {
                     //TODO: check the "transaction manager" to see if the proof has already
@@ -201,17 +204,26 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                     continue;
                 };
 
-                // Submit a transaction to propose the L2Output to the L2OutputOracle contract
-                //TODO: transaction management
-                let _pending_txn = l2_output_oracle
-                    .proposeL2Output(
-                        l2_output.output_root,
-                        U256::from(target_block),
-                        l2_output.l1_block_hash,
-                        U256::from(l2_output.l1_block_number),
-                    )
-                    .send()
-                    .await?;
+                // Get the L2 Safe Head. If the target block is < the safe head. We can submit the
+                // Proposal.
+                let safe_head = get_l2_safe_head(rollup_provider.clone()).await?;
+                if target_block >= safe_head {
+                    // Submit a transaction to propose the L2Output to the L2OutputOracle contract
+                    //TODO: transaction management
+                    let pending_txn = l2_output_oracle
+                        .proposeL2Output(
+                            l2_output.output_root,
+                            U256::from(target_block),
+                            l2_output.l1_block_hash,
+                            U256::from(l2_output.l1_block_number),
+                        )
+                        .send()
+                        .await?
+                        .register()
+                        .await?;
+
+                    // TODO: Verify inclusion
+                }
 
                 // // TODO: Wait for transaction inclusion, and add retries
                 // info!(
