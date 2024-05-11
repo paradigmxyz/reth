@@ -81,9 +81,9 @@ pub mod tests {
     use super::L2OutputDb;
 
     pub fn setup() -> eyre::Result<L2OutputDb> {
-        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        let connection = rusqlite::Connection::open_in_memory()?;
         let mut db = L2OutputDb::new(connection);
-        db.initialize().unwrap();
+        db.initialize()?;
         Ok(db)
     }
 
