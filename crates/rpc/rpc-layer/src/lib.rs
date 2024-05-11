@@ -1,4 +1,18 @@
+//! Reth RPC testing utilities.
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
+use assert_matches as _;
 use http::{HeaderMap, Response};
+use jsonrpsee as _;
+use tempfile as _;
+use tokio as _;
 
 mod auth_client_layer;
 mod auth_layer;
