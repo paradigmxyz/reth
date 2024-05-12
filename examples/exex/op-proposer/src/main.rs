@@ -25,8 +25,8 @@ async fn init_exex<Node: FullNodeComponents>(
 
     let l1_provider = ProviderBuilder::new()
         .with_recommended_fillers()
-        .signer(EthereumSigner::from(config.proposer_private_key.parse::<LocalWallet>().unwrap()))
-        .on_http(config.l1_rpc.parse().unwrap());
+        .signer(EthereumSigner::from(config.proposer_private_key.parse::<LocalWallet>()?))
+        .on_http(config.l1_rpc.parse()?);
 
     // Initialize the L2Output database
     let connection = Connection::open(config.l2_output_db)?;

@@ -5,5 +5,3 @@ l2_to_l1_message_passer = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 l1_rpc_url = "http://localhost:8545"
 rollup_rpc = "http://localhost:8547"
 proposer_private_key ="KzoM1LkuUW9T5KFoyocBuvoKT5aHHJQ6ctbqZSg7LjZdaL3sJBhw"
-
-# export OP_PROPOSER__PROPOSER_PRIVATE_KEY="KzoM1LkuUW9T5KFoyocBuvoKT5aHHJQ6ctbqZSg7LjZdaL3sJBhw"

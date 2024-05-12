@@ -40,8 +40,10 @@ impl L2OutputDb {
             (l2_block_number,),
             |row| {
                 let l2_block_number = row.get::<_, u64>(0)?;
-                let output_root = B256::from_str(&row.get::<_, String>(1)?).unwrap();
-                let l1_block_hash = B256::from_str(&row.get::<_, String>(2)?).unwrap();
+                let output_root =
+                    B256::from_str(&row.get::<_, String>(1)?).expect("Could not parse output root");
+                let l1_block_hash = B256::from_str(&row.get::<_, String>(2)?)
+                    .expect("Could not parse l1 block hash");
                 let l1_block_number = row.get::<_, u64>(3)?;
 
                 Ok(L2Output { output_root, l2_block_number, l1_block_hash, l1_block_number })

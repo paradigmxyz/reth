@@ -144,11 +144,9 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
     ) -> impl Future<Output = eyre::Result<()>> {
         let l2_provider = ctx.provider().clone();
         let l1_provider = self.l1_provider.clone();
-        let rollup_provider = Arc::new(
-            ProviderBuilder::new()
-                .with_recommended_fillers()
-                .on_http(self.rollup_provider.parse().unwrap()),
-        );
+        let rollup_provider = Arc::new(ProviderBuilder::new().with_recommended_fillers().on_http(
+            self.rollup_provider.parse().expect("Could not parse rollup provider endpoint"),
+        ));
         let l2_to_l1_message_passer = self.l2_to_l1_message_passer;
 
         async move {
