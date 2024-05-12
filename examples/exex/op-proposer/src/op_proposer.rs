@@ -91,7 +91,12 @@ where
     _pd: PhantomData<fn() -> (T, N)>,
 }
 
-impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
+impl<T, N, P> OpProposer<T, N, P>
+where
+    T: Transport + Clone,
+    N: Network,
+    P: Provider<T, N>,
+{
     pub fn new(
         l1_provider: P,
         rollup_provider: String,
