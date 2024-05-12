@@ -13,6 +13,7 @@ use std::{
 use eyre::Result;
 use thiserror::Error;
 
+use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
@@ -20,7 +21,6 @@ use reth::{
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
-use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle,SidecarIterator};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -202,7 +202,7 @@ where
                                 Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
                             };
 
-                            let mut blobs_bundle: BeaconBlobBundle =
+                            let blobs_bundle: BeaconBlobBundle =
                                 match serde_json::from_slice(&bytes) {
                                     Ok(b) => b,
                                     Err(e) => {
@@ -212,20 +212,16 @@ where
                                     }
                                 };
 
-                            let sidecar_iterator = SidecarIterator::new(blobs_bundle);
+                            let mut sidecar_iterator = SidecarIterator::new(blobs_bundle);
 
-                            let sidecars: Vec<BlobTransaction> = txs.iter().map(|(tx, blob_len)| {
-                                if let Some(sidecar) = sidecar_iterator.next_sidecar(*blob_len) {
-                
-                                    BlobTransaction::try_from_signed(
-                                        tx.clone(),
-                                        sidecar,
-                                    ).expect("should not fail to convert blob tx if it is already eip4844")
-                                } else {
-                                    panic!("Expected to find a matching sidecar for every transaction");
-                                }
-                            }).collect();
-
+                            let sidecars: Vec<BlobTransaction> = txs.iter()
+                            .filter_map(|(tx, blob_len)| {
+                                sidecar_iterator.next_sidecar(*blob_len).map(|sidecar| {
+                                    BlobTransaction::try_from_signed(tx.clone(), sidecar)
+                                        .expect("should not fail to convert blob tx if it is already eip4844")
+                                })
+                            })
+                            .collect();
 
                             Ok(sidecars)
                         });
