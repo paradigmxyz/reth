@@ -1,4 +1,3 @@
-use alloy_eips::eip4788;
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -105,7 +104,7 @@ where
         }
     };
 
-    state.remove(&eip4788::SYSTEM_ADDRESS);
+    state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
     state.remove(&evm.block().coinbase);
 
     evm.context.evm.db.commit(state);

@@ -5,7 +5,7 @@ use crate::{
     B256, U256,
 };
 
-use alloy_eips::eip4788::{self, BEACON_ROOTS_ADDRESS};
+use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
 
@@ -143,7 +143,7 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 ///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
 pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
     env.tx = TxEnv {
-        caller: eip4788::SYSTEM_ADDRESS,
+        caller: alloy_eips::eip4788::SYSTEM_ADDRESS,
         transact_to: TransactTo::Call(BEACON_ROOTS_ADDRESS),
         // Explicitly set nonce to None so revm does not do any nonce checks
         nonce: None,
