@@ -147,51 +147,6 @@ impl Deref for Block {
     }
 }
 
-#[cfg(feature = "alloy-compat")]
-impl TryFrom<alloy_rpc_types::Block> for Block {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(block: alloy_rpc_types::Block) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
-        let body = {
-            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
-                .transactions
-            {
-                alloy_rpc_types::BlockTransactions::Full(transactions) => transactions
-                    .into_iter()
-                    .map(|tx| {
-                        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-                        Ok(TransactionSigned::from_transaction_and_signature(
-                            tx.try_into()?,
-                            crate::Signature {
-                                r: signature.r,
-                                s: signature.s,
-                                odd_y_parity: signature
-                                    .y_parity
-                                    .unwrap_or(alloy_rpc_types::Parity(false))
-                                    .0,
-                            },
-                        ))
-                    })
-                    .collect(),
-                alloy_rpc_types::BlockTransactions::Hashes(_) |
-                alloy_rpc_types::BlockTransactions::Uncle => {
-                    return Err(ConversionError::MissingFullTransactions)
-                }
-            };
-            transactions?
-        };
-
-        Ok(Self {
-            header: block.header.try_into()?,
-            body,
-            ommers: Default::default(),
-            withdrawals: block.withdrawals.map(Into::into),
-        })
-    }
-}
-
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BlockWithSenders {
