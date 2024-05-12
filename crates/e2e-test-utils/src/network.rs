@@ -2,11 +2,11 @@ use futures_util::StreamExt;
 use reth::network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersInfo};
 use reth_primitives::NodeRecord;
 use reth_tracing::tracing::info;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::BroadcastStream;
 
 /// Helper for network operations
 pub struct NetworkTestContext {
-    network_events: UnboundedReceiverStream<NetworkEvent>,
+    network_events: BroadcastStream<NetworkEvent>,
     network: NetworkHandle,
 }
 
@@ -22,7 +22,7 @@ impl NetworkTestContext {
         self.network.peers_handle().add_peer(node_record.id, node_record.tcp_addr());
 
         match self.network_events.next().await {
-            Some(NetworkEvent::PeerAdded(_)) => (),
+            Some(Ok(NetworkEvent::PeerAdded(_))) => (),
             _ => panic!("Expected a peer added event"),
         }
     }
@@ -35,7 +35,7 @@ impl NetworkTestContext {
     /// Expects a session to be established
     pub async fn expect_session(&mut self) {
         match self.network_events.next().await {
-            Some(NetworkEvent::SessionEstablished { remote_addr, .. }) => {
+            Some(Ok(NetworkEvent::SessionEstablished { remote_addr, .. })) => {
                 info!(?remote_addr, "Session established")
             }
             _ => panic!("Expected session established event"),

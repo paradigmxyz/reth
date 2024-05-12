@@ -72,7 +72,7 @@ async fn main() {
     while let Some(evt) = events.next().await {
         // For the sake of the example we only print the session established event
         // with the chain specific details
-        if let NetworkEvent::SessionEstablished { status, client_version, .. } = evt {
+        if let Ok(NetworkEvent::SessionEstablished { status, client_version, .. }) = evt {
             let chain = status.chain;
             info!(?chain, ?client_version, "Session established with a new peer.");
         }

@@ -1725,7 +1725,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
+                Ok(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1733,9 +1733,9 @@ mod tests {
                     messages,
                     status,
                     version,
-                } => {
+                }) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
+                    transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
                         peer_id,
                         remote_addr,
                         client_version,
@@ -1743,12 +1743,13 @@ mod tests {
                         messages,
                         status,
                         version,
-                    })
+                    }))
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
-                ev => {
+                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
+                Ok(ev) => {
                     panic!("unexpected event {ev:?}")
                 }
+                Err(err) => panic!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1811,7 +1812,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
+                Ok(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1819,9 +1820,9 @@ mod tests {
                     messages,
                     status,
                     version,
-                } => {
+                }) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
+                    transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
                         peer_id,
                         remote_addr,
                         client_version,
@@ -1829,12 +1830,13 @@ mod tests {
                         messages,
                         status,
                         version,
-                    })
+                    }))
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
-                ev => {
+                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
+                Ok(ev) => {
                     panic!("unexpected event {ev:?}")
                 }
+                Err(err) => panic!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1895,7 +1897,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
+                Ok(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1903,9 +1905,9 @@ mod tests {
                     messages,
                     status,
                     version,
-                } => {
+                }) => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(NetworkEvent::SessionEstablished {
+                    transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
                         peer_id,
                         remote_addr,
                         client_version,
@@ -1913,12 +1915,13 @@ mod tests {
                         messages,
                         status,
                         version,
-                    })
+                    }))
                 }
-                NetworkEvent::PeerAdded(_peer_id) => continue,
-                ev => {
+                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
+                Ok(ev) => {
                     panic!("unexpected event {ev:?}")
                 }
+                Err(err) => panic!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1986,7 +1989,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionEstablished {
+                Ok(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1994,7 +1997,7 @@ mod tests {
                     messages,
                     status,
                     version,
-                } => transactions.on_network_event(NetworkEvent::SessionEstablished {
+                }) => transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -2002,11 +2005,12 @@ mod tests {
                     messages,
                     status,
                     version,
-                }),
-                NetworkEvent::PeerAdded(_peer_id) => continue,
-                ev => {
+                })),
+                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
+                Ok(ev) => {
                     panic!("unexpected event {ev:?}")
                 }
+                Err(err) => panic!("unexpected error {err:?}"),
             }
         }
         handle.terminate().await;

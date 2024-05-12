@@ -40,7 +40,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::BroadcastStream;
 
 /// A test network consisting of multiple peers.
 pub struct Testnet<C, Pool> {
@@ -503,7 +503,7 @@ impl<Pool> PeerHandle<Pool> {
     }
 
     /// Creates a new [`NetworkEvent`] listener channel.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
+    pub fn event_listener(&self) -> BroadcastStream<NetworkEvent> {
         self.network.event_listener()
     }
 
@@ -591,14 +591,14 @@ impl Default for PeerConfig {
 /// This makes it easier to await established connections
 #[derive(Debug)]
 pub struct NetworkEventStream {
-    inner: UnboundedReceiverStream<NetworkEvent>,
+    inner: BroadcastStream<NetworkEvent>,
 }
 
 // === impl NetworkEventStream ===
 
 impl NetworkEventStream {
     /// Create a new [`NetworkEventStream`] from the given network event receiver stream.
-    pub fn new(inner: UnboundedReceiverStream<NetworkEvent>) -> Self {
+    pub fn new(inner: BroadcastStream<NetworkEvent>) -> Self {
         Self { inner }
     }
 
@@ -606,7 +606,9 @@ impl NetworkEventStream {
     pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionClosed { peer_id, reason } => return Some((peer_id, reason)),
+                Ok(NetworkEvent::SessionClosed { peer_id, reason }) => {
+                    return Some((peer_id, reason))
+                }
                 _ => continue,
             }
         }
@@ -617,7 +619,7 @@ impl NetworkEventStream {
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionEstablished { peer_id, .. } => return Some(peer_id),
+                Ok(NetworkEvent::SessionEstablished { peer_id, .. }) => return Some(peer_id),
                 _ => continue,
             }
         }
@@ -632,7 +634,7 @@ impl NetworkEventStream {
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
             match ev {
-                NetworkEvent::SessionEstablished { peer_id, .. } => {
+                Ok(NetworkEvent::SessionEstablished { peer_id, .. }) => {
                     peers.push(peer_id);
                     num -= 1;
                     if num == 0 {
@@ -650,12 +652,12 @@ impl NetworkEventStream {
     /// session.
     pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
-            Some(NetworkEvent::PeerAdded(peer_id)) => peer_id,
+            Some(Ok(NetworkEvent::PeerAdded(peer_id))) => peer_id,
             _ => return None,
         };
 
         match self.inner.next().await {
-            Some(NetworkEvent::SessionEstablished { peer_id: peer_id2, .. }) => {
+            Some(Ok(NetworkEvent::SessionEstablished { peer_id: peer_id2, .. })) => {
                 debug_assert_eq!(peer_id, peer_id2, "PeerAdded peer_id {peer_id} does not match SessionEstablished peer_id {peer_id2}");
                 Some(peer_id)
             }
