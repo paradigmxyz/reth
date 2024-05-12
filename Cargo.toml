@@ -291,20 +291,20 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d", default-features = false, features = [
     "reqwest",
 ] }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "ba9d58d" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "ba9d58d" }
 
 # misc
