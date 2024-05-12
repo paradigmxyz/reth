@@ -109,7 +109,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         &self,
         mut ctx: ExExContext<Node>,
         mut l2_output_db: L2OutputDb,
-    ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
+    ) -> eyre::Result<impl Future<Output = ()>> {
         let l2_output_oracle =
             Arc::new(L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone()));
         let l2_provider = ctx.provider().clone();
