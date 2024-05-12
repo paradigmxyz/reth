@@ -1,5 +1,5 @@
 use num_traits::Zero;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -45,14 +45,12 @@ impl Default for TransactionLookupStage {
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
-        Self { chunk_size, etl_config, prune_mode }
-    }
-
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
+    pub fn new(
+        config: TransactionLookupConfig,
+        etl_config: EtlConfig,
+        prune_mode: Option<PruneMode>,
+    ) -> Self {
+        Self { chunk_size: config.chunk_size, etl_config, prune_mode }
     }
 }
 
@@ -153,18 +151,19 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                         );
                     }
 
+                    let key = RawKey::<TxHash>::from_vec(hash);
                     if append_only {
-                        txhash_cursor.append(
-                            RawKey::<TxHash>::from_vec(hash),
-                            RawValue::<TxNumber>::from_vec(number),
-                        )?;
+                        txhash_cursor.append(key, RawValue::<TxNumber>::from_vec(number))?
                     } else {
-                        txhash_cursor.insert(
-                            RawKey::<TxHash>::from_vec(hash),
-                            RawValue::<TxNumber>::from_vec(number),
-                        )?;
+                        txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))?
                     }
                 }
+
+                trace!(target: "sync::stages::transaction_lookup",
+                    total_hashes,
+                    "Transaction hashes inserted"
+                );
+
                 break
             }
         }
@@ -248,7 +247,7 @@ mod tests {
         generators::{random_block, random_block_range},
     };
     use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
-    use reth_provider::providers::StaticFileWriter;
+    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use std::ops::Sub;
 
     // Implement stage test suite.

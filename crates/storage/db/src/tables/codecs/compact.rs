@@ -50,7 +50,9 @@ impl_compression_for_compact!(
     CompactU256,
     StageCheckpoint,
     PruneCheckpoint,
-    ClientVersion
+    ClientVersion,
+    // Non-DB
+    GenesisAccount
 );
 
 macro_rules! impl_compression_fixed_compact {

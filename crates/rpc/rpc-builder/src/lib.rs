@@ -84,12 +84,12 @@
 //!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
 //!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 //! };
-//! use reth_rpc::JwtSecret;
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
 //!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
 //!     TransportRpcModuleConfig,
 //! };
+//! use reth_rpc_layer::JwtSecret;
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
@@ -187,11 +187,11 @@ use reth_rpc::{
         traits::RawTransactionForwarder,
         EthBundle, FeeHistoryCache,
     },
-    AdminApi, AuthLayer, Claims, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub,
-    EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret, NetApi, OtterscanApi, RPCApi, RethApi,
-    TraceApi, TxPoolApi, Web3Api,
+    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
+    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
+use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -1041,12 +1041,12 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
     /// Instantiates AdminApi
-    pub fn admin_api(&mut self) -> AdminApi<Network> {
+    pub fn admin_api(&self) -> AdminApi<Network> {
         AdminApi::new(self.network.clone(), self.provider.chain_spec())
     }
 
     /// Instantiates Web3Api
-    pub fn web3_api(&mut self) -> Web3Api<Network> {
+    pub fn web3_api(&self) -> Web3Api<Network> {
         Web3Api::new(self.network.clone())
     }
 
@@ -1443,7 +1443,7 @@ where
     }
 
     /// Instantiates RethApi
-    pub fn reth_api(&mut self) -> RethApi<Provider> {
+    pub fn reth_api(&self) -> RethApi<Provider> {
         RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
     }
 }
@@ -2113,7 +2113,7 @@ impl fmt::Debug for RpcServer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcServer")
             .field("http", &self.ws_http.http_local_addr.is_some())
-            .field("ws", &self.ws_http.http_local_addr.is_some())
+            .field("ws", &self.ws_http.ws_local_addr.is_some())
             .field("ipc", &self.ipc.is_some())
             .finish()
     }
@@ -2122,7 +2122,7 @@ impl fmt::Debug for RpcServer {
 /// A handle to the spawned servers.
 ///
 /// When this type is dropped or [RpcServerHandle::stop] has been called the server will be stopped.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[must_use = "Server stops if dropped"]
 pub struct RpcServerHandle {
     /// The address of the http/ws server
@@ -2222,16 +2222,6 @@ impl RpcServerHandle {
 
         let client = builder.build(url).await.expect("failed to create ws client");
         Some(client)
-    }
-}
-
-impl fmt::Debug for RpcServerHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RpcServerHandle")
-            .field("http", &self.http.is_some())
-            .field("ws", &self.ws.is_some())
-            .field("ipc", &self.ipc.is_some())
-            .finish()
     }
 }
 

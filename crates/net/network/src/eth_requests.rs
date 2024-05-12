@@ -139,7 +139,7 @@ where
     }
 
     fn on_headers_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
@@ -150,7 +150,7 @@ where
     }
 
     fn on_bodies_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
@@ -187,7 +187,7 @@ where
     }
 
     fn on_receipts_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,

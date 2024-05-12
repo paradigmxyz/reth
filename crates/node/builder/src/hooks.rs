@@ -77,15 +77,15 @@ pub trait OnComponentInitializedHook<Node>: Send {
     /// Consumes the event hook and runs it.
     ///
     /// If this returns an error, the node launch will be aborted.
-    fn on_event(&self, node: Node) -> eyre::Result<()>;
+    fn on_event(self: Box<Self>, node: Node) -> eyre::Result<()>;
 }
 
 impl<Node, F> OnComponentInitializedHook<Node> for F
 where
-    F: Fn(Node) -> eyre::Result<()> + Send,
+    F: FnOnce(Node) -> eyre::Result<()> + Send,
 {
-    fn on_event(&self, node: Node) -> eyre::Result<()> {
-        self(node)
+    fn on_event(self: Box<Self>, node: Node) -> eyre::Result<()> {
+        (*self)(node)
     }
 }
 
@@ -94,27 +94,27 @@ pub trait OnNodeStartedHook<Node: FullNodeComponents>: Send {
     /// Consumes the event hook and runs it.
     ///
     /// If this returns an error, the node launch will be aborted.
-    fn on_event(&self, node: FullNode<Node>) -> eyre::Result<()>;
+    fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()>;
 }
 
 impl<Node, F> OnNodeStartedHook<Node> for F
 where
     Node: FullNodeComponents,
-    F: Fn(FullNode<Node>) -> eyre::Result<()> + Send,
+    F: FnOnce(FullNode<Node>) -> eyre::Result<()> + Send,
 {
-    fn on_event(&self, node: FullNode<Node>) -> eyre::Result<()> {
-        self(node)
+    fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()> {
+        (*self)(node)
     }
 }
 
 impl<Node> OnComponentInitializedHook<Node> for () {
-    fn on_event(&self, _node: Node) -> eyre::Result<()> {
+    fn on_event(self: Box<Self>, _node: Node) -> eyre::Result<()> {
         Ok(())
     }
 }
 
 impl<Node: FullNodeComponents> OnNodeStartedHook<Node> for () {
-    fn on_event(&self, _node: FullNode<Node>) -> eyre::Result<()> {
+    fn on_event(self: Box<Self>, _node: FullNode<Node>) -> eyre::Result<()> {
         Ok(())
     }
 }

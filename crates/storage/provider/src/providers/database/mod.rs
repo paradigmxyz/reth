@@ -5,7 +5,7 @@ use crate::{
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_evm::ConfigureEvmEnv;
@@ -34,10 +34,10 @@ use reth_db::mdbx::DatabaseArguments;
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProviderFactory<DB> {
     /// Database
-    db: DB,
+    db: Arc<DB>,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Static File Provider
@@ -52,7 +52,7 @@ impl<DB> ProviderFactory<DB> {
         static_files_path: PathBuf,
     ) -> RethResult<ProviderFactory<DB>> {
         Ok(Self {
-            db,
+            db: Arc::new(db),
             chain_spec,
             static_file_provider: StaticFileProvider::new(static_files_path)?,
         })
@@ -69,14 +69,9 @@ impl<DB> ProviderFactory<DB> {
         &self.db
     }
 
-    /// Returns static file provider
-    pub fn static_file_provider(&self) -> StaticFileProvider {
-        self.static_file_provider.clone()
-    }
-
     #[cfg(any(test, feature = "test-utils"))]
     /// Consumes Self and returns DB
-    pub fn into_db(self) -> DB {
+    pub fn into_db(self) -> Arc<DB> {
         self.db
     }
 }
@@ -91,7 +86,7 @@ impl ProviderFactory<DatabaseEnv> {
         static_files_path: PathBuf,
     ) -> RethResult<Self> {
         Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
+            db: Arc::new(init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?),
             chain_spec,
             static_file_provider: StaticFileProvider::new(static_files_path)?,
         })
@@ -158,6 +153,13 @@ impl<DB: Database> ProviderFactory<DB> {
 impl<DB: Database> DatabaseProviderFactory<DB> for ProviderFactory<DB> {
     fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         self.provider()
+    }
+}
+
+impl<DB> StaticFileProviderFactory for ProviderFactory<DB> {
+    /// Returns static file provider
+    fn static_file_provider(&self) -> StaticFileProvider {
+        self.static_file_provider.clone()
     }
 }
 
@@ -556,6 +558,15 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
     }
 }
 
+impl<DB> Clone for ProviderFactory<DB> {
+    fn clone(&self) -> Self {
+        ProviderFactory {
+            db: Arc::clone(&self.db),
+            chain_spec: self.chain_spec.clone(),
+            static_file_provider: self.static_file_provider.clone(),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::ProviderFactory;

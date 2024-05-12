@@ -1,16 +1,15 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, Signature, TransactionSigned,
+    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::{any, prop_compose};
 use reth_codecs::derive_arbitrary;
-use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
-pub use reth_rpc_types::{
+pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
 
@@ -49,7 +48,7 @@ pub struct Block {
 }
 
 impl Block {
-    /// Create SealedBLock that will create all header hashes.
+    /// Calculate the header hash and seal the block so that it can't be changed.
     pub fn seal_slow(self) -> SealedBlock {
         SealedBlock {
             header: self.header.seal_slow(),
@@ -148,48 +147,6 @@ impl Deref for Block {
     }
 }
 
-impl TryFrom<reth_rpc_types::Block> for Block {
-    type Error = ConversionError;
-
-    fn try_from(block: reth_rpc_types::Block) -> Result<Self, Self::Error> {
-        let body = {
-            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
-                .transactions
-            {
-                reth_rpc_types::BlockTransactions::Full(transactions) => transactions
-                    .into_iter()
-                    .map(|tx| {
-                        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-                        Ok(TransactionSigned::from_transaction_and_signature(
-                            tx.try_into()?,
-                            Signature {
-                                r: signature.r,
-                                s: signature.s,
-                                odd_y_parity: signature
-                                    .y_parity
-                                    .unwrap_or(reth_rpc_types::Parity(false))
-                                    .0,
-                            },
-                        ))
-                    })
-                    .collect(),
-                reth_rpc_types::BlockTransactions::Hashes(_) |
-                reth_rpc_types::BlockTransactions::Uncle => {
-                    return Err(ConversionError::MissingFullTransactions);
-                }
-            };
-            transactions?
-        };
-
-        Ok(Self {
-            header: block.header.try_into()?,
-            body,
-            ommers: Default::default(),
-            withdrawals: block.withdrawals.map(Into::into),
-        })
-    }
-}
-
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BlockWithSenders {
@@ -212,6 +169,12 @@ impl BlockWithSenders {
     pub fn seal(self, hash: B256) -> SealedBlockWithSenders {
         let Self { block, senders } = self;
         SealedBlockWithSenders { block: block.seal(hash), senders }
+    }
+
+    /// Calculate the header hash and seal the block with senders so that it can't be changed.
+    #[inline]
+    pub fn seal_slow(self) -> SealedBlockWithSenders {
+        SealedBlockWithSenders { block: self.block.seal_slow(), senders: self.senders }
     }
 
     /// Split Structure to its components
@@ -456,7 +419,7 @@ impl std::ops::DerefMut for SealedBlock {
 }
 
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SealedBlockWithSenders {
     /// Sealed block
     pub block: SealedBlock,

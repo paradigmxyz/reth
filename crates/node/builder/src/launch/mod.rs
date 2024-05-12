@@ -11,32 +11,31 @@ use futures::{future, future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngine, EthBeaconConsensus,
 };
 use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+    noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
+    TreeExternals,
 };
 use reth_consensus::Consensus;
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
-use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
-    engine_api_store::EngineApiStore,
-    engine_skip_fcu::EngineApiSkipFcu,
+    engine::EngineMessageStreamExt,
     exit::NodeExitFuture,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
-use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub mod common;
 pub use common::LaunchContext;
@@ -83,7 +82,7 @@ where
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {
-            adapter: NodeTypesAdapter { types, database },
+            adapter: NodeTypesAdapter { database },
             components_builder,
             add_ons: NodeAddOns { hooks, rpc, exexs: installed_exex },
             config,
@@ -116,7 +115,7 @@ where
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
             Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
         } else {
-            Arc::new(BeaconConsensus::new(ctx.chain_spec()))
+            Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
         };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
@@ -124,27 +123,22 @@ where
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
         ctx.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
 
-        // Configure the blockchain tree for the node
-        let evm_config = types.evm_config();
-        let tree_config = BlockchainTreeConfig::default();
-        let tree_externals = TreeExternals::new(
-            ctx.provider_factory().clone(),
-            consensus.clone(),
-            EvmProcessorFactory::new(ctx.chain_spec(), evm_config.clone()),
-        );
-        let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
-            .with_sync_metrics_tx(sync_metrics_tx.clone());
-
-        let canon_state_notification_sender = tree.canon_state_notification_sender();
-        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
-        debug!(target: "reth::cli", "configured blockchain tree");
-
         // fetch the head block from the database
         let head = ctx.lookup_head()?;
 
-        // setup the blockchain provider
-        let blockchain_db =
-            BlockchainProvider::new(ctx.provider_factory().clone(), blockchain_tree.clone())?;
+        // Configure the blockchain tree for the node
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
+        let blockchain_db = BlockchainProvider::new(
+            ctx.provider_factory().clone(),
+            Arc::new(NoopBlockchainTree::with_canon_state_notifications(
+                canon_state_notification_sender.clone(),
+            )),
+        )?;
 
         let builder_ctx = BuilderContext::new(
             head,
@@ -153,11 +147,30 @@ where
             ctx.data_dir().clone(),
             ctx.node_config().clone(),
             ctx.toml_config().clone(),
-            evm_config.clone(),
         );
 
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;
+
+        let tree_externals = TreeExternals::new(
+            ctx.provider_factory().clone(),
+            consensus.clone(),
+            components.block_executor().clone(),
+        );
+        let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
+            .with_sync_metrics_tx(sync_metrics_tx.clone())
+            // Note: This is required because we need to ensure that both the components and the
+            // tree are using the same channel for canon state notifications. This will be removed
+            // once the Blockchain provider no longer depends on an instance of the tree
+            .with_canon_state_notification_sender(canon_state_notification_sender);
+
+        let canon_state_notification_sender = tree.canon_state_notification_sender();
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
+
+        // Replace the tree component with the actual tree
+        let blockchain_db = blockchain_db.with_tree(blockchain_tree);
+
+        debug!(target: "reth::cli", "configured blockchain tree");
 
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
@@ -165,7 +178,6 @@ where
             components,
             task_executor: ctx.task_executor().clone(),
             provider: blockchain_db.clone(),
-            evm: evm_config.clone(),
         };
 
         debug!(target: "reth::cli", "calling on_component_initialized hook");
@@ -182,12 +194,10 @@ where
             // create the launch context for the exex
             let context = ExExContext {
                 head,
-                provider: blockchain_db.clone(),
-                task_executor: ctx.task_executor().clone(),
                 data_dir: ctx.data_dir().clone(),
                 config: ctx.node_config().clone(),
                 reth_config: ctx.toml_config().clone(),
-                pool: node_adapter.components.pool().clone(),
+                components: node_adapter.clone(),
                 events,
                 notifications,
             };
@@ -225,15 +235,14 @@ where
             });
 
             // send notifications from the blockchain tree to exex manager
-            let mut canon_state_notifications = blockchain_tree.subscribe_to_canonical_state();
+            let mut canon_state_notifications = blockchain_db.subscribe_to_canonical_state();
             let mut handle = exex_manager_handle.clone();
             ctx.task_executor().spawn_critical(
                 "exex manager blockchain tree notifications",
                 async move {
                     while let Ok(notification) = canon_state_notifications.recv().await {
                         handle.send_async(notification.into()).await.expect(
-                            "blockchain tree notification could not be sent to exex
-manager",
+                            "blockchain tree notification could not be sent to exex manager",
                         );
                     }
                 },
@@ -248,29 +257,16 @@ manager",
 
         // create pipeline
         let network_client = node_adapter.network().fetch_client().await?;
-        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        if let Some(skip_fcu_threshold) = ctx.node_config().debug.skip_fcu {
-            debug!(target: "reth::cli", "spawning skip FCU task");
-            let (skip_fcu_tx, skip_fcu_rx) = unbounded_channel();
-            let engine_skip_fcu = EngineApiSkipFcu::new(skip_fcu_threshold);
-            ctx.task_executor().spawn_critical(
-                "skip FCU interceptor",
-                engine_skip_fcu.intercept(consensus_engine_rx, skip_fcu_tx),
-            );
-            consensus_engine_rx = skip_fcu_rx;
-        }
-
-        if let Some(store_path) = ctx.node_config().debug.engine_api_store.clone() {
-            debug!(target: "reth::cli", "spawning engine API store");
-            let (engine_intercept_tx, engine_intercept_rx) = unbounded_channel();
-            let engine_api_store = EngineApiStore::new(store_path);
-            ctx.task_executor().spawn_critical(
-                "engine api interceptor",
-                engine_api_store.intercept(consensus_engine_rx, engine_intercept_tx),
-            );
-            consensus_engine_rx = engine_intercept_rx;
-        };
+        let node_config = ctx.node_config();
+        let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
+            .maybe_skip_fcu(node_config.debug.skip_fcu)
+            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            // Store messages _after_ skipping so that `replay-engine` command
+            // would replay only the messages that were observed by the engine
+            // during this run.
+            .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
         let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
@@ -290,8 +286,7 @@ manager",
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
             for (idx, (address, alloc)) in ctx.chain_spec().genesis.alloc.iter().enumerate() {
-                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx,
-address.to_string(), format_ether(alloc.balance));
+                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
 
             // install auto-seal
@@ -306,7 +301,7 @@ address.to_string(), format_ether(alloc.balance));
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
                 mining_mode,
-                evm_config.clone(),
+                node_adapter.components.block_executor().clone(),
             )
             .build();
 
@@ -321,7 +316,7 @@ address.to_string(), format_ether(alloc.balance));
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                evm_config,
+                node_adapter.components.block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
@@ -331,7 +326,7 @@ address.to_string(), format_ether(alloc.balance));
             debug!(target: "reth::cli", "Spawning auto mine task");
             ctx.task_executor().spawn(Box::pin(task));
 
-            (pipeline, EitherDownloader::Left(client))
+            (pipeline, Either::Left(client))
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
                 ctx.node_config(),
@@ -344,12 +339,12 @@ address.to_string(), format_ether(alloc.balance));
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                evm_config,
+                node_adapter.components.block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
 
-            (pipeline, EitherDownloader::Right(network_client.clone()))
+            (pipeline, Either::Right(network_client.clone()))
         };
 
         let pipeline_events = pipeline.events();
@@ -382,7 +377,7 @@ address.to_string(), format_ether(alloc.balance));
             initial_target,
             reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
-            consensus_engine_rx,
+            Box::pin(consensus_engine_stream),
             hooks,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
@@ -448,7 +443,7 @@ address.to_string(), format_ether(alloc.balance));
         });
 
         let full_node = FullNode {
-            evm_config: node_adapter.evm.clone(),
+            evm_config: node_adapter.components.evm_config().clone(),
             pool: node_adapter.components.pool().clone(),
             network: node_adapter.components.network().clone(),
             provider: node_adapter.provider.clone(),

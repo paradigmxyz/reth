@@ -13,7 +13,7 @@ use reth_primitives::{
     fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
 };
 use reth_provider::BlockReader;
-use reth_rpc::{JwtError, JwtSecret};
+use reth_rpc_layer::{JwtError, JwtSecret};
 use std::{
     env::VarError,
     path::{Path, PathBuf},

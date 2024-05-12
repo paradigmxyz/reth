@@ -19,9 +19,11 @@ reth-interfaces.workspace = true
 reth-provider.workspace = true
 
 # Optimism
+revm.workspace = true
 revm-primitives.workspace = true
 
 # misc
+thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
@@ -31,7 +33,6 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
-    "reth-revm/optimism",
     "reth-interfaces/optimism",
     "revm-primitives/optimism",
 ]

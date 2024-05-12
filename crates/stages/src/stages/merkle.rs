@@ -117,7 +117,7 @@ impl MerkleStage {
 
     /// Saves the hashing progress
     pub fn save_execution_checkpoint<DB: Database>(
-        &mut self,
+        &self,
         provider: &DatabaseProviderRW<DB>,
         checkpoint: Option<MerkleCheckpoint>,
     ) -> Result<(), StageError> {
@@ -377,7 +377,7 @@ mod tests {
     use reth_primitives::{
         keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
     };
-    use reth_provider::providers::StaticFileWriter;
+    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
@@ -582,6 +582,7 @@ mod tests {
 
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();
+            writer.commit().unwrap();
             writer.append_header(last_header, U256::ZERO, hash).unwrap();
             writer.commit().unwrap();
 
