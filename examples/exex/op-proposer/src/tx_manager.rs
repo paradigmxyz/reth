@@ -3,11 +3,9 @@ use alloy_provider::{PendingTransaction, Provider};
 use alloy_transport::Transport;
 use futures::Future;
 use reth_primitives::U256;
+use reth_tracing::tracing::{info, warn};
 use std::{collections::HashSet, sync::Arc};
-use tokio::{
-    sync::{mpsc::Sender, Mutex},
-    task::JoinHandle,
-};
+use tokio::sync::{mpsc::Sender, Mutex};
 
 use crate::op_proposer::{L2Output, L2OutputOracle::L2OutputOracleInstance};
 pub struct TxManager<T, N, P>
@@ -61,15 +59,13 @@ where
 
         self.pending_transaction_tx.send((l2_output.l2_block_number, transport_result)).await?;
 
-        //send through channel
-
-        // info!(
-        //     output_root = ?l2_output.output_root,
-        //     l2_block_number = ?current_l2_block,
-        //     l1_block_hash = ?l2_output.l1_block_hash,
-        //     l1_block_number = ?l2_output.l1_block_number,
-        //     "Successfully Proposed L2Output"
-        // );
+        info!(
+            output_root = ?l2_output.output_root,
+            l2_block_number = ?l2_output.l2_block_number,
+            l1_block_hash = ?l2_output.l1_block_hash,
+            l1_block_number = ?l2_output.l1_block_number,
+            "Proposing L2Output"
+        );
 
         Ok(())
     }
@@ -85,12 +81,12 @@ where
                 if let Some((l2_block_number, pending_transaction)) = pending_rx.recv().await {
                     match pending_transaction.await {
                         Ok(_) => {
-                            // TODO: logging
-                            // remove from pending transactions
                             pending_transactions.lock().await.remove(&l2_block_number);
+                            info!(l2_block_number, "L2Output proposed successfully");
                         }
                         Err(e) => {
-                            // TODO: logging
+                            // TODO: What should we do here? Retry?
+                            warn!(error = ?e, "Error while proposing L2Output")
                         }
                     };
                 }

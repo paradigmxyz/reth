@@ -15,6 +15,8 @@ use reth_provider::{BlockNumReader, StateProviderFactory};
 use reth_tracing::tracing::info;
 use serde::Deserialize;
 
+use self::L2OutputOracle::L2OutputOracleInstance;
+
 sol! {
     #[sol(rpc)]
     contract L2OutputOracle {
@@ -107,24 +109,16 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
 
     pub fn spawn<Node: FullNodeComponents>(
         &self,
-        mut ctx: ExExContext<Node>,
-        mut l2_output_db: L2OutputDb,
-    ) -> eyre::Result<impl Future<Output = ()>> {
+        ctx: ExExContext<Node>,
+        l2_output_db: L2OutputDb,
+    ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         let l2_output_oracle =
             Arc::new(L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone()));
-        let l2_provider = ctx.provider().clone();
-        let l1_provider = self.l1_provider.clone();
-        let rollup_provider = Arc::new(
-            ProviderBuilder::new()
-                .with_recommended_fillers()
-                .on_http(self.rollup_provider.parse().unwrap()),
-        );
-        let l2_to_l1_message_passer = self.l2_to_l1_message_passer;
-
         let mut transaction_manager = TxManager::new(l2_output_oracle.clone());
 
         let tx_manager = transaction_manager.run();
-        let op_proposer = self.run();
+        let op_proposer =
+            self.run(ctx, l2_output_db, l2_output_oracle.clone(), transaction_manager);
 
         // Create a future for the tx manager to run
         let fut = async move {
@@ -136,12 +130,29 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                     info!("Op Proposer exited");
                 }
             }
+
+            Ok(())
         };
 
         Ok(fut)
     }
 
-    pub fn run(&self) -> impl Future<Output = eyre::Result<()>> {
+    pub fn run<Node: FullNodeComponents>(
+        &self,
+        mut ctx: ExExContext<Node>,
+        mut l2_output_db: L2OutputDb,
+        l2_output_oracle: Arc<L2OutputOracleInstance<T, Arc<P>, N>>,
+        mut transaction_manager: TxManager<T, N, P>,
+    ) -> impl Future<Output = eyre::Result<()>> {
+        let l2_provider = ctx.provider().clone();
+        let l1_provider = self.l1_provider.clone();
+        let rollup_provider = Arc::new(
+            ProviderBuilder::new()
+                .with_recommended_fillers()
+                .on_http(self.rollup_provider.parse().unwrap()),
+        );
+        let l2_to_l1_message_passer = self.l2_to_l1_message_passer;
+
         async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 info!(?notification, "Received ExEx notification");

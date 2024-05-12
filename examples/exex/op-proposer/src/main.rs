@@ -40,7 +40,7 @@ async fn init_exex<Node: FullNodeComponents>(
         config.l2_to_l1_message_passer,
     );
 
-    op_proposer.spawn(ctx, db)
+    Ok(op_proposer.spawn(ctx, db)?)
 }
 
 fn main() -> eyre::Result<()> {
