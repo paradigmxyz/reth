@@ -22,6 +22,9 @@ reth-trie = { workspace = true, optional = true }
 # revm
 revm.workspace = true
 
+# alloy
+alloy-eips.workspace = true
+
 # common
 tracing.workspace = true
 
