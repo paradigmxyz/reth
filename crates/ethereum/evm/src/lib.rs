@@ -5,7 +5,8 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![allow(unused_crate_dependencies)]
+#![allow(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
@@ -20,6 +21,8 @@ pub mod verify;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;
+
+mod instructions;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -55,7 +58,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-use alphanet_instructions::{context::InstructionsContext, eip3074, BoxedInstructionWithOpCode};
+use instructions::{context::InstructionsContext, eip3074, BoxedInstructionWithOpCode};
 use revm_interpreter::{opcode::InstructionTables, Host};
 use std::sync::Arc;
 
