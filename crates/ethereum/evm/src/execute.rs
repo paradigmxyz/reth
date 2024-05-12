@@ -5,6 +5,7 @@ use crate::{
     verify::verify_receipts,
     EthEvmConfig,
 };
+use alloy_consensus::Request;
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -23,7 +24,10 @@ use reth_primitives::{
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, post_block_balance_increments,
+        post_block_withdrawal_requests,
+    },
     Evm, State,
 };
 use revm_primitives::{
@@ -126,8 +130,8 @@ where
     fn execute_pre_and_transactions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
-        mut evm: Evm<'_, Ext, &mut State<DB>>,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
+        evm: &mut Evm<'_, Ext, &mut State<DB>>,
+    ) -> Result<(Vec<Receipt>, u64, Vec<Request>), BlockExecutionError>
     where
         DB: Database<Error = ProviderError>,
     {
@@ -137,7 +141,7 @@ where
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
-            &mut evm,
+            evm,
         )?;
 
         // execute transactions
@@ -185,7 +189,6 @@ where
                 },
             );
         }
-        drop(evm);
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
@@ -197,7 +200,10 @@ where
             .into())
         }
 
-        Ok((receipts, cumulative_gas_used))
+        let withdrawal_requests =
+            post_block_withdrawal_requests(&self.chain_spec, block.timestamp, evm)?;
+
+        Ok((receipts, cumulative_gas_used, withdrawal_requests))
     }
 }
 
@@ -258,23 +264,23 @@ where
 
     /// Execute a single block and apply the state changes to the internal state.
     ///
-    /// Returns the receipts of the transactions in the block and the total gas used.
+    /// Returns the receipts of the transactions in the block, the total gas used and the list of
+    /// EIP-7685 [requests](Request).
     ///
     /// Returns an error if execution fails or receipt verification fails.
     fn execute_and_verify(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+    ) -> Result<(Vec<Receipt>, u64, Vec<Request>), BlockExecutionError> {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
-
-        let (receipts, gas_used) = {
-            let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_pre_and_transactions(block, evm)
+        let (receipts, gas_used, requests) = {
+            let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+            self.executor.execute_pre_and_transactions(block, &mut evm)
         }?;
 
         // 3. apply post execution changes
@@ -295,7 +301,7 @@ where
             };
         }
 
-        Ok((receipts, gas_used))
+        Ok((receipts, gas_used, requests))
     }
 
     /// Apply settings before a new block is executed.
@@ -363,12 +369,12 @@ where
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, gas_used) = self.execute_and_verify(block, total_difficulty)?;
+        let (receipts, gas_used, requests) = self.execute_and_verify(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used, requests })
     }
 }
 
@@ -405,7 +411,8 @@ where
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, _gas_used) = self.executor.execute_and_verify(block, total_difficulty)?;
+        let (receipts, _gas_used, requests) =
+            self.executor.execute_and_verify(block, total_difficulty)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -418,6 +425,8 @@ where
             self.batch_record.set_first_block(block.number);
         }
 
+        self.batch_record.save_requests(requests);
+
         Ok(())
     }
 
@@ -428,6 +437,7 @@ where
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
+            self.batch_record.take_requests(),
         )
     }
 

@@ -77,6 +77,12 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
+    /// EVM error during withdrawal requests contract call
+    #[error("failed to apply withdrawal requests contract call: {message}")]
+    WithdrawalRequestsContractCall {
+        /// The error message.
+        message: String,
+    },
 }
 
 /// BlockExecutor Errors

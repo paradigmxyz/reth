@@ -1,6 +1,7 @@
 //! Helper for handling execution of multiple blocks.
 
 use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
+use alloy_consensus::Request;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
     PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, MINIMUM_PRUNING_DISTANCE,
@@ -23,6 +24,7 @@ pub struct BlockBatchRecord {
     ///
     /// If receipt is None it means it is pruned.
     receipts: Receipts,
+    requests: Vec<Vec<Request>>,
     /// Memoized address pruning filter.
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
@@ -73,6 +75,11 @@ impl BlockBatchRecord {
     /// Returns all recorded receipts.
     pub fn take_receipts(&mut self) -> Receipts {
         std::mem::take(&mut self.receipts)
+    }
+
+    /// Returns all recorded requests.
+    pub fn take_requests(&mut self) -> Vec<Vec<Request>> {
+        std::mem::take(&mut self.requests)
     }
 
     /// Returns the [BundleRetention] for the given block based on the configured prune modes.
@@ -154,6 +161,10 @@ impl BlockBatchRecord {
         }
 
         Ok(())
+    }
+
+    pub fn save_requests(&mut self, requests: Vec<Request>) {
+        self.requests.push(requests);
     }
 }
 
