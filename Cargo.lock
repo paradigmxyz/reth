@@ -7007,7 +7007,9 @@ dependencies = [
  "reth-primitives",
  "reth-revm",
  "revm-interpreter",
+ "revm-precompile",
  "revm-primitives",
+ "secp256k1",
  "tracing",
 ]
 
