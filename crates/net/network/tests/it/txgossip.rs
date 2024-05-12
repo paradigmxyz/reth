@@ -136,18 +136,19 @@ async fn test_sending_invalid_transactions() {
     // await disconnect for bad tx spam
     if let Some(ev) = peer1_events.next().await {
         match ev {
-            NetworkEvent::SessionClosed { peer_id, .. } => {
+            Ok(NetworkEvent::SessionClosed { peer_id, .. }) => {
                 assert_eq!(peer_id, *peer0.peer_id());
             }
-            NetworkEvent::SessionEstablished { .. } => {
+            Ok(NetworkEvent::SessionEstablished { .. }) => {
                 panic!("unexpected SessionEstablished event")
             }
-            NetworkEvent::PeerAdded(_) => {
+            Ok(NetworkEvent::PeerAdded(_)) => {
                 panic!("unexpected PeerAdded event")
             }
-            NetworkEvent::PeerRemoved(_) => {
+            Ok(NetworkEvent::PeerRemoved(_)) => {
                 panic!("unexpected PeerRemoved event")
             }
+            Err(e) => panic!("unexpected error: {e}"),
         }
     }
 
