@@ -116,17 +116,17 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
             Arc::new(L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone()));
         let mut transaction_manager = TxManager::new(l2_output_oracle.clone());
 
-        let tx_manager = transaction_manager.run();
-        let op_proposer =
+        let tx_manager_handle = transaction_manager.run();
+        let op_proposer_handle =
             self.run(ctx, l2_output_db, l2_output_oracle.clone(), transaction_manager);
 
         // Create a future for the tx manager to run
-        let fut = async move {
+        let early_handle_exit = async move {
             tokio::select! {
-                _ = tx_manager => {
+                _ = tx_manager_handle => {
                     info!("Tx Manager exited");
                 }
-                _ = op_proposer => {
+                _ = op_proposer_handle => {
                     info!("Op Proposer exited");
                 }
             }
@@ -134,7 +134,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
             Ok(())
         };
 
-        Ok(fut)
+        Ok(early_handle_exit)
     }
 
     pub fn run<Node: FullNodeComponents>(
