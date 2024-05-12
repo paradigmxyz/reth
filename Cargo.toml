@@ -282,7 +282,7 @@ reth-testing-utils = { path = "testing/testing-utils" }
 # revm
 revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
 revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "7fc34a2" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "a5df8a0" }
 
 # eth
 alloy-chains = "0.1.15"
