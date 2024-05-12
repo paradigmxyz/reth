@@ -19,6 +19,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod account;
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
 pub mod basefee;
 mod block;
 mod chain;
