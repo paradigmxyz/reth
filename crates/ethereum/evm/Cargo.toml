@@ -20,11 +20,10 @@ reth-interfaces.workspace = true
 # Ethereum
 revm-primitives.workspace = true
 
-# Alloy
-alloy-eips.workspace = true
-
 # misc
 tracing.workspace = true
 
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
+alloy-eips.workspace = true
+

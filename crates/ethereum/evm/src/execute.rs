@@ -444,9 +444,7 @@ where
 mod tests {
     use super::*;
     use alloy_eips::eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS};
-    use reth_primitives::{
-        bytes, keccak256, Account, Block, Bytes, ChainSpecBuilder, ForkCondition, B256,
-    };
+    use reth_primitives::{keccak256, Account, Block, ChainSpecBuilder, ForkCondition, B256};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
