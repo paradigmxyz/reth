@@ -8,26 +8,33 @@ use std::{
     marker::PhantomData,
     sync::Arc,
 };
-pub struct TxManager {
+pub struct TxManager<'a, T, N, P>
+where
+    T: Transport + Clone,
+    N: Network,
+    P: Provider<T, N>,
+{
     // NOTE: add a comment what the u64 is
     pub pending_transactions: HashSet<u64>,
+
+    pub l2_output_oracle: &'a L2OutputOracleInstance<T, Arc<P>, N>,
 }
 
-impl TxManager {
-    pub fn new() -> Self {
-        Self { pending_transactions: HashSet::new() }
+impl<'a, T, N, P> TxManager<'a, T, N, P>
+where
+    T: Transport + Clone,
+    N: Network,
+    P: Provider<T, N>,
+{
+    pub fn new(l2_output: &'a L2OutputOracleInstance<T, Arc<P>, N>) -> Self {
+        Self { pending_transactions: HashSet::new(), l2_output_oracle: l2_output }
     }
 
-    pub async fn propose_l2_output<T, P, N>(
+    pub async fn propose_l2_output(
         &mut self,
-        l2_output_oracle: &L2OutputOracleInstance<T, P, N>,
+        l2_output_oracle: &L2OutputOracleInstance<T, Arc<P>, N>,
         l2_output: L2Output,
-    ) -> eyre::Result<()>
-    where
-        T: Transport + Clone,
-        P: Provider<T, N>,
-        N: Network,
-    {
+    ) -> eyre::Result<()> {
         self.pending_transactions.insert(l2_output.l2_block_number);
 
         // Submit a transaction to propose the L2Output to the L2OutputOracle contract

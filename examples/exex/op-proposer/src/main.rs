@@ -157,7 +157,7 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         let l2_to_l1_message_passer = self.l2_to_l1_message_passer.clone();
 
         let fut = async move {
-            let mut transaction_manager = TxManager::new();
+            let mut transaction_manager = TxManager::new(&l2_output_oracle);
 
             while let Some(notification) = ctx.notifications.recv().await {
                 info!(?notification, "Received ExEx notification");
