@@ -183,7 +183,8 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                 // Get the l2 output data to prepare for submission
                 let l2_output = if target_block < current_l2_block {
                     // If the l2 output has already been submitted, we can skip this iteration
-                    if transaction_manager.pending_transactions.contains(&target_block) {
+                    if transaction_manager.pending_transactions.lock().await.contains(&target_block)
+                    {
                         continue;
                     }
 
