@@ -122,9 +122,27 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         let l2_to_l1_message_passer = self.l2_to_l1_message_passer;
 
         let mut transaction_manager = TxManager::new(l2_output_oracle.clone());
-        let tx_manager_handle = transaction_manager.spawn();
 
+        let tx_manager = transaction_manager.run();
+        let op_proposer = self.run();
+
+        // Create a future for the tx manager to run
         let fut = async move {
+            tokio::select! {
+                _ = tx_manager => {
+                    info!("Tx Manager exited");
+                }
+                _ = op_proposer => {
+                    info!("Op Proposer exited");
+                }
+            }
+        };
+
+        Ok(fut)
+    }
+
+    pub fn run(&self) -> impl Future<Output = eyre::Result<()>> {
+        async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 info!(?notification, "Received ExEx notification");
 
@@ -200,8 +218,6 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
             }
 
             Ok(())
-        };
-
-        Ok(fut)
+        }
     }
 }

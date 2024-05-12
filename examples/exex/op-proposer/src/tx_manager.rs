@@ -1,6 +1,7 @@
 use alloy_network::Network;
 use alloy_provider::{PendingTransaction, Provider};
 use alloy_transport::Transport;
+use futures::Future;
 use reth_primitives::U256;
 use std::{collections::HashSet, sync::Arc};
 use tokio::{
@@ -73,13 +74,13 @@ where
         Ok(())
     }
 
-    pub fn spawn(&mut self) -> JoinHandle<eyre::Result<()>> {
+    pub fn run(&mut self) -> impl Future<Output = ()> {
         let (pending_tx, mut pending_rx) =
             tokio::sync::mpsc::channel::<(u64, PendingTransaction)>(100);
         self.pending_transaction_tx = pending_tx;
         let pending_transactions = self.pending_transactions.clone();
 
-        tokio::spawn(async move {
+        async move {
             loop {
                 if let Some((l2_block_number, pending_transaction)) = pending_rx.recv().await {
                     match pending_transaction.await {
@@ -94,6 +95,6 @@ where
                     };
                 }
             }
-        })
+        }
     }
 }
