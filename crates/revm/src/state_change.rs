@@ -1,8 +1,9 @@
+use alloy_eips::eip4788;
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
-    ChainSpec, Header, Withdrawal, B256, U256,
+    revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header, Withdrawal,
+    B256, U256,
 };
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use std::collections::HashMap;
@@ -104,7 +105,7 @@ where
         }
     };
 
-    state.remove(&SYSTEM_ADDRESS);
+    state.remove(&eip4788::SYSTEM_ADDRESS);
     state.remove(&evm.block().coinbase);
 
     evm.context.evm.db.commit(state);

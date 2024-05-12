@@ -20,6 +20,9 @@ reth-interfaces.workspace = true
 # Ethereum
 revm-primitives.workspace = true
 
+# Alloy
+alloy-eips.workspace = true
+
 # misc
 tracing.workspace = true
 
