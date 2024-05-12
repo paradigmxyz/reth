@@ -2,7 +2,7 @@
 use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
 #[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
@@ -87,7 +87,11 @@ fn transaction_lookup(c: &mut Criterion, runtime: &Runtime) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
-    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS, EtlConfig::default(), None);
+    let stage = TransactionLookupStage::new(
+        TransactionLookupConfig { chunk_size: DEFAULT_NUM_BLOCKS },
+        EtlConfig::default(),
+        None,
+    );
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 

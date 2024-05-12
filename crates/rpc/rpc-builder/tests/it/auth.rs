@@ -4,8 +4,8 @@ use crate::utils::launch_auth;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_primitives::{Block, U64};
-use reth_rpc::JwtSecret;
 use reth_rpc_api::clients::EngineApiClient;
+use reth_rpc_layer::JwtSecret;
 use reth_rpc_types::engine::{ForkchoiceState, PayloadId, TransitionConfiguration};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, convert_block_to_payload_input_v2,
