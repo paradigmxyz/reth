@@ -1,7 +1,15 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run -p beacon-api-sidecar-fetcher -- node
+//! cargo run -p beacon-api-beacon-sidecar-fetcher -- node --full
+//! ```
+//!
+//! This launches a regular reth instance and subscribes to payload attributes event stream.
+//!
+//! **NOTE**: This expects that the CL client is running an http server on `localhost:5052` and is
+//! configured to emit payload attributes events.
+//!
+//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
 
 use std::{
     collections::VecDeque,
@@ -10,21 +18,60 @@ use std::{
     task::{Context, Poll},
 };
 
+use clap::Parser;
 use eyre::Result;
+use reth_node_ethereum::EthereumNode;
 use thiserror::Error;
 
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
+    builder::{NodeBuilder, NodeConfig, NodeHandle},
+    cli::Cli,
     primitives::{BlobTransaction, B256},
-    providers::CanonStateNotification,
+    providers::{CanonStateNotification, CanonStateSubscriptions},
+    tasks::TaskManager,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    Ok(())
+fn main() {
+    Cli::<BeaconSidecarConfig>::parse()
+        .run(|builder, args| async move {
+            // launch the node
+            let NodeHandle { node, node_exit_future } =
+                builder.node(EthereumNode::default()).launch().await?;
+
+            let notifications: reth::providers::CanonStateNotificationStream =
+                node.provider.canonical_state_stream();
+
+            let pool = node.pool.clone();
+
+            let mut sidecar_stream = MinedSidecarStream {
+                events: notifications,
+                pool,
+                beacon_config: args,
+                client: reqwest::Client::new(),
+                pending_requests: FuturesUnordered::new(),
+                queued_actions: VecDeque::new(),
+            };
+
+            while let Some(result) = sidecar_stream.next().await {
+                match result {
+                    Ok(blob_transaction) => {
+                        // Handle successful transaction
+                        println!("Processed BlobTransaction: {:?}", blob_transaction);
+                    }
+                    Err(e) => {
+                        // Handle errors specifically
+                        eprintln!("Failed to process transaction: {:?}", e);
+                    }
+                }
+            }
+
+            node_exit_future.await
+        })
+        .unwrap();
 }
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
@@ -36,6 +83,15 @@ struct BeaconSidecarConfig {
     /// Beacon Node http server port to listen on
     #[arg(long = "cl.port", default_value_t = 5052)]
     pub cl_port: u16,
+}
+
+impl Default for BeaconSidecarConfig {
+    fn default() -> Self {
+        Self {
+            cl_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), // Equivalent to Ipv4Addr::LOCALHOST
+            cl_port: 5052,
+        }
+    }
 }
 
 impl BeaconSidecarConfig {
