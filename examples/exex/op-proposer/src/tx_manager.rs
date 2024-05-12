@@ -1,19 +1,15 @@
 use alloy_network::Network;
 use alloy_provider::{PendingTransaction, Provider};
-use alloy_transport::{Transport, TransportResult};
-use futures::{channel::mpsc::Receiver, stream::FuturesUnordered};
+use alloy_transport::Transport;
 use reth_primitives::U256;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 use tokio::{
     sync::{mpsc::Sender, Mutex},
     task::JoinHandle,
 };
 
 use crate::op_proposer::{L2Output, L2OutputOracle::L2OutputOracleInstance};
-pub struct TxManager<'a, T, N, P>
+pub struct TxManager<T, N, P>
 where
     T: Transport + Clone,
     N: Network,
@@ -22,16 +18,16 @@ where
     // NOTE: add a comment what the u64 is
     pub pending_transactions: Arc<Mutex<HashSet<u64>>>,
     pub pending_transaction_tx: Sender<(u64, PendingTransaction)>,
-    pub l2_output_oracle: &'a L2OutputOracleInstance<T, Arc<P>, N>,
+    pub l2_output_oracle: Arc<L2OutputOracleInstance<T, Arc<P>, N>>,
 }
 
-impl<'a, T, N, P> TxManager<'a, T, N, P>
+impl<T, N, P> TxManager<T, N, P>
 where
     T: Transport + Clone,
     N: Network,
     P: Provider<T, N>,
 {
-    pub fn new(l2_output: &'a L2OutputOracleInstance<T, Arc<P>, N>) -> Self {
+    pub fn new(l2_output: Arc<L2OutputOracleInstance<T, Arc<P>, N>>) -> Self {
         let (pending_transaction_tx, _) =
             tokio::sync::mpsc::channel::<(u64, PendingTransaction)>(1);
 

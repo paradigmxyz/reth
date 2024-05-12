@@ -1,8 +1,5 @@
-use std::{marker::PhantomData, path::Path, sync::Arc};
-
-use alloy_network::{EthereumSigner, Network};
-use alloy_primitives::{Address, FixedBytes, U256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_network::EthereumSigner;
+use alloy_provider::ProviderBuilder;
 use alloy_signer_wallet::LocalWallet;
 use config::OpProposerConfig;
 use db::L2OutputDb;
@@ -12,6 +9,7 @@ use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use rusqlite::Connection;
+use std::path::Path;
 
 pub mod config;
 pub mod db;
@@ -42,7 +40,7 @@ async fn init_exex<Node: FullNodeComponents>(
         config.l2_to_l1_message_passer,
     );
 
-    Ok(op_proposer.spawn(ctx, db)?)
+    op_proposer.spawn(ctx, db)
 }
 
 fn main() -> eyre::Result<()> {
