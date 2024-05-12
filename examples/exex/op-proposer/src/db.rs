@@ -4,7 +4,7 @@ use reth_primitives::B256;
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
 
-use crate::L2Output;
+use crate::op_proposer::L2Output;
 
 pub struct L2OutputDb {
     connection: Connection,
@@ -76,6 +76,7 @@ impl L2OutputDb {
 
 #[cfg(test)]
 pub mod tests {
+    use crate::op_proposer::L2Output;
     use alloy_primitives::FixedBytes;
 
     use super::L2OutputDb;
@@ -90,7 +91,7 @@ pub mod tests {
     #[test]
     fn test_insert_and_get_l2_output() -> eyre::Result<()> {
         let mut db = setup()?;
-        let l2_output = crate::L2Output {
+        let l2_output = L2Output {
             output_root: FixedBytes::default(),
             l2_block_number: 1,
             l1_block_hash: FixedBytes::default(),
@@ -106,7 +107,7 @@ pub mod tests {
     #[test]
     fn test_delete_l2_output() -> eyre::Result<()> {
         let mut db = setup()?;
-        let l2_output = crate::L2Output {
+        let l2_output = L2Output {
             output_root: FixedBytes::default(),
             l2_block_number: 1,
             l1_block_hash: FixedBytes::default(),

@@ -1,4 +1,3 @@
-use crate::{L2Output, L2OutputOracle, L2OutputOracle::L2OutputOracleInstance};
 use alloy_network::Network;
 use alloy_provider::{PendingTransaction, Provider};
 use alloy_transport::{Transport, TransportResult};
@@ -12,6 +11,8 @@ use tokio::{
     sync::{mpsc::Sender, Mutex},
     task::JoinHandle,
 };
+
+use crate::op_proposer::{L2Output, L2OutputOracle::L2OutputOracleInstance};
 pub struct TxManager<'a, T, N, P>
 where
     T: Transport + Clone,
@@ -76,12 +77,10 @@ where
         Ok(())
     }
 
-    fn spawn(&mut self) -> JoinHandle<eyre::Result<()>> {
+    pub fn spawn(&mut self) -> JoinHandle<eyre::Result<()>> {
         let (pending_tx, mut pending_rx) =
             tokio::sync::mpsc::channel::<(u64, PendingTransaction)>(100);
-
         self.pending_transaction_tx = pending_tx;
-
         let pending_transactions = self.pending_transactions.clone();
 
         tokio::spawn(async move {
