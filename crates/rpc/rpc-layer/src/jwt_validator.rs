@@ -4,7 +4,7 @@ use tracing::error;
 use crate::{AuthValidator, JwtError, JwtSecret};
 
 /// Implements JWT validation logics and integrates
-/// to an Http [`AuthLayer`][crate::layers::AuthLayer]
+/// to an Http [`AuthLayer`][crate::AuthLayer]
 /// by implementing the [`AuthValidator`] trait.
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
@@ -68,7 +68,7 @@ fn err_response(err: JwtError) -> Response<hyper::Body> {
 
 #[cfg(test)]
 mod tests {
-    use crate::layers::jwt_validator::get_bearer;
+    use crate::jwt_validator::get_bearer;
     use http::{header, HeaderMap};
 
     #[test]

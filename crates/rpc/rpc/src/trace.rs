@@ -266,7 +266,7 @@ where
             let mut transaction_indices = HashSet::new();
             let mut highest_matching_index = 0;
             for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx.recover_signer().ok_or(BlockError::InvalidSignature)?;
+                let from = tx.recover_signer_unchecked().ok_or(BlockError::InvalidSignature)?;
                 let to = tx.to();
                 if matcher.matches(from, to) {
                     let idx = tx_idx as u64;

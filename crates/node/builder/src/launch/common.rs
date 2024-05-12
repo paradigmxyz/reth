@@ -24,7 +24,7 @@ use reth_provider::{
     providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
-use reth_rpc::JwtSecret;
+use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
