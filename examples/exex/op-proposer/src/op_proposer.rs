@@ -121,17 +121,17 @@ where
             Arc::new(L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone()));
 
         let mut transaction_manager = TxManager::new(l2_output_oracle.clone());
-        let tx_manager_handle = transaction_manager.run();
+        let tx_manager_fut = transaction_manager.run();
 
-        let op_proposer_handle =
+        let op_proposer_fut =
             self.run(ctx, l2_output_db, l2_output_oracle.clone(), transaction_manager);
 
         let fut = async move {
             tokio::select! {
-                _ = tx_manager_handle => {
+                _ = tx_manager_fut => {
                     return Err(eyre!("Tx Manager exited early"));
                 }
-                _ = op_proposer_handle => {
+                _ = op_proposer_fut => {
                     return Err(eyre!("Op Proposer exited early"));
                 }
             }
