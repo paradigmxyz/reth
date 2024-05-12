@@ -114,27 +114,25 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
     ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
         let l2_output_oracle =
             Arc::new(L2OutputOracle::new(self.l2_output_oracle, self.l1_provider.clone()));
-        let mut transaction_manager = TxManager::new(l2_output_oracle.clone());
 
+        let mut transaction_manager = TxManager::new(l2_output_oracle.clone());
         let tx_manager_handle = transaction_manager.run();
+
         let op_proposer_handle =
             self.run(ctx, l2_output_db, l2_output_oracle.clone(), transaction_manager);
 
-        // Create a future for the tx manager to run
-        let early_handle_exit = async move {
+        let fut = async move {
             tokio::select! {
                 _ = tx_manager_handle => {
-                    info!("Tx Manager exited");
+                    return Err(eyre!("Tx Manager exited early"));
                 }
                 _ = op_proposer_handle => {
-                    info!("Op Proposer exited");
+                    return Err(eyre!("Op Proposer exited early"));
                 }
             }
-
-            Ok(())
         };
 
-        Ok(early_handle_exit)
+        Ok(fut)
     }
 
     pub fn run<Node: FullNodeComponents>(
@@ -156,38 +154,20 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
         async move {
             while let Some(notification) = ctx.notifications.recv().await {
                 info!(?notification, "Received ExEx notification");
+                handle_reorgs(&notification, &mut l2_output_db)?;
 
-                //TODO: package this into function
-                match &notification {
-                    ExExNotification::ChainReorged { old, new } => {
-                        let from = old
-                            .blocks()
-                            .iter()
-                            .last()
-                            .ok_or(eyre!("From block number of reorg not found"))?
-                            .0;
-                        let to = new
-                            .blocks()
-                            .iter()
-                            .last()
-                            .ok_or(eyre!("To block number of reorg not found"))?
-                            .0;
-                        for block_number in *from..=*to {
-                            l2_output_db.delete_l2_output(block_number)?;
-                        }
-                    }
-                    ExExNotification::ChainReverted { old: _ } => {
-                        // TODO:
-                    }
-                    _ => {}
-                };
-
+                // Get the target block number from the L2OutputOracle and the latest L2 block
                 let target_block = l2_output_oracle.nextBlockNumber().call().await?._0.to::<u64>();
                 let current_l2_block = l2_provider.last_block_number()?;
 
+                // If the next l2 output block is less than the current l2 block, we should get the
+                // l2 output from the database. Otherwise, if the target block is
+                // equal to the current l2 block, we should get the new L2 output and store it in
+                // the database.
                 let l2_output = match target_block.cmp(&current_l2_block) {
                     Ordering::Less => {
-                        // If the l2 output has already been submitted, we can skip this iteration
+                        // If the l2 output has already been submitted
+                        // we can continue to the next block
                         if transaction_manager
                             .pending_transactions
                             .lock()
@@ -219,10 +199,11 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
                     }
                 };
 
-                // Get the L2 Safe Head. If the target block is > the safe head. We shouldn't submit
-                // the Proposal yet.
+                // Check the L2 Safe Head. If the target block is > the safe head. We shouldn't
+                // submit the proposal yet.
                 let safe_head = get_l2_safe_head(rollup_provider.clone()).await?;
 
+                // Otherwise, submit the proposal to the L2OutputOracle contract
                 if target_block <= safe_head {
                     transaction_manager.propose_l2_output(&l2_output_oracle, l2_output).await?;
                 }
@@ -231,4 +212,27 @@ impl<T: Transport + Clone, N: Network, P: Provider<T, N>> OpProposer<T, N, P> {
             Ok(())
         }
     }
+}
+
+fn handle_reorgs(
+    notification: &ExExNotification,
+    l2_output_db: &mut L2OutputDb,
+) -> eyre::Result<()> {
+    match &notification {
+        ExExNotification::ChainReorged { old, new } => {
+            let from =
+                old.blocks().iter().last().ok_or(eyre!("From block number of reorg not found"))?.0;
+            let to =
+                new.blocks().iter().last().ok_or(eyre!("To block number of reorg not found"))?.0;
+            for block_number in *from..=*to {
+                l2_output_db.delete_l2_output(block_number)?;
+            }
+        }
+        ExExNotification::ChainReverted { old: _ } => {
+            // TODO:
+        }
+        _ => {}
+    };
+
+    Ok(())
 }

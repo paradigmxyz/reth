@@ -19,7 +19,7 @@ pub mod tx_manager;
 async fn init_exex<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
-    // NOTE: pass the config path as an arg instead of hardcoding
+    // TODO: pass the config path as an arg instead of hardcoding
     let config_file = Path::new("./op_proposer.toml");
     let config = OpProposerConfig::load(Some(config_file))?;
 

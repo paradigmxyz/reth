@@ -14,7 +14,7 @@ where
     N: Network,
     P: Provider<T, N>,
 {
-    // NOTE: add a comment what the u64 is
+    // Hashset to keep track of which L2Outputs have been proposed, keyed by l2_block_number
     pub pending_transactions: Arc<Mutex<HashSet<u64>>>,
     pub pending_transaction_tx: Sender<(u64, PendingTransaction)>,
     pub l2_output_oracle: Arc<L2OutputOracleInstance<T, Arc<P>, N>>,
@@ -37,6 +37,9 @@ where
         }
     }
 
+    /// Propose an L2Output to the L2OutputOracle contract. Pending transactions are added to the
+    /// `pending_transactions` HashSet and the TxManager will wait for the transaction to complete
+    /// asynchronously.
     pub async fn propose_l2_output(
         &mut self,
         l2_output_oracle: &L2OutputOracleInstance<T, Arc<P>, N>,
@@ -70,6 +73,10 @@ where
         Ok(())
     }
 
+    /// Core logic of the TxManager. This function will listen for pending transactions send through
+    /// the `pending_transaction_tx` and wait for them to complete. Once the transaction has
+    /// succeeded or failed, the transaction will be removed from the `pending_transactions`
+    /// HashSet.
     pub fn run(&mut self) -> impl Future<Output = ()> {
         let (pending_tx, mut pending_rx) =
             tokio::sync::mpsc::channel::<(u64, PendingTransaction)>(100);
@@ -81,14 +88,18 @@ where
                 if let Some((l2_block_number, pending_transaction)) = pending_rx.recv().await {
                     match pending_transaction.await {
                         Ok(_) => {
-                            pending_transactions.lock().await.remove(&l2_block_number);
                             info!(l2_block_number, "L2Output proposed successfully");
                         }
                         Err(e) => {
-                            // TODO: What should we do here? Retry?
                             warn!(error = ?e, "Error while proposing L2Output")
                         }
                     };
+
+                    // Once the pending transaction has completed, remove it from the pending
+                    // regardless if the tx succeeded or failed
+                    // If the transaction did not successfully complete, the l2_oracle.nextBlock
+                    // will be the same and the next transaction will propose the same l2_output
+                    pending_transactions.lock().await.remove(&l2_block_number);
                 }
             }
         }
