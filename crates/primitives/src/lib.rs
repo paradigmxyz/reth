@@ -40,6 +40,7 @@ pub mod proofs;
 mod prune;
 mod receipt;
 mod request;
+/// Helpers for working with revm
 pub mod revm;
 pub mod stage;
 pub mod static_file;

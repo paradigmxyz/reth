@@ -522,7 +522,7 @@ impl StaticFileProviderRW {
         if self.prune_on_commit.is_some() {
             return Err(ProviderError::NippyJar(
                 "Pruning should be comitted before appending or pruning more data".to_string(),
-            ));
+            ))
         }
         Ok(())
     }

@@ -6982,6 +6982,7 @@ dependencies = [
 name = "reth-evm"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "futures-util",
  "parking_lot 0.12.2",
  "reth-interfaces",
@@ -6994,6 +6995,7 @@ dependencies = [
 name = "reth-evm-ethereum"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "reth-evm",
  "reth-interfaces",
@@ -7652,7 +7654,9 @@ dependencies = [
 name = "reth-revm"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
+ "alloy-rlp",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",

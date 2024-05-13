@@ -9,6 +9,12 @@ use reth_codecs::{main_codec, Compact};
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]
 pub struct Requests(pub Vec<Request>);
 
+impl From<Vec<Request>> for Requests {
+    fn from(requests: Vec<Request>) -> Self {
+        Self(requests)
+    }
+}
+
 impl IntoIterator for Requests {
     type Item = Request;
     type IntoIter = std::vec::IntoIter<Request>;

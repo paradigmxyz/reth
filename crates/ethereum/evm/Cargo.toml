@@ -23,6 +23,9 @@ revm-interpreter.workspace = true
 
 revm-precompile = { version = "7.0.0", features = ["std"], default-features = false }
 
+# Alloy
+alloy-consensus.workspace = true
+
 # misc
 tracing.workspace = true
 

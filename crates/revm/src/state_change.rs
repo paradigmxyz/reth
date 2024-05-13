@@ -1,12 +1,19 @@
+use alloy_consensus::Request;
+use alloy_rlp::Decodable;
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    address, revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header,
-    Withdrawal, B256, U256,
+    address,
+    revm::env::{
+        fill_tx_env_with_beacon_root_contract_call,
+        fill_tx_env_with_withdrawal_requests_contract_call,
+    },
+    Address, ChainSpec, Header, Withdrawal, B256, U256,
 };
 use revm::{
+    self,
     interpreter::Host,
-    primitives::{Account, AccountInfo, StorageSlot},
+    primitives::{Account, AccountInfo, ExecutionResult, ResultAndState, StorageSlot},
     Database, DatabaseCommit, Evm,
 };
 use std::{collections::HashMap, ops::Rem};
@@ -281,4 +288,66 @@ pub fn insert_post_block_withdrawals_balance_increments(
             }
         }
     }
+}
+
+/// Applies the post-block call to the EIP-7002 withdrawal requests contract.
+///
+/// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
+/// returned. Otherwise, the withdrawal requests are returned.
+#[inline]
+pub fn post_block_withdrawal_requests<EXT, DB: Database + DatabaseCommit>(
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<Vec<Request>, BlockExecutionError>
+where
+    DB::Error: std::fmt::Display,
+{
+    if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
+        return Ok(vec![])
+    }
+
+    // get previous env
+    let previous_env = Box::new(evm.context.env().clone());
+
+    // modify env for pre block call
+    fill_tx_env_with_withdrawal_requests_contract_call(&mut evm.context.evm.env);
+
+    let ResultAndState { result, mut state } = match evm.transact() {
+        Ok(res) => res,
+        Err(e) => {
+            evm.context.evm.env = previous_env;
+            return Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: e.to_string(),
+            }
+            .into())
+        }
+    };
+
+    state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
+    state.remove(&evm.block().coinbase);
+
+    let withdrawal_requests = match result {
+        ExecutionResult::Success { output, .. } => {
+            Vec::<Request>::decode(&mut output.into_data().as_ref()).map_err(|err| {
+                BlockValidationError::WithdrawalRequestsContractCall { message: err.to_string() }
+            })
+        }
+        ExecutionResult::Revert { output, .. } => {
+            Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: format!("execution reverted: {output}"),
+            })
+        }
+        ExecutionResult::Halt { reason, .. } => {
+            Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: format!("execution halted: {reason:?}"),
+            })
+        }
+    }?;
+    evm.context.evm.db.commit(state);
+
+    // re-set the previous env
+    evm.context.evm.env = previous_env;
+
+    Ok(withdrawal_requests)
 }

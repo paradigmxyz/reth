@@ -1412,7 +1412,7 @@ impl Decodable for TransactionSigned {
     /// header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort);
+            return Err(RlpError::InputTooShort)
         }
 
         // decode header
