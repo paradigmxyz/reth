@@ -12,16 +12,14 @@ use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_evm_ethereum::eip6110::parse_deposits_from_receipts;
-use reth_interfaces::{RethError, RethResult};
+use reth_interfaces::RethResult;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
 };
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, ChainSpec, Receipt, Request, SealedBlock, Withdrawals, B256,
-    U256,
+    proofs, BlockNumberOrTag, Bytes, ChainSpec, Request, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
