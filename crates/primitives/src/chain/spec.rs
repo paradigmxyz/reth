@@ -1059,7 +1059,7 @@ impl From<Genesis> for ChainSpec {
             genesis_hash: None,
             hardforks,
             paris_block_and_final_difficulty,
-            deposit_contract: None,
+            deposit_contract: genesis.deposit_contract_address,
             ..Default::default()
         }
     }
