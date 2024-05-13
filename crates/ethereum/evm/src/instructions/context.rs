@@ -41,7 +41,7 @@ impl InstructionsContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_revm::{Evm, InMemoryDB};
+    use reth_revm::{Context, Evm, InMemoryDB};
     use revm_interpreter::Interpreter;
     use revm_primitives::{address, AccountInfo, Bytecode, TransactTo, U256};
     use std::sync::Arc;
@@ -53,9 +53,7 @@ mod tests {
         let value = vec![0x01, 0x02];
 
         ctx.set(key, value.clone());
-
-        let cloned_ctx = ctx.clone();
-        assert_eq!(cloned_ctx.get(key).unwrap(), value);
+        assert_eq!(ctx.get(key).unwrap(), value);
     }
 
     #[test]
@@ -79,26 +77,21 @@ mod tests {
             .modify_tx_env(|tx| tx.transact_to = TransactTo::Call(to_addr))
             .append_handler_register_box(Box::new(move |handler| {
                 let writer_context = to_capture_instructions.clone();
-                let writer_instruction = Box::new(
-                    move |_interp: &mut Interpreter, _host: &mut Evm<'_, (), InMemoryDB>| {
+                let writer_instruction =
+                    Box::new(move |_interp: &mut Interpreter, _host: &mut Context<(), _>| {
                         // write into the context variable.
                         writer_context.set(key, vec![0x01, 0x02]);
-                    },
-                );
+                    });
                 let reader_context = to_capture_instructions.clone();
-                let reader_instruction = Box::new(
-                    move |_interp: &mut Interpreter, _host: &mut Evm<'_, (), InMemoryDB>| {
+                let reader_instruction =
+                    Box::new(move |_interp: &mut Interpreter, _host: &mut Context<(), _>| {
                         // read from context variable.
                         assert_eq!(reader_context.get(key).unwrap(), vec![0x01, 0x02]);
-                    },
-                );
+                    });
 
                 let mut table = handler.take_instruction_table();
-                table = table.map(|mut table| {
-                    table.insert_boxed(0xEE, writer_instruction);
-                    table.insert_boxed(0xEF, reader_instruction);
-                    table
-                });
+                table.insert_boxed(0xEE, writer_instruction);
+                table.insert_boxed(0xEF, reader_instruction);
                 handler.instruction_table = table;
 
                 let post_execution_context = to_capture_post_execution.clone();

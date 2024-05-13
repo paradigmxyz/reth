@@ -71,5 +71,6 @@ optimism = [
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
     "reth-ethereum-consensus/optimism",
-    "reth-rpc/optimism"
+    "reth-rpc/optimism",
+    "reth-evm-ethereum/optimism",
 ]

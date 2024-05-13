@@ -16,13 +16,12 @@ reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-interfaces.workspace = true
-alphanet-instructions = { git = "https://github.com/paradigmxyz/alphanet/" }
 
 # Ethereum
 revm-primitives.workspace = true
 revm-interpreter.workspace = true
 
-revm-precompile = { version = "6.0.0", features = ["std"], default-features = false }
+revm-precompile = { version = "7.0.0", features = ["std"], default-features = false }
 
 # misc
 tracing.workspace = true
@@ -30,3 +29,7 @@ tracing.workspace = true
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
+alloy-eips.workspace = true
+
+[features]
+optimism = []

@@ -63,11 +63,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
@@ -93,4 +89,5 @@ optimism = [
     "reth-provider/optimism",
     "dep:reth-evm-optimism",
     "reth-evm-optimism/optimism",
+    "reth-evm-ethereum/optimism",
 ]

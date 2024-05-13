@@ -467,7 +467,7 @@ where
             ExecutionResult::Success { .. } => {
                 // transaction succeeded by manually increasing the gas limit to
                 // highest, which means the caller lacks funds to pay for the tx
-                RpcInvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into()
+                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into()
             }
             ExecutionResult::Revert { output, .. } => {
                 // reverted again after bumping the limit
