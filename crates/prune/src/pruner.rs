@@ -1,8 +1,7 @@
 //! Support for pruning.
 
 use crate::{
-    segments::PruneInput, CycleSegments, Metrics, PrunerError, PrunerEvent, Segment, TableRef,
-    TableRing,
+    segments::PruneInput, Metrics, PrunerError, PrunerEvent, Segment, TableRef, TableRing,
 };
 use reth_db::database::Database;
 use reth_primitives::{BlockNumber, FinishedExExHeight, PruneLimiter, PruneProgress, PruneSegment};
@@ -49,8 +48,6 @@ pub struct Pruner<DB> {
     timeout: Option<Duration>,
     /// The finished height of all ExEx's.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
-    /// The next static file table to prune, ensuring fair pruning between static file tables.
-    current_table: TableRef,
     #[doc(hidden)]
     metrics: Metrics,
     listeners: EventListeners<PrunerEvent>,
@@ -67,9 +64,8 @@ impl<DB: Database> Pruner<DB> {
         timeout: Option<Duration>,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
-        let current_table = TableRef::default();
         let segments =
-            TableRing::new(provider_factory.static_file_provider(), current_table, segments);
+            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments);
 
         Self {
             provider_factory,
@@ -80,7 +76,6 @@ impl<DB: Database> Pruner<DB> {
             prune_max_blocks_per_run,
             timeout,
             finished_exex_height,
-            current_table: TableRef::default(),
             metrics: Metrics::default(),
             listeners: Default::default(),
         }
@@ -243,8 +238,6 @@ impl<DB: Database> Pruner<DB> {
                 debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
             }
         }
-
-        self.current_table = self.segments.current_table();
 
         Ok((stats, pruned, progress))
     }
