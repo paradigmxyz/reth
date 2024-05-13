@@ -568,6 +568,12 @@ impl BlockBody {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
     }
 
+    /// Calculate the requests root for the block body, if requests exist. If there are no
+    /// requests, this will return `None`.
+    pub fn calculate_requests_root(&self) -> Option<B256> {
+        self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
+    }
+
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
     #[inline]
     pub fn size(&self) -> usize {
