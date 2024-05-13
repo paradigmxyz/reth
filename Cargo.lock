@@ -7033,7 +7033,9 @@ dependencies = [
 name = "reth-evm-ethereum"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=bd39117)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=bd39117)",
+ "alloy-sol-types",
  "reth-ethereum-consensus",
  "reth-evm",
  "reth-primitives",
@@ -7041,6 +7043,7 @@ dependencies = [
  "reth-testing-utils",
  "revm-primitives",
  "secp256k1 0.28.2",
+ "serde_json",
 ]
 
 [[package]]

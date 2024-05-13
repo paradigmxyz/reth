@@ -75,12 +75,21 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
-    /// EVM error during withdrawal requests contract call
+    /// EVM error during withdrawal requests contract call [EIP-7002]
+    ///
+    /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002
     #[error("failed to apply withdrawal requests contract call: {message}")]
     WithdrawalRequestsContractCall {
         /// The error message.
         message: String,
     },
+    /// Error when decoding deposit requests from receipts [EIP-6110]
+    ///
+    /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
+    // TODO(gakonst): This is an RLP decoding error but we don't import alloy_rlp here,
+    // do we want to?
+    #[error("could not decode deposit request: {0}")]
+    DepositRequestDecode(String),
 }
 
 /// BlockExecutor Errors
