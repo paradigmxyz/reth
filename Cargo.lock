@@ -620,7 +620,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.3.1"
-source = "git+https://github.com/alloy-rs/trie?branch=rkrasiuk/proof-verification#dcff1181e455aedc13c1ca924ff4c790886941c8"
+source = "git+https://github.com/alloy-rs/trie?branch=rkrasiuk/proof-verification#eec05977c39b8502751d03e7619c4b6871713ad7"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",

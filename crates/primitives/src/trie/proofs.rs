@@ -6,9 +6,10 @@ use super::{
 };
 use crate::{keccak256, Account, Address, Bytes, B256, U256};
 use alloy_rlp::{encode_fixed_size, Encodable};
+use alloy_trie::EMPTY_ROOT_HASH;
 
 /// The merkle proof with the relevant account info.
-#[derive(PartialEq, Eq, Default, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -26,7 +27,13 @@ pub struct AccountProof {
 impl AccountProof {
     /// Create new account proof entity.
     pub fn new(address: Address) -> Self {
-        Self { address, ..Default::default() }
+        Self {
+            address,
+            info: None,
+            proof: Vec::new(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: Vec::new(),
+        }
     }
 
     /// Set account info, storage root and requested storage proofs.
@@ -54,9 +61,25 @@ impl AccountProof {
         }
 
         // Verify the account proof.
-        let mut encoded = Vec::new();
-        TrieAccount::from((self.info.unwrap_or_default(), self.storage_root)).encode(&mut encoded);
-        verify_proof(&self.proof, root, keccak256(&self.address), encoded)
+        let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
+            None
+        } else {
+            let mut expected = Vec::new();
+            TrieAccount::from((self.info.unwrap_or_default(), self.storage_root))
+                .encode(&mut expected);
+            Some(expected)
+        };
+        let key = keccak256(&self.address);
+        let value = verify_proof(&self.proof, root, key)?;
+        if value == expected {
+            Ok(())
+        } else {
+            Err(ProofVerificationError::ValueMismatch {
+                path: Nibbles::unpack(&key),
+                got: value.map(Bytes::from),
+                expected: expected.map(Bytes::from),
+            })
+        }
     }
 }
 
@@ -103,11 +126,17 @@ impl StorageProof {
 
     /// Verify the proof against the provided storage root.
     pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
-        verify_proof(
-            &self.proof,
-            root,
-            B256::from_slice(&self.nibbles.pack()),
-            encode_fixed_size(&self.value).to_vec(),
-        )
+        let expected =
+            if self.value.is_zero() { None } else { Some(encode_fixed_size(&self.value).to_vec()) };
+        let value = verify_proof(&self.proof, root, B256::from_slice(&self.nibbles.pack()))?;
+        if expected == value {
+            Ok(())
+        } else {
+            Err(ProofVerificationError::ValueMismatch {
+                path: Nibbles::unpack(self.key),
+                got: value.map(Bytes::from),
+                expected: expected.map(Bytes::from),
+            })
+        }
     }
 }
