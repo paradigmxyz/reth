@@ -38,7 +38,11 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
 
     /// Sends an event to all listeners. Returns the number of subscribers the event was sent to.
     pub fn notify(&self, event: T) -> Result<usize, SendError<T>> {
-        self.sender.send(event)
+        if !self.is_empty() {
+            self.sender.send(event)
+        } else {
+            Ok(0)
+        }
     }
 
     /// Sender cloner.
