@@ -31,6 +31,7 @@ use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventListeners;
 use std::{
+    collections::VecDeque,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -176,6 +177,8 @@ where
     sync_state_updater: Box<dyn NetworkSyncUpdater>,
     /// The Engine API message receiver.
     engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
+    /// Queued engine messages.
+    queued_engine_messages: VecDeque<BeaconEngineMessage<EngineT>>,
     /// A clone of the handle
     handle: BeaconConsensusEngineHandle<EngineT>,
     /// Tracks the received forkchoice state updates received by the CL.
@@ -299,6 +302,7 @@ where
             blockchain,
             sync_state_updater,
             engine_message_stream,
+            queued_engine_messages: Default::default(),
             handle: handle.clone(),
             forkchoice_state_tracker: Default::default(),
             payload_builder,
@@ -1862,12 +1866,11 @@ where
                     continue
                 }
 
-                // Process one incoming message from the CL. We don't drain the messages right away,
-                // because we want to sneak a polling of running hook in between them.
+                // Process one incoming message from the CL.
                 //
                 // These messages can affect the state of the SyncController and they're also time
                 // sensitive, hence they are polled first.
-                if let Poll::Ready(Some(msg)) = this.engine_message_stream.poll_next_unpin(cx) {
+                if let Some(msg) = this.queued_engine_messages.pop_front() {
                     match msg {
                         BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                             this.on_forkchoice_updated(state, payload_attrs, tx);
@@ -1880,6 +1883,12 @@ where
                         }
                         BeaconEngineMessage::EventListener(tx) => this.push_listener(tx),
                     }
+                }
+
+                // We don't drain the messages right away, because we want to sneak a polling of
+                // running hook in between them.
+                if let Poll::Ready(Some(msg)) = this.engine_message_stream.poll_next_unpin(cx) {
+                    this.queued_engine_messages.push_back(msg);
                     continue
                 }
 
@@ -1968,7 +1977,7 @@ mod tests {
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
-    use std::{collections::VecDeque, sync::Arc};
+    use std::sync::Arc;
     use tokio::sync::oneshot::error::TryRecvError;
 
     // Pipeline error is propagated.
