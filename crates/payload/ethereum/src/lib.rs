@@ -396,7 +396,7 @@ where
                 &initialized_block_env,
                 &attributes,
             )?;
-            // TODO: add deposit requests
+            // TODO: add deposit requests (https://github.com/paradigmxyz/reth/pull/8204)
 
             let requests = withdrawal_requests;
             let requests_root = calculate_requests_root(&requests);
