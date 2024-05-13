@@ -30,3 +30,6 @@ tracing.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 alloy-eips.workspace = true
+
+[features]
+optimism = []

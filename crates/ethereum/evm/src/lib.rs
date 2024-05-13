@@ -89,14 +89,12 @@ impl ConfigureEvm for EthEvmConfig {
         EvmBuilder::default()
             .with_db(db)
             .append_handler_register_box(Box::new(move |h| {
-                if let Some(ref mut table) = h.instruction_table {
-                    insert_boxed_instructions(
-                        table,
-                        eip3074::boxed_instructions(instructions_context.clone()),
-                    );
+                insert_boxed_instructions(
+                    &mut h.instruction_table,
+                    eip3074::boxed_instructions(instructions_context.clone()),
+                );
 
-                    instructions_context.clear();
-                }
+                instructions_context.clear();
 
                 let post_execution_context = instructions_context.clone();
                 #[allow(clippy::arc_with_non_send_sync)]

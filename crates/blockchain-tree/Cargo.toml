@@ -40,7 +40,7 @@ linked_hash_set = "0.1.4"
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-primitives = { workspace = true , features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
@@ -50,4 +50,9 @@ assert_matches.workspace = true
 
 [features]
 test-utils = []
-optimism = ["reth-primitives/optimism", "reth-interfaces/optimism", "reth-provider/optimism"]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-interfaces/optimism",
+    "reth-provider/optimism",
+    "reth-evm-ethereum/optimism",
+]
