@@ -1,6 +1,6 @@
 use alloy_consensus::Request;
 use alloy_eips::eip7002::WithdrawalRequest;
-use alloy_rlp::{Buf, MaxEncodedLenAssoc};
+use alloy_rlp::Buf;
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -325,38 +325,16 @@ where
         }
     };
 
+    // cleanup the state
     state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
     state.remove(&evm.block().coinbase);
+    evm.context.evm.db.commit(state);
 
-    let withdrawal_requests = match result {
-        ExecutionResult::Success { output, .. } => {
-            let mut data = output.into_data();
-            let mut requests = Vec::with_capacity(data.len() / (20 + 48 + 8));
+    // re-set the previous env
+    evm.context.evm.env = previous_env;
 
-            // Withdrawals are encoded as a series of withdrawal requests, each with the following
-            // format:
-            //
-            // +------+--------+--------+
-            // | addr | pubkey | amount |
-            // +------+--------+--------+
-            //    20      48        8
-            while data.has_remaining() {
-                let mut source_address = Address::ZERO;
-                data.copy_to_slice(source_address.as_mut_slice());
-
-                let mut validator_public_key = FixedBytes::<48>::ZERO;
-                data.copy_to_slice(validator_public_key.as_mut_slice());
-
-                let amount = data.get_u64();
-
-                requests.push(Request::WithdrawalRequest(WithdrawalRequest {
-                    source_address,
-                    validator_public_key,
-                    amount,
-                }));
-            }
-            Ok(requests)
-        }
+    let mut data = match result {
+        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {
             Err(BlockValidationError::WithdrawalRequestsContractCall {
                 message: format!("execution reverted: {output}"),
@@ -368,10 +346,31 @@ where
             })
         }
     }?;
-    evm.context.evm.db.commit(state);
 
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
+    let mut withdrawal_requests = Vec::with_capacity(data.len() / (20 + 48 + 8));
+
+    // Withdrawals are encoded as a series of withdrawal requests, each with the following
+    // format:
+    //
+    // +------+--------+--------+
+    // | addr | pubkey | amount |
+    // +------+--------+--------+
+    //    20      48        8
+    while data.has_remaining() {
+        let mut source_address = Address::ZERO;
+        data.copy_to_slice(source_address.as_mut_slice());
+
+        let mut validator_public_key = FixedBytes::<48>::ZERO;
+        data.copy_to_slice(validator_public_key.as_mut_slice());
+
+        let amount = data.get_u64();
+
+        withdrawal_requests.push(Request::WithdrawalRequest(WithdrawalRequest {
+            source_address,
+            validator_public_key,
+            amount,
+        }));
+    }
 
     Ok(withdrawal_requests)
 }

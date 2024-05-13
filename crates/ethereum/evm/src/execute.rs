@@ -925,9 +925,15 @@ mod tests {
         let BlockExecutionOutput { receipts, requests, .. } = executor
             .execute(
                 (
-                    &Block { header, body: vec![tx], ommers: vec![], withdrawals: None }
-                        .with_recovered_senders()
-                        .unwrap(),
+                    &Block {
+                        header,
+                        body: vec![tx],
+                        ommers: vec![],
+                        withdrawals: None,
+                        requests: None,
+                    }
+                    .with_recovered_senders()
+                    .unwrap(),
                     U256::ZERO,
                 )
                     .into(),
