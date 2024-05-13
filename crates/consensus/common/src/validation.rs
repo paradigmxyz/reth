@@ -1,7 +1,6 @@
 //! Collection of methods for block validation.
 
 use reth_consensus::ConsensusError;
-use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
@@ -9,7 +8,6 @@ use reth_primitives::{
     },
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
-use reth_provider::{HeaderProvider, WithdrawalsProvider};
 
 /// Validate header standalone
 pub fn validate_header_standalone(
