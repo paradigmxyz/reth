@@ -81,9 +81,9 @@ pub struct BlockExecutionOutput<T> {
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
+    pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
-    pub requests: Vec<Request>,
 }
 
 /// The output of a batch of ethereum blocks.
@@ -97,9 +97,9 @@ pub struct BatchBlockExecutionOutput {
     ///
     /// If receipt is None it means it is pruned.
     pub receipts: Receipts,
+    pub requests: Vec<Vec<Request>>,
     /// First block of bundle state.
     pub first_block: BlockNumber,
-    pub requests: Vec<Vec<Request>>,
 }
 
 impl BatchBlockExecutionOutput {
@@ -107,10 +107,10 @@ impl BatchBlockExecutionOutput {
     pub fn new(
         bundle: BundleState,
         receipts: Receipts,
-        first_block: BlockNumber,
         requests: Vec<Vec<Request>>,
+        first_block: BlockNumber,
     ) -> Self {
-        Self { bundle, receipts, first_block, requests }
+        Self { bundle, receipts, requests, first_block }
     }
 }
 

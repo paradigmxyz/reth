@@ -272,7 +272,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64, Vec<Request>), BlockExecutionError> {
+    ) -> Result<(Vec<Receipt>, Vec<Request>, u64), BlockExecutionError> {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
@@ -301,7 +301,7 @@ where
             };
         }
 
-        Ok((receipts, gas_used, requests))
+        Ok((receipts, requests, gas_used))
     }
 
     /// Apply settings before a new block is executed.
@@ -369,12 +369,12 @@ where
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, gas_used, requests) = self.execute_and_verify(block, total_difficulty)?;
+        let (receipts, requests, gas_used) = self.execute_and_verify(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used, requests })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 }
 
@@ -411,7 +411,7 @@ where
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, _gas_used, requests) =
+        let (receipts, requests, _gas_used) =
             self.executor.execute_and_verify(block, total_difficulty)?;
 
         // prepare the state according to the prune mode
@@ -421,11 +421,12 @@ where
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
 
+        // store requests in the set
+        self.batch_record.save_requests(requests);
+
         if self.batch_record.first_block().is_none() {
             self.batch_record.set_first_block(block.number);
         }
-
-        self.batch_record.save_requests(requests);
 
         Ok(())
     }
@@ -436,8 +437,8 @@ where
         BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
-            self.batch_record.first_block().unwrap_or_default(),
             self.batch_record.take_requests(),
+            self.batch_record.first_block().unwrap_or_default(),
         )
     }
 
