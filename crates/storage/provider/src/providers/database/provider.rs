@@ -2645,6 +2645,13 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
             }
         }
 
+        if let Some(requests) = block.block.requests {
+            if !requests.0.is_empty() {
+                self.tx.put::<tables::BlockRequests>(block_number, requests)?;
+                durations_recorder.record_relative(metrics::Action::InsertBlockRequests);
+            }
+        }
+
         let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
         self.tx.put::<tables::BlockBodyIndices>(block_number, block_indices.clone())?;
         durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
