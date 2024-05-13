@@ -83,6 +83,11 @@ impl BlockBatchRecord {
         std::mem::take(&mut self.receipts)
     }
 
+    /// Returns the recorded requests.
+    pub fn requests(&self) -> &[Requests] {
+        &self.requests
+    }
+
     /// Returns all recorded requests.
     pub fn take_requests(&mut self) -> Vec<Requests> {
         std::mem::take(&mut self.requests)
