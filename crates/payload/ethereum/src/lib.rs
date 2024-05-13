@@ -389,8 +389,7 @@ where
     // calculate the requests and the requests root
     let (requests, requests_root) =
         if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-            let non_empty_receipts = receipts.iter().flatten().cloned().collect::<Vec<_>>();
-            let deposit_requests = post_block_deposit_requests(&non_empty_receipts)?;
+            let deposit_requests = post_block_deposit_requests(receipts.iter().flatten())?;
 
             let withdrawal_requests = post_block_withdrawal_requests_contract_call(
                 &mut db,

@@ -928,9 +928,10 @@ where
 /// Apply the [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) post block processing.
 ///
 /// This uses [parse_deposits_from_receipts] to ultimately calculate the [requests](Request).
-pub fn post_block_deposit_requests(
-    receipts: &[Receipt],
-) -> Result<Vec<Request>, PayloadBuilderError> {
+pub fn post_block_deposit_requests<'a, I>(receipts: I) -> Result<Vec<Request>, PayloadBuilderError>
+where
+    I: IntoIterator<Item = &'a Receipt>,
+{
     parse_deposits_from_receipts(receipts)
         .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))
 }
