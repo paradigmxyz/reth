@@ -389,13 +389,16 @@ where
     // calculate the requests and the requests root
     let (requests, requests_root) =
         if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-            let requests = post_block_withdrawal_requests_contract_call(
+            let withdrawal_requests = post_block_withdrawal_requests_contract_call(
                 &mut db,
                 &chain_spec,
                 &initialized_cfg,
                 &initialized_block_env,
                 &attributes,
             )?;
+            // TODO: add deposit requests
+
+            let requests = withdrawal_requests;
             let requests_root = calculate_requests_root(&requests);
             (Some(requests.into()), Some(requests_root))
         } else {
