@@ -69,13 +69,13 @@ impl AccountProof {
                 .encode(&mut expected);
             Some(expected)
         };
-        let key = keccak256(&self.address);
+        let key = keccak256(self.address);
         let value = verify_proof(&self.proof, root, key)?;
         if value == expected {
             Ok(())
         } else {
             Err(ProofVerificationError::ValueMismatch {
-                path: Nibbles::unpack(&key),
+                path: Nibbles::unpack(key),
                 got: value.map(Bytes::from),
                 expected: expected.map(Bytes::from),
             })
