@@ -8,11 +8,14 @@ use revm_primitives::Log;
 
 /// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa) Deposits from receipts,
 /// and returns them as a `Request`.
-pub fn parse_deposits_from_receipts(
-    receipts: &[Receipt],
-) -> Result<Vec<Request>, BlockValidationError> {
+pub fn parse_deposits_from_receipts<'a, I>(
+    receipts: I,
+) -> Result<Vec<Request>, BlockValidationError>
+where
+    I: IntoIterator<Item = &'a Receipt>,
+{
     let res = receipts
-        .iter()
+        .into_iter()
         .flat_map(|receipt| receipt.logs.iter())
         // No need to filter for topic because there's only one event and that's the Deposit event
         // in the deposit contract.
