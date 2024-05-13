@@ -402,3 +402,9 @@ proptest-derive = "0.4"
 serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm" }
+revm-precompile = { git = "https://github.com/bluealloy/revm" }
+revm-primitives = { git = "https://github.com/bluealloy/revm" }
