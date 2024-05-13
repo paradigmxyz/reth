@@ -1,11 +1,8 @@
-use crate::PrunerEvent;
 use reth_db::DatabaseError;
 use reth_interfaces::RethError;
-use reth_network_api::NetworkError;
 use reth_primitives::PruneSegmentError;
 use reth_provider::ProviderError;
 use thiserror::Error;
-use tokio::sync::broadcast::error::SendError;
 
 #[derive(Error, Debug)]
 pub enum PrunerError {
@@ -35,11 +32,5 @@ impl From<PrunerError> for RethError {
             PrunerError::Database(err) => RethError::Database(err),
             PrunerError::Provider(err) => RethError::Provider(err),
         }
-    }
-}
-
-impl From<SendError<PrunerEvent>> for PrunerError {
-    fn from(_: SendError<PrunerEvent>) -> Self {
-        Self::Interface(RethError::Network(NetworkError::ChannelClosed))
     }
 }

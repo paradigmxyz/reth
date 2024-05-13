@@ -7607,7 +7607,6 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-metrics",
- "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-stages",
