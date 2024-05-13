@@ -107,6 +107,14 @@ where
     }
 }
 
+/// Helper type for the output of executing a block.
+#[derive(Debug, Clone)]
+struct EthExecuteOutput {
+    receipts: Vec<Receipt>,
+    requests: Vec<Request>,
+    gas_used: u64,
+}
+
 /// Helper container type for EVM with chain spec.
 #[derive(Debug, Clone)]
 struct EthEvmExecutor<EvmConfig> {
@@ -120,7 +128,8 @@ impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    /// Executes the transactions in the block and returns the receipts.
+    /// Executes the transactions in the block and returns the receipts of the transactions in the
+    /// block, the total gas used and the list of EIP-7685 [requests](Request).
     ///
     /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
     /// executes the transactions.
@@ -133,7 +142,7 @@ where
         &self,
         block: &BlockWithSenders,
         evm: &mut Evm<'_, Ext, &mut State<DB>>,
-    ) -> Result<(Vec<Receipt>, Vec<Request>, u64), BlockExecutionError>
+    ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database<Error = ProviderError>,
     {
@@ -207,7 +216,7 @@ where
             post_block_withdrawal_requests(&self.chain_spec, block.timestamp, evm)?;
         let requests = withdrawal_requests;
 
-        Ok((receipts, requests, cumulative_gas_used))
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
 }
 
@@ -276,13 +285,13 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, Vec<Request>, u64), BlockExecutionError> {
+    ) -> Result<EthExecuteOutput, BlockExecutionError> {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
-        let (receipts, requests, gas_used) = {
+        let EthExecuteOutput { receipts, requests, gas_used } = {
             let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
             self.executor.execute_state_transitions(block, &mut evm)
         }?;
@@ -305,7 +314,7 @@ where
             };
         }
 
-        Ok((receipts, requests, gas_used))
+        Ok(EthExecuteOutput { receipts, requests, gas_used })
     }
 
     /// Apply settings before a new block is executed.
@@ -373,7 +382,8 @@ where
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, requests, gas_used) = self.execute_and_verify(block, total_difficulty)?;
+        let EthExecuteOutput { receipts, requests, gas_used } =
+            self.execute_and_verify(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
@@ -415,7 +425,7 @@ where
 
     fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, requests, _gas_used) =
+        let EthExecuteOutput { receipts, requests, gas_used: _ } =
             self.executor.execute_and_verify(block, total_difficulty)?;
 
         // prepare the state according to the prune mode

@@ -111,13 +111,13 @@ fn auth_instruction<EXT, DB: Database>(
                 ctx.remove(AUTHORIZED_VAR_NAME);
                 push!(interp, B256::ZERO.into());
                 interp.instruction_result = InstructionResult::Continue;
-                return;
+                return
             }
             acc
         }
         Err(_) => {
             interp.instruction_result = InstructionResult::Revert;
-            return;
+            return
         }
     };
     let nonce = authority_account.0.info.nonce;
@@ -132,7 +132,7 @@ fn auth_instruction<EXT, DB: Database>(
         Ok(signer) => signer,
         Err(_) => {
             interp.instruction_result = InstructionResult::Revert;
-            return;
+            return
         }
     };
 
@@ -164,7 +164,7 @@ fn authcall_instruction<EXT, DB: Database>(
         Some(address) => Address::from_slice(&address),
         None => {
             interp.instruction_result = InstructionResult::Revert;
-            return;
+            return
         }
     };
 
@@ -181,7 +181,7 @@ fn authcall_instruction<EXT, DB: Database>(
     pop!(interp, value);
     if interp.is_static && value != U256::ZERO {
         interp.instruction_result = InstructionResult::CallNotAllowedInsideStatic;
-        return;
+        return
     }
 
     let Some((input, return_memory_offset)) = get_memory_input_and_out_ranges(interp) else {

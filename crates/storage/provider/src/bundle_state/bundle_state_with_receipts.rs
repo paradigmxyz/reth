@@ -9,8 +9,8 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StaticFileSegment,
-    StorageEntry, B256, U256,
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
+    StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
 pub use revm::db::states::OriginalValuesKnown;
@@ -49,7 +49,7 @@ impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
     fn from(value: BundleStateWithReceipts) -> Self {
         let BundleStateWithReceipts { bundle, receipts, first_block } = value;
         // TODO(alexey): add requests
-        Self { bundle, receipts, requests: vec![], first_block }
+        Self { bundle, receipts, requests: Requests::default(), first_block }
     }
 }
 
