@@ -23,7 +23,7 @@ use reth_primitives::{
         EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
-    proofs,
+    proofs::{self, calculate_requests_root},
     revm::env::tx_env_with_recovered,
     Block, Header, IntoRecoveredTransaction, Receipt, Receipts, Requests, EMPTY_OMMER_ROOT_HASH,
     U256,
@@ -396,7 +396,8 @@ where
                 &initialized_block_env,
                 &attributes,
             )?;
-            (Some(requests.into()), Some(EMPTY_ROOT_HASH))
+            let requests_root = calculate_requests_root(&requests);
+            (Some(requests.into()), Some(requests_root))
         } else {
             (None, None)
         };
