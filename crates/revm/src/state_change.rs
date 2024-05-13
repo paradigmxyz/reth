@@ -1,8 +1,8 @@
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    address, revm::env::fill_tx_env_with_beacon_root_contract_call,
-    Address, ChainSpec, Header, Withdrawal, B256, U256,
+    address, revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header,
+    Withdrawal, B256, U256,
 };
 use revm::{
     interpreter::Host,
