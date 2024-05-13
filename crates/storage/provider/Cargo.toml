@@ -22,6 +22,7 @@ reth-codecs.workspace = true
 reth-evm.workspace = true
 
 # ethereum
+alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 revm.workspace = true
 
