@@ -599,6 +599,22 @@ where
         Ok(res?)
     }
 
+    async fn new_payload_v4(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
+        let start = Instant::now();
+        let res =
+            EngineApi::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root)
+                .await;
+        self.inner.metrics.latency.new_payload_v4.record(start.elapsed());
+        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        Ok(res?)
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -709,6 +725,26 @@ where
         let start = Instant::now();
         let res = EngineApi::get_payload_v3(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v3.record(start.elapsed());
+        Ok(res?)
+    }
+
+    /// Handler for `engine_getPayloadV4`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    async fn get_payload_v4(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadV4> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
+        let start = Instant::now();
+        let res = EngineApi::get_payload_v4(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
         Ok(res?)
     }
 
