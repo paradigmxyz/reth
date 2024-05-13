@@ -110,33 +110,6 @@ pub fn validate_block_standalone(
     Ok(())
 }
 
-/// Validate block with regard to chain (parent)
-///
-/// Checks:
-///  If we already know the block.
-///  If parent is known
-///
-/// Returns parent block header
-pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider>(
-    block: &SealedBlock,
-    provider: &PROV,
-) -> RethResult<SealedHeader> {
-    let hash = block.header.hash();
-
-    // Check if block is known.
-    if provider.is_known(&hash)? {
-        return Err(ConsensusError::BlockKnown { hash, number: block.header.number }.into())
-    }
-
-    // Check if parent is known.
-    let parent = provider
-        .header(&block.parent_hash)?
-        .ok_or(ConsensusError::ParentUnknown { hash: block.parent_hash })?;
-
-    // Return parent header.
-    Ok(parent.seal(block.parent_hash))
-}
-
 /// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
 ///
 ///  * `blob_gas_used` exists as a header field
@@ -398,22 +371,14 @@ mod tests {
         assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
         let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
         assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
-
         let (_, parent) = mock_block();
-        let provider = Provider::new(Some(parent.clone()));
-        let block = create_block_with_withdrawals(&[0, 1, 2]);
-        let res = validate_block_regarding_chain(&block, &provider);
-        assert!(res.is_ok());
 
         // Withdrawal index should be the last withdrawal index + 1
         let mut provider = Provider::new(Some(parent));
-        let block = create_block_with_withdrawals(&[3, 4, 5]);
         provider
             .withdrawals_provider
             .expect_latest_withdrawal()
             .return_const(Ok(Some(Withdrawal { index: 2, ..Default::default() })));
-        let res = validate_block_regarding_chain(&block, &provider);
-        assert!(res.is_ok());
     }
 
     #[test]
