@@ -1,7 +1,8 @@
 //! Support for pruning.
 
 use crate::{
-    segments::PruneInput, Metrics, PrunerError, PrunerEvent, Segment, TableRef, TableRing,
+    segments::PruneInput, CycleSegments, Metrics, PrunerError, PrunerEvent, Segment, TableRef,
+    TableRing,
 };
 use reth_db::database::Database;
 use reth_primitives::{BlockNumber, FinishedExExHeight, PruneLimiter, PruneProgress, PruneSegment};
@@ -174,7 +175,7 @@ impl<DB: Database> Pruner<DB> {
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in &mut self.segments {
+        for (segment, purpose) in self.segments.iter_mut() {
             if limiter.is_limit_reached() {
                 break
             }

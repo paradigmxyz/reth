@@ -6,6 +6,12 @@ use reth_provider::providers::StaticFileProvider;
 
 use crate::{segments, Segment};
 
+/// A mutable iterator over a ring of tables. Returns `None` after the first cycle.
+#[derive(Debug)]
+pub struct SegmentIterMut<'a, T> {
+    ring: &'a mut T,
+}
+
 /// Cycles prunable segments.
 pub trait CycleSegments {
     type Db: Database;
@@ -24,33 +30,37 @@ pub trait CycleSegments {
     /// Returns the next [`Segment`] to prune, if any entries to prune for the current table.
     #[allow(clippy::type_complexity)]
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>;
+    /// Returns a mutable iterator cycling once over the ring of tables, generating the next
+    /// segments to prune.
+    fn iter_mut(&mut self) -> SegmentIterMut<'_, Self>
+    where
+        Self: Sized,
+    {
+        SegmentIterMut { ring: self }
+    }
 }
 
-macro_rules! cycle_iterator_impl {
-    ($ty:ty) => {
-        impl<DB> Iterator for &mut $ty
-        where
-            DB: Database,
-        {
-            type Item = (Arc<dyn Segment<DB>>, PrunePurpose);
+impl<'a, T> Iterator for SegmentIterMut<'a, T>
+where
+    T: CycleSegments,
+{
+    type Item = (Arc<dyn Segment<<T as CycleSegments>::Db>>, PrunePurpose);
 
-            /// Returns next prunable segment in ring, or `None` if iterator has walked one cycle.
-            fn next(&mut self) -> Option<Self::Item> {
-                loop {
-                    if self.prev_table() == self.start_table() {
-                        return None
-                    }
+    /// Returns next prunable segment in ring, or `None` if iterator has walked one cycle.
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.ring.prev_table() == self.ring.start_table() {
+                return None
+            }
 
-                    let segment = self.next_segment();
+            let segment = self.ring.next_segment();
 
-                    // table is not completely pruned.
-                    if segment.is_some() {
-                        return segment
-                    }
-                }
+            // table is not completely pruned.
+            if segment.is_some() {
+                return segment
             }
         }
-    };
+    }
 }
 
 /// Opaque reference to a table.
@@ -76,8 +86,6 @@ pub struct TableRing<DB> {
     static_file_start: StaticFileTableRef,
     static_file_ring: StaticFileTableRing<DB>,
 }
-
-cycle_iterator_impl!(TableRing<DB>);
 
 impl<DB> TableRing<DB> {
     pub fn new(
@@ -147,7 +155,7 @@ where
         let Self { current, segments, .. } = self;
 
         let segment = match current {
-            TableRef::StaticFiles(_) => (&mut self.static_file_ring).next(),
+            TableRef::StaticFiles(_) => self.static_file_ring.iter_mut().next(),
             TableRef::Garbage(index) => Some((segments[*index].clone(), PrunePurpose::User)),
         };
 
@@ -181,8 +189,6 @@ pub struct StaticFileTableRing<DB> {
     prev: StaticFileTableRef,
     _phantom: PhantomData<DB>,
 }
-
-cycle_iterator_impl!(StaticFileTableRing<DB>);
 
 impl<DB> StaticFileTableRing<DB> {
     pub fn new(provider: StaticFileProvider, start: StaticFileTableRef) -> Self {
