@@ -25,8 +25,8 @@ use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     state_change::{
-        apply_beacon_root_contract_call, apply_blockhashes_update, post_block_balance_increments,
-        post_block_withdrawal_requests,
+        apply_beacon_root_contract_call, apply_blockhashes_update,
+        apply_withdrawal_requests_contract_call, post_block_balance_increments,
     },
     Evm, State,
 };
@@ -214,7 +214,7 @@ where
 
         // Collect all EIP-7685 requests
         let withdrawal_requests =
-            post_block_withdrawal_requests(&self.chain_spec, block.timestamp, &mut evm)?;
+            apply_withdrawal_requests_contract_call(&self.chain_spec, block.timestamp, &mut evm)?;
         let requests = withdrawal_requests;
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
