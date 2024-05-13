@@ -6993,11 +6993,15 @@ version = "0.2.0-beta.7"
 dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=56a0668)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=56a0668)",
+ "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=56a0668)",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
  "reth-revm",
+ "revm-interpreter",
+ "revm-precompile",
  "revm-primitives",
+ "secp256k1 0.28.2",
  "tracing",
 ]
 
@@ -7649,6 +7653,7 @@ dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=56a0668)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=56a0668)",
  "alloy-rlp",
+ "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=56a0668)",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
