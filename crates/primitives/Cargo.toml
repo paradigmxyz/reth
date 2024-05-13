@@ -21,7 +21,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
 alloy-chains = { workspace = true, features = ["serde", "rlp"] }
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
@@ -31,7 +31,11 @@ alloy-eips = { workspace = true, features = ["serde"] }
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "recovery", "rand"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "recovery",
+    "rand",
+] }
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
@@ -84,7 +88,12 @@ plain_hasher = "0.2"
 sucds = "0.8.1"
 
 criterion.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
+secp256k1.workspace = true
 
 [features]
 default = ["c-kzg", "zstd-codec"]
@@ -101,7 +110,13 @@ arbitrary = [
     "dep:proptest-derive",
     "zstd-codec",
 ]
-c-kzg = ["dep:c-kzg", "revm/c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
+c-kzg = [
+    "dep:c-kzg",
+    "revm/c-kzg",
+    "revm-primitives/c-kzg",
+    "dep:tempfile",
+    "alloy-eips/kzg",
+]
 zstd-codec = ["dep:zstd"]
 clap = ["dep:clap"]
 optimism = [

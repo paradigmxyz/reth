@@ -1577,6 +1577,7 @@ mod tests {
                     body: body.clone().into_iter().map(|tx| tx.into_signed()).collect(),
                     ommers: Vec::new(),
                     withdrawals: Some(Withdrawals::default()),
+                    requests: None,
                 },
                 body.iter().map(|tx| tx.signer()).collect(),
             )

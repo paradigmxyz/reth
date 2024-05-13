@@ -1,66 +1,25 @@
-use std::ops::{Deref, DerefMut};
+//! EIP-7685 requests.
 
 use alloy_consensus::Request;
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use reth_codecs::{main_codec, Compact};
 
-/// A collection of requests organized as a two-dimensional vector.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct Requests {
-    /// A two-dimensional vector of [Request] instances.
-    pub request_vec: Vec<Vec<Request>>,
-}
+/// A list of EIP-7685 requests.
+#[main_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]
+pub struct Requests(pub Vec<Request>);
 
-impl Requests {
-    /// Create a new [Requests] instance with an empty vector.
-    pub fn new() -> Self {
-        Self { request_vec: vec![] }
-    }
-
-    /// Create a new [Requests] instance from an existing vector.
-    pub fn from_vec(vec: Vec<Vec<Request>>) -> Self {
-        Self { request_vec: vec }
-    }
-
-    /// Returns the length of the [Requests] vector.
-    pub fn len(&self) -> usize {
-        self.request_vec.len()
-    }
-
-    /// Returns `true` if the [Requests] vector is empty.
-    pub fn is_empty(&self) -> bool {
-        self.request_vec.is_empty()
-    }
-
-    /// Push a new vector of [requests](Request) into the [Requests] collection.
-    pub fn push(&mut self, requests: Vec<Request>) {
-        self.request_vec.push(requests);
-    }
-}
-
-impl Deref for Requests {
-    type Target = Vec<Vec<Request>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.request_vec
-    }
-}
-
-impl DerefMut for Requests {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.request_vec
+impl From<Vec<Request>> for Requests {
+    fn from(requests: Vec<Request>) -> Self {
+        Self(requests)
     }
 }
 
 impl IntoIterator for Requests {
-    type Item = Vec<Request>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type Item = Request;
+    type IntoIter = std::vec::IntoIter<Request>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.request_vec.into_iter()
-    }
-}
-
-impl FromIterator<Vec<Request>> for Requests {
-    fn from_iter<I: IntoIterator<Item = Vec<Request>>>(iter: I) -> Self {
-        Self::from_vec(iter.into_iter().collect())
+        self.0.into_iter()
     }
 }

@@ -49,7 +49,7 @@ impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
     fn from(value: BundleStateWithReceipts) -> Self {
         let BundleStateWithReceipts { bundle, receipts, first_block } = value;
         // TODO(alexey): add requests
-        Self { bundle, receipts, requests: reth_primitives::Requests::default(), first_block }
+        Self { bundle, receipts, requests: Vec::default(), first_block }
     }
 }
 

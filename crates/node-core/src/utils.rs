@@ -120,6 +120,7 @@ where
         body: block.transactions,
         ommers: block.ommers,
         withdrawals: block.withdrawals,
+        requests: block.requests,
     };
 
     validate_block_standalone(&block, &chain_spec)?;
