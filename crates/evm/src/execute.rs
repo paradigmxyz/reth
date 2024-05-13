@@ -2,7 +2,9 @@
 
 use alloy_consensus::Request;
 use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, U256};
+use reth_primitives::{
+    BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, Requests, U256,
+};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
@@ -104,7 +106,7 @@ pub struct BatchBlockExecutionOutput {
     ///
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
-    pub requests: Vec<Vec<Request>>,
+    pub requests: Requests,
     /// First block of bundle state.
     pub first_block: BlockNumber,
 }
@@ -114,7 +116,7 @@ impl BatchBlockExecutionOutput {
     pub fn new(
         bundle: BundleState,
         receipts: Receipts,
-        requests: Vec<Vec<Request>>,
+        requests: Requests,
         first_block: BlockNumber,
     ) -> Self {
         Self { bundle, receipts, requests, first_block }

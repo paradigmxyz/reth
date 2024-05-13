@@ -4,7 +4,7 @@ use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
 use alloy_consensus::Request;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
-    PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, MINIMUM_PRUNING_DISTANCE,
+    PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, Requests, MINIMUM_PRUNING_DISTANCE,
 };
 use revm::db::states::bundle_state::BundleRetention;
 use std::time::Duration;
@@ -30,7 +30,7 @@ pub struct BlockBatchRecord {
     ///
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
-    requests: Vec<Vec<Request>>,
+    requests: Requests,
     /// Memoized address pruning filter.
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
@@ -84,7 +84,7 @@ impl BlockBatchRecord {
     }
 
     /// Returns all recorded requests.
-    pub fn take_requests(&mut self) -> Vec<Vec<Request>> {
+    pub fn take_requests(&mut self) -> Requests {
         std::mem::take(&mut self.requests)
     }
 

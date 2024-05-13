@@ -39,6 +39,7 @@ mod net;
 pub mod proofs;
 mod prune;
 mod receipt;
+mod request;
 /// Helpers for working with revm
 pub mod revm;
 pub mod stage;
@@ -83,6 +84,7 @@ pub use prune::{
     MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
+pub use request::Requests;
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
