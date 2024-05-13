@@ -116,20 +116,20 @@ impl HttpJsonRpcSync {
     pub fn query_validators(&self, contract_address: String) -> Result<Vec<Vec<u8>>, ClRpcError> {
         use ethers_contract::BaseContract;
         let abi = match ethers_core::abi::parse_abi(&[
-            "function getValidators() public view returns (bytes32[] memory)",
+            "function allValidators() public view returns (bytes32[] memory)",
         ]) {
             Ok(c) => c,
             Err(e) => {
-                return Err(ClRpcError::RequestFailed(format!("getValidators::parse_abi: {:?}", e)))
+                return Err(ClRpcError::RequestFailed(format!("allValidators::parse_abi: {:?}", e)))
             }
         };
 
         let abi = BaseContract::from(abi);
-        let method_bytes = match abi.encode("getValidators", ()) {
+        let method_bytes = match abi.encode("allValidators", ()) {
             Ok(v) => v,
             Err(e) => {
                 return Err(ClRpcError::RequestFailed(format!(
-                    "getValidators::abi.encode: {:?}",
+                    "allValidators::abi.encode: {:?}",
                     e
                 )))
             }
@@ -141,7 +141,7 @@ impl HttpJsonRpcSync {
                     Ok(bytes) => bytes,
                     Err(e) => {
                         return Err(ClRpcError::RequestFailed(format!(
-                            "getValidators::data.decode: {:?}",
+                            "allValidators::data.decode: {:?}",
                             e
                         )))
                     }
@@ -149,17 +149,17 @@ impl HttpJsonRpcSync {
                 data_bytes
             }
             Err(e) => {
-                tracing::error!(target:"consensus::cl","getValidators::rpc_request {:?}",e);
+                tracing::error!(target:"consensus::cl","allValidators::rpc_request {:?}",e);
                 return Err(ClRpcError::RequestFailed(format!(
                     "query_validator::rpc_request {:?}",
                     e
                 )));
             }
         };
-        let return_data: Vec<Vec<u8>> = match abi.decode_output("getValidators", data_bytes) {
+        let return_data: Vec<Vec<u8>> = match abi.decode_output("allValidators", data_bytes) {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!(target:"consensus::cl","getValidators::decode_output: {:?}",e);
+                tracing::error!(target:"consensus::cl","allValidators::decode_output: {:?}",e);
                 return Err(ClRpcError::RequestFailed(format!(
                     "query_validators::decode_output: {:?}",
                     e
