@@ -141,7 +141,7 @@ where
     fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
-        evm: &mut Evm<'_, Ext, &mut State<DB>>,
+        mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database<Error = ProviderError>,
@@ -152,7 +152,7 @@ where
             block.timestamp,
             block.number,
             block.parent_beacon_block_root,
-            evm,
+            &mut evm,
         )?;
         apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, evm.db_mut())?;
 
@@ -214,7 +214,7 @@ where
 
         // Collect all EIP-7685 requests
         let withdrawal_requests =
-            post_block_withdrawal_requests(&self.chain_spec, block.timestamp, evm)?;
+            post_block_withdrawal_requests(&self.chain_spec, block.timestamp, &mut evm)?;
         let requests = withdrawal_requests;
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
@@ -293,8 +293,8 @@ where
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let EthExecuteOutput { receipts, requests, gas_used } = {
-            let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(block, &mut evm)
+            let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+            self.executor.execute_state_transitions(block, evm)
         }?;
 
         // 3. apply post execution changes
