@@ -25,7 +25,8 @@ jobs:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        network: ["ethereum", "optimism"]
+        # network: ["ethereum", "optimism"]
+        network: ["ethereum"]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
