@@ -32,6 +32,11 @@ impl StateProviderTest {
         }
         self.accounts.insert(address, (storage, account));
     }
+
+    /// Insert a block hash.
+    pub fn insert_block_hash(&mut self, block_number: u64, block_hash: B256) {
+        self.block_hash.insert(block_number, block_hash);
+    }
 }
 
 impl AccountReader for StateProviderTest {

@@ -19,7 +19,9 @@ use reth_primitives::{
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update, post_block_balance_increments,
+    },
     Evm, State,
 };
 use revm_primitives::{
@@ -134,6 +136,7 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, evm.db_mut())?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;
@@ -181,6 +184,16 @@ where
             );
         }
         drop(evm);
+
+        // Check if gas used matches the value set in header.
+        if block.gas_used != cumulative_gas_used {
+            let receipts = Receipts::from_block_receipt(receipts);
+            return Err(BlockValidationError::BlockGasUsed {
+                gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
+            }
+            .into())
+        }
 
         Ok((receipts, cumulative_gas_used))
     }
@@ -264,6 +277,21 @@ where
 
         // 3. apply post execution changes
         self.post_execution(block, total_difficulty)?;
+
+        // Before Byzantium, receipts contained state root that would mean that expensive
+        // operation as hashing that is required for state root got calculated in every
+        // transaction This was replaced with is_success flag.
+        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
+        if self.chain_spec().is_byzantium_active_at_block(block.header.number) {
+            if let Err(error) = verify_receipts(
+                block.header.receipts_root,
+                block.header.logs_bloom,
+                receipts.iter(),
+            ) {
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
+                return Err(error)
+            };
+        }
 
         Ok((receipts, gas_used))
     }

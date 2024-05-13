@@ -66,11 +66,22 @@ pub enum BlockValidationError {
         /// The beacon block root
         parent_beacon_block_root: B256,
     },
-    /// EVM error during beacon root contract call
+    /// EVM error during [EIP-4788] beacon root contract call.
+    ///
+    /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
     #[error("failed to apply beacon root contract call at {parent_beacon_block_root}: {message}")]
     BeaconRootContractCall {
         /// The beacon block root
         parent_beacon_block_root: Box<B256>,
+        /// The error message.
+        message: String,
+    },
+    /// EVM error during [EIP-2935] pre-block state transition.
+    ///
+    /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
+    #[error("failed to apply EIP-2935 pre-block state transition: {message}")]
+    // todo: better variant name
+    Eip2935StateTransition {
         /// The error message.
         message: String,
     },
