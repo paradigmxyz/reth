@@ -25,7 +25,7 @@ use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     state_change::{
-        apply_beacon_root_contract_call, post_block_balance_increments,
+        apply_beacon_root_contract_call, apply_blockhashes_update, post_block_balance_increments,
         post_block_withdrawal_requests,
     },
     Evm, State,
@@ -154,6 +154,7 @@ where
             block.parent_beacon_block_root,
             evm,
         )?;
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, evm.db_mut())?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;
