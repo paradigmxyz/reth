@@ -14,7 +14,8 @@ use reth_basic_payload_builder::{
     pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
 };
-use reth_evm_ethereum::eip6110::parse_deposits_from_receipts;
+use reth_evm::ConfigureEvm;
+use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_interfaces::RethError;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
@@ -41,13 +42,29 @@ use revm::{
 use tracing::{debug, trace, warn};
 
 /// Ethereum payload builder
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct EthereumPayloadBuilder;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
+    /// The type responsible for creating the evm.
+    evm_config: EvmConfig,
+}
+
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
+    /// EthereumPayloadBuilder constructor.
+    pub const fn new(evm_config: EvmConfig) -> Self {
+        Self { evm_config }
+    }
+}
+
+impl Default for EthereumPayloadBuilder {
+    fn default() -> Self {
+        Self::new(EthEvmConfig::default())
+    }
+}
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder
+impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
+    EvmConfig: ConfigureEvm,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -58,7 +75,7 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        default_ethereum_payload_builder(args)
+        default_ethereum_payload_builder(self.evm_config.clone(), args)
     }
 
     fn build_empty_payload(
@@ -214,10 +231,12 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload_builder<Pool, Client>(
+pub fn default_ethereum_payload_builder<EvmConfig, Pool, Client>(
+    evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
+    EvmConfig: ConfigureEvm,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -307,15 +326,14 @@ where
             }
         }
 
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            tx_env_with_recovered(&tx),
+        );
+
         // Configure the environment for the block.
-        let mut evm = revm::Evm::builder()
-            .with_db(&mut db)
-            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                initialized_cfg.clone(),
-                initialized_block_env.clone(),
-                tx_env_with_recovered(&tx),
-            ))
-            .build();
+        let mut evm = evm_config.evm_with_env(&mut db, env);
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,

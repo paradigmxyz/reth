@@ -9,6 +9,7 @@
 #![allow(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use instructions::{context::InstructionsContext, eip3074, BoxedInstructionWithOpCode};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
@@ -16,6 +17,9 @@ use reth_primitives::{
     Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{Database, EvmBuilder};
+use revm_interpreter::{opcode::InstructionTables, Host};
+use std::sync::Arc;
+
 pub mod execute;
 pub mod verify;
 
@@ -60,10 +64,6 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.handler_cfg.spec_id = spec_id;
     }
 }
-
-use instructions::{context::InstructionsContext, eip3074, BoxedInstructionWithOpCode};
-use revm_interpreter::{opcode::InstructionTables, Host};
-use std::sync::Arc;
 
 /// Inserts the given boxed instructions with opcodes in the instructions table.
 fn insert_boxed_instructions<'a, I, H>(
