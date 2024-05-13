@@ -28,12 +28,21 @@
 #             cmd.env(format!("CC_{}", self.target), c_flags.join(" "));
 #         }
 
-export PATH="$HOME/riscv/bin:$PATH"
+export PATH="/opt/riscv/bin:$PATH"
 export RUSTUP_TOOLCHAIN="succinct"
 export RUSTFLAGS="-C passes=loweratomic -C link-arg=-Ttext=0x00200800 -C panic=abort" 
 export CARGO_BUILD_TARGET="riscv32im-succinct-zkvm-elf"
 export CC="gcc"
-export CC_riscv32im_succinct_zkvm_elf="$HOME/riscv/bin/riscv32-unknown-elf-gcc -mstrict-align" 
+export CC_riscv32im_succinct_zkvm_elf="/opt/riscv/bin/riscv32-unknown-elf-gcc -mstrict-align" 
 cargo build --release --ignore-rust-version
+
+
+# export PATH="$HOME/riscv/bin:$PATH"
+# export RUSTUP_TOOLCHAIN="succinct"
+# export RUSTFLAGS="-C passes=loweratomic -C link-arg=-Ttext=0x00200800 -C panic=abort" 
+# export CARGO_BUILD_TARGET="riscv32im-succinct-zkvm-elf"
+# export CC="gcc"
+# export CC_riscv32im_succinct_zkvm_elf="$HOME/riscv/bin/riscv32-unknown-elf-gcc -mstrict-align" 
+# cargo build --release --ignore-rust-version
 
 # https://github.com/taikoxyz/raiko/blob/6a8421d5c17a7d8846c22f8f986d9584a6885bf1/script/install.sh#L4

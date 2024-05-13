@@ -13,4 +13,4 @@ workspace = true
 
 [dependencies]
 sp1-zkvm = { git = "https://github.com/succinctlabs/sp1.git" }
-reth-primitives.workspace = true
+reth-primitives = { path = "../../crates/primitives", default_features = false}
