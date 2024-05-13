@@ -24,6 +24,12 @@ pub struct BlockBatchRecord {
     ///
     /// If receipt is None it means it is pruned.
     receipts: Receipts,
+    /// The collection of EIP-7685 requests.
+    /// Outer vector stores requests for each block sequentially.
+    /// The inner vector stores requests ordered by transaction number.
+    ///
+    /// A transaction may have zero or more requests, so the length of the inner vector is not
+    /// guaranteed to be the same as the number of transactions.
     requests: Vec<Vec<Request>>,
     /// Memoized address pruning filter.
     /// Empty implies that there is going to be addresses to include in the filter in a future
@@ -163,6 +169,7 @@ impl BlockBatchRecord {
         Ok(())
     }
 
+    /// Save EIP-7685 requests to the executor.
     pub fn save_requests(&mut self, requests: Vec<Request>) {
         self.requests.push(requests);
     }

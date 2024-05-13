@@ -155,7 +155,7 @@ impl ExecutionPayloadValidator {
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
         if !shanghai_active && sealed_block.withdrawals.is_some() {
             // shanghai not active but withdrawals present
-            return Err(PayloadError::PreShanghaiBlockWithWitdrawals);
+            return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
         }
 
         // EIP-4844 checks

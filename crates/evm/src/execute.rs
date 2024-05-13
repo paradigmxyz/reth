@@ -81,6 +81,7 @@ pub struct BlockExecutionOutput<T> {
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
+    /// All the EIP-7685 requests of the transactions in the block.
     pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
@@ -97,6 +98,12 @@ pub struct BatchBlockExecutionOutput {
     ///
     /// If receipt is None it means it is pruned.
     pub receipts: Receipts,
+    /// The collection of EIP-7685 requests.
+    /// Outer vector stores requests for each block sequentially.
+    /// The inner vector stores requests ordered by transaction number.
+    ///
+    /// A transaction may have zero or more requests, so the length of the inner vector is not
+    /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Vec<Request>>,
     /// First block of bundle state.
     pub first_block: BlockNumber,

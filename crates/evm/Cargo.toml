@@ -19,7 +19,6 @@ reth-interfaces.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
-alloy-eips.workspace = true
 
 futures-util.workspace = true
 parking_lot = { workspace = true, optional = true }

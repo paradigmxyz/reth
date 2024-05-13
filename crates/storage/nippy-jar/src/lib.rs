@@ -530,7 +530,7 @@ impl DataReader {
 
         let offset_end = index + self.offset_size as usize;
         if offset_end > self.offset_mmap.len() {
-            return Err(NippyJarError::OffsetOutOfBounds { index });
+            return Err(NippyJarError::OffsetOutOfBounds { index })
         }
 
         buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
