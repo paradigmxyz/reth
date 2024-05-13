@@ -213,13 +213,13 @@ where
         }
 
         // Collect all EIP-6110 deposits
-        let deposits = crate::eip6110::parse_deposits_from_receipts(&receipts)?;
+        let deposit_requests = crate::eip6110::parse_deposits_from_receipts(&receipts)?;
 
         // Collect all EIP-7685 requests
         let withdrawal_requests =
             post_block_withdrawal_requests(&self.chain_spec, block.timestamp, &mut evm)?;
-        // Requests are ordered by Request ID.
-        let requests = [deposits, withdrawal_requests].concat();
+        // Requests are ordered by Request Type ID.
+        let requests = [deposit_requests, withdrawal_requests].concat();
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
