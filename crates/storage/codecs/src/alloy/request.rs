@@ -3,6 +3,7 @@
 use crate::Compact;
 use alloy_consensus::Request;
 use alloy_eips::eip7685::{Decodable7685, Encodable7685};
+use alloy_primitives::Bytes;
 use bytes::BufMut;
 
 impl Compact for Request {
@@ -10,14 +11,14 @@ impl Compact for Request {
     where
         B: BufMut + AsMut<[u8]>,
     {
-        let encoded = self.encoded_7685();
+        let encoded: Bytes = self.encoded_7685().into();
         encoded.to_compact(buf)
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (raw, buf) = <Vec<u8> as Compact>::from_compact(buf, len);
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        let (raw, buf) = Bytes::from_compact(buf, buf.len());
 
-        (Request::decode_7685(&mut raw.as_slice()).expect("invalid eip-7685 request in db"), buf)
+        (Request::decode_7685(&mut raw.as_ref()).expect("invalid eip-7685 request in db"), buf)
     }
 }
 
@@ -30,8 +31,8 @@ mod tests {
         #[test]
         fn roundtrip(request: Request) {
             let mut buf = Vec::<u8>::new();
-            let len = request.to_compact(&mut buf);
-            let (decoded, _) = Request::from_compact(&buf, len);
+            request.to_compact(&mut buf);
+            let (decoded, _) = Request::from_compact(&buf, buf.len());
             assert_eq!(request, decoded);
         }
     }
