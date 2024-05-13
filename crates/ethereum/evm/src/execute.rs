@@ -159,7 +159,7 @@ where
         // execute transactions
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
-        for (sender, transaction) in block.transactions_with_sender() {
+        for (i, (sender, transaction)) in block.transactions_with_sender().enumerate() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
@@ -168,7 +168,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
@@ -185,6 +185,8 @@ where
 
             // append gas used
             cumulative_gas_used += result.gas_used();
+
+            tracing::info!(target: "evm", ?transaction, ?result, gas_used = %result.gas_used(), tx_num = %i, "Executed transaction");
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(
@@ -209,7 +211,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into());
+            .into())
         }
 
         // Collect all EIP-6110 deposits
@@ -314,8 +316,7 @@ where
                 block.header.logs_bloom,
                 receipts.iter(),
             ) {
-                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error);
+                return Err(error)
             };
         }
 
