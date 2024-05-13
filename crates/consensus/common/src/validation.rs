@@ -117,7 +117,7 @@ pub fn validate_block_standalone(
     // EIP-7685: General purpose execution layer requests
     if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
         let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
-        let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
+        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
         let header_requests_root =
             block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
         if requests_root != *header_requests_root {
