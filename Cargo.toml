@@ -92,6 +92,7 @@ members = [
     "examples/db-access",
     "testing/ef-tests/",
     "testing/testing-utils",
+    "testing/zkvm",
 ]
 default-members = ["bin/reth"]
 

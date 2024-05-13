@@ -1,0 +1,16 @@
+[package]
+name = "zkvm-test"
+description = "Test zkvm imports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sp1-zkvm = { git = "https://github.com/succinctlabs/sp1.git" }
+reth-primitives.workspace = true

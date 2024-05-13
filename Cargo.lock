@@ -2719,6 +2719,7 @@ dependencies = [
  "rand_core 0.6.4",
  "sec1",
  "subtle",
+ "tap",
  "zeroize",
 ]
 
@@ -3072,6 +3073,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ded41244b729663b1e574f1b4fb731469f69f79c17667b5d776b16cda0479449"
 dependencies = [
+ "bitvec",
  "rand_core 0.6.4",
  "subtle",
 ]
@@ -8516,6 +8518,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "scale-info"
+version = "2.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eca070c12893629e2cc820a9761bedf6ce1dcddc9852984d1dc734b8bd9bd024"
+dependencies = [
+ "cfg-if",
+ "derive_more",
+ "parity-scale-codec",
+ "scale-info-derive",
+]
+
+[[package]]
+name = "scale-info-derive"
+version = "2.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d35494501194174bda522a32605929eefc9ecf7e0a326c26db1fdd85881eb62"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "scc"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9005,6 +9031,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b6b67fb9a61334225b5b790716f609cd58395f895b3fe8b328786812a40bc3b"
 
 [[package]]
+name = "snowbridge-amcl"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "460a9ed63cdf03c1b9847e8a12a5f5ba19c4efd5869e4a737e05be25d7c427e5"
+dependencies = [
+ "parity-scale-codec",
+ "scale-info",
+]
+
+[[package]]
 name = "socket2"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9038,6 +9074,40 @@ dependencies = [
  "log",
  "rand 0.8.5",
  "sha-1",
+]
+
+[[package]]
+name = "sp1-precompiles"
+version = "0.1.0"
+source = "git+https://github.com/succinctlabs/sp1.git#2f57e1e77f7c88396b571bd961d3cbe4b1291c7a"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "cfg-if",
+ "getrandom 0.2.15",
+ "hex",
+ "k256",
+ "num",
+ "rand 0.8.5",
+ "serde",
+ "snowbridge-amcl",
+]
+
+[[package]]
+name = "sp1-zkvm"
+version = "0.1.0"
+source = "git+https://github.com/succinctlabs/sp1.git#2f57e1e77f7c88396b571bd961d3cbe4b1291c7a"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "getrandom 0.2.15",
+ "k256",
+ "libm",
+ "once_cell",
+ "rand 0.8.5",
+ "serde",
+ "sha2 0.10.8",
+ "sp1-precompiles",
 ]
 
 [[package]]
@@ -10675,6 +10745,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.63",
+]
+
+[[package]]
+name = "zkvm-test"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-primitives",
+ "sp1-zkvm",
 ]
 
 [[package]]
