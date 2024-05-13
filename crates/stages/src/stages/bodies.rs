@@ -127,6 +127,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
+        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
@@ -238,6 +239,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
                         }
                     }
+
+                    // Write requests if any
+                    if let Some(requests) = block.requests {
+                        if !requests.0.is_empty() {
+                            requests_cursor.append(block_number, requests)?;
+                        }
+                    }
                 }
                 BlockResponse::Empty(_) => {}
             };
@@ -273,6 +281,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
+        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
         // Cursors to unwind transitions
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
@@ -290,6 +299,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Delete the withdrawals entry if any
             if withdrawals_cursor.seek_exact(number)?.is_some() {
                 withdrawals_cursor.delete_current()?;
+            }
+
+            // Delete the requests entry if any
+            if requests_cursor.seek_exact(number)?.is_some() {
+                requests_cursor.delete_current()?;
             }
 
             // Delete all transaction to block values.
