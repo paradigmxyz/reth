@@ -9,8 +9,8 @@ use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StaticFileSegment,
-    StorageEntry, B256, U256,
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
+    StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
 pub use revm::db::states::OriginalValuesKnown;
@@ -38,16 +38,18 @@ pub struct BundleStateWithReceipts {
 // TODO(mattsse): unify the types, currently there's a cyclic dependency between
 impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
     fn from(value: BatchBlockExecutionOutput) -> Self {
-        let BatchBlockExecutionOutput { bundle, receipts, first_block } = value;
+        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } = value;
         Self { bundle, receipts, first_block }
     }
 }
 
 // TODO(mattsse): unify the types, currently there's a cyclic dependency between
+#[cfg(any(test, feature = "test-utils"))]
 impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
     fn from(value: BundleStateWithReceipts) -> Self {
         let BundleStateWithReceipts { bundle, receipts, first_block } = value;
-        Self { bundle, receipts, first_block }
+        // TODO(alexey): add requests
+        Self { bundle, receipts, requests: Requests::default(), first_block }
     }
 }
 

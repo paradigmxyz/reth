@@ -83,8 +83,14 @@ pub enum BlockValidationError {
     ///
     /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
     #[error("failed to apply EIP-2935 pre-block state transition: {message}")]
-    // todo: better variant name
+    // TODO: better variant name
     Eip2935StateTransition {
+        /// The error message.
+        message: String,
+    },
+    /// EVM error during withdrawal requests contract call
+    #[error("failed to apply withdrawal requests contract call: {message}")]
+    WithdrawalRequestsContractCall {
         /// The error message.
         message: String,
     },

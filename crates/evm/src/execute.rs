@@ -1,7 +1,10 @@
 //! Traits for execution.
 
+use alloy_consensus::Request;
 use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, U256};
+use reth_primitives::{
+    BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, Requests, U256,
+};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
@@ -80,6 +83,8 @@ pub struct BlockExecutionOutput<T> {
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
+    /// All the EIP-7685 requests of the transactions in the block.
+    pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
 }
@@ -95,14 +100,26 @@ pub struct BatchBlockExecutionOutput {
     ///
     /// If receipt is None it means it is pruned.
     pub receipts: Receipts,
+    /// The collection of EIP-7685 requests.
+    /// Outer vector stores requests for each block sequentially.
+    /// The inner vector stores requests ordered by transaction number.
+    ///
+    /// A transaction may have zero or more requests, so the length of the inner vector is not
+    /// guaranteed to be the same as the number of transactions.
+    pub requests: Requests,
     /// First block of bundle state.
     pub first_block: BlockNumber,
 }
 
 impl BatchBlockExecutionOutput {
     /// Create Bundle State.
-    pub fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
-        Self { bundle, receipts, first_block }
+    pub fn new(
+        bundle: BundleState,
+        receipts: Receipts,
+        requests: Requests,
+        first_block: BlockNumber,
+    ) -> Self {
+        Self { bundle, receipts, requests, first_block }
     }
 }
 

@@ -17,6 +17,9 @@ revm-primitives.workspace = true
 revm.workspace = true
 reth-interfaces.workspace = true
 
+# alloy
+alloy-consensus.workspace = true
+
 futures-util.workspace = true
 parking_lot = { workspace = true, optional = true }
 

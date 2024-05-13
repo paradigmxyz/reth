@@ -157,12 +157,12 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
-                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into());
+                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into())
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -228,7 +228,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into());
+            .into())
         }
 
         Ok((receipts, cumulative_gas_used))
@@ -325,7 +325,7 @@ where
                 block.timestamp,
             ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error);
+                return Err(error)
             };
         }
 
@@ -388,7 +388,12 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            gas_used,
+            requests: Default::default(),
+        })
     }
 }
 
@@ -450,6 +455,7 @@ where
         BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
+            self.batch_record.take_requests(),
             self.batch_record.first_block().unwrap_or_default(),
         )
     }

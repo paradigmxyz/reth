@@ -55,6 +55,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
             gas_used: 0,
+            requests: vec![],
         })
     }
 }
