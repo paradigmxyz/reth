@@ -14,7 +14,9 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_evm::{either::Either, test_utils::MockExecutorProvider};
+use reth_evm::{
+    either::Either, execute::BatchBlockExecutionOutput, test_utils::MockExecutorProvider,
+};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_interfaces::{
     p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
