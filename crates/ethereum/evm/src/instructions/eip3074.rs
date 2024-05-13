@@ -3,8 +3,8 @@ use reth_revm::{Context, Database};
 use revm_interpreter::{
     gas,
     instructions::contract::{calc_call_gas, get_memory_input_and_out_ranges},
-    pop, pop_address, pop_address_ret, push, resize_memory, CallInputs, CallScheme, CallValue,
-    DummyHost, InstructionResult, Interpreter, InterpreterAction,
+    pop, pop_address, push, resize_memory, CallInputs, CallScheme, CallValue, InstructionResult,
+    Interpreter, InterpreterAction,
 };
 use revm_precompile::secp256k1::ecrecover;
 use revm_primitives::{
@@ -192,8 +192,7 @@ fn authcall_instruction<EXT, DB: Database>(
     // it by using the spec ID set in the evm.
     let Some(gas_limit) = spec_to_generic!(
         evm.evm.spec_id(),
-        // TODO: This host should be removed?
-        calc_call_gas::<DummyHost, SPEC>(
+        calc_call_gas::<SPEC>(
             interp,
             true,                // is_cold
             value != U256::ZERO, // has_transfer
