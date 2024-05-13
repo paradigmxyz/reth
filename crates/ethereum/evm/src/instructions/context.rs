@@ -53,9 +53,7 @@ mod tests {
         let value = vec![0x01, 0x02];
 
         ctx.set(key, value.clone());
-
-        let cloned_ctx = ctx.clone();
-        assert_eq!(cloned_ctx.get(key).unwrap(), value);
+        assert_eq!(ctx.get(key).unwrap(), value);
     }
 
     #[test]

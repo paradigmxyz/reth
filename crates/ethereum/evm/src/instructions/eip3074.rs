@@ -34,7 +34,7 @@ pub fn boxed_instructions<'a, EXT: 'a, DB: Database + 'a>(
     context: InstructionsContext,
 ) -> impl Iterator<Item = BoxedInstructionWithOpCode<'a, Context<EXT, DB>>> {
     let to_capture_for_auth = context.clone();
-    let to_capture_for_authcall = context.clone();
+    let to_capture_for_authcall = context;
 
     let boxed_auth_instruction =
         Box::new(move |interpreter: &mut Interpreter, evm: &mut Context<EXT, DB>| {
@@ -154,6 +154,7 @@ fn auth_instruction<EXT, DB: Database>(
 /// executed as the next action. See also:
 ///
 /// <https://eips.ethereum.org/EIPS/eip-3074#authcall-0xf7>
+#[allow(clippy::needless_pass_by_ref_mut)]
 fn authcall_instruction<EXT, DB: Database>(
     interp: &mut Interpreter,
     evm: &mut Context<EXT, DB>,
@@ -377,7 +378,7 @@ mod tests {
         let mut interpreter = setup_interpreter();
 
         let secp = Secp256k1::new();
-        let (_, authority) = setup_authority(secp.clone());
+        let (_, authority) = setup_authority(secp);
 
         setup_auth_stack(&mut interpreter.stack, authority);
 
