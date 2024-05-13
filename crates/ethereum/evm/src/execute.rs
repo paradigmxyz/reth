@@ -316,6 +316,7 @@ where
                 block.header.logs_bloom,
                 receipts.iter(),
             ) {
+                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
                 return Err(error)
             };
         }
