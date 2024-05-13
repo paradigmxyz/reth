@@ -23,7 +23,9 @@ use reth_primitives::{
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update, post_block_balance_increments,
+    },
     Evm, State,
 };
 use revm_primitives::{
@@ -139,6 +141,7 @@ where
             block.parent_beacon_block_root,
             &mut evm,
         )?;
+        apply_blockhashes_update(&self.chain_spec, block.timestamp, block.number, evm.db_mut())?;
 
         // execute transactions
         let mut cumulative_gas_used = 0;
@@ -152,7 +155,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
@@ -194,7 +197,7 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into())
+            .into());
         }
 
         Ok((receipts, cumulative_gas_used))
@@ -291,7 +294,7 @@ where
                 receipts.iter(),
             ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error)
+                return Err(error);
             };
         }
 
