@@ -15,7 +15,10 @@
 //! > "Node started"
 //! once the node has been started.
 
+use reth::api::PayloadBuilderAttributes;
 use reth::cli::Cli;
+use reth::primitives::{Address, B256};
+use reth::rpc::types::engine::PayloadAttributes;
 use reth_node_ethereum::EthereumNode;
 
 fn main() {
@@ -37,6 +40,18 @@ fn main() {
                 })
                 .launch()
                 .await?;
+
+
+            let rpc_payload_attributes = PayloadAttributes {
+                timestamp: 10000,
+                prev_randao: B256::ZERO,
+                suggested_fee_recipient: Address::default(),
+                withdrawals: None,
+                parent_beacon_block_root: None,
+            };
+            let attr = PayloadBuilderAttributes::try_new(B256::ZERO, rpc_payload_attributes).unwrap();
+            let payload_builder = handle.node.payload_builder.clone();
+            payload_builder.new_payload(attr);
 
             handle.wait_for_node_exit().await
         })
