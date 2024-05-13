@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::broadcast::{self, error::SendError, Sender};
+use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{error, warn};
 
@@ -36,13 +36,16 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
         Self { sender, subscriber_count: 0.into() }
     }
 
-    /// Sends an event to all listeners. Returns the number of subscribers the event was sent to.
-    pub fn notify(&self, event: T) -> Result<usize, SendError<T>> {
-        if self.subscriber_count.load(Ordering::Relaxed) > 0 {
-            self.sender.send(event)
-        } else {
-            Ok(0)
-        }
+    /// Broadcasts an event to all listeners.
+    pub fn notify(&self, event: T) {
+        match self.sender.send(event) {
+            Ok(listener_count) => {
+                if listener_count == 0 {
+                    warn!("notification of network event with 0 listeners");
+                }
+            }
+            Err(_) => error!("channel closed"),
+        };
     }
 
     /// Sender cloner.
