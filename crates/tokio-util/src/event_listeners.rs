@@ -9,7 +9,7 @@ const DEFAULT_BROADCAST_CHANNEL_SIZE: usize = 1000;
 #[derive(Debug)]
 pub struct EventListeners<T> {
     /// The sender part of the broadcast channel
-    sender: broadcast::Sender<T>,
+    sender: Sender<T>,
     /// The number of subscribers, needed because the broadcast sender doesn't track this
     subscriber_count: AtomicUsize,
 }
@@ -36,6 +36,11 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
         Self { sender, subscriber_count: 0.into() }
     }
 
+    /// Broadcast sender setter.
+    pub fn set_sender(&mut self, sender: Sender<T>) {
+        self.sender = sender;
+    }
+
     /// Broadcasts an event to all listeners.
     pub fn notify(&self, event: T) {
         match self.sender.send(event) {
@@ -57,36 +62,5 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
     pub fn new_listener(&self) -> BroadcastStream<T> {
         self.subscriber_count.fetch_add(1, Ordering::Relaxed);
         BroadcastStream::new(self.sender.subscribe())
-    }
-}
-
-/// Notifies events to the listeners subscribed to the wrapped broadcast sender.
-#[derive(Debug, Clone)]
-pub struct EventNotifier<T> {
-    sender: Option<Sender<T>>,
-}
-
-impl<T: Send + Sync + 'static> Default for EventNotifier<T> {
-    fn default() -> Self {
-        Self { sender: None }
-    }
-}
-
-impl<T: Send + Sync + 'static> EventNotifier<T> {
-    /// Broadcast sender setter.
-    pub fn set_sender(&mut self, sender: Sender<T>) {
-        self.sender = Some(sender);
-    }
-
-    /// Sends an event to all listeners. Returns the number of subscribers the event was sent to.
-    pub fn notify(&self, event: T) {
-        match self.sender.as_ref().map(|sender| sender.send(event)).unwrap_or(Ok(0)) {
-            Ok(listener_count) => {
-                if listener_count == 0 {
-                    warn!("notification of network event with 0 listeners");
-                }
-            }
-            Err(e) => error!("channel closed: {e}"),
-        };
     }
 }
