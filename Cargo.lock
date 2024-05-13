@@ -7003,6 +7003,7 @@ dependencies = [
  "revm-precompile",
  "revm-primitives",
  "secp256k1 0.28.2",
+ "serde_json",
  "tracing",
 ]
 

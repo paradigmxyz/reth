@@ -218,7 +218,7 @@ where
         // Collect all EIP-7685 requests
         let withdrawal_requests =
             post_block_withdrawal_requests(&self.chain_spec, block.timestamp, &mut evm)?;
-        // TODO: Does order matter?
+        // Requests are ordered by Request ID.
         let requests = [deposits, withdrawal_requests].concat();
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })

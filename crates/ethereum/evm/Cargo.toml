@@ -31,6 +31,7 @@ alloy-sol-types.workspace = true
 
 # misc
 tracing.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
