@@ -486,7 +486,7 @@ mod tests {
         headers::downloader::{HeaderDownloader, SyncTarget},
     };
     use reth_provider::test_utils::create_test_provider_factory;
-    use std::{mem, sync::Arc};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
