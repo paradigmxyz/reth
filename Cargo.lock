@@ -7036,6 +7036,7 @@ dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=bd39117)",
  "reth-ethereum-consensus",
  "reth-evm",
+ "reth-interfaces",
  "reth-primitives",
  "reth-revm",
  "revm-primitives",
