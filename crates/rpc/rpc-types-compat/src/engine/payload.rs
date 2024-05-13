@@ -4,7 +4,7 @@
 use reth_primitives::{
     constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
     proofs::{self},
-    Block, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
+    Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
@@ -93,14 +93,21 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 
 /// Converts [ExecutionPayloadV4] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    // this performs the same conversion as the underlying V3 payload, but inserts the blob gas
-    // used and excess blob gas
-    let mut base_block = try_payload_v3_to_block(payload.payload_inner)?;
+    let ExecutionPayloadV4 { payload_inner, deposit_requests, withdrawal_requests } = payload;
+    let mut block = try_payload_v3_to_block(payload_inner)?;
 
-    base_block.header.requests_root = None;
-    base_block.requests = None;
+    // attach requests with asc type identifiers
+    let requests = deposit_requests
+        .into_iter()
+        .map(Request::DepositRequest)
+        .chain(withdrawal_requests.into_iter().map(Request::WithdrawalRequest))
+        .collect::<Vec<_>>();
 
-    todo!()
+    let requests_root = proofs::calculate_requests_root(&requests);
+    block.header.requests_root = Some(requests_root);
+    block.requests = Some(requests.into());
+
+    Ok(block)
 }
 
 /// Converts [SealedBlock] to [ExecutionPayload]
@@ -195,8 +202,30 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadV4]
-pub fn block_to_payload_v4(_value: SealedBlock) -> ExecutionPayloadV4 {
-    todo!()
+pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
+    let (deposit_requests, withdrawal_requests) =
+        value.requests.take().unwrap_or_default().into_iter().fold(
+            (Vec::new(), Vec::new()),
+            |(mut deposits, mut withdrawals), request| {
+                match request {
+                    Request::DepositRequest(r) => {
+                        deposits.push(r);
+                    }
+                    Request::WithdrawalRequest(r) => {
+                        withdrawals.push(r);
+                    }
+                    _ => {}
+                };
+
+                (deposits, withdrawals)
+            },
+        );
+
+    ExecutionPayloadV4 {
+        deposit_requests,
+        withdrawal_requests,
+        payload_inner: block_to_payload_v3(value),
+    }
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadFieldV2]
