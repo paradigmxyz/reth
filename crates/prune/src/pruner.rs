@@ -1,16 +1,18 @@
 //! Support for pruning.
 
 use crate::{
-    segments::PruneInput, CycleSegments, Metrics, PrunerError, PrunerEvent, TableRef, TableRing,
+    segments::PruneInput, CycleSegments, Metrics, PrunerError, PrunerEvent, Segment, TableRef,
+    TableRing,
 };
 use reth_db::database::Database;
-use reth_primitives::{
-    BlockNumber, FinishedExExHeight, PruneLimiter, PruneModes, PruneProgress, PruneSegment,
+use reth_primitives::{BlockNumber, FinishedExExHeight, PruneLimiter, PruneProgress, PruneSegment};
+use reth_provider::{
+    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -29,7 +31,8 @@ type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
 #[derive(Debug)]
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
-    prune_modes: PruneModes,
+    /// Ring abstraction over tables to prune, provides the next segment to prune.
+    segments: TableRing<DB>,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
@@ -57,16 +60,20 @@ impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        prune_modes: PruneModes,
+        segments: Vec<Arc<dyn Segment<DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
         timeout: Option<Duration>,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
+        let current_table = TableRef::default();
+        let segments =
+            TableRing::new(provider_factory.static_file_provider(), current_table, segments);
+
         Self {
             provider_factory,
-            prune_modes,
+            segments,
             min_block_interval,
             previous_tip_block_number: None,
             delete_limit_per_block: delete_limit,
@@ -168,18 +175,11 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
         limiter: &mut PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let prune_modes = &self.prune_modes;
-        let mut segments = TableRing::new(
-            provider.static_file_provider().clone(),
-            self.current_table,
-            prune_modes,
-        );
-
         let mut stats = PrunerStats::new();
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in &mut segments {
+        for (segment, purpose) in &mut self.segments {
             if limiter.is_limit_reached() {
                 break
             }
@@ -244,7 +244,7 @@ impl<DB: Database> Pruner<DB> {
             }
         }
 
-        self.current_table = segments.current_table();
+        self.current_table = self.segments.current_table();
 
         Ok((stats, pruned, progress))
     }
@@ -306,7 +306,7 @@ mod tests {
 
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
+    use reth_primitives::{FinishedExExHeight, MAINNET};
     use reth_provider::ProviderFactory;
 
     #[test]
@@ -319,15 +319,8 @@ mod tests {
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let mut pruner = Pruner::new(
-            provider_factory,
-            PruneModes::default(),
-            5,
-            0,
-            5,
-            None,
-            finished_exex_height_rx,
-        );
+        let mut pruner =
+            Pruner::new(provider_factory, vec![], 5, 0, 5, None, finished_exex_height_rx);
 
         // No last pruned block number was set before
         let first_block_number = 1;

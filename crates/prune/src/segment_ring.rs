@@ -1,7 +1,7 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use reth_db::database::Database;
-use reth_primitives::{PruneMode, PruneModes, PrunePurpose, StaticFileSegment};
+use reth_primitives::{PruneMode, PrunePurpose, StaticFileSegment};
 use reth_provider::providers::StaticFileProvider;
 
 use crate::{segments, Segment};
@@ -23,7 +23,7 @@ pub trait CycleSegments {
     fn next_table(&self) -> Self::TableRef;
     /// Returns the next [`Segment`] to prune, if any entries to prune for the current table.
     #[allow(clippy::type_complexity)]
-    fn next_segment(&mut self) -> Option<(Box<dyn Segment<Self::Db>>, PrunePurpose)>;
+    fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>;
 }
 
 macro_rules! cycle_iterator_impl {
@@ -32,7 +32,7 @@ macro_rules! cycle_iterator_impl {
         where
             DB: Database,
         {
-            type Item = (Box<dyn Segment<DB>>, PrunePurpose);
+            type Item = (Arc<dyn Segment<DB>>, PrunePurpose);
 
             /// Returns next prunable segment in ring, or `None` if iterator has walked one cycle.
             fn next(&mut self) -> Option<Self::Item> {
@@ -57,12 +57,7 @@ macro_rules! cycle_iterator_impl {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TableRef {
     StaticFiles(StaticFileTableRef),
-    SenderRecovery,
-    TxLookup,
-    Receipts,
-    AccountHistory,
-    StorageHistory,
-    ReceiptsLogFilter,
+    Garbage(usize),
 }
 
 impl Default for TableRef {
@@ -72,22 +67,24 @@ impl Default for TableRef {
 }
 
 /// A ring over prunable tables.
-///
-/// Iterator that generates [Segment]s. Thread-safe, allocated on the heap.
 #[derive(Debug)]
-pub struct TableRing<'a, DB> {
+pub struct TableRing<DB> {
     start: TableRef,
     current: TableRef,
     prev: TableRef,
-    prune_modes: &'a PruneModes,
+    segments: Vec<Arc<dyn Segment<DB>>>,
     static_file_start: StaticFileTableRef,
     static_file_ring: StaticFileTableRing<DB>,
 }
 
-cycle_iterator_impl!(TableRing<'_, DB>);
+cycle_iterator_impl!(TableRing<DB>);
 
-impl<'a, DB> TableRing<'a, DB> {
-    pub fn new(provider: StaticFileProvider, start: TableRef, prune_modes: &'a PruneModes) -> Self {
+impl<DB> TableRing<DB> {
+    pub fn new(
+        provider: StaticFileProvider,
+        start: TableRef,
+        segments: Vec<Arc<dyn Segment<DB>>>,
+    ) -> Self {
         let static_file_start = match start {
             TableRef::StaticFiles(table_ref) => table_ref,
             _ => StaticFileTableRef::default(),
@@ -97,14 +94,14 @@ impl<'a, DB> TableRing<'a, DB> {
             start,
             current: start,
             prev: start,
-            prune_modes,
+            segments,
             static_file_start,
             static_file_ring: StaticFileTableRing::new(provider, static_file_start),
         }
     }
 }
 
-impl<'a, DB> CycleSegments for TableRing<'a, DB>
+impl<DB> CycleSegments for TableRing<DB>
 where
     DB: Database,
 {
@@ -124,75 +121,37 @@ where
     }
 
     fn next_table(&self) -> Self::TableRef {
-        let Self { current, static_file_start, static_file_ring, .. } = self;
+        let Self { current, static_file_start, static_file_ring, segments, .. } = self;
 
-        use TableRef::*;
         match current {
-            StaticFiles(_) => {
+            TableRef::StaticFiles(_) => {
                 let next = static_file_ring.next_table();
                 if next == *static_file_start {
-                    Receipts
+                    TableRef::Garbage(0)
                 } else {
-                    StaticFiles(next)
+                    TableRef::StaticFiles(next)
                 }
             }
-            Receipts => ReceiptsLogFilter,
-            ReceiptsLogFilter => TxLookup,
-            TxLookup => SenderRecovery,
-            SenderRecovery => AccountHistory,
-            AccountHistory => StorageHistory,
-            StorageHistory => StaticFiles(StaticFileTableRef::default()),
+            TableRef::Garbage(index) => {
+                if *index == segments.len() - 2 {
+                    // start next cycle
+                    TableRef::StaticFiles(StaticFileTableRef::default())
+                } else {
+                    TableRef::Garbage(*index + 1)
+                }
+            }
         }
     }
 
-    fn next_segment(&mut self) -> Option<(Box<dyn Segment<Self::Db>>, PrunePurpose)> {
-        let Self { current, prune_modes, .. } = *self;
+    fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)> {
+        let Self { current, segments, .. } = self;
 
         let segment = match current {
             TableRef::StaticFiles(_) => (&mut self.static_file_ring).next(),
-            TableRef::Receipts => prune_modes.receipts.map(|mode| {
-                (
-                    Box::new(segments::Receipts::new(mode)) as Box<dyn Segment<Self::Db>>,
-                    PrunePurpose::User,
-                )
-            }),
-            TableRef::ReceiptsLogFilter => {
-                (!prune_modes.receipts_log_filter.is_empty()).then(|| {
-                    (
-                        Box::new(segments::ReceiptsByLogs::new(
-                            prune_modes.receipts_log_filter.clone(),
-                        )) as Box<dyn Segment<Self::Db>>,
-                        PrunePurpose::User,
-                    )
-                })
-            }
-            TableRef::TxLookup => prune_modes.transaction_lookup.map(|mode| {
-                (
-                    Box::new(segments::TransactionLookup::new(mode)) as Box<dyn Segment<Self::Db>>,
-                    PrunePurpose::User,
-                )
-            }),
-            TableRef::SenderRecovery => prune_modes.sender_recovery.map(|mode| {
-                (
-                    Box::new(segments::SenderRecovery::new(mode)) as Box<dyn Segment<Self::Db>>,
-                    PrunePurpose::User,
-                )
-            }),
-            TableRef::AccountHistory => prune_modes.account_history.map(|mode| {
-                (
-                    Box::new(segments::AccountHistory::new(mode)) as Box<dyn Segment<Self::Db>>,
-                    PrunePurpose::User,
-                )
-            }),
-            TableRef::StorageHistory => prune_modes.storage_history.map(|mode| {
-                (
-                    Box::new(segments::StorageHistory::new(mode)) as Box<dyn Segment<Self::Db>>,
-                    PrunePurpose::User,
-                )
-            }),
+            TableRef::Garbage(index) => Some((segments[*index].clone(), PrunePurpose::User)),
         };
 
-        self.prev = current;
+        self.prev = *current;
         self.current = self.next_table();
 
         segment
@@ -260,27 +219,27 @@ where
         }
     }
 
-    fn next_segment(&mut self) -> Option<(Box<dyn Segment<Self::Db>>, PrunePurpose)> {
+    fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)> {
         let Self { provider, current, .. } = self;
 
         let segment = match current {
             StaticFileTableRef::Headers => {
                 provider.get_highest_static_file_block(StaticFileSegment::Headers).map(|to_block| {
-                    Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block)))
-                        as Box<dyn Segment<DB>>
+                    Arc::new(segments::Headers::new(PruneMode::before_inclusive(to_block)))
+                        as Arc<dyn Segment<DB>>
                 })
             }
             StaticFileTableRef::Transactions => provider
                 .get_highest_static_file_block(StaticFileSegment::Transactions)
                 .map(|to_block| {
-                    Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block)))
-                        as Box<dyn Segment<DB>>
+                    Arc::new(segments::Transactions::new(PruneMode::before_inclusive(to_block)))
+                        as Arc<dyn Segment<DB>>
                 }),
             StaticFileTableRef::Receipts => provider
                 .get_highest_static_file_block(StaticFileSegment::Receipts)
                 .map(|to_block| {
-                    Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block)))
-                        as Box<dyn Segment<DB>>
+                    Arc::new(segments::Receipts::new(PruneMode::before_inclusive(to_block)))
+                        as Arc<dyn Segment<DB>>
                 }),
         };
 

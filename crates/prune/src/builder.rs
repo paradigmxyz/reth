@@ -80,9 +80,11 @@ impl PrunerBuilder {
 
     /// Builds a [Pruner] from the current configuration.
     pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
+        let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
+
         Pruner::new(
             provider_factory,
-            self.segments,
+            segments.into_vec(),
             self.block_interval,
             self.prune_delete_limit,
             self.max_reorg_depth,
