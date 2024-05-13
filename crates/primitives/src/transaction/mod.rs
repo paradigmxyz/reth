@@ -1495,40 +1495,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     }
 }
 
-#[cfg(feature = "alloy-compat")]
-impl TryFrom<alloy_rpc_types::Transaction> for TransactionSigned {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
-        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-        let transaction: Transaction = tx.try_into()?;
-
-        Ok(TransactionSigned::from_transaction_and_signature(
-            transaction.clone(),
-            Signature {
-                r: signature.r,
-                s: signature.s,
-                odd_y_parity: if let Some(y_parity) = signature.y_parity {
-                    y_parity.0
-                } else {
-                    match transaction.tx_type() {
-                        // If the transaction type is Legacy, adjust the v component of the
-                        // signature according to the Ethereum specification
-                        TxType::Legacy => {
-                            extract_chain_id(signature.v.to())
-                                .map_err(|_| ConversionError::InvalidSignature)?
-                                .0
-                        }
-                        _ => !signature.v.is_zero(),
-                    }
-                },
-            },
-        ))
-    }
-}
-
 /// Signed transaction with recovered signer.
 #[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
@@ -1646,19 +1612,6 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     #[inline]
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.clone()
-    }
-}
-
-#[cfg(feature = "alloy-compat")]
-impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedEcRecovered {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
-        let transaction: TransactionSigned = tx.try_into()?;
-
-        transaction.try_into_ecrecovered().map_err(|_| ConversionError::InvalidSignature)
     }
 }
 
