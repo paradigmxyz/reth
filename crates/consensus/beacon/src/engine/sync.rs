@@ -434,7 +434,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
-    use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
+    use reth_interfaces::{p2p::either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
         Header, PruneModes, SealedHeader, MAINNET,
@@ -543,15 +543,15 @@ mod tests {
             self,
             pipeline: Pipeline<DB>,
             chain_spec: Arc<ChainSpec>,
-        ) -> EngineSyncController<DB, EitherDownloader<Client, TestFullBlockClient>>
+        ) -> EngineSyncController<DB, Either<Client, TestFullBlockClient>>
         where
             DB: Database + 'static,
             Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
         {
             let client = self
                 .client
-                .map(EitherDownloader::Left)
-                .unwrap_or_else(|| EitherDownloader::Right(TestFullBlockClient::default()));
+                .map(Either::Left)
+                .unwrap_or_else(|| Either::Right(TestFullBlockClient::default()));
 
             EngineSyncController::new(
                 pipeline,

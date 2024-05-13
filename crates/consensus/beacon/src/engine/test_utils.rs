@@ -6,7 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::config::EtlConfig;
+use reth_config::config::StageConfig;
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 use reth_downloaders::{
@@ -17,7 +17,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_interfaces::{
-    p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
+    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     sync::NoopSyncStateUpdater,
     test_utils::NoopFullBlockClient,
 };
@@ -42,7 +42,7 @@ type DatabaseEnv = TempDatabase<DE>;
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
     BlockchainProvider<Arc<DatabaseEnv>>,
-    Arc<EitherDownloader<Client, NoopFullBlockClient>>,
+    Arc<Either<Client, NoopFullBlockClient>>,
     EthEngineTypes,
 >;
 
@@ -111,7 +111,7 @@ impl<DB> TestEnv<DB> {
 }
 
 // TODO: add with_consensus in case we want to use the TestConsensus purposeful failure - this
-// would require similar patterns to how we use with_client and the EitherDownloader
+// would require similar patterns to how we use with_client and the downloader
 /// Represents either a real consensus engine, or a test consensus engine.
 #[derive(Debug, Default)]
 enum TestConsensusConfig {
@@ -331,8 +331,8 @@ where
         // use either noop client or a user provided client (for example TestFullBlockClient)
         let client = Arc::new(
             self.client
-                .map(EitherDownloader::Left)
-                .unwrap_or_else(|| EitherDownloader::Right(NoopFullBlockClient::default())),
+                .map(Either::Left)
+                .unwrap_or_else(|| Either::Right(NoopFullBlockClient::default())),
         );
 
         // use either test executor or real executor
@@ -375,7 +375,8 @@ where
                     header_downloader,
                     body_downloader,
                     executor_factory.clone(),
-                    EtlConfig::default(),
+                    StageConfig::default(),
+                    PruneModes::default(),
                 ))
             }
         };
