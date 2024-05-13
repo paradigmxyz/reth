@@ -35,6 +35,11 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
         self.sender = sender;
     }
 
+    /// Broadcast sender setter.
+    pub fn set_sender(&mut self, sender: Sender<T>) {
+        self.sender = sender;
+    }
+
     /// Broadcasts an event to all listeners.
     pub fn notify(&self, event: T) {
         match self.sender.send(event) {
@@ -55,36 +60,5 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
     /// Adds a new event listener and returns the associated receiver.
     pub fn new_listener(&self) -> BroadcastStream<T> {
         BroadcastStream::new(self.sender.subscribe())
-    }
-}
-
-/// Notifies events to the listeners subscribed to the wrapped broadcast sender.
-#[derive(Debug, Clone)]
-pub struct EventNotifier<T> {
-    sender: Option<Sender<T>>,
-}
-
-impl<T: Send + Sync + 'static> Default for EventNotifier<T> {
-    fn default() -> Self {
-        Self { sender: None }
-    }
-}
-
-impl<T: Send + Sync + 'static> EventNotifier<T> {
-    /// Broadcast sender setter.
-    pub fn set_sender(&mut self, sender: Sender<T>) {
-        self.sender = Some(sender);
-    }
-
-    /// Sends an event to all listeners. Returns the number of subscribers the event was sent to.
-    pub fn notify(&self, event: T) {
-        match self.sender.as_ref().map(|sender| sender.send(event)).unwrap_or(Ok(0)) {
-            Ok(listener_count) => {
-                if listener_count == 0 {
-                    warn!("notification of network event with 0 listeners");
-                }
-            }
-            Err(e) => error!("channel closed: {e}"),
-        };
     }
 }
