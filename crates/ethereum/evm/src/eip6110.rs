@@ -1,4 +1,4 @@
-// EIP-6110 parsing
+//! EIP-6110 deposit requests parsing
 use alloy_consensus::Request;
 use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
 use alloy_sol_types::{sol, SolEvent};
@@ -21,7 +21,7 @@ pub(crate) fn parse_deposits_from_receipts(
             Ok(Request::DepositRequest(deposit))
         })
         .collect::<Result<Vec<_>, _>>()
-        // ugly
+        // todo: this is ugly, we should clean it up
         .map_err(|err: alloy_sol_types::Error| {
             BlockValidationError::DepositRequestDecode(err.to_string())
         })?;
