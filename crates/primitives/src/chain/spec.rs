@@ -1247,6 +1247,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Prague at genesis.
+    pub fn prague_activated(mut self) -> Self {
+        self = self.cancun_activated();
+        self.hardforks.insert(Hardfork::Prague, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Enable Bedrock at genesis
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
