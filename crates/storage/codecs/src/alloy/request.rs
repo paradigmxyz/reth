@@ -29,11 +29,11 @@ mod tests {
 
     proptest! {
         #[test]
-        fn roundtrip(log: Request) {
+        fn roundtrip(request: Request) {
             let mut buf = Vec::<u8>::new();
-            let len = log.clone().to_compact(&mut buf);
+            let len = request.to_compact(&mut buf);
             let (decoded, _) = Request::from_compact(&buf, len);
-            assert_eq!(log, decoded);
+            assert_eq!(request, decoded);
         }
     }
 }
