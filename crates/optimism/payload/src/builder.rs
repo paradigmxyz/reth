@@ -34,13 +34,13 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     compute_pending_block: bool,
     /// The rollup's chain spec.
     chain_spec: Arc<ChainSpec>,
-
+    /// The type responsible for creating the evm.
     evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// OptimismPayloadBuilder constructor.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, chain_spec, evm_config }
     }
 

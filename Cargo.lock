@@ -6959,6 +6959,7 @@ name = "reth-ethereum-payload-builder"
 version = "0.2.0-beta.7"
 dependencies = [
  "reth-basic-payload-builder",
+ "reth-evm",
  "reth-evm-ethereum",
  "reth-interfaces",
  "reth-payload-builder",
