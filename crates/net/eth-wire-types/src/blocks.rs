@@ -436,6 +436,7 @@ mod tests {
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };
@@ -511,6 +512,7 @@ mod tests {
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };

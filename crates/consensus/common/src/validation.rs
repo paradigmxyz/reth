@@ -367,7 +367,16 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
+        (
+            SealedBlock {
+                header: header.seal_slow(),
+                body,
+                ommers,
+                withdrawals: None,
+                requests: None,
+            },
+            parent,
+        )
     }
 
     #[test]
@@ -455,6 +464,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            requests: None,
         };
 
         let block = SealedBlock::new(header, body);

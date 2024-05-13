@@ -244,8 +244,13 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let block =
-            Block { header: Default::default(), body: vec![], ommers: vec![], withdrawals: None };
+        let block = Block {
+            header: Default::default(),
+            body: vec![],
+            ommers: vec![],
+            withdrawals: None,
+            requests: None,
+        };
         let block = BlockWithSenders::new(block, Default::default()).unwrap();
         let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
     }
