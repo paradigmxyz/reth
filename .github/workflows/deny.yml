@@ -4,7 +4,7 @@ name: deny
 
 on:
   push:
-    branches: [main, devnet-0]
+    branches: [main]
     paths: [Cargo.lock]
   pull_request:
     branches: [main, devnet-0]

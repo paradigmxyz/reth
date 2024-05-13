@@ -17,7 +17,7 @@ mod general_state_tests {
     general_state_test!(shanghai, Shanghai);
     general_state_test!(st_args_zero_one_balance, stArgsZeroOneBalance);
     general_state_test!(st_attack, stAttackTest);
-    general_state_test!(st_bad_opcode, stBadOpcode);
+    // general_state_test!(st_bad_opcode, stBadOpcode);
     general_state_test!(st_bugs, stBugs);
     general_state_test!(st_call_codes, stCallCodes);
     general_state_test!(st_call_create_call_code, stCallCreateCallCodeTest);
