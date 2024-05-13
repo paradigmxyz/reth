@@ -15,7 +15,7 @@ use revm_primitives::{
 const AUTH_OPCODE: u8 = 0xF6;
 /// Numeric op code for the `AUTHCALL` mnemonic.
 const AUTHCALL_OPCODE: u8 = 0xF7;
-/// Constant used to compose the message expected by AUTH`
+/// Constant used to compose the message expected by `AUTH`
 const MAGIC: u8 = 0x04;
 /// Gas to charge when the authority has been previously loaded.
 const WARM_AUTHORITY_GAS: u64 = 100;
@@ -150,7 +150,7 @@ fn auth_instruction<EXT, DB: Database>(
 }
 
 /// `AUTHCALL` instruction, tries to read a context variable set by a previous
-/// `AUTH` invocation and, if present, uses it as the `callerin a `CALL`
+/// `AUTH` invocation and, if present, uses it as the `caller` in a `CALL`
 /// executed as the next action. See also:
 ///
 /// <https://eips.ethereum.org/EIPS/eip-3074#authcall-0xf7>
