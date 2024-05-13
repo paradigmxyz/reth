@@ -11,12 +11,11 @@ impl Compact for Request {
         B: BufMut + AsMut<[u8]>,
     {
         let encoded = self.encoded_7685();
-        buf.put(encoded.as_ref());
-        encoded.len()
+        encoded.to_compact(buf)
     }
 
-    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let (raw, buf) = <Vec<u8> as Compact>::from_compact(buf, buf.len());
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (raw, buf) = <Vec<u8> as Compact>::from_compact(buf, len);
 
         (Request::decode_7685(&mut raw.as_slice()).expect("invalid eip-7685 request in db"), buf)
     }
