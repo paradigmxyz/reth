@@ -263,7 +263,6 @@ impl StorageInner {
 
     /// Fills in pre-execution header fields based on the current best block and given
     /// transactions.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_header_template(
         &self,
         transactions: &[TransactionSigned],
@@ -348,6 +347,7 @@ impl StorageInner {
     /// Builds and executes a new block with the given transactions, on the provided executor.
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_and_execute<Provider, Executor>(
         &mut self,
         transactions: Vec<TransactionSigned>,
