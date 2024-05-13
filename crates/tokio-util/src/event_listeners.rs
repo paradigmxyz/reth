@@ -38,7 +38,7 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
 
     /// Sends an event to all listeners. Returns the number of subscribers the event was sent to.
     pub fn notify(&self, event: T) -> Result<usize, SendError<T>> {
-        if !self.is_empty() {
+        if self.subscriber_count.load(Ordering::Relaxed) > 0 {
             self.sender.send(event)
         } else {
             Ok(0)
@@ -54,16 +54,6 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
     pub fn new_listener(&self) -> BroadcastStream<T> {
         self.subscriber_count.fetch_add(1, Ordering::Relaxed);
         BroadcastStream::new(self.sender.subscribe())
-    }
-
-    /// Returns the number of registered listeners.
-    pub fn len(&self) -> usize {
-        self.subscriber_count.load(Ordering::Relaxed)
-    }
-
-    /// Returns true if there are no registered listeners.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
 
