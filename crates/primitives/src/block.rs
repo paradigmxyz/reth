@@ -13,6 +13,16 @@ pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
 
+// HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
+// a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
+// requests as withdrawals
+#[cfg(any(feature = "arbitrary", test))]
+prop_compose! {
+    pub fn empty_requests_strategy()(_ in 0..1) -> Option<Requests> {
+        None
+    }
+}
+
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
@@ -46,10 +56,7 @@ pub struct Block {
     )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Requests>())")
-    )]
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -266,10 +273,7 @@ pub struct SealedBlock {
     )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Requests>())")
-    )]
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -531,6 +535,7 @@ pub struct BlockBody {
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
     /// Requests in the block.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -626,6 +631,9 @@ pub fn generate_valid_header(
         header.excess_blob_gas = None;
         header.parent_beacon_block_root = None;
     }
+
+    // todo(onbjerg): adjust this for eip-7589
+    header.requests_root = None;
 
     header
 }
