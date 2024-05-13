@@ -47,7 +47,7 @@ use reth_payload_builder::{
 use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
         PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
     ExecutionPayloadV1, Withdrawal,
@@ -167,6 +167,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,

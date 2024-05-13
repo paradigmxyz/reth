@@ -7,11 +7,12 @@ use reth_primitives::{
     BlobTransactionSidecar, ChainSpec, Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
-    PayloadId,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadV1, PayloadAttributes, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
+    convert_block_to_payload_field_v2,
 };
 use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::convert::Infallible;
@@ -113,6 +114,27 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
 
         ExecutionPayloadEnvelopeV3 {
             execution_payload: block_to_payload_v3(block),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+        }
+    }
+}
+
+impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
+    fn from(value: EthBuiltPayload) -> Self {
+        let EthBuiltPayload { block, fees, sidecars, .. } = value;
+
+        ExecutionPayloadEnvelopeV4 {
+            execution_payload: block_to_payload_v4(block),
             block_value: fees,
             // From the engine API spec:
             //
