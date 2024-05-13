@@ -175,7 +175,7 @@ impl<DB: Database> Pruner<DB> {
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in self.segments.iter_mut() {
+        for (segment, purpose) in self.segments.iter() {
             if limiter.is_limit_reached() {
                 break
             }

@@ -7624,6 +7624,7 @@ dependencies = [
  "derive_more",
  "itertools 0.12.1",
  "metrics",
+ "rand 0.8.5",
  "rayon",
  "reth-config",
  "reth-db",
