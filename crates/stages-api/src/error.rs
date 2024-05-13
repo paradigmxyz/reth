@@ -178,9 +178,3 @@ pub enum PipelineError {
     #[error(transparent)]
     Internal(#[from] RethError),
 }
-
-impl From<SendError<PipelineEvent>> for PipelineError {
-    fn from(err: SendError<PipelineEvent>) -> Self {
-        Self::Channel(Box::new(err))
-    }
-}
