@@ -25,7 +25,7 @@ use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
 use reth_revm::state_change::{
-    apply_beacon_root_contract_call, post_block_withdrawal_requests,
+    apply_beacon_root_contract_call, apply_withdrawal_requests_contract_call,
     post_block_withdrawals_balance_increments,
 };
 use reth_tasks::TaskSpawner;
@@ -893,13 +893,10 @@ where
 /// Apply the [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) post block contract call.
 ///
 /// This constructs a new [Evm] with the given DB, and environment
-/// ([CfgEnvWithHandlerCfg] and [BlockEnv]) to execute the pre block contract call.
+/// ([CfgEnvWithHandlerCfg] and [BlockEnv]) to execute the post block contract call.
 ///
-/// The parent beacon block root used for the call is gathered from the given
-/// [PayloadBuilderAttributes].
-///
-/// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
-/// change.
+/// This uses [apply_withdrawal_requests_contract_call] to ultimately calculate the
+/// [requests](Request).
 pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit, Attributes>(
     db: &mut DB,
     chain_spec: &ChainSpec,
@@ -922,7 +919,7 @@ where
         .build();
 
     // initialize a block from the env, because the post block call needs the block itself
-    post_block_withdrawal_requests(chain_spec, attributes.timestamp(), &mut evm_post_block)
+    apply_withdrawal_requests_contract_call(chain_spec, attributes.timestamp(), &mut evm_post_block)
         .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
