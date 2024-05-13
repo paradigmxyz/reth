@@ -393,6 +393,7 @@ const fn decode_varuint_panic() -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
 
     #[test]
     fn compact_bytes() {
