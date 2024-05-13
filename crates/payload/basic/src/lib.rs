@@ -12,14 +12,16 @@ use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_interfaces::RethResult;
+use reth_evm_ethereum::eip6110::parse_deposits_from_receipts;
+use reth_interfaces::{RethError, RethResult};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
 };
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, ChainSpec, Request, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, Bytes, ChainSpec, Receipt, Request, SealedBlock, Withdrawals, B256,
+    U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -921,6 +923,16 @@ where
     // initialize a block from the env, because the post block call needs the block itself
     apply_withdrawal_requests_contract_call(chain_spec, attributes.timestamp(), &mut evm_post_block)
         .map_err(|err| PayloadBuilderError::Internal(err.into()))
+}
+
+/// Apply the [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) post block processing.
+///
+/// This uses [parse_deposits_from_receipts] to ultimately calculate the [requests](Request).
+pub fn post_block_deposit_requests(
+    receipts: &[Receipt],
+) -> Result<Vec<Request>, PayloadBuilderError> {
+    parse_deposits_from_receipts(receipts)
+        .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))
 }
 
 /// Checks if the new payload is better than the current best.

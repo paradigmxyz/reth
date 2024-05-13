@@ -6487,6 +6487,7 @@ dependencies = [
  "futures-util",
  "metrics",
  "reth-engine-primitives",
+ "reth-evm-ethereum",
  "reth-interfaces",
  "reth-metrics",
  "reth-payload-builder",

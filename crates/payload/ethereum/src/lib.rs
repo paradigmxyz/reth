@@ -10,9 +10,9 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use reth_basic_payload_builder::{
-    commit_withdrawals, is_better_payload, post_block_withdrawal_requests_contract_call,
-    pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
-    PayloadConfig, WithdrawalsOutcome,
+    commit_withdrawals, is_better_payload, post_block_deposit_requests,
+    post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
+    BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
@@ -389,6 +389,9 @@ where
     // calculate the requests and the requests root
     let (requests, requests_root) =
         if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+            let non_empty_receipts = receipts.iter().flatten().cloned().collect::<Vec<_>>();
+            let deposit_requests = post_block_deposit_requests(&non_empty_receipts)?;
+
             let withdrawal_requests = post_block_withdrawal_requests_contract_call(
                 &mut db,
                 &chain_spec,
@@ -396,9 +399,8 @@ where
                 &initialized_block_env,
                 &attributes,
             )?;
-            // TODO: add deposit requests (https://github.com/paradigmxyz/reth/pull/8204)
 
-            let requests = withdrawal_requests;
+            let requests = [deposit_requests, withdrawal_requests].concat();
             let requests_root = calculate_requests_root(&requests);
             (Some(requests.into()), Some(requests_root))
         } else {
