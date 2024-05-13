@@ -122,12 +122,14 @@ where
 {
     /// Executes the transactions in the block and returns the receipts.
     ///
-    /// This applies the pre-execution changes, and executes the transactions.
+    /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
+    /// executes the transactions.
     ///
     /// # Note
     ///
-    /// It does __not__ apply post-execution changes.
-    fn execute_pre_and_transactions<Ext, DB>(
+    /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
+    /// [EthBlockExecutor::post_execution].
+    fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
         evm: &mut Evm<'_, Ext, &mut State<DB>>,
@@ -280,7 +282,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let (receipts, gas_used, requests) = {
             let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_pre_and_transactions(block, &mut evm)
+            self.executor.execute_state_transitions(block, &mut evm)
         }?;
 
         // 3. apply post execution changes
@@ -311,8 +313,8 @@ where
         self.state.set_state_clear_flag(state_clear_flag);
     }
 
-    /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
-    /// hardfork state change.
+    /// Apply post execution state changes that do not require an [EVM](Evm), such as: block
+    /// rewards, withdrawals, and irregular DAO hardfork state change
     pub fn post_execution(
         &mut self,
         block: &BlockWithSenders,
