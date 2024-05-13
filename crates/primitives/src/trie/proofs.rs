@@ -1,7 +1,11 @@
 //! Merkle trie proofs.
 
-use super::Nibbles;
+use super::{
+    proof::{verify_proof, ProofVerificationError},
+    Nibbles, TrieAccount,
+};
 use crate::{keccak256, Account, Address, Bytes, B256, U256};
+use alloy_rlp::{encode_fixed_size, Encodable};
 
 /// The merkle proof with the relevant account info.
 #[derive(PartialEq, Eq, Default, Debug)]
@@ -40,6 +44,19 @@ impl AccountProof {
     /// Set proof path.
     pub fn set_proof(&mut self, proof: Vec<Bytes>) {
         self.proof = proof;
+    }
+
+    /// Verify the storage proofs and account proof against the provided state root.
+    pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
+        // Verify storage proofs.
+        for storage_proof in &self.storage_proofs {
+            storage_proof.verify(self.storage_root)?;
+        }
+
+        // Verify the account proof.
+        let mut encoded = Vec::new();
+        TrieAccount::from((self.info.unwrap_or_default(), self.storage_root)).encode(&mut encoded);
+        verify_proof(&self.proof, root, keccak256(&self.address), encoded)
     }
 }
 
@@ -82,5 +99,15 @@ impl StorageProof {
     /// Set proof path.
     pub fn set_proof(&mut self, proof: Vec<Bytes>) {
         self.proof = proof;
+    }
+
+    /// Verify the proof against the provided storage root.
+    pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
+        verify_proof(
+            &self.proof,
+            root,
+            B256::from_slice(&self.nibbles.pack()),
+            encode_fixed_size(&self.value).to_vec(),
+        )
     }
 }

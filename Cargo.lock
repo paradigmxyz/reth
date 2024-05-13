@@ -620,8 +620,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beb28aa4ecd32fdfa1b1bdd111ff7357dd562c6b2372694cf9e613434fcba659"
+source = "git+https://github.com/alloy-rs/trie?branch=rkrasiuk/proof-verification#dcff1181e455aedc13c1ca924ff4c790886941c8"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -633,7 +632,6 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "serde",
- "smallvec",
  "tracing",
 ]
 
@@ -4588,7 +4586,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.5",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
