@@ -11,8 +11,6 @@ use reth_primitives::{
 };
 use reth_provider::{HeaderProvider, WithdrawalsProvider};
 
-// todo: validate requests root
-
 /// Validate header standalone
 pub fn validate_header_standalone(
     header: &SealedHeader,
@@ -53,6 +51,13 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::ExcessBlobGasUnexpected)
     } else if header.parent_beacon_block_root.is_some() {
         return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
+    }
+
+    if chain_spec.is_prague_active_at_timestamp(header.timestamp) && header.requests_root.is_none()
+    {
+        return Err(ConsensusError::RequestsRootMissing)
+    } else if header.requests_root.is_some() {
+        return Err(ConsensusError::RequestsRootUnexpected)
     }
 
     Ok(())
@@ -106,6 +111,19 @@ pub fn validate_block_standalone(
                 got: header_blob_gas_used,
                 expected: total_blob_gas,
             }))
+        }
+    }
+
+    // EIP-7685: General purpose execution layer requests
+    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+        let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
+        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
+        let header_requests_root =
+            block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+        if requests_root != *header_requests_root {
+            return Err(ConsensusError::BodyRequestsRootDiff(
+                GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+            ))
         }
     }
 
