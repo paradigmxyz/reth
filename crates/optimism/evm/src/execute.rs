@@ -27,7 +27,7 @@ use reth_revm::{
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, Requests, ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
 use std::sync::Arc;
 use tracing::{debug, trace};
@@ -392,7 +392,7 @@ where
             state: self.state.take_bundle(),
             receipts,
             gas_used,
-            requests: Requests::default(),
+            requests: Default::default(),
         })
     }
 }
