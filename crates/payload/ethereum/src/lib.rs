@@ -14,6 +14,8 @@ use reth_basic_payload_builder::{
     post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
     BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
+use reth_evm_ethereum::eip6110::parse_deposits_from_receipts;
+use reth_interfaces::RethError;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
@@ -389,7 +391,8 @@ where
     // calculate the requests and the requests root
     let (requests, requests_root) =
         if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-            let deposit_requests = post_block_deposit_requests(receipts.iter().flatten())?;
+            let deposit_requests = parse_deposits_from_receipts(receipts)
+                .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
 
             let withdrawal_requests = post_block_withdrawal_requests_contract_call(
                 &mut db,

@@ -925,17 +925,6 @@ where
         .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
-/// Apply the [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) post block processing.
-///
-/// This uses [parse_deposits_from_receipts] to ultimately calculate the [requests](Request).
-pub fn post_block_deposit_requests<'a, I>(receipts: I) -> Result<Vec<Request>, PayloadBuilderError>
-where
-    I: IntoIterator<Item = &'a Receipt>,
-{
-    parse_deposits_from_receipts(receipts)
-        .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))
-}
-
 /// Checks if the new payload is better than the current best.
 ///
 /// This compares the total fees of the blocks, higher is better.
