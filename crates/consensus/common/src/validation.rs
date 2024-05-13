@@ -175,7 +175,7 @@ mod tests {
         BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
         Withdrawal, Withdrawals, U256,
     };
-    use reth_provider::AccountReader;
+    use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
     use std::ops::RangeBounds;
 
     mock! {
