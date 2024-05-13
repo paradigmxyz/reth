@@ -132,15 +132,10 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 /// [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) are:
 ///
 /// At the start of processing any execution block where `block.timestamp >= FORK_TIMESTAMP` (i.e.
-/// before processing any transactions), call `BEACON_ROOTS_ADDRESS` as `SYSTEM_ADDRESS` with the
-/// 32-byte input of `header.parent_beacon_block_root`, a gas limit of `30_000_000`, and `0` value.
-/// This will trigger the `set()` routine of the beacon roots contract. This is a system operation
-/// and therefore:
-///  * the call must execute to completion
-///  * the call does not count against the block’s gas limit
-///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
-///  part of the call
-///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
+/// before processing any transactions), call [BEACON_ROOTS_ADDRESS] as
+/// [SYSTEM_ADDRESS](alloy_eips::eip4788::SYSTEM_ADDRESS) with the 32-byte input of
+/// `header.parent_beacon_block_root`. This will trigger the `set()` routine of the beacon roots
+/// contract.
 pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
     fill_tx_env_with_system_contract_call(
         env,
@@ -167,6 +162,15 @@ pub fn fill_tx_env_with_withdrawal_requests_contract_call(env: &mut Env) {
     );
 }
 
+/// Fill transaction environment with the system caller and the system contract address and message
+/// data.
+///
+/// This is a system operation and therefore:
+///  * the call must execute to completion
+///  * the call does not count against the block’s gas limit
+///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
+///  part of the call
+///  * if no code exists at the provided address, the call will fail silently
 fn fill_tx_env_with_system_contract_call(
     env: &mut Env,
     caller: Address,
