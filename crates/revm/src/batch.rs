@@ -84,7 +84,7 @@ impl BlockBatchRecord {
     }
 
     /// Returns the recorded requests.
-    pub fn requests(&self) -> &Vec<Requests> {
+    pub fn requests(&self) -> &[Requests] {
         &self.requests
     }
 

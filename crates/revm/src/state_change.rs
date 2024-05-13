@@ -347,8 +347,6 @@ where
         }
     }?;
 
-    let mut withdrawal_requests = Vec::with_capacity(data.len() / (20 + 48 + 8));
-
     // Withdrawals are encoded as a series of withdrawal requests, each with the following
     // format:
     //
@@ -356,7 +354,17 @@ where
     // | addr | pubkey | amount |
     // +------+--------+--------+
     //    20      48        8
+
+    const WITHDRAWAL_REQUEST_SIZE: usize = 20 + 48 + 8;
+    let mut withdrawal_requests = Vec::with_capacity(data.len() / WITHDRAWAL_REQUEST_SIZE);
     while data.has_remaining() {
+        if data.remaining() < WITHDRAWAL_REQUEST_SIZE {
+            return Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: "invalid withdrawal request length".to_string(),
+            }
+            .into())
+        }
+
         let mut source_address = Address::ZERO;
         data.copy_to_slice(source_address.as_mut_slice());
 
