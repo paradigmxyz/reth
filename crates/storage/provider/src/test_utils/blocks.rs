@@ -37,6 +37,7 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
     );
     assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::BlockRequests>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
