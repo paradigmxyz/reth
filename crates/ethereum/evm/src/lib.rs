@@ -22,6 +22,9 @@ pub mod verify;
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;
 
+/// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
+pub mod eip6110;
+
 mod instructions;
 
 /// Ethereum-related EVM configuration.

@@ -6994,6 +6994,7 @@ dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-rlp",
+ "alloy-sol-types",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",

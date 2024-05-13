@@ -106,24 +106,6 @@ where
         }
     }
 }
-// EIP-6110
-use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
-use alloy_rlp::Decodable;
-
-fn parse_deposits_from_receipts(
-    receipts: &[Receipt],
-) -> Result<Vec<Request>, BlockValidationError> {
-    let res = receipts
-        .iter()
-        .flat_map(|receipt| receipt.logs.iter())
-        .filter(|log| log.address == MAINNET_DEPOSIT_CONTRACT_ADDRESS)
-        .map(|log| DepositRequest::decode(&mut log.data.data.as_ref()))
-        .map(|res| res.map(Request::DepositRequest))
-        .collect::<Result<Vec<_>, _>>()
-        // ugly
-        .map_err(|err| BlockValidationError::DepositRequestDecode(err.to_string()))?;
-    Ok(res)
-}
 
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
@@ -231,7 +213,7 @@ where
         }
 
         // Collect all EIP-6110 deposits
-        let deposits = parse_deposits_from_receipts(&receipts)?;
+        let deposits = crate::eip6110::parse_deposits_from_receipts(&receipts)?;
 
         // Collect all EIP-7685 requests
         let withdrawal_requests =

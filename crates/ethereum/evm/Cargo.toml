@@ -27,6 +27,7 @@ revm-precompile = { version = "7.0.0", features = ["std"], default-features = fa
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
+alloy-sol-types.workspace = true
 
 # misc
 tracing.workspace = true
