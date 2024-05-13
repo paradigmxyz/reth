@@ -863,8 +863,6 @@ mod tests {
         let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
         let sender_address = public_key_to_address(sender_key_pair.public_key());
 
-        println!("sender_address: {:?}", sender_address);
-
         db.insert_account(
             sender_address,
             Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
@@ -893,7 +891,7 @@ mod tests {
                 gas_limit: 134_807,
                 to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
                 // `MIN_WITHDRAWAL_REQUEST_FEE`
-                value: U256::from(2),
+                value: U256::from(1),
                 input,
             }),
         );
@@ -902,7 +900,7 @@ mod tests {
 
         let executor = provider.executor(StateProviderDatabase::new(&db));
 
-        let BlockExecutionOutput { state, receipts, requests, .. } = executor
+        let BlockExecutionOutput { receipts, requests, .. } = executor
             .execute(
                 (
                     &Block { header, body: vec![tx], ommers: vec![], withdrawals: None }
@@ -914,9 +912,6 @@ mod tests {
             )
             .unwrap();
 
-        println!("{:?}", state);
-
-        println!("{:?}", receipts);
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
