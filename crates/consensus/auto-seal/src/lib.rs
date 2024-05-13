@@ -311,7 +311,7 @@ impl StorageInner {
             excess_blob_gas: None,
             extra_data: Default::default(),
             parent_beacon_block_root: None,
-            requests_root: requests.map(|r| proofs::calculate_requests_root(r)),
+            requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
         };
 
         if chain_spec.is_cancun_active_at_timestamp(timestamp) {

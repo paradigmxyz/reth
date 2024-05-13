@@ -4,9 +4,10 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH,
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Requests, TransactionSigned,
-    Withdrawal, B256, U256,
+    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
+    B256, U256,
 };
+use alloy_consensus::Request;
 use alloy_rlp::Encodable;
 use bytes::BufMut;
 use itertools::Itertools;
@@ -73,8 +74,8 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
 }
 
 /// Calculate EIP-7685 requests root.
-pub fn calculate_requests_root(requests: &Requests) -> B256 {
-    ordered_trie_root(&requests.0)
+pub fn calculate_requests_root(requests: &[Request]) -> B256 {
+    ordered_trie_root(&requests)
 }
 
 /// Calculates the receipt root for a header.
