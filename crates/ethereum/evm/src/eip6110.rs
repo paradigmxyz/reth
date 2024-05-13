@@ -15,9 +15,9 @@ pub(crate) fn parse_deposits_from_receipts(
         // No need to filter for topic because there's only one event and that's the Deposit event
         // in the deposit contract.
         .filter(|log| log.address == MAINNET_DEPOSIT_CONTRACT_ADDRESS)
-        .map(|log| DepositEvent::decode_log(log, false))
-        .map(|res| {
-            let deposit = parse_deposit_from_log(&res?);
+        .map(|log| {
+            let decoded_log = DepositEvent::decode_log(log, false)?;
+            let deposit = parse_deposit_from_log(&decoded_log);
             Ok(Request::DepositRequest(deposit))
         })
         .collect::<Result<Vec<_>, _>>()
@@ -53,23 +53,23 @@ fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
             .withdrawal_credentials
             .as_ref()
             .try_into()
-            .expect("pubkey length should be enforced in deposit contract"),
+            .expect("withdrawal_credentials length should be enforced in deposit contract"),
         amount: u64::from_le_bytes(
             log.amount
                 .as_ref()
                 .try_into()
-                .expect("pubkey length should be enforced in deposit contract"),
+                .expect("amount length should be enforced in deposit contract"),
         ),
         signature: log
             .signature
             .as_ref()
             .try_into()
-            .expect("pubkey length should be enforced in deposit contract"),
+            .expect("signature length should be enforced in deposit contract"),
         index: u64::from_le_bytes(
             log.index
                 .as_ref()
                 .try_into()
-                .expect("pubkey length should be enforced in deposit contract"),
+                .expect("deposit index length should be enforced in deposit contract"),
         ),
     }
 }
