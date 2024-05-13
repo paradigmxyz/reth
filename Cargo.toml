@@ -409,9 +409,3 @@ similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
 walkdir = "2.5"
-
-[patch.crates-io]
-revm = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
-revm-interpreter = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
-revm-precompile = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
-revm-primitives = { git = "https://github.com/danipopes/revm", rev = "1914696de833600f28d895be6c2621714402419c" }
