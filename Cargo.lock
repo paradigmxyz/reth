@@ -7728,6 +7728,7 @@ name = "reth-revm"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=bd39117)",
+ "alloy-rlp",
  "reth-consensus-common",
  "reth-execution-errors",
  "reth-primitives",

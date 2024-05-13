@@ -19,7 +19,10 @@ use reth_primitives::{
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, post_block_balance_increments,
+        post_block_withdrawal_requests,
+    },
     Evm, State,
 };
 use revm_primitives::{
@@ -119,13 +122,16 @@ impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    /// Executes the transactions in the block and returns the receipts.
+    /// Executes the transactions in the block and returns the receipts of the transactions in the
+    /// block, the total gas used and the list of EIP-7685 [requests](Request).
     ///
-    /// This applies the pre-execution changes, and executes the transactions.
+    /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
+    /// executes the transactions.
     ///
     /// # Note
     ///
-    /// It does __not__ apply post-execution changes.
+    /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
+    /// [EthBlockExecutor::post_execution].
     fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
@@ -188,9 +194,13 @@ where
                 },
             );
         }
-        drop(evm);
 
-        Ok(EthExecuteOutput { receipts, requests: vec![], gas_used: cumulative_gas_used })
+        // Collect all EIP-7685 requests
+        let withdrawal_requests =
+            post_block_withdrawal_requests(&self.chain_spec, block.timestamp, &mut evm)?;
+        let requests = withdrawal_requests;
+
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
 }
 
@@ -251,7 +261,8 @@ where
 
     /// Execute a single block and apply the state changes to the internal state.
     ///
-    /// Returns the receipts of the transactions in the block and the total gas used.
+    /// Returns the receipts of the transactions in the block, the total gas used and the list of
+    /// EIP-7685 [requests](Request).
     ///
     /// Returns an error if execution fails.
     fn execute_without_verification(
@@ -264,7 +275,6 @@ where
 
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
-
         let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
             self.executor.execute_state_transitions(block, evm)
@@ -283,8 +293,8 @@ where
         self.state.set_state_clear_flag(state_clear_flag);
     }
 
-    /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
-    /// hardfork state change.
+    /// Apply post execution state changes that do not require an [EVM](Evm), such as: block
+    /// rewards, withdrawals, and irregular DAO hardfork state change
     pub fn post_execution(
         &mut self,
         block: &BlockWithSenders,
