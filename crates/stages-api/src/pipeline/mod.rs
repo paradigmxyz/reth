@@ -108,7 +108,7 @@ where
     }
 
     /// Listen for events on the pipeline.
-    pub fn events(&mut self) -> BroadcastStream<PipelineEvent> {
+    pub fn events(&self) -> BroadcastStream<PipelineEvent> {
         self.listeners.new_listener()
     }
 
@@ -251,7 +251,7 @@ where
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
     pub fn move_to_static_files(&self) -> RethResult<()> {
-        let mut static_file_producer = self.static_file_producer.lock();
+        let static_file_producer = self.static_file_producer.lock();
 
         // Copies data from database to static files
         let lowest_static_file_height = {

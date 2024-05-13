@@ -111,7 +111,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     }
 
     /// Listen for events on the static_file_producer.
-    pub fn events(&mut self) -> BroadcastStream<StaticFileProducerEvent> {
+    pub fn events(&self) -> BroadcastStream<StaticFileProducerEvent> {
         self.listeners.new_listener()
     }
 
@@ -123,7 +123,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
-    pub fn run(&mut self, targets: StaticFileTargets) -> StaticFileProducerResult {
+    pub fn run(&self, targets: StaticFileTargets) -> StaticFileProducerResult {
         // If there are no targets, do not produce any static files and return early
         if !targets.any() {
             return Ok(targets)
@@ -307,7 +307,7 @@ mod tests {
     fn run() {
         let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
 
-        let mut static_file_producer = StaticFileProducerInner::new(
+        let static_file_producer = StaticFileProducerInner::new(
             provider_factory,
             static_file_provider.clone(),
             PruneModes::default(),
@@ -395,7 +395,7 @@ mod tests {
             let tx = tx.clone();
 
             std::thread::spawn(move || {
-                let mut locked_producer = producer.lock();
+                let locked_producer = producer.lock();
                 if i == 0 {
                     // Let other threads spawn as well.
                     std::thread::sleep(Duration::from_millis(100));
