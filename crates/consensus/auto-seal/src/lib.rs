@@ -263,6 +263,7 @@ impl StorageInner {
 
     /// Fills in pre-execution header fields based on the current best block and given
     /// transactions.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_header_template(
         &self,
         transactions: &[TransactionSigned],
