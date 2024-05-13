@@ -48,6 +48,9 @@ pub use transactions::{TransactionsProvider, TransactionsProviderExt};
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;
 
+mod requests;
+pub use requests::RequestsProvider;
+
 mod chain;
 pub use chain::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,

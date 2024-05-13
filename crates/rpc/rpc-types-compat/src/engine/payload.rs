@@ -93,15 +93,14 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 
 /// Converts [ExecutionPayloadV4] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
+    // this performs the same conversion as the underlying V3 payload, but inserts the blob gas
     // used and excess blob gas
     let mut base_block = try_payload_v3_to_block(payload.payload_inner)?;
 
     base_block.header.requests_root = None;
     base_block.requests = None;
-    todo!();
 
-    Ok(base_block)
+    todo!()
 }
 
 /// Converts [SealedBlock] to [ExecutionPayload]
@@ -196,36 +195,8 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadV4]
-pub fn block_to_payload_v4(value: SealedBlock) -> ExecutionPayloadV4 {
-    let transactions = value.raw_transactions();
-
-    ExecutionPayloadV4 {
-        deposit_requests: todo!(),
-        withdrawal_requests: todo!(),
-        payload_inner: ExecutionPayloadV3 {
-            payload_inner: ExecutionPayloadV2 {
-                payload_inner: ExecutionPayloadV1 {
-                    parent_hash: value.parent_hash,
-                    fee_recipient: value.beneficiary,
-                    state_root: value.state_root,
-                    receipts_root: value.receipts_root,
-                    logs_bloom: value.logs_bloom,
-                    prev_randao: value.mix_hash,
-                    block_number: value.number,
-                    gas_limit: value.gas_limit,
-                    gas_used: value.gas_used,
-                    timestamp: value.timestamp,
-                    extra_data: value.extra_data.clone(),
-                    base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-                    block_hash: value.hash(),
-                    transactions,
-                },
-                withdrawals: value.withdrawals.unwrap_or_default().into_inner(),
-            },
-            blob_gas_used: value.blob_gas_used.unwrap_or_default(),
-            excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
-        },
-    }
+pub fn block_to_payload_v4(_value: SealedBlock) -> ExecutionPayloadV4 {
+    todo!()
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadFieldV2]

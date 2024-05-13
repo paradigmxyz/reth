@@ -23,7 +23,7 @@ use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header,
-    Receipts, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
+    Receipts, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
@@ -268,6 +268,7 @@ impl StorageInner {
         transactions: &[TransactionSigned],
         ommers: &[Header],
         withdrawals: Option<&Withdrawals>,
+        requests: Option<&Requests>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
@@ -310,7 +311,7 @@ impl StorageInner {
             excess_blob_gas: None,
             extra_data: Default::default(),
             parent_beacon_block_root: None,
-            requests_root: None,
+            requests_root: requests.map(|r| proofs::calculate_requests_root(r)),
         };
 
         if chain_spec.is_cancun_active_at_timestamp(timestamp) {
@@ -334,8 +335,6 @@ impl StorageInner {
                 Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         }
 
-        // todo: do we support requests root in auto-seal
-
         header.transactions_root = if transactions.is_empty() {
             EMPTY_TRANSACTIONS
         } else {
@@ -353,6 +352,7 @@ impl StorageInner {
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
         withdrawals: Option<Withdrawals>,
+        requests: Option<Requests>,
         provider: &Provider,
         chain_spec: Arc<ChainSpec>,
         executor: &Executor,
@@ -361,14 +361,21 @@ impl StorageInner {
         Executor: BlockExecutorProvider,
         Provider: StateProviderFactory,
     {
-        let header =
-            self.build_header_template(&transactions, &ommers, withdrawals.as_ref(), chain_spec);
+        let header = self.build_header_template(
+            &transactions,
+            &ommers,
+            withdrawals.as_ref(),
+            requests.as_ref(),
+            chain_spec,
+        );
 
+        // todo(onbjerg): when we rewrite this, add support for requests
         let mut block = Block {
             header,
             body: transactions,
             ommers: ommers.clone(),
             withdrawals: withdrawals.clone(),
+            requests: requests.clone(),
         }
         .with_recovered_senders()
         .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
@@ -408,8 +415,12 @@ impl StorageInner {
             block.number,
         );
 
+        // todo(onbjerg): we should not pass requests around as this is building a block, which
+        // means we need to extract the requests from the execution output and compute the requests
+        // root here
+
         let Block { mut header, body, .. } = block.block;
-        let body = BlockBody { transactions: body, ommers, withdrawals };
+        let body = BlockBody { transactions: body, ommers, withdrawals, requests };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 

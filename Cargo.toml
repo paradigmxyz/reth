@@ -285,7 +285,6 @@ revm-primitives = { version = "4.0.0", features = ["std"], default-features = fa
 revm-interpreter = { version = "5.0.0", features = ["std"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "21a2db5" }
 
-
 # eth
 alloy-chains = "0.1.15"
 alloy-primitives = "0.7.2"
