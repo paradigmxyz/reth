@@ -1,0 +1,29 @@
+[package]
+name = "reth-rpc-layer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+http.workspace = true
+hyper.workspace = true
+tower.workspace = true
+http-body.workspace = true
+pin-project.workspace = true
+tokio.workspace = true
+jsonrpsee.workspace = true
+jsonwebtoken = "8"
+rand.workspace = true
+reth-primitives.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+assert_matches.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
