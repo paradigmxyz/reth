@@ -1,5 +1,6 @@
 use alloy_consensus::Request;
-use alloy_rlp::Decodable;
+use alloy_eips::eip7002::WithdrawalRequest;
+use alloy_rlp::Buf;
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -13,7 +14,7 @@ use reth_primitives::{
 use revm::{
     self,
     interpreter::Host,
-    primitives::{Account, AccountInfo, ExecutionResult, ResultAndState, StorageSlot},
+    primitives::{Account, AccountInfo, ExecutionResult, FixedBytes, ResultAndState, StorageSlot},
     Database, DatabaseCommit, Evm,
 };
 use std::{collections::HashMap, ops::Rem};
@@ -318,7 +319,7 @@ where
         Err(e) => {
             evm.context.evm.env = previous_env;
             return Err(BlockValidationError::WithdrawalRequestsContractCall {
-                message: e.to_string(),
+                message: format!("execution failed: {e}"),
             }
             .into())
         }
@@ -329,9 +330,25 @@ where
 
     let withdrawal_requests = match result {
         ExecutionResult::Success { output, .. } => {
-            Vec::<Request>::decode(&mut output.into_data().as_ref()).map_err(|err| {
-                BlockValidationError::WithdrawalRequestsContractCall { message: err.to_string() }
-            })
+            let mut requests = vec![];
+            let mut data = output.into_data();
+
+            while data.has_remaining() {
+                let mut source_address = Address::ZERO;
+                data.copy_to_slice(source_address.as_mut_slice());
+
+                let mut validator_public_key = FixedBytes::<48>::ZERO;
+                data.copy_to_slice(validator_public_key.as_mut_slice());
+
+                let amount = data.get_u64();
+
+                requests.push(Request::WithdrawalRequest(WithdrawalRequest {
+                    source_address,
+                    validator_public_key,
+                    amount,
+                }));
+            }
+            Ok(requests)
         }
         ExecutionResult::Revert { output, .. } => {
             Err(BlockValidationError::WithdrawalRequestsContractCall {
