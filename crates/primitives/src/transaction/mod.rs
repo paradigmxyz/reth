@@ -1,3 +1,5 @@
+//! Transaction types.
+
 #[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};

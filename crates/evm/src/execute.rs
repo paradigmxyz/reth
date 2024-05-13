@@ -106,7 +106,7 @@ pub struct BatchBlockExecutionOutput {
     ///
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
-    pub requests: Requests,
+    pub requests: Vec<Requests>,
     /// First block of bundle state.
     pub first_block: BlockNumber,
 }
@@ -116,7 +116,7 @@ impl BatchBlockExecutionOutput {
     pub fn new(
         bundle: BundleState,
         receipts: Receipts,
-        requests: Requests,
+        requests: Vec<Requests>,
         first_block: BlockNumber,
     ) -> Self {
         Self { bundle, receipts, requests, first_block }
@@ -261,8 +261,13 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let block =
-            Block { header: Default::default(), body: vec![], ommers: vec![], withdrawals: None };
+        let block = Block {
+            header: Default::default(),
+            body: vec![],
+            ommers: vec![],
+            withdrawals: None,
+            requests: None,
+        };
         let block = BlockWithSenders::new(block, Default::default()).unwrap();
         let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
     }

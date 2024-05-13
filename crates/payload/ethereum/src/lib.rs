@@ -18,12 +18,14 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH,
+        EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, Requests, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
@@ -165,6 +167,13 @@ where
             blob_gas_used = Some(0);
         }
 
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+            } else {
+                (None, None)
+            };
+
         let header = Header {
             parent_hash: parent_block.hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -186,9 +195,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            requests_root,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
         Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
@@ -424,6 +434,14 @@ where
         blob_gas_used = Some(sum_blob_gas_used);
     }
 
+    // todo: compute requests and requests root
+    let (requests, requests_root) =
+        if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+            (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+        } else {
+            (None, None)
+        };
+
     let header = Header {
         parent_hash: parent_block.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -445,10 +463,11 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

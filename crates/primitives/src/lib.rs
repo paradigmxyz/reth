@@ -45,7 +45,6 @@ pub mod revm;
 pub mod stage;
 pub mod static_file;
 mod storage;
-/// Helpers for working with transactions
 pub mod transaction;
 pub mod trie;
 mod withdrawal;
@@ -84,7 +83,6 @@ pub use prune::{
     MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
-pub use request::Requests;
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -105,10 +103,12 @@ pub use transaction::{
     LEGACY_TX_TYPE_ID,
 };
 
+pub use request::Requests;
 pub use withdrawal::{Withdrawal, Withdrawals};
 
 // Re-exports
 pub use self::ruint::UintTryTo;
+pub use alloy_consensus::Request;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},

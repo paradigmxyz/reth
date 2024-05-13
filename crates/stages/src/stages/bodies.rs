@@ -663,6 +663,7 @@ mod tests {
                     transactions: block.body.clone(),
                     ommers: block.ommers.clone(),
                     withdrawals: block.withdrawals.clone(),
+                    requests: block.requests.clone(),
                 },
             )
         }
@@ -941,6 +942,7 @@ mod tests {
                             body: body.transactions,
                             ommers: body.ommers,
                             withdrawals: body.withdrawals,
+                            requests: body.requests,
                         }));
                     }
 

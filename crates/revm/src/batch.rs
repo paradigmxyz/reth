@@ -30,7 +30,7 @@ pub struct BlockBatchRecord {
     ///
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
-    requests: Requests,
+    requests: Vec<Requests>,
     /// Memoized address pruning filter.
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
@@ -84,7 +84,7 @@ impl BlockBatchRecord {
     }
 
     /// Returns all recorded requests.
-    pub fn take_requests(&mut self) -> Requests {
+    pub fn take_requests(&mut self) -> Vec<Requests> {
         std::mem::take(&mut self.requests)
     }
 
@@ -171,7 +171,7 @@ impl BlockBatchRecord {
 
     /// Save EIP-7685 requests to the executor.
     pub fn save_requests(&mut self, requests: Vec<Request>) {
-        self.requests.push(requests);
+        self.requests.push(requests.into());
     }
 }
 

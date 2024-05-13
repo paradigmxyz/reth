@@ -8,8 +8,9 @@ use reth_primitives::{
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
+    trie::EMPTY_ROOT_HASH,
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Receipts, Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -244,6 +245,15 @@ impl PendingBlockEnv {
         let blob_gas_used =
             if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
 
+        // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
+        // set these to empty
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(block_env.timestamp.to::<u64>()) {
+                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+            } else {
+                (None, None)
+            };
+
         let header = Header {
             parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -265,10 +275,11 @@ impl PendingBlockEnv {
             excess_blob_gas: block_env.get_blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root,
+            requests_root,
         };
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
         Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
     }
 }
