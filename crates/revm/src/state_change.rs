@@ -1,6 +1,6 @@
 use alloy_consensus::Request;
 use alloy_eips::eip7002::WithdrawalRequest;
-use alloy_rlp::Buf;
+use alloy_rlp::{Buf, MaxEncodedLenAssoc};
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -330,9 +330,16 @@ where
 
     let withdrawal_requests = match result {
         ExecutionResult::Success { output, .. } => {
-            let mut requests = vec![];
             let mut data = output.into_data();
+            let mut requests = Vec::with_capacity(data.len() / (20 + 48 + 8));
 
+            // Withdrawals are encoded as a series of withdrawal requests, each with the following
+            // format:
+            //
+            // +------+--------+--------+
+            // | addr | pubkey | amount |
+            // +------+--------+--------+
+            //    20      48        8
             while data.has_remaining() {
                 let mut source_address = Address::ZERO;
                 data.copy_to_slice(source_address.as_mut_slice());
