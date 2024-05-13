@@ -34,6 +34,7 @@ tracing.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 alloy-eips.workspace = true

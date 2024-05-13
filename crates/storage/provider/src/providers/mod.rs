@@ -3,9 +3,9 @@ use crate::{
     BlockSource, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
     CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
-    TreeViewer, WithdrawalsProvider,
+    ReceiptProvider, ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
 use reth_db::{
     database::Database,
@@ -465,6 +465,19 @@ where
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.database.latest_withdrawal()
+    }
+}
+
+impl<DB> RequestsProvider for BlockchainProvider<DB>
+where
+    DB: Database,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.database.requests_by_block(id, timestamp)
     }
 }
 

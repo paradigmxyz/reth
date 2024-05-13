@@ -1,25 +1,25 @@
-use alloy_consensus::Request;
+//! EIP-7685 requests.
 
-/// A collection of requests organized as a two-dimensional vector.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct Requests {
-    /// A two-dimensional vector of [Request] instances.
-    pub request_vec: Vec<Vec<Request>>,
+use alloy_consensus::Request;
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use reth_codecs::{main_codec, Compact};
+
+/// A list of EIP-7685 requests.
+#[main_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]
+pub struct Requests(pub Vec<Request>);
+
+impl From<Vec<Request>> for Requests {
+    fn from(requests: Vec<Request>) -> Self {
+        Self(requests)
+    }
 }
 
-impl Requests {
-    /// Create a new [Requests] instance with an empty vector.
-    pub fn new() -> Self {
-        Self { request_vec: vec![] }
-    }
+impl IntoIterator for Requests {
+    type Item = Request;
+    type IntoIter = std::vec::IntoIter<Request>;
 
-    /// Create a new [Requests] instance from an existing vector.
-    pub fn from_vec(vec: Vec<Vec<Request>>) -> Self {
-        Self { request_vec: vec }
-    }
-
-    /// Push a new vector of [requests](Request) into the [Requests] collection.
-    pub fn push(&mut self, requests: Vec<Request>) {
-        self.request_vec.push(requests);
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }

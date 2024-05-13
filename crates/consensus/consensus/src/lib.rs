@@ -116,6 +116,11 @@ pub enum ConsensusError {
     #[error("mismatched block withdrawals root: {0}")]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
 
+    /// Error when the requests root in the block is different from the expected requests
+    /// root.
+    #[error("mismatched block requests root: {0}")]
+    BodyRequestsRootDiff(GotExpectedBoxed<B256>),
+
     /// Error when a block with a specific hash and number is already known.
     #[error("block with [hash={hash}, number={number}] is already known")]
     BlockKnown {
@@ -183,13 +188,25 @@ pub enum ConsensusError {
     #[error("missing withdrawals root")]
     WithdrawalsRootMissing,
 
+    /// Error when the requests root is missing.
+    #[error("missing requests root")]
+    RequestsRootMissing,
+
     /// Error when an unexpected withdrawals root is encountered.
     #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
+    /// Error when an unexpected requests root is encountered.
+    #[error("unexpected requests root")]
+    RequestsRootUnexpected,
+
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
+
+    /// Error when requests are missing.
+    #[error("missing requests")]
+    BodyRequestsMissing,
 
     /// Error when blob gas used is missing.
     #[error("missing blob gas used")]

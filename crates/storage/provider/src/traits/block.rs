@@ -1,6 +1,6 @@
 use crate::{
     BlockIdReader, BlockNumReader, BundleStateWithReceipts, Chain, HeaderProvider, ReceiptProvider,
-    ReceiptProviderIdExt, TransactionsProvider, WithdrawalsProvider,
+    ReceiptProviderIdExt, RequestsProvider, TransactionsProvider, WithdrawalsProvider,
 };
 use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
@@ -64,6 +64,7 @@ pub trait BlockReader:
     + TransactionsProvider
     + ReceiptProvider
     + WithdrawalsProvider
+    + RequestsProvider
     + Send
     + Sync
 {

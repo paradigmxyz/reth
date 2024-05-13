@@ -10,20 +10,23 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use reth_basic_payload_builder::{
-    commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
-    BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
+    commit_withdrawals, is_better_payload, post_block_withdrawal_requests_contract_call,
+    pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
+    PayloadConfig, WithdrawalsOutcome,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
 use reth_primitives::{
     constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH,
+        EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
-    proofs,
+    proofs::{self, calculate_requests_root},
     revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, Requests, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
@@ -165,6 +168,13 @@ where
             blob_gas_used = Some(0);
         }
 
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+            } else {
+                (None, None)
+            };
+
         let header = Header {
             parent_hash: parent_block.hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -186,9 +196,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            requests_root,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
         Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
@@ -268,12 +279,12 @@ where
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue;
+            continue
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled);
+            return Ok(BuildOutcome::Cancelled)
         }
 
         // convert tx to a signed transaction
@@ -290,7 +301,7 @@ where
                 // for regular transactions above.
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
         }
 
@@ -319,11 +330,11 @@ where
                             best_txs.mark_invalid(&pool_tx);
                         }
 
-                        continue;
+                        continue
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err));
+                        return Err(PayloadBuilderError::EvmExecutionError(err))
                     }
                 }
             }
@@ -372,8 +383,27 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
+
+    // calculate the requests and the requests root
+    let (requests, requests_root) =
+        if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+            let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                &mut db,
+                &chain_spec,
+                &initialized_cfg,
+                &initialized_block_env,
+                &attributes,
+            )?;
+            // TODO: add deposit requests (https://github.com/paradigmxyz/reth/pull/8204)
+
+            let requests = withdrawal_requests;
+            let requests_root = calculate_requests_root(&requests);
+            (Some(requests.into()), Some(requests_root))
+        } else {
+            (None, None)
+        };
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
@@ -445,10 +475,11 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

@@ -47,6 +47,9 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
             body,
             ommers: Default::default(),
             withdrawals: block.withdrawals.map(Into::into),
+            // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it as
+            // empty.
+            requests: None,
         })
     }
 }
@@ -93,6 +96,8 @@ impl TryFrom<alloy_rpc_types::Header> for Header {
             timestamp: header.timestamp,
             transactions_root: header.transactions_root,
             withdrawals_root: header.withdrawals_root,
+            // TODO: requests_root: header.requests_root,
+            requests_root: None,
         })
     }
 }

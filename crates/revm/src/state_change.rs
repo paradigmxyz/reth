@@ -1,5 +1,6 @@
 use alloy_consensus::Request;
-use alloy_rlp::Decodable;
+use alloy_eips::eip7002::WithdrawalRequest;
+use alloy_rlp::Buf;
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -13,7 +14,7 @@ use reth_primitives::{
 use revm::{
     self,
     interpreter::Host,
-    primitives::{Account, AccountInfo, ExecutionResult, ResultAndState, StorageSlot},
+    primitives::{Account, AccountInfo, ExecutionResult, FixedBytes, ResultAndState, StorageSlot},
     Database, DatabaseCommit, Evm,
 };
 use std::{collections::HashMap, ops::Rem};
@@ -295,7 +296,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
 /// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
 /// returned. Otherwise, the withdrawal requests are returned.
 #[inline]
-pub fn post_block_withdrawal_requests<EXT, DB: Database + DatabaseCommit>(
+pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     evm: &mut Evm<'_, EXT, DB>,
@@ -318,21 +319,22 @@ where
         Err(e) => {
             evm.context.evm.env = previous_env;
             return Err(BlockValidationError::WithdrawalRequestsContractCall {
-                message: e.to_string(),
+                message: format!("execution failed: {e}"),
             }
             .into())
         }
     };
 
+    // cleanup the state
     state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
     state.remove(&evm.block().coinbase);
+    evm.context.evm.db.commit(state);
 
-    let withdrawal_requests = match result {
-        ExecutionResult::Success { output, .. } => {
-            Vec::<Request>::decode(&mut output.into_data().as_ref()).map_err(|err| {
-                BlockValidationError::WithdrawalRequestsContractCall { message: err.to_string() }
-            })
-        }
+    // re-set the previous env
+    evm.context.evm.env = previous_env;
+
+    let mut data = match result {
+        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {
             Err(BlockValidationError::WithdrawalRequestsContractCall {
                 message: format!("execution reverted: {output}"),
@@ -344,10 +346,39 @@ where
             })
         }
     }?;
-    evm.context.evm.db.commit(state);
 
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
+    // Withdrawals are encoded as a series of withdrawal requests, each with the following
+    // format:
+    //
+    // +------+--------+--------+
+    // | addr | pubkey | amount |
+    // +------+--------+--------+
+    //    20      48        8
+
+    const WITHDRAWAL_REQUEST_SIZE: usize = 20 + 48 + 8;
+    let mut withdrawal_requests = Vec::with_capacity(data.len() / WITHDRAWAL_REQUEST_SIZE);
+    while data.has_remaining() {
+        if data.remaining() < WITHDRAWAL_REQUEST_SIZE {
+            return Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: "invalid withdrawal request length".to_string(),
+            }
+            .into())
+        }
+
+        let mut source_address = Address::ZERO;
+        data.copy_to_slice(source_address.as_mut_slice());
+
+        let mut validator_public_key = FixedBytes::<48>::ZERO;
+        data.copy_to_slice(validator_public_key.as_mut_slice());
+
+        let amount = data.get_u64();
+
+        withdrawal_requests.push(Request::WithdrawalRequest(WithdrawalRequest {
+            source_address,
+            validator_public_key,
+            amount,
+        }));
+    }
 
     Ok(withdrawal_requests)
 }
