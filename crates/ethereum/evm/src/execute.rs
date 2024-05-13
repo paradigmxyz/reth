@@ -133,7 +133,7 @@ where
         &self,
         block: &BlockWithSenders,
         evm: &mut Evm<'_, Ext, &mut State<DB>>,
-    ) -> Result<(Vec<Receipt>, u64, Vec<Request>), BlockExecutionError>
+    ) -> Result<(Vec<Receipt>, Vec<Request>, u64), BlockExecutionError>
     where
         DB: Database<Error = ProviderError>,
     {
@@ -202,10 +202,12 @@ where
             .into())
         }
 
+        // Collect all EIP-7685 requests
         let withdrawal_requests =
             post_block_withdrawal_requests(&self.chain_spec, block.timestamp, evm)?;
+        let requests = withdrawal_requests;
 
-        Ok((receipts, cumulative_gas_used, withdrawal_requests))
+        Ok((receipts, requests, cumulative_gas_used))
     }
 }
 
@@ -280,7 +282,7 @@ where
 
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
-        let (receipts, gas_used, requests) = {
+        let (receipts, requests, gas_used) = {
             let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
             self.executor.execute_state_transitions(block, &mut evm)
         }?;
