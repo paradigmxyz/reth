@@ -173,7 +173,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
 /// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
 /// returned. Otherwise, the withdrawal requests are returned.
 #[inline]
-pub fn post_block_withdrawal_requests<EXT, DB: Database + DatabaseCommit>(
+pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommit>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     evm: &mut Evm<'_, EXT, DB>,

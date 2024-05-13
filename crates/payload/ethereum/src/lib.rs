@@ -10,8 +10,9 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use reth_basic_payload_builder::{
-    commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
-    BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
+    commit_withdrawals, is_better_payload, post_block_withdrawal_requests_contract_call,
+    pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
+    PayloadConfig, WithdrawalsOutcome,
 };
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
@@ -24,7 +25,7 @@ use reth_primitives::{
         EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
-    proofs,
+    proofs::{self, calculate_requests_root},
     revm::env::tx_env_with_recovered,
     Block, Header, IntoRecoveredTransaction, Receipt, Receipts, Requests, EMPTY_OMMER_ROOT_HASH,
     U256,
@@ -141,14 +142,6 @@ where
             );
             err
         })?;
-
-        // Calculate the requests and the requests root.
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-            } else {
-                (None, None)
-            };
 
         // merge all transitions into bundle state, this would apply the withdrawal balance
         // changes and 4788 contract call
@@ -385,6 +378,25 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
+    // calculate the requests and the requests root
+    let (requests, requests_root) =
+        if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+            let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                &mut db,
+                &chain_spec,
+                &initialized_cfg,
+                &initialized_block_env,
+                &attributes,
+            )?;
+            // TODO: add deposit requests (https://github.com/paradigmxyz/reth/pull/8204)
+
+            let requests = withdrawal_requests;
+            let requests_root = calculate_requests_root(&requests);
+            (Some(requests.into()), Some(requests_root))
+        } else {
+            (None, None)
+        };
+
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
@@ -433,14 +445,6 @@ where
 
         blob_gas_used = Some(sum_blob_gas_used);
     }
-
-    // todo: compute requests and requests root
-    let (requests, requests_root) =
-        if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-            (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-        } else {
-            (None, None)
-        };
 
     let header = Header {
         parent_hash: parent_block.hash(),
