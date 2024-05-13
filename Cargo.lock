@@ -139,14 +139,17 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
+ "arbitrary",
  "c-kzg",
+ "proptest",
+ "proptest-derive",
  "serde",
 ]
 
 [[package]]
 name = "alloy-consensus"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#0f9711692743d0444a887a589ca6786df77568be"
+source = "git+https://github.com/alloy-rs/alloy#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy)",
  "alloy-primitives",
@@ -195,7 +198,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#0f9711692743d0444a887a589ca6786df77568be"
+source = "git+https://github.com/alloy-rs/alloy#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -220,7 +223,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#0f9711692743d0444a887a589ca6786df77568be"
+source = "git+https://github.com/alloy-rs/alloy#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-primitives",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy)",
@@ -407,7 +410,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#0f9711692743d0444a887a589ca6786df77568be"
+source = "git+https://github.com/alloy-rs/alloy#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy)",
@@ -488,7 +491,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#0f9711692743d0444a887a589ca6786df77568be"
+source = "git+https://github.com/alloy-rs/alloy#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -909,11 +912,12 @@ dependencies = [
 
 [[package]]
 name = "async-channel"
-version = "2.3.1"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89b47800b0be77592da0afd425cc03468052844aff33b84e33cc696f64e77b6a"
+checksum = "9f2776ead772134d55b62dd45e59a79e21612d85d0af729b8b7d3967d601a62a"
 dependencies = [
  "concurrent-queue",
+ "event-listener 5.3.0",
  "event-listener-strategy 0.5.2",
  "futures-core",
  "pin-project-lite",
@@ -1259,7 +1263,7 @@ version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "495f7104e962b7356f0aeb34247aca1fe7d2e783b346582db7f2904cb5717e88"
 dependencies = [
- "async-channel 2.3.1",
+ "async-channel 2.3.0",
  "async-lock",
  "async-task",
  "futures-io",
@@ -6569,6 +6573,7 @@ dependencies = [
 name = "reth-codecs"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-primitives",
@@ -7582,6 +7587,7 @@ name = "reth-primitives"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-chains",
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-primitives",

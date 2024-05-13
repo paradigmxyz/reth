@@ -217,9 +217,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
+            requests_root: None,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
         Ok(OptimismBuiltPayload::new(
@@ -577,10 +578,11 @@ where
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root: None,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests: None };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

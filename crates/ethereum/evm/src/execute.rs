@@ -473,6 +473,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },
@@ -503,6 +504,7 @@ mod tests {
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        requests: None,
                     },
                     senders: vec![],
                 },
@@ -563,7 +565,13 @@ mod tests {
             .execute(
                 (
                     &BlockWithSenders {
-                        block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -609,7 +617,13 @@ mod tests {
         executor
             .execute_without_verification(
                 &BlockWithSenders {
-                    block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                    block: Block {
+                        header,
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                        requests: None,
+                    },
                     senders: vec![],
                 },
                 U256::ZERO,
@@ -653,6 +667,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },
@@ -674,7 +689,13 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -733,6 +754,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },

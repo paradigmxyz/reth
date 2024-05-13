@@ -8,8 +8,8 @@ use reth_primitives::{
     hex_literal::hex,
     proofs::{state_root_unhashed, storage_root_unhashed},
     revm::compat::into_reth_acc,
-    Address, BlockNumber, Bytes, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
-    TxType, Withdrawal, Withdrawals, B256, U256,
+    Address, BlockNumber, Bytes, Header, Receipt, Receipts, Requests, SealedBlock,
+    SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::{
     db::BundleState,
@@ -108,6 +108,7 @@ pub fn genesis() -> SealedBlock {
         body: vec![],
         ommers: vec![],
         withdrawals: Some(Withdrawals::default()),
+        requests: Some(Requests::default()),
     }
 }
 

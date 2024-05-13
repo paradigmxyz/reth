@@ -11,7 +11,7 @@ use reth_evm::execute::BatchBlockExecutionOutput;
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockHash, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts,
+    Account, Address, BlockHash, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
     StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -41,7 +41,7 @@ pub struct BundleStateWithReceipts {
 // TODO(mattsse): unify the types, currently there's a cyclic dependency between
 impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
     fn from(value: BatchBlockExecutionOutput) -> Self {
-        let BatchBlockExecutionOutput { bundle, receipts, first_block } = value;
+        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } = value;
         Self { bundle, receipts, first_block }
     }
 }
@@ -50,7 +50,8 @@ impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
 impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
     fn from(value: BundleStateWithReceipts) -> Self {
         let BundleStateWithReceipts { bundle, receipts, first_block } = value;
-        Self { bundle, receipts, first_block }
+        // TODO(alexey): add requests
+        Self { bundle, receipts, requests: Vec::default(), first_block }
     }
 }
 

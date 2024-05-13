@@ -55,6 +55,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         blob_gas_used: None,
         excess_blob_gas: None,
         parent_beacon_block_root: None,
+        requests_root: None,
         extra_data: payload.extra_data,
         // Defaults
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -62,7 +63,13 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         nonce: Default::default(),
     };
 
-    Ok(Block { header, body: transactions, withdrawals: None, ommers: Default::default() })
+    Ok(Block {
+        header,
+        body: transactions,
+        ommers: Default::default(),
+        withdrawals: None,
+        requests: None,
+    })
 }
 
 /// Converts [ExecutionPayloadV2] to [Block]
@@ -90,18 +97,21 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 
 /// Converts [ExecutionPayloadV4] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    // this performs the same conversion as the underlying V3 payload.
-    //
-    // the new request lists (`deposit_requests`, `withdrawal_requests`) are EL -> CL only, so we do
-    // not do anything special here to handle them
-    try_payload_v3_to_block(payload.payload_inner)
+    // this performs the same conversion as the underlying V3 payload, but inserts the blob gas
+    // used and excess blob gas
+    let mut base_block = try_payload_v3_to_block(payload.payload_inner)?;
+
+    base_block.header.requests_root = None;
+    base_block.requests = None;
+
+    todo!()
 }
 
-/// Converts [SealedBlock] to [ExecutionPayload], returning additional data (the parent beacon block
-/// root) if the block is a V3 payload
-pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) {
-    // todo(onbjerg): check for requests_root here and return payload v4
-    if value.header.parent_beacon_block_root.is_some() {
+/// Converts [SealedBlock] to [ExecutionPayload]
+pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
+    if value.header.requests_root.is_some() {
+        (ExecutionPayload::V4(block_to_payload_v4(value)), None)
+    } else if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         let (payload, beacon_block_root) = block_to_payload_v3(value);
         (ExecutionPayload::V3(payload), beacon_block_root)
@@ -190,6 +200,11 @@ pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B2
     };
 
     (payload, parent_beacon_block_root)
+}
+
+/// Converts [SealedBlock] to [ExecutionPayloadV4]
+pub fn block_to_payload_v4(_value: SealedBlock) -> ExecutionPayloadV4 {
+    todo!()
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadFieldV2]

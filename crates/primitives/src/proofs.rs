@@ -7,6 +7,7 @@ use crate::{
     Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
     B256, U256,
 };
+use alloy_consensus::Request;
 use alloy_rlp::Encodable;
 use itertools::Itertools;
 
@@ -67,6 +68,11 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
+/// Calculate EIP-7685 requests root.
+pub fn calculate_requests_root(requests: &[Request]) -> B256 {
+    ordered_trie_root(requests)
 }
 
 /// Calculates the receipt root for a header.

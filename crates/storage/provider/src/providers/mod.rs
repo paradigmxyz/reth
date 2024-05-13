@@ -9,8 +9,13 @@ use crate::{
 };
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
-    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-    InsertPayloadOk,
+    BlockSource, BlockValidationKind, BlockchainTreeEngine, BlockchainTreePendingStateProvider,
+    BlockchainTreeViewer, BundleStateDataProvider, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, CanonicalOutcome, ChainSpecProvider, ChangeSetReader,
+    DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, InsertPayloadOk, ProviderError,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
 use reth_db::{
     database::Database,
@@ -462,6 +467,19 @@ where
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.database.latest_withdrawal()
+    }
+}
+
+impl<DB> RequestsProvider for BlockchainProvider<DB>
+where
+    DB: Database,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.database.requests_by_block(id, timestamp)
     }
 }
 

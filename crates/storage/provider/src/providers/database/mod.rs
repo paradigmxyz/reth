@@ -4,8 +4,9 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, PruneCheckpointReader, RequestsProvider, StageCheckpointReader,
+    StateProviderBox, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{
     database::Database, init_db, mdbx::DatabaseArguments, models::StoredBlockBodyIndices,
@@ -462,6 +463,19 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.provider()?.latest_withdrawal()
+    }
+}
+
+impl<DB> RequestsProvider for ProviderFactory<DB>
+where
+    DB: Database,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.provider()?.requests_by_block(id, timestamp)
     }
 }
 
