@@ -53,9 +53,10 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
     }
 
-    if chain_spec.is_prague_active_at_timestamp(header.timestamp) && header.requests_root.is_none()
-    {
-        return Err(ConsensusError::RequestsRootMissing)
+    if chain_spec.is_prague_active_at_timestamp(header.timestamp) {
+        if header.requests_root.is_none() {
+            return Err(ConsensusError::RequestsRootMissing)
+        }
     } else if header.requests_root.is_some() {
         return Err(ConsensusError::RequestsRootUnexpected)
     }
