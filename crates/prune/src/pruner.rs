@@ -82,7 +82,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Listen for events on the pruner.
-    pub fn events(&mut self) -> BroadcastStream<PrunerEvent> {
+    pub fn events(&self) -> BroadcastStream<PrunerEvent> {
         self.listeners.new_listener()
     }
 
