@@ -1,6 +1,6 @@
 //! Test results and errors
 
-use crate::Case;
+use crate::{case::CaseAsync, Case};
 use reth_db::DatabaseError;
 use reth_interfaces::RethError;
 use std::path::{Path, PathBuf};
@@ -67,6 +67,24 @@ impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, case: &impl Case, result: Result<(), Error>) -> Self {
         CaseResult { desc: case.description(), path: path.into(), result }
+    }
+}
+
+/// The result of running a test.
+#[derive(Debug)]
+pub struct CaseAsyncResult {
+    /// A description of the test.
+    pub desc: String,
+    /// The full path to the test.
+    pub path: PathBuf,
+    /// The result of the test.
+    pub result: Result<(), Error>,
+}
+
+impl CaseAsyncResult {
+    /// Create a new test result.
+    pub fn new(path: &Path, case: &impl CaseAsync, result: Result<(), Error>) -> Self {
+        CaseAsyncResult { desc: case.description(), path: path.into(), result }
     }
 }
 

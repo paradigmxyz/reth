@@ -1,12 +1,15 @@
 #![cfg(feature = "ef-tests")]
 
-use ef_tests::{cases::blockchain_test::BlockchainTests, suite::Suite};
+use ef_tests::{
+    cases::blockchain_test::BlockchainTests,
+    suite::{Suite, SuiteAsync},
+};
 
 macro_rules! general_state_test {
     ($test_name:ident, $dir:ident) => {
-        #[test]
-        fn $test_name() {
-            BlockchainTests::new(format!("GeneralStateTests/{}", stringify!($dir))).run();
+        #[tokio::test(flavor = "multi_thread")]
+        async fn $test_name() {
+            BlockchainTests::new(format!("GeneralStateTests/{}", stringify!($dir))).run().await;
         }
     };
 }

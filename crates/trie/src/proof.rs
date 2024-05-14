@@ -46,6 +46,7 @@ where
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateRootError> {
+        //println!("Brecht account proof");
         let target_hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(target_hashed_address);
         let mut account_proof = AccountProof::new(address);
@@ -66,11 +67,15 @@ where
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
+            println!("loop account: {:?}", account_node);
             match account_node {
                 AccountNode::Branch(node) => {
+                    println!("reth branch");
+                    assert!(false);
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 AccountNode::Leaf(hashed_address, account) => {
+                    println!("reth leaf");
                     let storage_root = if hashed_address == target_hashed_address {
                         let (storage_root, storage_proofs) =
                             self.storage_root_with_proofs(hashed_address, slots)?;
@@ -89,7 +94,9 @@ where
             }
         }
 
-        let _ = hash_builder.root();
+        let root = hash_builder.root();
+        println!("proof root: {:?}", root);
+        println!("{:?}", hash_builder);
 
         let proofs = hash_builder.take_proofs();
         account_proof.set_proof(proofs.values().cloned().collect());
@@ -109,6 +116,7 @@ where
         hashed_address: B256,
         slots: &[B256],
     ) -> Result<(B256, Vec<StorageProof>), StorageRootError> {
+        //println!("Brecht storage root");
         let mut hashed_storage_cursor = self.hashed_cursor_factory.hashed_storage_cursor()?;
 
         let mut proofs = slots.iter().copied().map(StorageProof::new).collect::<Vec<_>>();

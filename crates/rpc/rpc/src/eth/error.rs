@@ -471,6 +471,9 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::HaltedDepositPostRegolith => RpcInvalidTransactionError::Optimism(
                 OptimismInvalidTransactionError::HaltedDepositPostRegolith,
             ),
+            InvalidTransaction::InvalidAnchorTransaction => {
+                RpcInvalidTransactionError::BlobTransactionIsCreate
+            }
         }
     }
 }

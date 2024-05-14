@@ -144,8 +144,9 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
     }
 }
 
+/// from_block_with_transactions
 #[inline]
-fn from_block_with_transactions(
+pub fn from_block_with_transactions(
     block_length: usize,
     block_hash: B256,
     block: PrimitiveBlock,
