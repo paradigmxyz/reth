@@ -815,7 +815,6 @@ mod tests {
                 .await
                 .unwrap();
         });
-        assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::EventListener(..)));
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
 
