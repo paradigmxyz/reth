@@ -33,7 +33,7 @@ const FIXED_FEE_GAS: u64 = 3100;
 const AUTHORIZED_VAR_NAME: &str = "authorized";
 /// The gas that should be consumed for authcall transactions.
 ///
-/// From the spec: `NB: Not 9000, like in `CALL`
+/// From the spec: `NB: Not 9000, like in CALL`
 const AUTH_CALL_GAS: u64 = 6700;
 
 /// Generates an iterator over EIP3074 boxed instructions. Defining the
