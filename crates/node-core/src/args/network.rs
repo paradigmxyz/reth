@@ -21,6 +21,7 @@ use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    ops::Not,
     path::PathBuf,
     sync::Arc,
 };
@@ -39,7 +40,7 @@ pub struct NetworkArgs {
     #[arg(long, value_delimiter = ',')]
     pub trusted_peers: Vec<NodeRecord>,
 
-    /// Connect only to trusted peers
+    /// Connect to or accept from trusted peers only
     #[arg(long)]
     pub trusted_only: bool,
 
@@ -156,13 +157,9 @@ impl NetworkArgs {
         self.discovery.apply_to_builder(network_config_builder)
     }
 
-    /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
+    /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
-        if self.no_persist_peers {
-            return None
-        }
-
-        Some(peers_file)
+        self.no_persist_peers.not().then_some(peers_file)
     }
 
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
@@ -258,12 +255,12 @@ pub struct DiscoveryArgs {
 
     /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
     /// times, at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval", 
+    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval",
         default_value_t = DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL)]
     pub discv5_bootstrap_lookup_interval: u64,
 
     /// The number of times to carry out boost lookup queries at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown", 
+    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown",
         default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
     pub discv5_bootstrap_lookup_countdown: u64,
 }
