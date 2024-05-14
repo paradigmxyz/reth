@@ -20,7 +20,7 @@ reth-network-api = { path = "../net/network-api", optional = true }
 reth-eth-wire-types = { path = "../net/eth-wire-types", optional = true }
 
 # async
-futures = { workspace = true, optional = true } 
+futures = { workspace = true } 
 tokio = { workspace = true, features = ["sync"], optional = true }
 
 # misc
