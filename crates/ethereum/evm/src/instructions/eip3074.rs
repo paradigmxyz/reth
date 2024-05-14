@@ -2,14 +2,19 @@ use crate::instructions::{context::InstructionsContext, BoxedInstructionWithOpCo
 use reth_revm::{Context, Database};
 use revm_interpreter::{
     gas,
-    instructions::contract::{calc_call_gas, get_memory_input_and_out_ranges},
+    gas::{warm_cold_cost, NEWACCOUNT},
+    instructions::contract::get_memory_input_and_out_ranges,
     pop, pop_address, push, resize_memory, CallInputs, CallScheme, CallValue, InstructionResult,
     Interpreter, InterpreterAction,
 };
 use revm_precompile::secp256k1::ecrecover;
 use revm_primitives::{
-    alloy_primitives::B512, keccak256, spec_to_generic, Address, SpecId, B256, KECCAK_EMPTY, U256,
+    alloy_primitives::B512,
+    keccak256, spec_to_generic, Address, Spec,
+    SpecId::{self, TANGERINE},
+    B256, KECCAK_EMPTY, U256,
 };
+use std::cmp::min;
 
 /// Numeric op code for the `AUTH` mnemonic.
 const AUTH_OPCODE: u8 = 0xF6;
@@ -26,6 +31,10 @@ const FIXED_FEE_GAS: u64 = 3100;
 /// Context variable name to store (AUTH) and retrieve (AUTHCALL) the validated
 /// authority.
 const AUTHORIZED_VAR_NAME: &str = "authorized";
+/// The gas that should be consumed for authcall transactions.
+///
+/// From the spec: `NB: Not 9000, like in `CALL`
+const AUTH_CALL_GAS: u64 = 6700;
 
 /// Generates an iterator over EIP3074 boxed instructions. Defining the
 /// instructions inside a `Box` allows them to capture variables defined in its
@@ -149,6 +158,75 @@ fn auth_instruction<EXT, DB: Database>(
     }
 }
 
+// Duplicated from revm
+/// Calculates the gas for an authcall instruction, mostly duplicated from revm:
+/// <https://github.com/bluealloy/revm/blob/d185018d33fd73a880eaa54bdcd6e463f8a6d11a/crates/interpreter/src/instructions/contract/call_helpers.rs#L45>
+#[inline]
+fn calc_authcall_gas<SPEC: Spec>(
+    interpreter: &mut Interpreter,
+    is_cold: bool,
+    has_transfer: bool,
+    new_account_accounting: bool,
+    local_gas_limit: u64,
+) -> Option<u64> {
+    let call_cost = authcall_cost(SPEC::SPEC_ID, has_transfer, is_cold, new_account_accounting);
+
+    gas!(interpreter, call_cost, None);
+
+    // EIP-150: Gas cost changes for IO-heavy operations
+    let gas_limit = if SPEC::enabled(TANGERINE) {
+        let gas = interpreter.gas().remaining();
+        // take l64 part of gas_limit
+        min(gas - gas / 64, local_gas_limit)
+    } else {
+        local_gas_limit
+    };
+
+    Some(gas_limit)
+}
+
+/// Calculate call gas cost for the authcall instruction.
+///
+/// Mostly duplicated from revm:
+/// <https://github.com/bluealloy/revm/blob/d185018d33fd73a880eaa54bdcd6e463f8a6d11a/crates/interpreter/src/gas/calc.rs#L293>
+#[inline]
+const fn authcall_cost(
+    spec_id: SpecId,
+    transfers_value: bool,
+    is_cold: bool,
+    new_account_accounting: bool,
+) -> u64 {
+    // Account access.
+    let mut gas = if spec_id.is_enabled_in(SpecId::BERLIN) {
+        warm_cold_cost(is_cold)
+    } else if spec_id.is_enabled_in(SpecId::TANGERINE) {
+        // EIP-150: Gas cost changes for IO-heavy operations
+        700
+    } else {
+        40
+    };
+
+    // transfer value cost
+    if transfers_value {
+        gas += AUTH_CALL_GAS;
+    }
+
+    // new account cost
+    if new_account_accounting {
+        // EIP-161: State trie clearing (invariant-preserving alternative)
+        if spec_id.is_enabled_in(SpecId::SPURIOUS_DRAGON) {
+            // account only if there is value transferred.
+            if transfers_value {
+                gas += NEWACCOUNT;
+            }
+        } else {
+            gas += NEWACCOUNT;
+        }
+    }
+
+    gas
+}
+
 /// `AUTHCALL` instruction, tries to read a context variable set by a previous
 /// `AUTH` invocation and, if present, uses it as the `caller` in a `CALL`
 /// executed as the next action. See also:
@@ -192,7 +270,7 @@ fn authcall_instruction<EXT, DB: Database>(
     // it by using the spec ID set in the evm.
     let Some(gas_limit) = spec_to_generic!(
         evm.evm.spec_id(),
-        calc_call_gas::<SPEC>(
+        calc_authcall_gas::<SPEC>(
             interp,
             true,                // is_cold
             value != U256::ZERO, // has_transfer
