@@ -475,6 +475,7 @@ where
 mod tests {
     use super::*;
     use alloy_eips::{
+        eip2935::HISTORY_STORAGE_ADDRESS,
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
@@ -484,7 +485,8 @@ mod tests {
         ForkCondition, Transaction, TxKind, TxLegacy, B256,
     };
     use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
+        database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,
+        test_utils::StateProviderTest, TransitionState,
     };
     use revm_primitives::{b256, fixed_bytes, Bytes};
     use secp256k1::{Keypair, Secp256k1};
@@ -974,26 +976,22 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let provider = executor_provider(chain_spec);
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // construct the header for block one
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
 
-        executor.init_env(&header, U256::ZERO);
-
         // attempt to execute an empty block, this should not fail
         executor
-            .execute_and_verify_receipt(
+            .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        requests: None,
                     },
                     senders: vec![],
                 },
@@ -1008,8 +1006,8 @@ mod tests {
         //
         // we load the account first, which should also not exist, because revm expects it to be
         // loaded
-        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
-        assert!(executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
+        assert!(executor.state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
     }
 
     #[test]
@@ -1024,23 +1022,19 @@ mod tests {
         );
 
         let header = chain_spec.genesis_header();
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let provider = executor_provider(chain_spec);
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
-        executor.init_env(&header, U256::ZERO);
-
-        // attempt to execute the genesis block, this should not fail
+        // attempt to execute genesis block, this should not fail
         executor
-            .execute_and_verify_receipt(
+            .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        requests: None,
                     },
                     senders: vec![],
                 },
@@ -1055,8 +1049,8 @@ mod tests {
         //
         // we load the account first, which should also not exist, because revm expects it to be
         // loaded
-        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
-        assert!(executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
+        assert!(executor.state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
     }
 
     #[test]
@@ -1071,25 +1065,20 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
-
         let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
-
-        executor.init_env(&header, U256::ZERO);
+        let provider = executor_provider(chain_spec);
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the fork activation block, this should not fail
         executor
-            .execute_and_verify_receipt(
+            .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        ..Default::default()
                     },
                     senders: vec![],
                 },
@@ -1104,17 +1093,17 @@ mod tests {
         //
         // our fork activation check depends on checking slot 0, so we also check that slot 0 was
         // indeed set if the fork activation block was within `HISTORY_SERVE_WINDOW`
-        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert!(executor.state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
         for slot in 0..fork_activation_block {
             assert_ne!(
-                executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
+                executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
                 U256::ZERO
             );
         }
 
         // the hash of the block itself should not be in storage
         assert!(executor
-            .db_mut()
+            .state
             .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
             .unwrap()
             .is_zero());
@@ -1132,25 +1121,21 @@ mod tests {
                 .build(),
         );
 
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
+        let provider = executor_provider(chain_spec);
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
 
-        executor.init_env(&header, U256::ZERO);
-
         // attempt to execute the fork activation block, this should not fail
         executor
-            .execute_and_verify_receipt(
+            .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        ..Default::default()
                     },
                     senders: vec![],
                 },
@@ -1165,10 +1150,10 @@ mod tests {
         //
         // our fork activation check depends on checking slot 0, so we also check that slot 0 was
         // indeed set if the fork activation block was within `HISTORY_SERVE_WINDOW`
-        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert!(executor.state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
         for slot in 0..HISTORY_SERVE_WINDOW {
             assert_ne!(
-                executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
+                executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
                 U256::ZERO
             );
         }
@@ -1186,23 +1171,19 @@ mod tests {
         );
 
         let header = chain_spec.genesis_header();
-        let mut executor = EVMProcessor::new_with_db(
-            chain_spec,
-            StateProviderDatabase::new(db),
-            TestEvmConfig::default(),
-        );
-
-        executor.init_env(&header, U256::ZERO);
+        let provider = executor_provider(chain_spec);
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the genesis block, this should not fail
         executor
-            .execute_and_verify_receipt(
+            .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        requests: None,
                     },
                     senders: vec![],
                 },
@@ -1213,15 +1194,21 @@ mod tests {
             );
 
         // nothing should be written as the genesis has no ancestors
-        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
-        assert!(executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
+        assert!(executor.state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
 
         // attempt to execute block 1, this should not fail
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
         executor
-            .execute_and_verify_receipt(
+            .execute_and_verify(
                 &BlockWithSenders {
-                    block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                    block: Block {
+                        header,
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                        ..Default::default()
+                    },
                     senders: vec![],
                 },
                 U256::ZERO,
@@ -1231,23 +1218,25 @@ mod tests {
             );
 
         // the block hash of genesis should now be in storage, but not block 1
-        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert!(executor.state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
         assert_ne!(
-            executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
+            executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
             U256::ZERO
         );
-        assert!(executor
-            .db_mut()
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
-            .unwrap()
-            .is_zero());
+        assert!(executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero());
 
         // attempt to execute block 2, this should not fail
         let header = Header { timestamp: 1, number: 2, ..Header::default() };
         executor
-            .execute_and_verify_receipt(
+            .execute_and_verify(
                 &BlockWithSenders {
-                    block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                    block: Block {
+                        header,
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                        ..Default::default()
+                    },
                     senders: vec![],
                 },
                 U256::ZERO,
@@ -1257,19 +1246,15 @@ mod tests {
             );
 
         // the block hash of genesis and block 1 should now be in storage, but not block 2
-        assert!(executor.db_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert!(executor.state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
         assert_ne!(
-            executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
+            executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
             U256::ZERO
         );
         assert_ne!(
-            executor.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap(),
+            executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap(),
             U256::ZERO
         );
-        assert!(executor
-            .db_mut()
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(2))
-            .unwrap()
-            .is_zero());
+        assert!(executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::from(2)).unwrap().is_zero());
     }
 }
