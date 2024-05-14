@@ -124,6 +124,14 @@ where
             err
         })?;
 
+        // Calculate the requests and the requests root.
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+            } else {
+                (None, None)
+            };
+
         // merge all transitions into bundle state, this would apply the withdrawal balance
         // changes and 4788 contract call
         db.merge_transitions(BundleRetention::PlainState);
@@ -155,13 +163,6 @@ where
 
             blob_gas_used = Some(0);
         }
-
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-            } else {
-                (None, None)
-            };
 
         let header = Header {
             parent_hash: parent_block.hash(),
