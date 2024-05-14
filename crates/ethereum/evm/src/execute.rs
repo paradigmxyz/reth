@@ -557,7 +557,7 @@ mod tests {
                 (
                     &BlockWithSenders {
                         block: Block {
-                            header,
+                            header: header.clone(),
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
@@ -738,9 +738,7 @@ mod tests {
         );
 
         let mut header = chain_spec.genesis_header();
-
         let provider = executor_provider(chain_spec);
-
         let mut executor =
             provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
@@ -751,7 +749,7 @@ mod tests {
                 (
                     &BlockWithSenders {
                         block: Block {
-                            header,
+                            header: header.clone(),
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
@@ -838,7 +836,7 @@ mod tests {
                 (
                     &BlockWithSenders {
                         block: Block {
-                            header,
+                            header: header.clone(),
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
