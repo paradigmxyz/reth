@@ -472,5 +472,4 @@ cfg-check:
 pr:
 	make cfg-check && \
 	make lint && \
-	make docs && \
 	make test
