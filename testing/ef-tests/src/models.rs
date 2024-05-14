@@ -320,9 +320,10 @@ pub enum ForkSpec {
     MergePush0,
     /// Cancun
     Cancun,
-    /// Prague
+    /// Cancun to Prague transition at timestamp 15_000
     #[serde(alias = "CancunToPragueAtTime15k")]
     CancunToPrague,
+    /// Prague
     Prague,
     /// Fork Spec which is unknown to us
     #[serde(other)]
