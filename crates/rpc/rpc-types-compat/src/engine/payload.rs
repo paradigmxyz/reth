@@ -616,7 +616,7 @@ mod tests {
         let s = r#"{
       "baseFeePerGas": "0x2ada43",
       "blobGasUsed": "0x0",
-      "blockHash": "0xedfe4ef7d8a7c116f68f7e72bdb75be157bedf03ac8b63fa8d5762495b0473d3",
+      "blockHash": "0x86eeb2a4b656499f313b601e1dcaedfeacccab27131b6d4ea99bc69a57607f7d",
       "blockNumber": "0x2c",
       "depositRequests": [
         {
@@ -658,6 +658,7 @@ mod tests {
 
         let payload = serde_json::from_str::<ExecutionPayloadV4>(s).unwrap();
         let block = try_payload_v4_to_block(payload, parent_beacon_block).unwrap().seal_slow();
-        let _hash = block.hash();
+        let hash = block.hash();
+        assert_eq!(hash, b256!("86eeb2a4b656499f313b601e1dcaedfeacccab27131b6d4ea99bc69a57607f7d"))
     }
 }
