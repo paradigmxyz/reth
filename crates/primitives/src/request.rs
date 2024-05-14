@@ -39,11 +39,10 @@ impl Encodable for Requests {
 
 impl Decodable for Requests {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self(
-            <Vec<Bytes> as Decodable>::decode(buf)?
-                .into_iter()
-                .map(|bytes| Request::decode_7685(&mut bytes.as_ref()))
-                .collect::<Result<Vec<_>, alloy_eips::eip7685::Eip7685Error>>()?,
-        ))
+        <Vec<Bytes> as Decodable>::decode(buf)?
+            .into_iter()
+            .map(|bytes| Request::decode_7685(&mut bytes.as_ref()))
+            .collect::<Result<Vec<_>, alloy_eips::eip7685::Eip7685Error>>()
+            .map(Self)
     }
 }
