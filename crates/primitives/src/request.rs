@@ -2,7 +2,8 @@
 
 use alloy_consensus::Request;
 use alloy_eips::eip7685::{Decodable7685, Encodable7685};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::{encode_iter, encode_list, Decodable, Encodable};
+use bytes::BufMut;
 use reth_codecs::{main_codec, Compact};
 use revm_primitives::Bytes;
 
@@ -28,21 +29,28 @@ impl IntoIterator for Requests {
 
 impl Encodable for Requests {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.0
-            .iter()
-            .map(Encodable7685::encoded_7685)
-            .map(Bytes::from)
-            .collect::<Vec<_>>()
-            .encode(out)
+        let mut h = alloy_rlp::Header { list: true, payload_length: 0 };
+
+        let mut encoded = Vec::new();
+        for req in self.0.iter() {
+            let encoded_req = req.encoded_7685();
+            h.payload_length += encoded_req.len();
+            encoded.push(Bytes::from(encoded_req));
+        }
+
+        h.encode(out);
+        for req in encoded {
+            req.encode(out);
+        }
     }
 }
 
 impl Decodable for Requests {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        <Vec<Bytes> as Decodable>::decode(buf)?
+        Ok(<Vec<Bytes> as Decodable>::decode(buf)?
             .into_iter()
             .map(|bytes| Request::decode_7685(&mut bytes.as_ref()))
             .collect::<Result<Vec<_>, alloy_eips::eip7685::Eip7685Error>>()
-            .map(Self)
+            .map(Self)?)
     }
 }
