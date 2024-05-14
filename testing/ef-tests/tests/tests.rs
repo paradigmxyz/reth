@@ -14,6 +14,7 @@ macro_rules! general_state_test {
 mod general_state_tests {
     use super::*;
 
+    general_state_test!(prague, prague);
     general_state_test!(shanghai, Shanghai);
     general_state_test!(st_args_zero_one_balance, stArgsZeroOneBalance);
     general_state_test!(st_attack, stAttackTest);

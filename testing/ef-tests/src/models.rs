@@ -8,8 +8,8 @@ use reth_db::{
 };
 use reth_primitives::{
     keccak256, Account as RethAccount, Address, Bloom, Bytecode, Bytes, ChainSpec,
-    ChainSpecBuilder, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals, B256, B64,
-    U256,
+    ChainSpecBuilder, ForkCondition, Hardfork, Header as RethHeader, SealedHeader, StorageEntry,
+    Withdrawals, B256, B64, U256,
 };
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
@@ -216,16 +216,28 @@ impl Account {
             Error::Assertion(format!("Expected account ({address}) is missing from DB: {self:?}"))
         })?;
 
-        assert_equal(self.balance, account.balance, "Balance does not match")?;
-        assert_equal(self.nonce.to(), account.nonce, "Nonce does not match")?;
+        assert_equal(
+            self.balance,
+            account.balance,
+            &format!("Balance of account {} does not match", address),
+        )?;
+        assert_equal(
+            self.nonce.to(),
+            account.nonce,
+            &format!("Nonce of account {} does not match", address),
+        )?;
 
         if let Some(bytecode_hash) = account.bytecode_hash {
-            assert_equal(keccak256(&self.code), bytecode_hash, "Bytecode does not match")?;
+            assert_equal(
+                keccak256(&self.code),
+                bytecode_hash,
+                &format!("Bytecode of account {} does not match", address),
+            )?;
         } else {
             assert_equal(
                 self.code.is_empty(),
                 true,
-                "Expected empty bytecode, got bytecode in db.",
+                &format!("Expected empty bytecode of account {}, got bytecode in db.", address),
             )?;
         }
 
@@ -242,12 +254,12 @@ impl Account {
                     )?;
                 } else {
                     return Err(Error::Assertion(format!(
-                        "Slot {slot:?} is missing from the database. Expected {value:?}"
+                        "Slot {slot:?} of account {address} is missing from the database. Expected {value:?}"
                     )))
                 }
             } else {
                 return Err(Error::Assertion(format!(
-                    "Slot {slot:?} is missing from the database. Expected {value:?}"
+                    "Slot {slot:?} of account {address} is missing from the database. Expected {value:?}"
                 )))
             }
         }
@@ -308,6 +320,10 @@ pub enum ForkSpec {
     MergePush0,
     /// Cancun
     Cancun,
+    /// Prague
+    #[serde(alias = "CancunToPragueAtTime15k")]
+    CancunToPrague,
+    Prague,
     /// Fork Spec which is unknown to us
     #[serde(other)]
     Unknown,
@@ -339,6 +355,10 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::Shanghai => spec_builder.shanghai_activated(),
             ForkSpec::Cancun => spec_builder.cancun_activated(),
+            ForkSpec::CancunToPrague => spec_builder
+                .cancun_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(15_000)),
+            ForkSpec::Prague => spec_builder.prague_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
             }
