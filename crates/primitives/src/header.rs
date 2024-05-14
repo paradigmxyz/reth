@@ -102,7 +102,7 @@ pub struct Header {
     /// The Keccak 256-bit hash of the root node of the trie structure populated with each
     /// [EIP-7685] request in the block body.
     ///
-    /// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-4895
+    /// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
     pub requests_root: Option<B256>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.

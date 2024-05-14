@@ -623,9 +623,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beb28aa4ecd32fdfa1b1bdd111ff7357dd562c6b2372694cf9e613434fcba659"
+checksum = "d55bd16fdb7ff4bd74cc4c878eeac7e8a27c0d7ba9df4ab58d9310aaafb62d43"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -637,7 +637,6 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "serde",
- "smallvec",
  "tracing",
 ]
 
