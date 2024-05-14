@@ -159,10 +159,6 @@ pub fn validate_withdrawals_presence(
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
-            if is_shanghai_active {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
-            }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
             if is_shanghai_active && !has_withdrawals {
