@@ -186,7 +186,7 @@ where
             // append gas used
             cumulative_gas_used += result.gas_used();
 
-            tracing::info!(target: "evm", ?transaction, ?result, gas_used = %result.gas_used(), tx_num = %i, "Executed transaction");
+            tracing::info!(?transaction, ?result, gas_used = %result.gas_used(), tx_num = %i, "Executed transaction in execute");
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(

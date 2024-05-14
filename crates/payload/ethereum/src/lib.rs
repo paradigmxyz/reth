@@ -380,7 +380,7 @@ where
         // add gas used by the transaction to cumulative gas used, before creating the receipt
         cumulative_gas_used += gas_used;
 
-        tracing::info!(target: "payload_builder", ?tx, ?result, %gas_used, tx_num = %executed_txs.len(), "Executed transaction");
+        tracing::info!(?tx, ?result, %gas_used, tx_num = %executed_txs.len(), "Executed transaction in payload builder");
 
         // Push transaction changeset and calculate header bloom filter for receipt.
         #[allow(clippy::needless_update)] // side-effect of optimism fields
@@ -398,8 +398,8 @@ where
             .expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-
         // append transaction to the list of executed transactions
+        //
         executed_txs.push(tx.into_signed());
     }
 
