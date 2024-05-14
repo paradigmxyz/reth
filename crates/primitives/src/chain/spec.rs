@@ -12,7 +12,7 @@ use crate::{
     MAINNET_DEPOSIT_CONTRACT, U256,
 };
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::BTreeMap,
     fmt::{Display, Formatter},
@@ -519,7 +519,7 @@ pub struct ChainSpec {
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
 
     /// The deposit contract deployed for PoS
-    #[serde(skip, default)]
+    #[serde(skip_serializing, deserialize_with = "deserialize_deposit_contract")]
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
@@ -1615,6 +1615,17 @@ impl DepositContract {
     pub const fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
         DepositContract { address, block, topic }
     }
+}
+
+fn deserialize_deposit_contract<'de, D>(
+    deserializer: D,
+) -> Result<Option<DepositContract>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(address) = Option::<Address>::deserialize(deserializer)? else { return Ok(None) };
+
+    Ok(Some(DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }))
 }
 
 #[cfg(feature = "optimism")]
