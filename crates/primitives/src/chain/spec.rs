@@ -9,7 +9,7 @@ use crate::{
     revm_primitives::{address, b256},
     Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
     Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
-    U256,
+    MAINNET_DEPOSIT_CONTRACT, U256,
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -1053,13 +1053,23 @@ impl From<Genesis> for ChainSpec {
 
         hardforks.extend(time_hardforks);
 
+        // NOTE: we prune receipts in full nodes, but not the deposit contract receipts. We do not
+        // have the deployment block in the genesis file, so we use block zero. We use the same
+        // deposit topic as the mainnet contract if we have the deposit contract address in the
+        // genesis json.
+        let deposit_contract = genesis.deposit_contract_address.map(|address| DepositContract {
+            address,
+            block: 0,
+            topic: MAINNET_DEPOSIT_CONTRACT.topic,
+        });
+
         Self {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
             hardforks,
             paris_block_and_final_difficulty,
-            deposit_contract: genesis.deposit_contract_address,
+            deposit_contract,
             ..Default::default()
         }
     }
@@ -1601,7 +1611,7 @@ pub struct DepositContract {
 }
 
 impl DepositContract {
-    fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
+    pub const fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
         DepositContract { address, block, topic }
     }
 }
