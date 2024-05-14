@@ -425,8 +425,7 @@ mod tests {
         let parent_beacon_block_root =
             b256!("531cd53b8e68deef0ea65edfa3cda927a846c307b0907657af34bc3f313b5871");
 
-        let mut block =
-            try_payload_v3_to_block(new_payload.clone(), parent_beacon_block_root).unwrap();
+        let block = try_payload_v3_to_block(new_payload.clone(), parent_beacon_block_root).unwrap();
 
         let converted_payload = block_to_payload_v3(block.seal_slow());
 
