@@ -18,6 +18,7 @@ use reth_primitives::{
 };
 use reth_revm::{Database, EvmBuilder};
 use revm_interpreter::{opcode::InstructionTables, Host};
+use revm_primitives::SpecId;
 use std::sync::Arc;
 
 pub mod execute;
@@ -92,20 +93,22 @@ impl ConfigureEvm for EthEvmConfig {
         EvmBuilder::default()
             .with_db(db)
             .append_handler_register_box(Box::new(move |h| {
-                insert_boxed_instructions(
-                    &mut h.instruction_table,
-                    eip3074::boxed_instructions(instructions_context.clone()),
-                );
+                if h.cfg.spec_id >= SpecId::PRAGUE {
+                    insert_boxed_instructions(
+                        &mut h.instruction_table,
+                        eip3074::boxed_instructions(instructions_context.clone()),
+                    );
 
-                instructions_context.clear();
+                    instructions_context.clear();
 
-                let post_execution_context = instructions_context.clone();
-                #[allow(clippy::arc_with_non_send_sync)]
-                {
-                    h.post_execution.end = Arc::new(move |_, outcome: _| {
-                        post_execution_context.clear();
-                        outcome
-                    });
+                    let post_execution_context = instructions_context.clone();
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    {
+                        h.post_execution.end = Arc::new(move |_, outcome: _| {
+                            post_execution_context.clear();
+                            outcome
+                        });
+                    }
                 }
             }))
             .build()
