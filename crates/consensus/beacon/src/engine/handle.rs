@@ -43,11 +43,10 @@ where
     Engine: EngineTypes,
 {
     /// Creates a new beacon consensus engine handle.
-    pub fn new(to_engine: UnboundedSender<BeaconEngineMessage<Engine>>) -> Self {
-        let event_listeners: EventListeners<BeaconConsensusEngineEvent> = Default::default();
-        let tx = event_listeners.clone_sender();
-        let _ = to_engine.send(BeaconEngineMessage::EventListener(tx));
-
+    pub fn new(
+        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+        event_listeners: EventListeners<BeaconConsensusEngineEvent>,
+    ) -> Self {
         Self { to_engine, event_listeners }
     }
 

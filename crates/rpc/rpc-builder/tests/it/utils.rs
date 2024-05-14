@@ -1,4 +1,4 @@
-use reth_beacon_consensus::BeaconConsensusEngineHandle;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
@@ -13,6 +13,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::EngineApi;
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TokioTaskExecutor;
+use reth_tokio_util::EventListeners;
 use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
@@ -26,7 +27,8 @@ pub fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
+    let listeners: EventListeners<BeaconConsensusEngineEvent> = Default::default();
+    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx, listeners);
     let engine_api = EngineApi::new(
         NoopProvider::default(),
         MAINNET.clone(),

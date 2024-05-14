@@ -89,8 +89,7 @@ impl EngineMessageStore {
                 )?;
             }
             // noop
-            BeaconEngineMessage::TransitionConfigurationExchanged |
-            BeaconEngineMessage::EventListener(_) => (),
+            BeaconEngineMessage::TransitionConfigurationExchanged => (),
         };
         Ok(())
     }

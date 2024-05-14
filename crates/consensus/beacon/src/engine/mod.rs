@@ -37,7 +37,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    broadcast::Sender,
     mpsc::{self, UnboundedSender},
     oneshot,
 };
@@ -283,8 +282,8 @@ where
         engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
-        let handle = BeaconConsensusEngineHandle::new(to_engine);
         let listeners = EventListeners::default();
+        let handle = BeaconConsensusEngineHandle::new(to_engine, listeners.clone());
         let sync = EngineSyncController::new(
             pipeline,
             client,
@@ -596,13 +595,6 @@ where
     /// [`BeaconConsensusEngine`]
     pub fn handle(&self) -> BeaconConsensusEngineHandle<EngineT> {
         self.handle.clone()
-    }
-
-    /// Sets a [Sender] to the engine's notifier. Also sets a [Sender] to
-    /// the sync controller's notifier.
-    pub(crate) fn set_sender(&mut self, sender: Sender<BeaconConsensusEngineEvent>) {
-        self.listeners.set_sender(sender.clone());
-        self.sync.set_sender(sender);
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured
@@ -1879,7 +1871,6 @@ where
                         BeaconEngineMessage::TransitionConfigurationExchanged => {
                             this.blockchain.on_transition_configuration_exchanged();
                         }
-                        BeaconEngineMessage::EventListener(tx) => this.set_sender(tx),
                     }
                     continue
                 }
