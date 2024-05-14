@@ -91,8 +91,16 @@ impl EvmCompilerDll {
                     }
                 }
                 #[cfg(unix)]
-                if e.to_string().contains("undefined symbol") {
-                    return Ok(None);
+                {
+                    let s = e.to_string();
+                    let search = if cfg!(target_vendor = "apple") {
+                        "symbol not found"
+                    } else {
+                        "undefined symbol"
+                    };
+                    if s.contains(search) {
+                        return Ok(None);
+                    }
                 }
                 Err(e)
             }
