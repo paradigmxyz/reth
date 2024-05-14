@@ -16,3 +16,4 @@ sp1-zkvm = { git = "https://github.com/succinctlabs/sp1.git" }
 reth-primitives = { path = "../../crates/primitives", default-features = false}
 reth-consensus.workspace = true
 reth-interfaces = { path = "../../crates/interfaces", default-features = false }
+reth-evm.workspace = true

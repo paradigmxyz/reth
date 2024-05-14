@@ -15,7 +15,7 @@ workspace = true
 reth-primitives.workspace = true
 revm-primitives.workspace = true
 revm.workspace = true
-reth-interfaces.workspace = true
+reth-interfaces = { path = "../interfaces", default-features = false }
 
 futures-util.workspace = true
 parking_lot = { workspace = true, optional = true }
