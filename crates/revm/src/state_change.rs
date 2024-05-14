@@ -96,9 +96,9 @@ where
     let mut account = Account::from(AccountInfo::default());
 
     // HACK(onbjerg): This is a temporary workaround to make sure the account does not get cleared
-    // by state clearing later. This balance will likely be present in the devnet 0 genesis file
+    // by state clearing later. This nonce will likely be present in the devnet 0 genesis file
     // until the EIP itself is fixed.
-    account.info.balance = U256::from(1);
+    account.info.nonce = 1;
 
     // We load the `HISTORY_STORAGE_ADDRESS` account because REVM expects this to be loaded in order
     // to access any storage, which we will do below.
