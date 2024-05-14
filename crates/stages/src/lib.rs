@@ -28,7 +28,7 @@
 //! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
-//! # use reth_config::config::EtlConfig;
+//! # use reth_config::config::StageConfig;
 //! # use reth_consensus::Consensus;
 //! # use reth_consensus::test_utils::TestConsensus;
 //! #
@@ -62,7 +62,8 @@
 //!         headers_downloader,
 //!         bodies_downloader,
 //!         executor_provider,
-//!         EtlConfig::default(),
+//!         StageConfig::default(),
+//!         PruneModes::default(),
 //!     ))
 //!     .build(provider_factory, static_file_producer);
 //! ```

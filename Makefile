@@ -95,6 +95,7 @@ op-build-aarch64-unknown-linux-gnu: export JEMALLOC_SYS_WITH_LG_PAGE=16
 
 # No jemalloc on Windows
 build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
+op-build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,$(FEATURES))
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
@@ -116,6 +117,10 @@ build-x86_64-apple-darwin:
 	$(MAKE) build-native-x86_64-apple-darwin
 build-aarch64-apple-darwin:
 	$(MAKE) build-native-aarch64-apple-darwin
+op-build-x86_64-apple-darwin:
+	$(MAKE) op-build-native-x86_64-apple-darwin
+op-build-aarch64-apple-darwin:
+	$(MAKE) op-build-native-aarch64-apple-darwin
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary

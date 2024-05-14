@@ -15,7 +15,7 @@ use reth_node_core::{
     },
 };
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_rpc::JwtSecret;
+use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use std::{

@@ -1,10 +1,9 @@
-use std::time::Duration;
-
 use crate::{segments::SegmentSet, Pruner};
 use reth_config::PruneConfig;
 use reth_db::database::Database;
 use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
+use std::time::Duration;
 use tokio::sync::watch;
 
 /// Contains the information required to build a pruner
@@ -102,7 +101,7 @@ impl Default for PrunerBuilder {
             segments: PruneModes::none(),
             max_reorg_depth: 64,
             prune_delete_limit: MAINNET.prune_delete_limit,
-            timeout: Some(Self::DEFAULT_TIMEOUT),
+            timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }
     }

@@ -21,7 +21,6 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_exex::ExExManagerHandle;
 use reth_interfaces::p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
@@ -33,11 +32,7 @@ use reth_provider::{
     BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
     ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
-use reth_stages::{
-    prelude::*,
-    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
-    Pipeline, StageSet,
-};
+use reth_stages::{prelude::*, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
@@ -273,29 +268,11 @@ where
                 consensus.clone(),
                 header_downloader,
                 body_downloader,
-                executor.clone(),
-                config.stages.etl.clone(),
-            )
-            .set(SenderRecoveryStage {
-                commit_threshold: config.stages.sender_recovery.commit_threshold,
-            })
-            .set(ExecutionStage::new(
                 executor,
-                ExecutionStageThresholds {
-                    max_blocks: config.stages.execution.max_blocks,
-                    max_changes: config.stages.execution.max_changes,
-                    max_cumulative_gas: config.stages.execution.max_cumulative_gas,
-                    max_duration: config.stages.execution.max_duration,
-                },
-                config
-                    .stages
-                    .merkle
-                    .clean_threshold
-                    .max(config.stages.account_hashing.clean_threshold)
-                    .max(config.stages.storage_hashing.clean_threshold),
-                config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default(),
-                ExExManagerHandle::empty(),
-            ))
+                config.stages.clone(),
+                PruneModes::default(),
+            )
+            .builder()
             .disable_all_if(&StageId::STATE_REQUIRED, || should_exec),
         )
         .build(provider_factory, static_file_producer);
