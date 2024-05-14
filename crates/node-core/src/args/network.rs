@@ -40,7 +40,7 @@ pub struct NetworkArgs {
     #[arg(long, value_delimiter = ',')]
     pub trusted_peers: Vec<NodeRecord>,
 
-    /// Connect to or accept from trusted peers only?
+    /// Connect to or accept from trusted peers only
     #[arg(long)]
     pub trusted_only: bool,
 
