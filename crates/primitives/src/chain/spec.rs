@@ -1611,6 +1611,7 @@ pub struct DepositContract {
 }
 
 impl DepositContract {
+    /// Creates a new deposit contract with the given address, block, and topic.
     pub const fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
         DepositContract { address, block, topic }
     }
