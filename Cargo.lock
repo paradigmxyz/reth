@@ -2701,7 +2701,7 @@ dependencies = [
 [[package]]
 name = "did"
 version = "0.18.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#4760a5ff3b5eb021b73228e40ad81af82af76c22"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#3b7cdcdc0b2ffffbf437f9177032b6811b99c3d6"
 dependencies = [
  "alloy-primitives",
  "bincode",
@@ -3139,7 +3139,7 @@ dependencies = [
 [[package]]
 name = "ethereum-json-rpc-client"
 version = "0.18.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#4760a5ff3b5eb021b73228e40ad81af82af76c22"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#3b7cdcdc0b2ffffbf437f9177032b6811b99c3d6"
 dependencies = [
  "anyhow",
  "candid",
@@ -3273,7 +3273,7 @@ dependencies = [
 [[package]]
 name = "evm-canister-client"
 version = "0.18.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#4760a5ff3b5eb021b73228e40ad81af82af76c22"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=add-endpoint#3b7cdcdc0b2ffffbf437f9177032b6811b99c3d6"
 dependencies = [
  "candid",
  "did",

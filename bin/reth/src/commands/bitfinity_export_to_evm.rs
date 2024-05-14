@@ -91,6 +91,7 @@ impl Command {
         
         let mut plain_account_cursor = tx_mut.cursor_read::<tables::PlainAccountState>()?;
         let mut contract_storage_cursor = tx_mut.cursor_read::<tables::Bytecodes>()?;
+        let mut plain_storage_cursor = tx_mut.cursor_read::<tables::PlainStorageState>()?;
 
         let mut entry = plain_account_cursor.first()?;
 
@@ -109,14 +110,14 @@ impl Command {
 
             let mut storage = BTreeMap::new();
 
-            // while let Some((_, entry)) = plain_storage_cursor.seek_exact(*address)? {
-            //     info!("Recovering storage for account {}", address);
-            //     let StorageEntry { key, value } = entry;
-            //     storage.insert(
-            //         did::H256::from_slice(&key.0),
-            //         did::U256::from_little_endian(&value.as_le_bytes_trimmed()),
-            //     );
-            // }
+            while let Some((_, entry)) = plain_storage_cursor.seek_exact(*address)? {
+                info!("Recovering storage for account {}", address);
+                let StorageEntry { key, value } = entry;
+                storage.insert(
+                    did::H256::from_slice(&key.0),
+                    did::U256::from_little_endian(&value.as_le_bytes_trimmed()),
+                );
+            }
 
             let account = RawAccountInfo {
                 nonce: account.nonce.into(),
