@@ -4,7 +4,11 @@ use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
 use alloy_sol_types::{sol, SolEvent};
 use reth_interfaces::executor::BlockValidationError;
 use reth_primitives::Receipt;
-use revm_primitives::Log;
+use revm_primitives::{address, Address, Log};
+
+/// devnet-0 deposit contract address.
+pub const DEVNET_0_DEPOSIT_CONTRACT_ADDRESS: Address =
+    address!("4242424242424242424242424242424242424242");
 
 /// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa) Deposits from receipts,
 /// and returns them as a `Request`.
@@ -19,7 +23,7 @@ where
         .flat_map(|receipt| receipt.logs.iter())
         // No need to filter for topic because there's only one event and that's the Deposit event
         // in the deposit contract.
-        .filter(|log| log.address == MAINNET_DEPOSIT_CONTRACT_ADDRESS)
+        .filter(|log| log.address == DEVNET_0_DEPOSIT_CONTRACT_ADDRESS)
         .map(|log| {
             let decoded_log = DepositEvent::decode_log(log, false)?;
             let deposit = parse_deposit_from_log(&decoded_log);
