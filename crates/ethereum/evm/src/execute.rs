@@ -196,7 +196,8 @@ where
         }
 
         // Collect all EIP-6110 deposits
-        let deposit_requests = crate::eip6110::parse_deposits_from_receipts(&receipts)?;
+        let deposit_requests =
+            crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
         // Collect all EIP-7685 requests
         let withdrawal_requests =

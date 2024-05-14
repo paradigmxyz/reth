@@ -3,20 +3,31 @@ use alloy_consensus::Request;
 use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
 use alloy_sol_types::{sol, SolEvent};
 use reth_evm::execute::BlockValidationError;
-use reth_primitives::Receipt;
+use reth_interfaces::executor::BlockValidationError;
+use reth_primitives::{ChainSpec, Receipt};
 use revm_primitives::Log;
 
 /// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa) Deposits from receipts,
 /// and returns them as a `Request`.
-pub fn parse_deposits_from_receipts(
-    receipts: &[Receipt],
-) -> Result<Vec<Request>, BlockValidationError> {
+pub fn parse_deposits_from_receipts<'a, I>(
+    chain_spec: &ChainSpec,
+    receipts: I,
+) -> Result<Vec<Request>, BlockValidationError>
+where
+    I: IntoIterator<Item = &'a Receipt>,
+{
     let res = receipts
         .iter()
         .flat_map(|receipt| receipt.logs.iter())
         // No need to filter for topic because there's only one event and that's the Deposit event
         // in the deposit contract.
-        .filter(|log| log.address == MAINNET_DEPOSIT_CONTRACT_ADDRESS)
+        .filter(|log| {
+            log.address ==
+                chain_spec
+                    .deposit_contract
+                    .as_ref()
+                    .map_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS, |contract| contract.address)
+        })
         .map(|log| {
             let decoded_log = DepositEvent::decode_log(log, false)?;
             let deposit = parse_deposit_from_log(&decoded_log);
@@ -78,7 +89,7 @@ fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::TxType;
+    use reth_primitives::{TxType, MAINNET};
 
     use super::*;
 
@@ -110,7 +121,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let requests = parse_deposits_from_receipts(&receipts).unwrap();
+        let requests = parse_deposits_from_receipts(&MAINNET, &receipts).unwrap();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].as_deposit_request().unwrap().amount, 32e9 as u64);
         assert_eq!(requests[1].as_deposit_request().unwrap().amount, 32e9 as u64);

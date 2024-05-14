@@ -398,25 +398,26 @@ where
     }
 
     // calculate the requests and the requests root
-    let (requests, requests_root) =
-        if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-            let deposit_requests = parse_deposits_from_receipts(receipts.iter().flatten())
-                .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
+    let (requests, requests_root) = if chain_spec
+        .is_prague_active_at_timestamp(attributes.timestamp)
+    {
+        let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
+            .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
 
-            let withdrawal_requests = post_block_withdrawal_requests_contract_call(
-                &mut db,
-                &chain_spec,
-                &initialized_cfg,
-                &initialized_block_env,
-                &attributes,
-            )?;
+        let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+            &mut db,
+            &chain_spec,
+            &initialized_cfg,
+            &initialized_block_env,
+            &attributes,
+        )?;
 
-            let requests = [deposit_requests, withdrawal_requests].concat();
-            let requests_root = calculate_requests_root(&requests);
-            (Some(requests.into()), Some(requests_root))
-        } else {
-            (None, None)
-        };
+        let requests = [deposit_requests, withdrawal_requests].concat();
+        let requests_root = calculate_requests_root(&requests);
+        (Some(requests.into()), Some(requests_root))
+    } else {
+        (None, None)
+    };
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
