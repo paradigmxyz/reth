@@ -1,11 +1,12 @@
 //! EIP-6110 deposit requests parsing
 use alloy_consensus::Request;
-use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
+use alloy_eips::eip6110::DepositRequest;
 use alloy_sol_types::{sol, SolEvent};
 use reth_interfaces::executor::BlockValidationError;
 use reth_primitives::Receipt;
 use revm_primitives::{address, Address, Log};
 
+// TODO(alexey): get deposit contract address from the chain spec
 /// devnet-0 deposit contract address.
 pub const DEVNET_0_DEPOSIT_CONTRACT_ADDRESS: Address =
     address!("4242424242424242424242424242424242424242");
