@@ -11,15 +11,17 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
-reth-network-api.workspace = true
-reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
-reth-network-types.workspace = true
+
+# Used for p2p feature
+reth-primitives = { path = "../primitives", default-features = false }
+reth-network-types = { path = "../net/types", optional = true }
+reth-network-api = { path = "../net/network-api", optional = true }
+reth-eth-wire-types = { path = "../net/eth-wire-types", optional = true }
 
 # async
-futures.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+futures = { workspace = true, optional = true } 
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 # misc
 auto_impl.workspace = true
@@ -43,6 +45,8 @@ tokio = { workspace = true, features = ["full"] }
 secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
-test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
+default = ["p2p"]
+p2p = ["tokio", "reth-network-types", "reth-network-api", "reth-eth-wire-types"]
+test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot", "tokio"]
 cli = ["clap"]
 optimism = ["reth-eth-wire-types/optimism"]

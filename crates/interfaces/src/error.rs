@@ -5,7 +5,8 @@ use crate::{
     provider::ProviderError,
 };
 use reth_consensus::ConsensusError;
-use reth_network_api::NetworkError;
+// TODO: this needs to be not imported from reth_network_api
+// use reth_network_api::NetworkError;
 use reth_primitives::fs::FsPathError;
 
 /// Result alias for [`RethError`].
@@ -35,8 +36,8 @@ pub enum RethError {
     Provider(#[from] ProviderError),
 
     /// Errors related to networking.
-    #[error(transparent)]
-    Network(#[from] NetworkError),
+    // #[error(transparent)]
+    // Network(#[from] NetworkError),
 
     /// Canonical errors encountered.
     #[error(transparent)]
@@ -75,6 +76,6 @@ mod size_asserts {
     static_assert_size!(ConsensusError, 48);
     static_assert_size!(DatabaseError, 40);
     static_assert_size!(ProviderError, 48);
-    static_assert_size!(NetworkError, 0);
+    // static_assert_size!(NetworkError, 0);
     static_assert_size!(CanonicalError, 56);
 }

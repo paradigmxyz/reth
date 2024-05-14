@@ -11,7 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
+# reth-primitives.workspace = true
+reth-primitives = { path = "../../primitives", default-features = false }
 
 # misc
 auto_impl.workspace = true

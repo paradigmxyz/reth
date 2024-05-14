@@ -10750,6 +10750,8 @@ dependencies = [
 name = "zkvm-test"
 version = "0.2.0-beta.7"
 dependencies = [
+ "reth-consensus",
+ "reth-interfaces",
  "reth-primitives",
  "sp1-zkvm",
 ]
