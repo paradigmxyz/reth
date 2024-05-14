@@ -241,7 +241,8 @@ impl BitfinityImportCommand {
                     header_downloader,
                     body_downloader,
                     executor.clone(),
-                    config.stages.etl.clone(),
+                    config.stages.clone(),
+                    PruneModes::default(),
                 )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,

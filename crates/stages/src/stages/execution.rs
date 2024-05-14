@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
+use reth_config::config::ExecutionConfig;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
@@ -107,6 +108,22 @@ impl<E> ExecutionStage<E> {
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
+            ExExManagerHandle::empty(),
+        )
+    }
+
+    /// Create new instance of [ExecutionStage] from configuration.
+    pub fn from_config(
+        executor_provider: E,
+        config: ExecutionConfig,
+        external_clean_threshold: u64,
+        prune_modes: PruneModes,
+    ) -> Self {
+        Self::new(
+            executor_provider,
+            config.into(),
+            external_clean_threshold,
+            prune_modes,
             ExExManagerHandle::empty(),
         )
     }
@@ -537,6 +554,17 @@ impl ExecutionStageThresholds {
             changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
             cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX) ||
             elapsed >= self.max_duration.unwrap_or(Duration::MAX)
+    }
+}
+
+impl From<ExecutionConfig> for ExecutionStageThresholds {
+    fn from(config: ExecutionConfig) -> Self {
+        ExecutionStageThresholds {
+            max_blocks: config.max_blocks,
+            max_changes: config.max_changes,
+            max_cumulative_gas: config.max_cumulative_gas,
+            max_duration: config.max_duration,
+        }
     }
 }
 

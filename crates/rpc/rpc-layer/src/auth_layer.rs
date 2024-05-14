@@ -18,7 +18,7 @@ use tower::{Layer, Service};
 /// ```rust
 /// async fn build_layered_rpc_server() {
 ///     use jsonrpsee::server::ServerBuilder;
-///     use reth_rpc::{AuthLayer, JwtAuthValidator, JwtSecret};
+///     use reth_rpc_layer::{AuthLayer, JwtAuthValidator, JwtSecret};
 ///     use std::net::SocketAddr;
 ///
 ///     const AUTH_PORT: u32 = 8551;
@@ -167,7 +167,7 @@ mod tests {
     };
 
     use super::AuthLayer;
-    use crate::{layers::jwt_secret::Claims, JwtAuthValidator, JwtError, JwtSecret};
+    use crate::{jwt_secret::Claims, JwtAuthValidator, JwtError, JwtSecret};
 
     const AUTH_PORT: u32 = 8551;
     const AUTH_ADDR: &str = "0.0.0.0";
