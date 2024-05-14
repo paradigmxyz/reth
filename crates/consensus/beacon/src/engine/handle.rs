@@ -45,7 +45,7 @@ where
 {
     /// Creates a new beacon consensus engine handle.
     pub fn new(
-        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+        to_engine: Sender<BeaconEngineMessage<Engine>>,
         event_listeners: EventListeners<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self { to_engine, event_listeners }

@@ -37,8 +37,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    broadcast::Sender as BroadcastSender,
-    mpsc::{self, Sender as BoundedSender},
+    mpsc::{self, Sender},
     oneshot,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -282,7 +281,7 @@ where
         payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
-        to_engine: BoundedSender<BeaconEngineMessage<EngineT>>,
+        to_engine: Sender<BeaconEngineMessage<EngineT>>,
         engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
