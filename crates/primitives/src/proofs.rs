@@ -8,6 +8,7 @@ use crate::{
     B256, U256,
 };
 use alloy_consensus::Request;
+use alloy_eips::eip7685::Encodable7685;
 use alloy_rlp::Encodable;
 use itertools::Itertools;
 
@@ -70,9 +71,11 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
-/// Calculate EIP-7685 requests root.
+/// Calculate [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685) requests root.
+///
+/// NOTE: The requests are encoded as `id + request`
 pub fn calculate_requests_root(requests: &[Request]) -> B256 {
-    ordered_trie_root(requests)
+    ordered_trie_root_with_encoder(requests, |item, buf| item.encode_7685(buf))
 }
 
 /// Calculates the receipt root for a header.
