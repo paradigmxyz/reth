@@ -21,6 +21,7 @@ use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    ops::Not,
     path::PathBuf,
     sync::Arc,
 };
@@ -158,7 +159,7 @@ impl NetworkArgs {
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
-        (!self.no_persist_peers).then_some(peers_file)
+        self.no_persist_peers.not().then_some(peers_file)
     }
 
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
