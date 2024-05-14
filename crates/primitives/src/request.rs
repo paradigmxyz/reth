@@ -2,8 +2,7 @@
 
 use alloy_consensus::Request;
 use alloy_eips::eip7685::{Decodable7685, Encodable7685};
-use alloy_rlp::{encode_iter, encode_list, Decodable, Encodable};
-use bytes::BufMut;
+use alloy_rlp::{Decodable, Encodable};
 use reth_codecs::{main_codec, Compact};
 use revm_primitives::Bytes;
 
