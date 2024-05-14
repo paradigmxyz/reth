@@ -77,8 +77,6 @@ pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
 /// Calculate [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685) requests root.
 ///
 /// NOTE: The requests are encoded as `id + request`
-///
-/// See also [Encodable7685] and <https://github.com/ethereum/go-ethereum/blob/main/core/types/request.go#L108-L112>
 pub fn calculate_requests_root(requests: &[Request]) -> B256 {
     ordered_trie_root_with_encoder(requests, |item, buf| item.encode_7685(buf))
 }
