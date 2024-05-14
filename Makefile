@@ -303,8 +303,7 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: ## Update book cli documentation.
-	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+update-book-cli: build ## Update book cli documentation.
 	@echo "Updating book cli doc..."
 	@./book/cli/update.sh $(BUILD_PATH)/$(PROFILE)/reth
 
