@@ -1,4 +1,4 @@
-//! Command that initializes the node by importing a chain from a file.
+//! Command that initializes the node by importing a chain from a remote EVM node.
 
 use crate::{
     commands::import::load_config, dirs::DataDirPath, macros::block_executor, version::SHORT_VERSION

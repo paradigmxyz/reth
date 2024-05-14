@@ -223,7 +223,7 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
 
     /// Export state to EVM canister
     #[command(name = "bitfinity-export-to-evm")]
-    BitfinityExportToEvm(bitfinity_export_to_evm::Command),
+    BitfinityExportToEvm(bitfinity_export_to_evm::BitfinityResetEvmStateCommand),
 }
 
 #[cfg(test)]

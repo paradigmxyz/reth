@@ -1,30 +1,27 @@
-use std::collections::{BTreeMap, HashMap};
+//! Command that initializes the reset of remote EVM node using the current node state
+//! 
+use std::collections::BTreeMap;
 use std::fs;
 use std::sync::Arc;
-use std::time::Duration;
 
-use clap::{Parser, Subcommand};
-use did::{AccountInfoMap, RawAccountInfo};
-use ethereum_json_rpc_client::reqwest::ReqwestClient;
+use clap::Parser;
+use did::evm_reset_state::EvmResetState;
+use did::{AccountInfoMap, RawAccountInfo, H256};
 use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
 use itertools::Itertools;
-use reth_config::Config;
 use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
 use reth_db::{init_db, tables};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
-use reth_node_core::args::{BitfinityExportToEvmArgs, BitfinityImportArgs, DatabaseArgs};
+use reth_node_core::args::BitfinityExportToEvmArgs;
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
-use reth_node_core::init::init_genesis;
-use reth_primitives::StorageEntry;
-use reth_provider::{BlockNumReader, ProviderFactory};
+use reth_primitives::{StorageEntry, B256};
+use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
 use tracing::{debug, info};
 
-use crate::commands::import::ImportCommand;
-
-/// `reth recover` command
+/// Reset the EVM state to a specific block number.
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct BitfinityResetEvmStateCommand {
     /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
@@ -40,8 +37,8 @@ pub struct Command {
     bitfinity: BitfinityExportToEvmArgs,
 }
 
-impl Command {
-    /// Execute `storage-tries` recovery command
+impl BitfinityResetEvmStateCommand {
+    /// Execute the command
     pub async fn execute(self) -> eyre::Result<()> {
 
         let principal = candid::Principal::from_text(self.bitfinity.evmc_principal.as_str())?;
@@ -71,29 +68,35 @@ impl Command {
             ProviderFactory::new(db.clone(), chain.clone(), data_dir.static_files())?;
 
         // Disable evm execution
-
         {
             evm_client.admin_disable_evm(true).await??;
-            evm_client.admin_disable_process_pending_transactions(true).await??;
         }
 
-        //
+        // Reset the evm
         {
-            // Reset the evm
             info!(target: "reth::cli", "Resetting evm");
-            evm_client.reset_state().await??;
+            evm_client.admin_reset_state(EvmResetState::Start).await??;
             info!(target: "reth::cli", "Evm reset");
         }
 
-        let mut provider = provider_factory.provider()?;
+        let provider = provider_factory.provider()?;
 
-        let tx_mut = provider.tx_mut();
+        // TODO: get block number from config
+        // let GET_BLOCK_FROM_CONFIG = 0;
+        // let block_number = provider.last_block_number().unwrap_or_default();
+        // let state_provider = provider.state_provider_by_block_number(block_number)?;
+        // let res = state_provider.basic_account(...)?;
+
+        let last_block_number = provider.last_block_number()?;
+        let last_block = provider.block_by_number(last_block_number)?.expect("Block should be present");
+
+        info!(target: "reth::cli", "Resetting evm to block {}, state root: {:?}", last_block_number, last_block.state_root);
+
+        let tx_ref = provider.tx_ref();
         
-        let mut plain_account_cursor = tx_mut.cursor_read::<tables::PlainAccountState>()?;
-        let mut contract_storage_cursor = tx_mut.cursor_read::<tables::Bytecodes>()?;
-        let mut plain_storage_cursor = tx_mut.cursor_read::<tables::PlainStorageState>()?;
-
-        let mut entry = plain_account_cursor.first()?;
+        let mut plain_account_cursor = tx_ref.cursor_read::<tables::PlainAccountState>()?;
+        let mut contract_storage_cursor = tx_ref.cursor_read::<tables::Bytecodes>()?;
+        let mut plain_storage_cursor = tx_ref.cursor_read::<tables::PlainStorageState>()?;
 
         // We need to iterate through all the accounts and retrieve their storage tries and populate the AccountInfo
         let mut accounts = AccountInfoMap::new();
@@ -103,18 +106,29 @@ impl Command {
         let mut batch_size = 0;
         let batch_limit = 500;
 
-        while let Some((ref address, ref account)) = entry {
-            let bytecode = contract_storage_cursor
-                .seek_exact(account.bytecode_hash.unwrap_or_default())?
-                .map(|bytecode| bytecode.1.bytecode.clone());
+        while let Some((ref address, ref account)) = plain_account_cursor.next()? {
+
+            // We need to retrieve the bytecode for the account
+            let bytecode = if let Some(bytecode_hash) = account.bytecode_hash {
+                info!(target: "reth::cli", "Recovering bytecode for account {}", address);
+                contract_storage_cursor
+                    .seek_exact(bytecode_hash)?
+                    .map(|(_, bytecode)| bytecode)
+            } else {
+                None
+            };
 
             let mut storage = BTreeMap::new();
+
+            fn b256_to_u256(num: B256) -> reth_primitives::U256 {
+                reth_primitives::U256::from_be_bytes(num.0)
+            }
 
             while let Some((_, entry)) = plain_storage_cursor.seek_exact(*address)? {
                 info!("Recovering storage for account {}", address);
                 let StorageEntry { key, value } = entry;
                 storage.insert(
-                    did::H256::from_slice(&key.0),
+                    b256_to_u256(key).into(),
                     did::U256::from_little_endian(&value.as_le_bytes_trimmed()),
                 );
             }
@@ -122,11 +136,11 @@ impl Command {
             let account = RawAccountInfo {
                 nonce: account.nonce.into(),
                 balance: account.balance.into(),
-                bytecode: bytecode.map(Into::into),
+                bytecode: bytecode.map(|bytecode| bytecode.bytes().into()),
                 storage: storage.into_iter().collect_vec(),
             };
 
-            info!(target: "reth::cli", "Account Address: {} Info: {:?}", address, account);
+            debug!(target: "reth::cli", "Account Address: {} Info: {:?}", address, account);
 
             info!(target: "reth::cli",address=%address, "Recovering storage tries");
 
@@ -137,19 +151,35 @@ impl Command {
             batch_size += 1;
 
             if batch_size == batch_limit {
+                let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
                 info!(target: "reth::cli", "Processing batch of accounts");
-                Self::process_account_info(&evm_client, &mut accounts).await?;
-                accounts.clear();
+                Self::process_account_info(&evm_client, process_accounts).await?;
                 batch_size = 0;
             }
 
-            entry = plain_account_cursor.next()?;
         }
 
         info!(target: "reth::cli", "Processing last batch of accounts");
 
         if !accounts.is_empty() {
-            Self::process_account_info(&evm_client, &mut accounts).await?;
+            Self::process_account_info(&evm_client, accounts).await?;
+        }
+
+        info!(target: "reth::cli", "Storage tries recovered");
+
+        // End of the recovery process
+        {
+            info!(target: "reth::cli", "End of recovery process");
+            let block_json = serde_json::to_value(last_block)?;
+            let did_block: did::Block<H256> = serde_json::from_value(block_json)?;
+            evm_client.admin_reset_state(EvmResetState::End(did_block)).await??;
+        }
+
+        // Enable evm execution
+        {
+            // Should I do it automatically?
+            let SHOULD_I_REALLY_DO_IT_AUTOMATICALLY = false;
+            evm_client.admin_disable_evm(false).await??;
         }
 
         Ok(())
@@ -157,12 +187,10 @@ impl Command {
 
     async fn process_account_info(
         client: &EvmCanisterClient<impl CanisterClient>,
-        accounts: &mut AccountInfoMap,
+        accounts: AccountInfoMap,
     ) -> eyre::Result<()> {
         info!(target: "reth::cli", "Processing account info");
-
-        client.update_state(accounts.clone()).await??;
-
+        client.admin_reset_state(EvmResetState::AddAccounts(accounts)).await??;
         Ok(())
     }
 }
