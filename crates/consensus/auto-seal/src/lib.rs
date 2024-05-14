@@ -36,7 +36,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{mpsc::Sender, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::trace;
 
 mod client;
@@ -97,7 +97,7 @@ pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig> {
     pool: Pool,
     mode: MiningMode,
     storage: Storage,
-    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+    to_engine: Sender<BeaconEngineMessage<Engine>>,
     canon_state_notification: CanonStateNotificationSender,
     evm_config: EvmConfig,
 }
@@ -115,7 +115,7 @@ where
         chain_spec: Arc<ChainSpec>,
         client: Client,
         pool: Pool,
-        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+        to_engine: Sender<BeaconEngineMessage<Engine>>,
         canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
         evm_config: EvmConfig,

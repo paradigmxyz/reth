@@ -770,7 +770,9 @@ where
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+    use reth_beacon_consensus::{
+        BeaconConsensusEngineEvent, BeaconEngineMessage, DEFAULT_CONSENSUS_CHANNEL_SIZE,
+    };
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_interfaces::test_utils::generators::random_block;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
@@ -779,14 +781,14 @@ mod tests {
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use reth_tokio_util::EventListeners;
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use tokio::sync::mpsc::{channel, Receiver};
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
     {
         let chain_spec: Arc<ChainSpec> = MAINNET.clone();
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
-        let (to_engine, engine_rx) = unbounded_channel();
+        let (to_engine, engine_rx) = channel(DEFAULT_CONSENSUS_CHANNEL_SIZE);
         let listeners: EventListeners<BeaconConsensusEngineEvent> = Default::default();
         let task_executor = Box::<TokioTaskExecutor>::default();
         let api = EngineApi::new(
@@ -803,7 +805,7 @@ mod tests {
     struct EngineApiTestHandle {
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
-        from_api: UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
+        from_api: Receiver<BeaconEngineMessage<EthEngineTypes>>,
     }
 
     #[tokio::test]

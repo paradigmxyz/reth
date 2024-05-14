@@ -37,10 +37,11 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    mpsc::{self, UnboundedSender},
+    broadcast::Sender as BroadcastSender,
+    mpsc::{self, Sender as BoundedSender},
     oneshot,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::*;
 
 mod message;
@@ -88,6 +89,9 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 /// This is the default threshold, the distance to the head that the tree will be used for sync.
 /// If the distance exceeds this threshold, the pipeline will be used for sync.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+
+/// The size of the channel used to receive consensus events sent from the RPC.
+pub const DEFAULT_CONSENSUS_CHANNEL_SIZE: usize = 1000;
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
@@ -236,7 +240,7 @@ where
         pipeline_run_threshold: u64,
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
-        let (to_engine, rx) = mpsc::unbounded_channel();
+        let (to_engine, rx) = mpsc::channel(DEFAULT_CONSENSUS_CHANNEL_SIZE);
         Self::with_channel(
             client,
             pipeline,
@@ -249,7 +253,7 @@ where
             target,
             pipeline_run_threshold,
             to_engine,
-            Box::pin(UnboundedReceiverStream::from(rx)),
+            Box::pin(ReceiverStream::from(rx)),
             hooks,
         )
     }
@@ -278,7 +282,7 @@ where
         payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
-        to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
+        to_engine: BoundedSender<BeaconEngineMessage<EngineT>>,
         engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {

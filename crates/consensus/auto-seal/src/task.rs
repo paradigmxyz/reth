@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::{mpsc::Sender, oneshot};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, error, warn};
 
@@ -38,7 +38,7 @@ pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTyp
     /// backlog of sets of transactions ready to be mined
     queued: VecDeque<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>,
     // TODO: ideally this would just be a sender of hashes
-    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+    to_engine: Sender<BeaconEngineMessage<Engine>>,
     /// Used to notify consumers of new blocks
     canon_state_notification: CanonStateNotificationSender,
     /// The pipeline events to listen on
@@ -57,7 +57,7 @@ impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes>
     pub(crate) fn new(
         chain_spec: Arc<ChainSpec>,
         miner: MiningMode,
-        to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+        to_engine: Sender<BeaconEngineMessage<Engine>>,
         canon_state_notification: CanonStateNotificationSender,
         storage: Storage,
         client: Client,
@@ -166,11 +166,16 @@ where
                                 // send the new update to the engine, this will trigger the engine
                                 // to download and execute the block we just inserted
                                 let (tx, rx) = oneshot::channel();
-                                let _ = to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-                                    state,
-                                    payload_attrs: None,
-                                    tx,
-                                });
+                                if let Err(err) = to_engine
+                                    .send(BeaconEngineMessage::ForkchoiceUpdated {
+                                        state,
+                                        payload_attrs: None,
+                                        tx,
+                                    })
+                                    .await
+                                {
+                                    warn!("sending to consensus bounded channel: {err}");
+                                }
                                 debug!(target: "consensus::auto", ?state, "Sent fork choice update");
 
                                 match rx.await.unwrap() {

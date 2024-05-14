@@ -12,7 +12,7 @@ use futures::{future, future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine, EthBeaconConsensus,
+    BeaconConsensusEngine, EthBeaconConsensus, DEFAULT_CONSENSUS_CHANNEL_SIZE,
 };
 use reth_blockchain_tree::{
     noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
@@ -35,8 +35,11 @@ use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, sync::Arc};
-use tokio::sync::{mpsc::unbounded_channel, oneshot};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio::sync::{
+    mpsc::{channel, unbounded_channel},
+    oneshot,
+};
+use tokio_stream::wrappers::ReceiverStream;
 
 pub mod common;
 pub use common::LaunchContext;
@@ -258,10 +261,10 @@ where
 
         // create pipeline
         let network_client = node_adapter.network().fetch_client().await?;
-        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+        let (consensus_engine_tx, consensus_engine_rx) = channel(DEFAULT_CONSENSUS_CHANNEL_SIZE);
 
         let node_config = ctx.node_config();
-        let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
+        let consensus_engine_stream = ReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
             // Store messages _after_ skipping so that `replay-engine` command
