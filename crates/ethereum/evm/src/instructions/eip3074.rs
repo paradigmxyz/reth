@@ -632,7 +632,7 @@ mod tests {
         assert_eq!(interpreter.instruction_result, InstructionResult::CallOrCreate);
 
         // check gas
-        let expected_gas = 66612;
+        let expected_gas = 64312;
         assert_eq!(expected_gas, interpreter.gas.spent());
 
         // check next action
