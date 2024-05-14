@@ -22,8 +22,9 @@ Automatically-generated CLI reference from `--help` output.
 {{#include ./SUMMARY.md}}
 """
 
+
 def write_file(file_path, content):
-    content = '\n'.join([line.rstrip() for line in content.split("\n")])
+    content = "\n".join([line.rstrip() for line in content.split("\n")])
     with open(file_path, "w") as f:
         f.write(content)
 
@@ -252,14 +253,27 @@ def command_name(cmd: str):
     """Returns the name of a command."""
     return cmd.split("/")[-1]
 
+
 def preprocess_help(s: str):
     """Preprocesses the help output of a command."""
     # Remove the user-specific paths.
-    s = re.sub(r"default: /.*/reth", "default: <CACHE_DIR>", s)
+    s = re.sub(
+        r"default: /.*/reth",
+        "default: <CACHE_DIR>",
+        s,
+    )
     # Remove the commit SHA and target architecture triple
-    s = re.sub(r"default: reth/.*-[0-9A-Fa-f]{6,10}/\w+-\w*-\w+", "default: reth/<VERSION>-<SHA>/<ARCH>", s)
+    s = re.sub(
+        r"default: reth/.*-[0-9A-Fa-f]{6,10}/\w+-\w*-\w+",
+        "default: reth/<VERSION>-<SHA>/<ARCH>",
+        s,
+    )
     # Remove the OS
-    s = re.sub(r"default: reth/.*/\w+", "default: reth/<VERSION>/<OS>", s)
+    s = re.sub(
+        r"default: reth/.*/\w+",
+        "default: reth/<VERSION>/<OS>",
+        s,
+    )
 
     return s
 
