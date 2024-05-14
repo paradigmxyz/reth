@@ -1,12 +1,11 @@
 use crate::instructions::{context::InstructionsContext, BoxedInstructionWithOpCode};
 use reth_revm::{Context, Database};
 use revm_interpreter::{
-    Host,
     gas,
     gas::{warm_cold_cost, NEWACCOUNT},
     instructions::contract::get_memory_input_and_out_ranges,
-    pop, pop_address, push, resize_memory, CallInputs, CallScheme, CallValue, InstructionResult,
-    Interpreter, InterpreterAction, LoadAccountResult,
+    pop, pop_address, push, resize_memory, CallInputs, CallScheme, CallValue, Host,
+    InstructionResult, Interpreter, InterpreterAction, LoadAccountResult,
 };
 use revm_precompile::secp256k1::ecrecover;
 use revm_primitives::{
@@ -278,9 +277,9 @@ fn authcall_instruction<EXT, DB: Database>(
         evm.evm.spec_id(),
         calc_authcall_gas::<SPEC>(
             interp,
-            is_cold,                // is_cold
+            is_cold,             // is_cold
             value != U256::ZERO, // has_transfer
-            is_empty,                // new_account_accounting
+            is_empty,            // new_account_accounting
             local_gas_limit,
         )
     ) else {
