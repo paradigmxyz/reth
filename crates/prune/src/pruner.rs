@@ -66,7 +66,8 @@ impl<DB: Database> Pruner<DB> {
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
         let segments =
-            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments);
+            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments)
+                .expect("default start always exists");
 
         Self {
             provider_factory,

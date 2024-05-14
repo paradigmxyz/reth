@@ -96,20 +96,26 @@ impl<DB> TableRing<DB> {
         provider: StaticFileProvider,
         start: TableRef,
         segments: Vec<Arc<dyn Segment<DB>>>,
-    ) -> Self {
+    ) -> Result<Self, &'static str> {
         let static_file_start = match start {
             TableRef::StaticFiles(table_ref) => table_ref,
             _ => StaticFileTableRef::default(),
         };
 
-        Self {
+        if let TableRef::Drop(index) = start {
+            if segments.is_empty() || index > segments.len() - 1 {
+                return Err("segments index out of bounds")
+            }
+        }
+
+        Ok(Self {
             start,
             current: start,
             prev: None,
             segments,
             static_file_start,
             static_file_ring: StaticFileTableRing::new(provider, static_file_start),
-        }
+        })
     }
 }
 
@@ -139,7 +145,7 @@ where
             TableRef::StaticFiles(_) => {
                 // static files ring nested in this ring, so is one step ahead
                 let next = static_file_ring.current_table();
-                if next == *static_file_start {
+                if next == *static_file_start && !segments.is_empty() {
                     TableRef::Drop(0)
                 } else {
                     TableRef::StaticFiles(next)
@@ -305,7 +311,7 @@ mod test {
         static_file_provider.commit().unwrap();
 
         let mut ring: TableRing<_> =
-            TableRing::new(static_file_provider, TableRef::default(), segments);
+            TableRing::new(static_file_provider, TableRef::default(), segments).unwrap();
 
         let total_segments = ring.iter().count();
 
@@ -328,7 +334,8 @@ mod test {
         let segments_len = segments.len();
 
         let mut ring: TableRing<_> =
-            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments);
+            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments)
+                .unwrap();
 
         let cycle = SegmentIter { ring: &mut ring };
         let total_segments = cycle.count();
@@ -362,7 +369,7 @@ mod test {
         let index = rand::thread_rng().gen_range(0..segments_len);
         let start = TableRef::Drop(index);
         let mut ring: TableRing<_> =
-            TableRing::new(provider_factory.static_file_provider(), start, segments);
+            TableRing::new(provider_factory.static_file_provider(), start, segments).unwrap();
 
         let cycle = SegmentIter { ring: &mut ring };
         let total_segments = cycle.count();
