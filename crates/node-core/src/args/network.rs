@@ -156,13 +156,9 @@ impl NetworkArgs {
         self.discovery.apply_to_builder(network_config_builder)
     }
 
-    /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
+    /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
     pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
-        if self.no_persist_peers {
-            return None
-        }
-
-        Some(peers_file)
+        (!self.no_persist_peers).then_some(peers_file)
     }
 
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
