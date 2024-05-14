@@ -235,10 +235,10 @@ fn register_compiler_handler<DB: Database>(
     });
 }
 
-fn execute_frame<'cx, DB: Database>(
+fn execute_frame<DB: Database>(
     frame: &mut Frame,
     memory: &mut SharedMemory,
-    context: &mut Context<CompilerEvmContext<'cx>, DB>,
+    context: &mut Context<CompilerEvmContext<'_>, DB>,
 ) -> Option<InterpreterAction> {
     let library = context.external.get_or_load_library(context.evm.spec_id())?;
     let interpreter = frame.interpreter_mut();
