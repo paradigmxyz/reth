@@ -19,6 +19,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod account;
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
 pub mod basefee;
 mod block;
 mod chain;
@@ -46,7 +48,6 @@ mod storage;
 pub mod transaction;
 pub mod trie;
 mod withdrawal;
-
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
@@ -115,7 +116,7 @@ pub use alloy_primitives::{
     StorageValue, TxHash, TxIndex, TxKind, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
-pub use revm_primitives::{self, JumpMap};
+pub use revm_primitives::{self, JumpTable};
 
 #[doc(hidden)]
 #[deprecated = "use B64 instead"]

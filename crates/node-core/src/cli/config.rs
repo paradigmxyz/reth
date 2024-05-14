@@ -2,14 +2,12 @@
 
 use reth_network::protocol::IntoRlpxSubProtocol;
 use reth_primitives::Bytes;
-use reth_rpc::{
-    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig},
-    JwtError, JwtSecret,
-};
+use reth_rpc::eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig};
 use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, Identity, IpcServerBuilder,
     RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 };
+use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, path::PathBuf, time::Duration};
 
