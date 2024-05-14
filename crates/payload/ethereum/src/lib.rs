@@ -22,14 +22,12 @@ use reth_payload_builder::{
 };
 use reth_primitives::{
     constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH,
-        EMPTY_TRANSACTIONS,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
     revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, Requests, EMPTY_OMMER_ROOT_HASH,
-    U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
@@ -187,9 +185,22 @@ where
             blob_gas_used = Some(0);
         }
 
+        // Calculate the requests and the requests root.
         let (requests, requests_root) =
             if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+                // We do not calculate the EIP-6110 deposit requests because there are no
+                // transactions in an empty payload.
+                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                    &mut db,
+                    &chain_spec,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                    &attributes,
+                )?;
+
+                let requests = withdrawal_requests;
+                let requests_root = calculate_requests_root(&requests);
+                (Some(requests.into()), Some(requests_root))
             } else {
                 (None, None)
             };
@@ -399,7 +410,6 @@ where
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
         // append transaction to the list of executed transactions
-        //
         executed_txs.push(tx.into_signed());
     }
 
