@@ -557,7 +557,7 @@ mod tests {
                 (
                     &BlockWithSenders {
                         block: Block {
-                            header: header.clone(),
+                            header,
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
@@ -588,7 +588,7 @@ mod tests {
             .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
@@ -751,7 +751,7 @@ mod tests {
                 (
                     &BlockWithSenders {
                         block: Block {
-                            header: header.clone(),
+                            header,
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
@@ -838,7 +838,7 @@ mod tests {
                 (
                     &BlockWithSenders {
                         block: Block {
-                            header: header.clone(),
+                            header,
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
@@ -987,7 +987,7 @@ mod tests {
             .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
@@ -1030,7 +1030,7 @@ mod tests {
             .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
@@ -1074,7 +1074,7 @@ mod tests {
             .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
@@ -1131,7 +1131,7 @@ mod tests {
             .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
@@ -1179,7 +1179,7 @@ mod tests {
             .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
-                        header: header.clone(),
+                        header,
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
