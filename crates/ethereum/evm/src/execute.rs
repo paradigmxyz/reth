@@ -168,7 +168,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
@@ -209,11 +209,12 @@ where
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
                 gas_spent_by_tx: receipts.gas_spent_by_tx()?,
             }
-            .into());
+            .into())
         }
 
         // Collect all EIP-6110 deposits
-        let deposit_requests = crate::eip6110::parse_deposits_from_receipts(&receipts)?;
+        let deposit_requests =
+            crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
         // Collect all EIP-7685 requests
         let withdrawal_requests =
@@ -315,7 +316,7 @@ where
                 receipts.iter(),
             ) {
                 debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error);
+                return Err(error)
             };
         }
 
