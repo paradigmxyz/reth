@@ -21,7 +21,7 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{broadcast::Sender, oneshot};
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Manages syncing under the control of the engine.
@@ -125,11 +125,6 @@ where
     /// Returns whether or not the sync controller is set to run the pipeline continuously.
     pub(crate) fn run_pipeline_continuously(&self) -> bool {
         self.run_pipeline_continuously
-    }
-
-    /// Sets a [Sender] to the sync controller's notifier.
-    pub(crate) fn set_sender(&mut self, sender: Sender<BeaconConsensusEngineEvent>) {
-        self.listeners.set_sender(sender);
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
