@@ -146,7 +146,7 @@ Networking:
           --trusted-peers enode://abcd@192.168.0.1:30303
 
       --trusted-only
-          Connect only to trusted peers
+          Connect to or accept from trusted peers only
 
       --bootnodes <BOOTNODES>
           Comma separated enode URLs for P2P discovery bootstrap.
