@@ -2,7 +2,7 @@
 members = [
     "bin/reth/",
     "crates/blockchain-tree/",
-    "crates/cli/runner/",
+    "crates/cli-runner/",
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
@@ -211,7 +211,7 @@ reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
-reth-cli-runner = { path = "crates/cli/runner" }
+reth-cli-runner = { path = "crates/cli-runner" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus" }
