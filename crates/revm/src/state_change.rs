@@ -4,7 +4,7 @@ use alloy_rlp::Buf;
 use reth_consensus_common::calc;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    address,
+    address, bytes,
     revm::env::{
         fill_tx_env_with_beacon_root_contract_call,
         fill_tx_env_with_withdrawal_requests_contract_call,
@@ -14,7 +14,9 @@ use reth_primitives::{
 use revm::{
     self,
     interpreter::Host,
-    primitives::{Account, AccountInfo, ExecutionResult, FixedBytes, ResultAndState, StorageSlot},
+    primitives::{
+        Account, AccountInfo, Bytecode, ExecutionResult, FixedBytes, ResultAndState, StorageSlot,
+    },
     Database, DatabaseCommit, Evm,
 };
 use std::{collections::HashMap, ops::Rem};
@@ -98,20 +100,20 @@ where
     }
     assert!(block_number > 0);
 
-    // Create an empty account using the `From<AccountInfo>` impl of `Account`. This marks the
-    // account internally as `Loaded`, which is required, since we want the EVM to retrieve storage
-    // values from the DB when `BLOCKHASH` is invoked.
-    let mut account = Account::from(AccountInfo::default());
-
-    // HACK(onbjerg): This is a temporary workaround to make sure the account does not get cleared
-    // by state clearing later. This nonce will likely be present in the devnet 0 genesis file
-    // until the EIP itself is fixed.
-    account.info.nonce = 1;
-
     // We load the `HISTORY_STORAGE_ADDRESS` account because REVM expects this to be loaded in order
     // to access any storage, which we will do below.
-    db.basic(HISTORY_STORAGE_ADDRESS)
-        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
+    //
+    // If the account does not exist, we create it with the EIP-2935 bytecode and a nonce of 1, so
+    // it does not get deleted.
+    let mut account: Account = db
+        .basic(HISTORY_STORAGE_ADDRESS)
+        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?.unwrap_or_else(|| {
+            AccountInfo {
+                nonce: 1,
+                code: Some(Bytecode::new_raw(bytes!("60203611603157600143035f35116029575f356120000143116029576120005f3506545f5260205ff35b5f5f5260205ff35b5f5ffd00"))),
+                ..Default::default()
+            }
+        }).into();
 
     // Insert the state change for the slot
     let (slot, value) = eip2935_block_hash_slot(block_number - 1, db)
