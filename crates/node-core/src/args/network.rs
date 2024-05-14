@@ -39,7 +39,7 @@ pub struct NetworkArgs {
     #[arg(long, value_delimiter = ',')]
     pub trusted_peers: Vec<NodeRecord>,
 
-    /// Connect only to trusted peers
+    /// Connect to or accept from trusted peers only?
     #[arg(long)]
     pub trusted_only: bool,
 
@@ -258,12 +258,12 @@ pub struct DiscoveryArgs {
 
     /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
     /// times, at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval", 
+    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval",
         default_value_t = DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL)]
     pub discv5_bootstrap_lookup_interval: u64,
 
     /// The number of times to carry out boost lookup queries at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown", 
+    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown",
         default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
     pub discv5_bootstrap_lookup_countdown: u64,
 }
