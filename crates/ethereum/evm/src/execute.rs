@@ -588,7 +588,7 @@ mod tests {
             .execute_and_verify(
                 &BlockWithSenders {
                     block: Block {
-                        header,
+                        header: header.clone(),
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
