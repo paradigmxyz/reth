@@ -296,9 +296,7 @@ impl Config {
             discovered_peer_filter: None,
         }
     }
-}
 
-impl Config {
     /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).
