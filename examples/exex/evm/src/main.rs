@@ -1,6 +1,8 @@
 use eyre::OptionExt;
 use reth::{
-    providers::{DatabaseProviderFactory, HistoricalStateProviderRef},
+    providers::{
+        providers::BundleStateProvider, DatabaseProviderFactory, HistoricalStateProviderRef,
+    },
     revm::database::StateProviderDatabase,
 };
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
@@ -18,11 +20,15 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
             let executor_provider = EthExecutorProvider::new(ctx.config.chain.clone(), evm_config);
 
             let database_provider = ctx.provider().database_provider_ro()?;
-            let db = StateProviderDatabase::new(HistoricalStateProviderRef::new(
-                database_provider.tx_ref(),
-                chain.first().number.checked_sub(1).ok_or_eyre("block number underflow")?,
-                database_provider.static_file_provider().clone(),
-            ));
+            let provider = BundleStateProvider::new(
+                HistoricalStateProviderRef::new(
+                    database_provider.tx_ref(),
+                    chain.first().number.checked_sub(1).ok_or_eyre("block number underflow")?,
+                    database_provider.static_file_provider().clone(),
+                ),
+                chain.state(),
+            );
+            let db = StateProviderDatabase::new(&provider);
 
             let mut executor = executor_provider.batch_executor(
                 db,
