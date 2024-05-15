@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::sync::Arc;
 
+use alloy_rlp::Encodable;
 use clap::Parser;
 use did::evm_reset_state::EvmResetState;
 use did::{AccountInfoMap, RawAccountInfo, H256};
@@ -53,10 +54,14 @@ impl BitfinityResetEvmStateCommand {
             .await?,
         );
 
+        println!("Fetching chain spec" );
+        let FIX_ME = false;
+        let URL = "https://orca-app-5yyst.ondigitalocean.app";
         let chain = Arc::new(
-            BitfinityEvmClient::fetch_chain_spec(self.bitfinity.evm_url.clone().to_owned()).await?,
-        );
 
+            BitfinityEvmClient::fetch_chain_spec(URL.to_owned()).await?,
+        );
+        println!("Chain: {:?}", chain.chain);
         let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
 
         let db_path = data_dir.db();
@@ -69,7 +74,9 @@ impl BitfinityResetEvmStateCommand {
 
         // Disable evm execution
         {
+            println!("admin_disable_evm");
             evm_client.admin_disable_evm(true).await??;
+            println!("admin_disable_evm done");
         }
 
         // Reset the evm
@@ -170,8 +177,15 @@ impl BitfinityResetEvmStateCommand {
         // End of the recovery process
         {
             info!(target: "reth::cli", "End of recovery process");
-            let block_json = serde_json::to_value(last_block)?;
-            let did_block: did::Block<H256> = serde_json::from_value(block_json)?;
+
+            let mut buff = vec![];
+            last_block.encode(&mut buff);
+
+            let did_block = rlp::decode::<did::Block<did::Transaction>>(&buff)?;
+            let did_block: did::Block<H256> = did_block.into();
+
+            // let block_json = serde_json::to_value(last_block)?;
+            // let did_block: did::Block<H256> = serde_json::from_value(block_json)?;
             evm_client.admin_reset_state(EvmResetState::End(did_block)).await??;
         }
 

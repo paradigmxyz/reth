@@ -7294,6 +7294,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
+ "rlp",
  "serde",
  "serde_json",
  "similar-asserts",

@@ -47,10 +47,6 @@ pub struct BitfinityExportToEvmArgs {
     #[arg(long, value_name = "EVMC_PRINCIPAL", default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]
     pub evmc_principal: String,
 
-    /// Root key for the IC network
-    #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
-    pub ic_root_key: String,
-
     /// Path to an identity PEM file to perform state recovery IC calls.
     /// The identity must have permissions to stop the EVM canister and to
     /// update the blockchain.
