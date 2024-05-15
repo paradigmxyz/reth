@@ -10,7 +10,7 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine};
+use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeaconConsensus};
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
@@ -122,7 +122,8 @@ impl Command {
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         let executor = block_executor!(self.chain.clone());
 

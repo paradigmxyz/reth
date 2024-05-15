@@ -11,7 +11,7 @@ use futures::{future, future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngine, EthBeaconConsensus,
 };
 use reth_blockchain_tree::{
     noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
@@ -19,7 +19,6 @@ use reth_blockchain_tree::{
 };
 use reth_consensus::Consensus;
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
-use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
@@ -116,7 +115,7 @@ where
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
             Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
         } else {
-            Arc::new(BeaconConsensus::new(ctx.chain_spec()))
+            Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
         };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
@@ -327,7 +326,7 @@ where
             debug!(target: "reth::cli", "Spawning auto mine task");
             ctx.task_executor().spawn(Box::pin(task));
 
-            (pipeline, EitherDownloader::Left(client))
+            (pipeline, Either::Left(client))
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
                 ctx.node_config(),
@@ -345,7 +344,7 @@ where
             )
             .await?;
 
-            (pipeline, EitherDownloader::Right(network_client.clone()))
+            (pipeline, Either::Right(network_client.clone()))
         };
 
         let pipeline_events = pipeline.events();

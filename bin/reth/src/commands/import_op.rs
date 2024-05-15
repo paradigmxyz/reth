@@ -1,8 +1,9 @@
-//! Command that initializes the node by importing a chain from a file.
+//! Command that initializes the node by importing OP Mainnet chain segment below Bedrock, from a
+//! file.
 
 use crate::{
     args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        utils::{genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
     commands::import::{build_import_pipeline, load_config},
@@ -10,15 +11,17 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 
 use reth_db::{init_db, tables, transaction::DbTx};
-use reth_downloaders::file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE};
+use reth_downloaders::file_client::{
+    ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
+};
 
 use reth_node_core::init::init_genesis;
 
-use reth_primitives::{hex, stage::StageId, ChainSpec, PruneModes, TxHash};
+use reth_primitives::{hex, stage::StageId, PruneModes, TxHash};
 use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -41,18 +44,6 @@ pub struct ImportOpCommand {
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
 
     /// Chunk byte length.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -83,8 +74,10 @@ impl ImportOpCommand {
             "Chunking chain import"
         );
 
+        let chain_spec = genesis_value_parser(SUPPORTED_CHAINS[0])?;
+
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(chain_spec.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = load_config(config_path.clone())?;
@@ -99,15 +92,16 @@ impl ImportOpCommand {
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
+
         info!(target: "reth::cli", "Database opened");
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+            ProviderFactory::new(db.clone(), chain_spec.clone(), data_dir.static_files())?;
 
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+        debug!(target: "reth::cli", chain=%chain_spec.chain, genesis=?chain_spec.genesis_hash(), "Initializing genesis");
 
         init_genesis(provider_factory.clone())?;
 
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
         // open file
@@ -117,7 +111,7 @@ impl ImportOpCommand {
         let mut total_decoded_txns = 0;
         let mut total_filtered_out_dup_txns = 0;
 
-        while let Some(mut file_client) = reader.next_chunk().await? {
+        while let Some(mut file_client) = reader.next_chunk::<FileClient>().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -253,22 +247,4 @@ pub fn is_duplicate(tx_hash: TxHash, block_number: u64) -> bool {
         }
     }
     false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_common_import_command_chain_args() {
-        for chain in SUPPORTED_CHAINS {
-            let args: ImportOpCommand =
-                ImportOpCommand::parse_from(["reth", "--chain", chain, "."]);
-            assert_eq!(
-                Ok(args.chain.chain),
-                chain.parse::<reth_primitives::Chain>(),
-                "failed to parse chain {chain}"
-            );
-        }
-    }
 }

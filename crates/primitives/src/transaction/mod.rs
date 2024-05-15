@@ -2,7 +2,6 @@
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
 
-use alloy_eips::eip2718::Eip2718Error;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -11,7 +10,6 @@ use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
-use reth_rpc_types::ConversionError;
 use serde::{Deserialize, Serialize};
 use std::mem;
 
@@ -25,12 +23,12 @@ pub use error::{
 };
 pub use legacy::TxLegacy;
 pub use meta::TransactionMeta;
-#[cfg(feature = "c-kzg")]
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub use sidecar::generate_blob_sidecar;
 #[cfg(feature = "c-kzg")]
-pub use sidecar::{BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError};
+pub use sidecar::BlobTransactionValidationError;
+pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
 pub use signature::{extract_chain_id, Signature};
 pub use tx_type::{
@@ -45,9 +43,7 @@ mod eip4844;
 mod error;
 mod legacy;
 mod meta;
-#[cfg(feature = "c-kzg")]
 mod pooled;
-#[cfg(feature = "c-kzg")]
 mod sidecar;
 mod signature;
 mod tx_type;
@@ -613,106 +609,6 @@ impl From<TxEip1559> for Transaction {
 impl From<TxEip4844> for Transaction {
     fn from(tx: TxEip4844) -> Self {
         Transaction::Eip4844(tx)
-    }
-}
-
-impl TryFrom<reth_rpc_types::Transaction> for Transaction {
-    type Error = ConversionError;
-
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
-            ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
-                tx.transaction_type.unwrap(),
-            ))
-        })? {
-            None | Some(TxType::Legacy) => {
-                // legacy
-                if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
-                    return Err(ConversionError::Eip2718Error(
-                        RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
-                            .into(),
-                    ))
-                }
-                Ok(Transaction::Legacy(TxLegacy {
-                    chain_id: tx.chain_id,
-                    nonce: tx.nonce,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                }))
-            }
-            Some(TxType::Eip2930) => {
-                // eip2930
-                Ok(Transaction::Eip2930(TxEip2930 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                }))
-            }
-            Some(TxType::Eip1559) => {
-                // EIP-1559
-                Ok(Transaction::Eip1559(TxEip1559 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                }))
-            }
-            Some(TxType::Eip4844) => {
-                // EIP-4844
-                Ok(Transaction::Eip4844(TxEip4844 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                    blob_versioned_hashes: tx
-                        .blob_versioned_hashes
-                        .ok_or(ConversionError::MissingBlobVersionedHashes)?,
-                    max_fee_per_blob_gas: tx
-                        .max_fee_per_blob_gas
-                        .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
-                }))
-            }
-            #[cfg(feature = "optimism")]
-            Some(TxType::Deposit) => todo!(),
-        }
     }
 }
 
@@ -1698,7 +1594,6 @@ impl TryFromRecoveredTransaction for TransactionSignedEcRecovered {
 ///
 /// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
 /// transaction type that the transaction pool uses.
-#[cfg(feature = "c-kzg")]
 pub trait FromRecoveredPooledTransaction {
     /// Converts to this type from the given [`PooledTransactionsElementEcRecovered`].
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
@@ -1717,40 +1612,6 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     #[inline]
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.clone()
-    }
-}
-
-impl TryFrom<reth_rpc_types::Transaction> for TransactionSignedEcRecovered {
-    type Error = ConversionError;
-
-    fn try_from(tx: reth_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-
-        let transaction: Transaction = tx.try_into()?;
-
-        TransactionSigned::from_transaction_and_signature(
-            transaction.clone(),
-            Signature {
-                r: signature.r,
-                s: signature.s,
-                odd_y_parity: if let Some(y_parity) = signature.y_parity {
-                    y_parity.0
-                } else {
-                    match transaction.tx_type() {
-                        // If the transaction type is Legacy, adjust the v component of the
-                        // signature according to the Ethereum specification
-                        TxType::Legacy => {
-                            extract_chain_id(signature.v.to())
-                                .map_err(|_| ConversionError::InvalidSignature)?
-                                .0
-                        }
-                        _ => !signature.v.is_zero(),
-                    }
-                },
-            },
-        )
-        .try_into_ecrecovered()
-        .map_err(|_| ConversionError::InvalidSignature)
     }
 }
 

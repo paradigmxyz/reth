@@ -35,8 +35,9 @@ pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
 mod state;
 pub use state::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, BundleStateForkProvider,
+    FullBundleStateDataProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    StateWriter,
 };
 
 mod trie;
@@ -47,9 +48,6 @@ pub use transactions::{TransactionsProvider, TransactionsProviderExt};
 
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;
-
-mod executor;
-pub use executor::{BlockExecutor, ExecutorFactory, PrunableBlockExecutor};
 
 mod chain;
 pub use chain::{

@@ -21,7 +21,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    BundleStateDataProvider, BundleStateWithReceipts, Chain, ProviderError, StateRootProvider,
+    BundleStateWithReceipts, Chain, FullBundleStateDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
@@ -119,7 +119,8 @@ impl AppendableChain {
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
-        let parent_number = block.number - 1;
+        let parent_number =
+            block.number.checked_sub(1).ok_or(BlockchainTreeError::GenesisBlockHasNoParent)?;
         let parent = self.blocks().get(&parent_number).ok_or(
             BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
         )?;
@@ -177,7 +178,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
-        BSDP: BundleStateDataProvider,
+        BSDP: FullBundleStateDataProvider,
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {

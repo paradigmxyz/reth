@@ -1,18 +1,11 @@
-use reth_interfaces::RethError;
 use reth_primitives::{Address, B256, KECCAK_EMPTY, U256};
 use reth_provider::{ProviderError, StateProvider};
 use revm::{
-    db::{CacheDB, DatabaseRef},
+    db::DatabaseRef,
     primitives::{AccountInfo, Bytecode},
-    Database, StateDBBox,
+    Database,
 };
 use std::ops::{Deref, DerefMut};
-
-/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
-pub type SubState<DB> = CacheDB<StateProviderDatabase<DB>>;
-
-/// State boxed database with reth Error.
-pub type RethStateDBBox<'a> = StateDBBox<'a, RethError>;
 
 /// Wrapper around StateProvider that implements revm database trait
 #[derive(Debug, Clone)]

@@ -10,7 +10,7 @@ use reth_evm::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, Executor,
     },
-    ConfigureEvm, ConfigureEvmEnv,
+    ConfigureEvm,
 };
 use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
@@ -62,7 +62,6 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig> {
 impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
@@ -79,7 +78,6 @@ where
 impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
     type Executor<DB: Database<Error = ProviderError>> = EthBlockExecutor<EvmConfig, DB>;
 
@@ -117,7 +115,6 @@ struct EthEvmExecutor<EvmConfig> {
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
     /// Executes the transactions in the block and returns the receipts.
     ///
@@ -158,7 +155,7 @@ where
                 .into())
             }
 
-            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, ());
+            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
@@ -238,8 +235,6 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO(mattsse): get rid of this
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database<Error = ProviderError>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -353,7 +348,6 @@ where
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -403,8 +397,6 @@ impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    // TODO(mattsse): get rid of this
-    EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -451,31 +443,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{
-        bytes,
-        constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
-        keccak256, Account, Block, Bytes, ChainSpecBuilder, ForkCondition, B256,
-    };
+    use alloy_eips::eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS};
+    use reth_primitives::{keccak256, Account, Block, ChainSpecBuilder, ForkCondition, B256};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use std::collections::HashMap;
-
-    static BEACON_ROOT_CONTRACT_CODE: Bytes = bytes!("3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500");
 
     fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
         let mut db = StateProviderTest::default();
 
         let beacon_root_contract_account = Account {
             balance: U256::ZERO,
-            bytecode_hash: Some(keccak256(BEACON_ROOT_CONTRACT_CODE.clone())),
+            bytecode_hash: Some(keccak256(BEACON_ROOTS_CODE.clone())),
             nonce: 1,
         };
 
         db.insert_account(
             BEACON_ROOTS_ADDRESS,
             beacon_root_contract_account,
-            Some(BEACON_ROOT_CONTRACT_CODE.clone()),
+            Some(BEACON_ROOTS_CODE.clone()),
             HashMap::new(),
         );
 

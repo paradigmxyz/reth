@@ -12,8 +12,8 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateNotificationSender,
-    CanonStateNotifications, CanonStateSubscriptions,
+    BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
+    CanonStateSubscriptions, FullBundleStateDataProvider,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -67,6 +67,12 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
 
     fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
         Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
+    }
+
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        Ok(BTreeMap::new())
     }
 }
 
@@ -132,7 +138,7 @@ impl BlockchainTreePendingStateProvider for NoopBlockchainTree {
     fn find_pending_state_provider(
         &self,
         _block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
         None
     }
 }

@@ -12,7 +12,7 @@ use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, ChainSpec, Head, Header, Transaction, U256,
+    Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{Database, EvmBuilder};
 pub mod execute;
@@ -27,12 +27,7 @@ pub mod dao_fork;
 pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
-    type TxMeta = ();
-
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, _meta: ())
-    where
-        T: AsRef<Transaction>,
-    {
+    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         fill_tx_env(tx_env, transaction, sender)
     }
 

@@ -52,6 +52,7 @@
       }
     ]
   },
+  "description": "Devp2p peer discovery protocols",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -578,7 +579,7 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "purple",
+                  "fixedColor": "#9b73d6",
                   "mode": "fixed"
                 }
               }
@@ -628,7 +629,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_discv5_total_kbucket_peers_raw{instance=\"$instance\"}",
+          "expr": "reth_discv5_kbucket_peers_raw_total{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -644,7 +645,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_discv5_total_sessions_raw{instance=\"$instance\"}",
+          "expr": "reth_discv5_sessions_raw_total{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -663,7 +664,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a  UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.\n\n",
+      "description": "Frequency of session establishment and kbuckets insertions.\n\nSince discv5 favours long-lived connections, kbuckets insertions are expected to be less frequent the longer the node stays online.\n\nSome incoming connections may be from peers with unreachable ENRs, ENRs that don't advertise a  UDP socket. These peers are not useful for the discv5 node, nor for RLPx.\n\nDiscovered peers are filtered w.r.t. what they advertise in their ENR. By default peers advertising 'eth2' are filtered out. Unreachable ENRs are also filtered out. Only peers that pass the filter are useful. These peers get passed up the node, to attempt an RLPx connection.\n\nSessions will succeed to peers that advertise no UDP socket in their ENR. This allows peers to discover their reachable socket. On the other hand, for DoS protection, peers that advertise a different socket than the socket from which they make the connection, are denied a sigp/discv5 session. These peers have an unverifiable ENR. The peers are passed to RLPx nonetheless (some EL implementations of discv5 are more lax about ENR and source socket matching). ",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -728,7 +729,7 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "purple",
+                  "fixedColor": "light-green",
                   "mode": "fixed"
                 }
               }
@@ -743,7 +744,7 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "super-light-red",
+                  "fixedColor": "#9958f4",
                   "mode": "fixed"
                 }
               }
@@ -778,6 +779,36 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Session Establishment Failed (unverifiable ENR)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8ab8ff",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failed Session Establishments (unverifiable ENR)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8ab8ff",
+                  "mode": "fixed"
+                }
+              }
+            ]
           }
         ]
       },
@@ -808,7 +839,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_inserted_kbucket_peers_raw{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_inserted_kbucket_peers_raw_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": false,
           "instant": false,
@@ -824,7 +855,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -841,7 +872,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_established_sessions_unreachable_enr{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_established_sessions_unreachable_enr_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -858,7 +889,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval]) - rate(reth_discv5_total_established_sessions_custom_filtered{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval]) - rate(reth_discv5_established_sessions_custom_filtered_total{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -866,6 +897,23 @@
           "legendFormat": "Session Establishments (pass filter)",
           "range": true,
           "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_discv5_unverifiable_enrs_raw_total{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Failed Session Establishments (unverifiable ENR)",
+          "range": true,
+          "refId": "E",
           "useBackend": false
         }
       ],
@@ -942,7 +990,7 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "purple",
+                  "fixedColor": "#b677d9",
                   "mode": "fixed"
                 }
               }
@@ -957,7 +1005,7 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "super-light-red",
+                  "fixedColor": "light-green",
                   "mode": "fixed"
                 }
               }
@@ -973,6 +1021,21 @@
                 "id": "color",
                 "value": {
                   "fixedColor": "#ff0ae5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OP EL"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8AB8FF",
                   "mode": "fixed"
                 }
               }
@@ -1074,7 +1137,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "rate(reth_discv5_total_established_sessions_raw{instance=\"$instance\"}[$__rate_interval]) - (rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opel{instance=\"$instance\"}[$__rate_interval]))",
+          "expr": "(rate(reth_discv5_established_sessions_raw_total{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_unverifiable_enrs_raw_total{instance=\"$instance\"}[$__rate_interval])) - (rate(reth_discv5_eth{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_eth2{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opstack{instance=\"$instance\"}[$__rate_interval]) + rate(reth_discv5_opel{instance=\"$instance\"}[$__rate_interval]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -1124,8 +1187,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "reth - discovery",
-  "uid": "de6e87b2-7630-40b2-b2c4-a500476e799d",
+  "title": "Reth - Peer Discovery",
+  "uid": "fd2d69b5-ca32-45d0-946e-c00ddcd7052c",
   "version": 1,
   "weekStart": ""
 }

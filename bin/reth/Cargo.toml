@@ -43,7 +43,6 @@ reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
-reth-prune.workspace = true
 reth-static-file = { workspace = true }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
@@ -133,7 +132,6 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
     "reth-primitives/optimism",
-    "reth-revm/optimism",
     "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",
