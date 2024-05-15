@@ -21,7 +21,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    BundleStateDataProvider, BundleStateWithReceipts, Chain, ProviderError, StateRootProvider,
+    BundleStateWithReceipts, Chain, FullBundleStateDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
@@ -178,7 +178,7 @@ impl AppendableChain {
         block_validation_kind: BlockValidationKind,
     ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
     where
-        BSDP: BundleStateDataProvider,
+        BSDP: FullBundleStateDataProvider,
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
