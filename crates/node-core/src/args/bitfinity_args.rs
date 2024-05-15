@@ -44,16 +44,25 @@ pub struct BitfinityExportToEvmArgs {
 
     /// Canister principal
     /// Default value corresponds to testnet
-    #[arg(long, value_name = "EVMC_PRINCIPAL", default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]
+    #[arg(long, default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]
     pub evmc_principal: String,
 
     /// Path to an identity PEM file to perform state recovery IC calls.
     /// The identity must have permissions to stop the EVM canister and to
     /// update the blockchain.
-    #[arg(long = "ic-identity-file-path", value_name = "IDENTITY_FILE")]
+    #[arg(long)]
     pub ic_identity_file_path: std::path::PathBuf,
 
     /// Network url
-    #[arg(long = "evm-url")]
-    pub evm_url: String,
+    /// This is the URL of the IC network.
+    /// E.g. 
+    /// - https://ic0.app
+    /// - http://127.0.0.1:3333
+    #[arg(long)]
+    pub evm_network: String,
+
+    /// URL used to fetch the ChainSpec information.
+    /// This is usually the URL of the Bitfinity EVM block extractor.
+    #[arg(long)]
+    pub evm_datasource_url: String,
 }

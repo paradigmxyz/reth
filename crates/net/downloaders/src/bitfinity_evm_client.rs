@@ -267,7 +267,7 @@ impl BitfinityEvmClient {
             ..Default::default()
         };
 
-        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:#?}", spec);
+        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:?}", spec);
 
         Ok(spec)
     }
