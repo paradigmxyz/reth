@@ -472,6 +472,7 @@ impl StaticFileProvider {
     pub fn check_consistency<TX: DbTx>(
         &self,
         provider: &DatabaseProvider<TX>,
+        has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>> {
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: Option<BlockNumber>| {
@@ -483,14 +484,8 @@ impl StaticFileProvider {
             }
         };
 
-        // TODO: this check might not be good enough
-        let is_pruned_node =
-            self.get_highest_static_file_block(StaticFileSegment::Receipts).is_none() &&
-                provider.get_stage_checkpoint(StageId::Execution)?.is_some() &&
-                provider.tx_ref().entries::<tables::Receipts>()? > 0;
-
         for segment in StaticFileSegment::iter() {
-            if is_pruned_node && segment.is_receipts() {
+            if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
             }
