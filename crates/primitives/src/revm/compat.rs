@@ -1,8 +1,5 @@
-use crate::{revm_primitives::AccountInfo, Account, Address, TransactionKind, KECCAK_EMPTY, U256};
-use revm::{
-    interpreter::gas::validate_initial_tx_gas,
-    primitives::{MergeSpec, ShanghaiSpec},
-};
+use crate::{revm_primitives::AccountInfo, Account, Address, TxKind, KECCAK_EMPTY, U256};
+use revm::{interpreter::gas::validate_initial_tx_gas, primitives::SpecId};
 
 /// Converts a Revm [`AccountInfo`] into a Reth [`Account`].
 ///
@@ -34,13 +31,12 @@ pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
 #[inline]
 pub fn calculate_intrinsic_gas_after_merge(
     input: &[u8],
-    kind: &TransactionKind,
+    kind: &TxKind,
     access_list: &[(Address, Vec<U256>)],
     is_shanghai: bool,
 ) -> u64 {
-    if is_shanghai {
-        validate_initial_tx_gas::<ShanghaiSpec>(input, kind.is_create(), access_list)
-    } else {
-        validate_initial_tx_gas::<MergeSpec>(input, kind.is_create(), access_list)
-    }
+    let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
+    // TODO(EOF)
+    let initcodes = &[];
+    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list, initcodes)
 }

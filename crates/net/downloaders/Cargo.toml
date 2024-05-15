@@ -19,6 +19,7 @@ reth-tasks.workspace = true
 reth-provider.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
+reth-network-types.workspace = true
 
 # async
 futures.workspace = true

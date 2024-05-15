@@ -41,7 +41,8 @@ use reth_eth_wire::{
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
-use reth_primitives::{PeerId, PooledTransactionsElement, TxHash};
+use reth_network_types::PeerId;
+use reth_primitives::{PooledTransactionsElement, TxHash};
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
 use smallvec::{smallvec, SmallVec};
@@ -238,7 +239,7 @@ impl TransactionFetcher {
     ///
     /// Returns left over hashes.
     pub fn pack_request(
-        &mut self,
+        &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
@@ -259,7 +260,7 @@ impl TransactionFetcher {
     /// response. If no, it's added to surplus hashes. If yes, it's added to hashes to the request
     /// and expected response size is accumulated.
     pub fn pack_request_eth68(
-        &mut self,
+        &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: impl HandleMempoolData
             + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
@@ -327,7 +328,7 @@ impl TransactionFetcher {
     ///
     /// Returns left over hashes.
     pub fn pack_request_eth66(
-        &mut self,
+        &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
@@ -1293,27 +1294,26 @@ pub enum VerificationOutcome {
 /// Tracks stats about the [`TransactionFetcher`].
 #[derive(Debug)]
 pub struct TransactionFetcherInfo {
-    /// Currently active outgoing [`GetPooledTransactions`] requests.
+    /// Max inflight [`GetPooledTransactions`] requests.
     pub max_inflight_requests: usize,
-    /// Soft limit for the byte size of the expected
-    /// [`PooledTransactions`] response on packing a
-    /// [`GetPooledTransactions`] request with hashes.
-    pub(super) soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
-    /// Soft limit for the byte size of a [`PooledTransactions`]
-    /// response on assembling a [`GetPooledTransactions`]
-    /// request. Spec'd at 2 MiB.
+    /// Soft limit for the byte size of the expected [`PooledTransactions`] response, upon packing
+    /// a [`GetPooledTransactions`] request with hashes (by default less than 2 MiB worth of
+    /// transactions is requested).
+    pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
+    /// Soft limit for the byte size of a [`PooledTransactions`] response, upon assembling the
+    /// response. Spec'd at 2 MiB, but can be adjusted for research purpose.
     pub soft_limit_byte_size_pooled_transactions_response: usize,
 }
 
 impl TransactionFetcherInfo {
     /// Creates a new max
     pub fn new(
-        max_inflight_transaction_requests: usize,
+        max_inflight_requests: usize,
         soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
         soft_limit_byte_size_pooled_transactions_response: usize,
     ) -> Self {
         Self {
-            max_inflight_requests: max_inflight_transaction_requests,
+            max_inflight_requests,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             soft_limit_byte_size_pooled_transactions_response,
         }
@@ -1323,7 +1323,7 @@ impl TransactionFetcherInfo {
 impl Default for TransactionFetcherInfo {
     fn default() -> Self {
         Self::new(
-            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES,
+            DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS as usize * DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER as usize,
             DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
             SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
         )

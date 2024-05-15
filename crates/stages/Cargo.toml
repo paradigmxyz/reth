@@ -24,6 +24,8 @@ reth-etl.workspace = true
 reth-config.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-consensus.workspace = true
+reth-evm.workspace = true
+reth-revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -51,6 +53,7 @@ reth-revm.workspace = true
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-network-types.workspace = true
 
 alloy-rlp.workspace = true
 itertools.workspace = true

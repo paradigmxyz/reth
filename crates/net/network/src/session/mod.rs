@@ -19,7 +19,8 @@ use reth_net_common::{
     bandwidth_meter::{BandwidthMeter, MeteredStream},
     stream::HasRemoteAddr,
 };
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
 use secp256k1::SecretKey;
 use std::{

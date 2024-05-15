@@ -3,7 +3,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 /// Error thrown when parsing cors domains went wrong
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CorsDomainError {
+pub enum CorsDomainError {
     #[error("{domain} is an invalid header value")]
     InvalidHeader { domain: String },
     #[error("wildcard origin (`*`) cannot be passed as part of a list: {input}")]

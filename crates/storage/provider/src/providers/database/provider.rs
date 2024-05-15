@@ -9,8 +9,8 @@ use crate::{
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    StageCheckpointReader, StateProviderBox, StatsReader, StorageReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    StageCheckpointReader, StateProviderBox, StateWriter, StatsReader, StorageReader,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -354,6 +354,11 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             |_| true,
         )
     }
+
+    /// Returns a reference to the [`ChainSpec`].
+    pub fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
 }
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
@@ -387,7 +392,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    pub fn unwind_or_peek_state<const UNWIND: bool>(
+    pub fn unwind_or_peek_state<const TAKE: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BundleStateWithReceipts> {
@@ -408,8 +413,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let storage_range = BlockNumberAddress::range(range.clone());
 
         let storage_changeset =
-            self.get_or_take::<tables::StorageChangeSets, UNWIND>(storage_range)?;
-        let account_changeset = self.get_or_take::<tables::AccountChangeSets, UNWIND>(range)?;
+            self.get_or_take::<tables::StorageChangeSets, TAKE>(storage_range)?;
+        let account_changeset = self.get_or_take::<tables::AccountChangeSets, TAKE>(range)?;
 
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
@@ -478,7 +483,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 .push(old_storage);
         }
 
-        if UNWIND {
+        if TAKE {
             // iterate over local plain state remove all account and all storages.
             for (address, (old_account, new_account, storage)) in state.iter() {
                 // revert account if needed.
@@ -515,7 +520,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // iterate over block body and create ExecutionResult
         let mut receipt_iter = self
-            .get_or_take::<tables::Receipts, UNWIND>(from_transaction_num..=to_transaction_num)?
+            .get_or_take::<tables::Receipts, TAKE>(from_transaction_num..=to_transaction_num)?
             .into_iter();
 
         let mut receipts = Vec::new();
@@ -1107,7 +1112,10 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
             Ordering::Greater => {
                 let mut static_file_producer =
                     static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-                static_file_producer.prune_headers(next_static_file_block_num - next_block)?
+                static_file_producer.prune_headers(next_static_file_block_num - next_block)?;
+                // Since this is a database <-> static file inconsistency, we commit the change
+                // straight away.
+                static_file_producer.commit()?
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.

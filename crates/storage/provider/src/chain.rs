@@ -16,6 +16,10 @@ use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 /// changesets for those blocks (and their transactions), as well as the blocks themselves.
 ///
 /// Used inside the BlockchainTree.
+///
+/// # Warning
+///
+/// A chain of blocks should not be empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
     /// All blocks in this chain.
@@ -33,16 +37,19 @@ pub struct Chain {
 
 impl Chain {
     /// Create new Chain from blocks and state.
+    ///
+    /// # Warning
+    ///
+    /// A chain of blocks should not be empty.
     pub fn new(
         blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
         state: BundleStateWithReceipts,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        Self {
-            blocks: BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b))),
-            state,
-            trie_updates,
-        }
+        let blocks = BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b)));
+        debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
+
+        Self { blocks, state, trie_updates }
     }
 
     /// Create new Chain from a single block and its state.
@@ -158,16 +165,20 @@ impl Chain {
     }
 
     /// Get the first block in this chain.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn first(&self) -> &SealedBlockWithSenders {
-        self.blocks.first_key_value().expect("Chain has at least one block for first").1
+        self.blocks.first_key_value().expect("Chain should have at least one block").1
     }
 
     /// Get the tip of the chain.
     ///
-    /// # Note
+    /// # Panics
     ///
-    /// Chains always have at least one block.
+    /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
@@ -179,6 +190,10 @@ impl Chain {
     }
 
     /// Returns the range of block numbers in the chain.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     pub fn range(&self) -> RangeInclusive<BlockNumber> {
         self.first().number..=self.tip().number
     }
@@ -255,6 +270,10 @@ impl Chain {
     /// The second chain only contains the changes that were reverted on the first chain; however,
     /// it retains the up to date state as if the chains were one, i.e. the second chain is an
     /// extension of the first.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn split(mut self, split_at: ChainSplitTarget) -> ChainSplit {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
@@ -479,7 +498,7 @@ mod tests {
         let chain2 =
             Chain { blocks: BTreeMap::from([(3, block3), (4, block4)]), ..Default::default() };
 
-        assert_eq!(chain1.append_chain(chain2.clone()), Ok(()));
+        assert!(chain1.append_chain(chain2.clone()).is_ok());
 
         // chain1 got changed so this will fail
         assert!(chain1.append_chain(chain2).is_err());

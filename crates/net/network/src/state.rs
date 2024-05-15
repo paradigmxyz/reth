@@ -18,7 +18,8 @@ use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
 use reth_network_api::PeerKind;
-use reth_primitives::{ForkId, PeerId, B256};
+use reth_network_types::PeerId;
+use reth_primitives::{ForkId, B256};
 use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
@@ -233,7 +234,7 @@ where
     }
 
     /// Invoked when a new [`ForkId`] is activated.
-    pub(crate) fn update_fork_id(&mut self, fork_id: ForkId) {
+    pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         self.discovery.update_fork_id(fork_id)
     }
 
@@ -537,7 +538,8 @@ mod tests {
         BlockBodies, EthVersion,
     };
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_primitives::{BlockBody, Header, PeerId, B256};
+    use reth_network_types::PeerId;
+    use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;
     use std::{
         future::poll_fn,

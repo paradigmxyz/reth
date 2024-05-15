@@ -171,7 +171,7 @@ impl<S> MuxDemuxStream<S> {
 
     /// Checks if all clones of this shared stream have been dropped, if true then returns //
     /// function to drop the stream.
-    fn can_drop(&mut self) -> bool {
+    fn can_drop(&self) -> bool {
         for tx in self.demux.values() {
             if !tx.is_closed() {
                 return false
@@ -357,9 +357,10 @@ mod tests {
         UnauthedEthStream, UnauthedP2PStream,
     };
     use futures::{Future, SinkExt, StreamExt};
+    use reth_network_types::pk2id;
     use reth_primitives::{
         bytes::{BufMut, Bytes, BytesMut},
-        pk2id, ForkFilter, Hardfork, MAINNET,
+        ForkFilter, Hardfork, MAINNET,
     };
     use secp256k1::{SecretKey, SECP256K1};
     use std::{net::SocketAddr, pin::Pin};

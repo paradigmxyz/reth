@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 reth.workspace = true
 reth-node-ethereum.workspace = true
+alloy-rpc-types-beacon.workspace = true
 
 clap.workspace = true
 tracing.workspace = true

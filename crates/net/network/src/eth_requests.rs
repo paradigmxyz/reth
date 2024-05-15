@@ -11,7 +11,8 @@ use reth_eth_wire::{
     Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     future::Future,
@@ -138,7 +139,7 @@ where
     }
 
     fn on_headers_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
@@ -149,7 +150,7 @@ where
     }
 
     fn on_bodies_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
@@ -186,7 +187,7 @@ where
     }
 
     fn on_receipts_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,

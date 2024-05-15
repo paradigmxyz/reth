@@ -1,20 +1,14 @@
 use super::access_list::AccessList;
 use crate::{
-    constants::eip4844::DATA_GAS_PER_BLOB, keccak256, Bytes, ChainId, Signature, TransactionKind,
-    TxType, B256, U256,
+    constants::eip4844::DATA_GAS_PER_BLOB, keccak256, Bytes, ChainId, Signature, TxKind, TxType,
+    B256, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_codecs::{main_codec, Compact};
 use std::mem;
 
 #[cfg(feature = "c-kzg")]
-use crate::eip4844::kzg_to_versioned_hash;
-#[cfg(feature = "c-kzg")]
-use crate::kzg::{self, KzgCommitment, KzgProof, KzgSettings};
-#[cfg(feature = "c-kzg")]
-use crate::transaction::sidecar::*;
-#[cfg(feature = "c-kzg")]
-use std::ops::Deref;
+use crate::kzg::KzgSettings;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
@@ -54,7 +48,7 @@ pub struct TxEip4844 {
     pub max_priority_fee_per_gas: u128,
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
+    pub to: TxKind,
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
@@ -112,57 +106,16 @@ impl TxEip4844 {
     /// commitments, and proofs. Each blob data element is verified against its commitment and
     /// proof.
     ///
-    /// Returns [BlobTransactionValidationError::InvalidProof] if any blob KZG proof in the response
+    /// Returns `InvalidProof` if any blob KZG proof in the response
     /// fails to verify, or if the versioned hashes in the transaction do not match the actual
     /// commitment versioned hashes.
     #[cfg(feature = "c-kzg")]
     pub fn validate_blob(
         &self,
-        sidecar: &BlobTransactionSidecar,
+        sidecar: &crate::BlobTransactionSidecar,
         proof_settings: &KzgSettings,
-    ) -> Result<(), BlobTransactionValidationError> {
-        // Ensure the versioned hashes and commitments have the same length
-        if self.blob_versioned_hashes.len() != sidecar.commitments.len() {
-            return Err(kzg::Error::MismatchLength(format!(
-                "There are {} versioned commitment hashes and {} commitments",
-                self.blob_versioned_hashes.len(),
-                sidecar.commitments.len()
-            ))
-            .into())
-        }
-
-        // zip and iterate, calculating versioned hashes
-        for (versioned_hash, commitment) in
-            self.blob_versioned_hashes.iter().zip(sidecar.commitments.iter())
-        {
-            // convert to KzgCommitment
-            let commitment = KzgCommitment::from(*commitment.deref());
-
-            // calculate & verify the versioned hash
-            // https://eips.ethereum.org/EIPS/eip-4844#execution-layer-validation
-            let calculated_versioned_hash = kzg_to_versioned_hash(commitment);
-            if *versioned_hash != calculated_versioned_hash {
-                return Err(BlobTransactionValidationError::WrongVersionedHash {
-                    have: *versioned_hash,
-                    expected: calculated_versioned_hash,
-                })
-            }
-        }
-
-        // Verify as a batch
-        let res = KzgProof::verify_blob_kzg_proof_batch(
-            sidecar.blobs.as_slice(),
-            sidecar.commitments.as_slice(),
-            sidecar.proofs.as_slice(),
-            proof_settings,
-        )
-        .map_err(BlobTransactionValidationError::KZGError)?;
-
-        if res {
-            Ok(())
-        } else {
-            Err(BlobTransactionValidationError::InvalidProof)
-        }
+    ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
+        sidecar.validate(&self.blob_versioned_hashes, proof_settings)
     }
 
     /// Returns the total gas for all blobs in this transaction.
@@ -291,7 +244,7 @@ impl TxEip4844 {
         TxType::Eip4844
     }
 
-    /// Encodes the legacy transaction in RLP for signing.
+    /// Encodes the EIP-4844 transaction in RLP for signing.
     ///
     /// This encodes the transaction as:
     /// `tx_type || rlp(chain_id, nonce, max_priority_fee_per_gas, max_fee_per_gas, gas_limit, to,

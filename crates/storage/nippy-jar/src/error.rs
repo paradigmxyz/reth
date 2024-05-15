@@ -37,6 +37,16 @@ pub enum NippyJarError {
     PHFMissing,
     #[error("nippy jar was built without an index")]
     UnsupportedFilterQuery,
+    #[error("the size of an offset must be at most 8 bytes, got {offset_size}")]
+    OffsetSizeTooBig {
+        /// The read offset size in number of bytes.
+        offset_size: u64,
+    },
+    #[error("attempted to read an out of bounds offset: {index}")]
+    OffsetOutOfBounds {
+        /// The index of the offset that was being read.
+        index: usize,
+    },
     #[error("compression or decompression requires a bigger destination output")]
     OutputTooSmall,
     #[error("dictionary is not loaded.")]

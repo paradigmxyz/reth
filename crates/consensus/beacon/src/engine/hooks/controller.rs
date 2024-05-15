@@ -124,16 +124,22 @@ impl EngineHooksController {
     }
 
     fn poll_next_hook_inner(
-        &mut self,
+        &self,
         cx: &mut Context<'_>,
         hook: &mut Box<dyn EngineHook>,
         args: EngineHookContext,
         db_write_active: bool,
     ) -> Poll<Result<PolledHook, EngineHookError>> {
-        // Hook with DB write access level is not allowed to run due to already running hook with DB
-        // write access level or active DB write according to passed argument
+        // Hook with DB write access level is not allowed to run due to any of the following
+        // reasons:
+        // - An already running hook with DB write access level
+        // - Active DB write according to passed argument
+        // - Missing a finalized block number. We might be on an optimistic sync scenario where we
+        // cannot skip the FCU with the finalized hash, otherwise CL might misbehave.
         if hook.db_access_level().is_read_write() &&
-            (self.active_db_write_hook.is_some() || db_write_active)
+            (self.active_db_write_hook.is_some() ||
+                db_write_active ||
+                args.finalized_block_number.is_none())
         {
             return Poll::Pending
         }

@@ -11,8 +11,7 @@ use reth_rpc_types::engine::{
     PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v3, convert_block_to_payload_field_v2,
-    convert_standalone_withdraw_to_withdrawal, try_block_to_payload_v1,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
 use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::convert::Infallible;
@@ -58,6 +57,11 @@ impl EthBuiltPayload {
         self.fees
     }
 
+    /// Returns the blob sidecars.
+    pub fn sidecars(&self) -> &[BlobTransactionSidecar] {
+        &self.sidecars
+    }
+
     /// Adds sidecars to the payload.
     pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
         self.sidecars.extend(sidecars)
@@ -87,7 +91,7 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        try_block_to_payload_v1(value.block)
+        block_to_payload_v1(value.block)
     }
 }
 
@@ -159,22 +163,13 @@ impl EthPayloadBuilderAttributes {
     pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
-        let withdraw = attributes.withdrawals.map(|withdrawals| {
-            Withdrawals::new(
-                withdrawals
-                    .into_iter()
-                    .map(convert_standalone_withdraw_to_withdrawal) // Removed the parentheses here
-                    .collect(),
-            )
-        });
-
         Self {
             id,
             parent,
             timestamp: attributes.timestamp,
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
-            withdrawals: withdraw.unwrap_or_default(),
+            withdrawals: attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
         }
     }

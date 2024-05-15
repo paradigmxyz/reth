@@ -1,8 +1,9 @@
 //! OP transaction pool types
 use parking_lot::RwLock;
+use reth_evm_optimism::RethL1BlockInfo;
 use reth_primitives::{Block, ChainSpec, GotExpected, InvalidTransactionError, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use reth_revm::{optimism::RethL1BlockInfo, L1BlockInfo};
+use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
     CoinbaseTipOrdering, EthPoolTransaction, EthPooledTransaction, EthTransactionValidator, Pool,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
@@ -75,7 +76,7 @@ where
     /// Update the L1 block info.
     fn update_l1_block_info(&self, block: &Block) {
         self.block_info.timestamp.store(block.timestamp, Ordering::Relaxed);
-        if let Ok(cost_addition) = reth_revm::optimism::extract_l1_info(block) {
+        if let Ok(cost_addition) = reth_evm_optimism::extract_l1_info(block) {
             *self.block_info.l1_block_info.write() = cost_addition;
         }
     }
@@ -202,8 +203,8 @@ pub struct OpL1BlockInfo {
 mod tests {
     use crate::txpool::OpTransactionValidator;
     use reth_primitives::{
-        Signature, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered,
-        TxDeposit, MAINNET, U256,
+        Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
+        MAINNET, U256,
     };
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
@@ -225,7 +226,7 @@ mod tests {
         let deposit_tx = Transaction::Deposit(TxDeposit {
             source_hash: Default::default(),
             from: signer,
-            to: TransactionKind::Create,
+            to: TxKind::Create,
             mint: None,
             value: U256::ZERO,
             gas_limit: 0u64,

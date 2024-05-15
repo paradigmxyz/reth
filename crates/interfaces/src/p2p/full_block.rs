@@ -6,8 +6,9 @@ use crate::p2p::{
 };
 use futures::Stream;
 use reth_consensus::{Consensus, ConsensusError};
+use reth_network_types::WithPeerId;
 use reth_primitives::{
-    BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, WithPeerId, B256,
+    BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, B256,
 };
 use std::{
     cmp::Reverse,
