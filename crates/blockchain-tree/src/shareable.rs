@@ -17,7 +17,7 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
     ProviderError,
 };
 use std::{
@@ -199,7 +199,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
         trace!(target: "blockchain_tree", ?block_hash, "Finding pending state provider");
         let provider = self.tree.read().post_state_data(block_hash)?;
         Some(Box::new(provider))
