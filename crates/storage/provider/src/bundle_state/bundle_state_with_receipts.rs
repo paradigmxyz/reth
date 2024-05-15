@@ -373,6 +373,7 @@ impl BundleStateDataProvider for BundleStateWithReceipts {
         self
     }
 
+    /// Always returns [None] because we don't have any information about the block header.
     fn block_hash(&self, _block_number: BlockNumber) -> Option<BlockHash> {
         None
     }
