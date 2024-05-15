@@ -459,7 +459,7 @@ impl StaticFileProvider {
     /// 1) When a static file fails to commit but the underlying data was changed.
     /// 2) When a static file was committed, but the required database transaction was not.
     ///
-    /// For 1) it can self-heal.
+    /// For 1) it can self-heal. Opening a writer to this segment will automatically do that.
     /// For 2) the invariants below are checked, and if broken, require a pipeline unwind to heal.
     ///
     /// For each static file segment:
