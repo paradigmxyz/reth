@@ -1,7 +1,7 @@
 //! [BundleStateDataProvider] implementations used by the tree.
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
-use reth_provider::{BundleStateDataProvider, BundleStateWithReceipts};
+use reth_provider::{BundleStateDataProvider, BundleStateForkProvider, BundleStateWithReceipts};
 use std::collections::BTreeMap;
 
 /// Structure that combines references of required data to be a [`BundleStateDataProvider`].
@@ -30,7 +30,9 @@ impl<'a> BundleStateDataProvider for BundleStateDataRef<'a> {
 
         self.canonical_block_hashes.get(&block_number).cloned()
     }
+}
 
+impl<'a> BundleStateForkProvider for BundleStateDataRef<'a> {
     fn canonical_fork(&self) -> ForkBlock {
         self.canonical_fork
     }
@@ -57,7 +59,9 @@ impl BundleStateDataProvider for BundleStateData {
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
         self.parent_block_hashes.get(&block_number).cloned()
     }
+}
 
+impl BundleStateForkProvider for BundleStateData {
     fn canonical_fork(&self) -> ForkBlock {
         self.canonical_fork
     }

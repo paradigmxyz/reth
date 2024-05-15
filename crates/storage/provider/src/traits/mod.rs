@@ -35,8 +35,9 @@ pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
 mod state;
 pub use state::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateWriter,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, BundleStateForkProvider,
+    FullBundleStateDataProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    StateWriter,
 };
 
 mod trie;
