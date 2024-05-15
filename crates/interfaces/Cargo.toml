@@ -11,16 +11,15 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+reth-primitives.workspace = true
 reth-consensus.workspace = true
 
-# Used for p2p feature
-reth-primitives = { path = "../primitives", default-features = false }
-reth-network-types = { path = "../net/types", optional = true }
-reth-network-api = { path = "../net/network-api", optional = true }
-reth-eth-wire-types = { path = "../net/eth-wire-types", optional = true }
+reth-network-api = { workspace = true, optional = true }
+reth-eth-wire-types = { workspace = true, optional = true }
+reth-network-types = { workspace = true, optional = true }
 
 # async
-futures = { workspace = true } 
+futures.workspace = true
 tokio = { workspace = true, features = ["sync"], optional = true }
 
 # misc
