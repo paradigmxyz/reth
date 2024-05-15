@@ -343,8 +343,8 @@ where
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
                     NoopBlockExecutorProvider::default(),
-                    // TODO: add stage_conf when possible
-                    Default::default(),
+                    self.toml_config().stages.clone(),
+                    self.prune_modes().unwrap_or_default(),
                 ))
                 .build(
                     factory.clone(),
