@@ -1615,42 +1615,6 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-#[cfg(feature = "alloy-compat")]
-impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedEcRecovered {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-
-        let transaction: Transaction = tx.try_into()?;
-
-        TransactionSigned::from_transaction_and_signature(
-            transaction.clone(),
-            Signature {
-                r: signature.r,
-                s: signature.s,
-                odd_y_parity: if let Some(y_parity) = signature.y_parity {
-                    y_parity.0
-                } else {
-                    match transaction.tx_type() {
-                        // If the transaction type is Legacy, adjust the v component of the
-                        // signature according to the Ethereum specification
-                        TxType::Legacy => {
-                            extract_chain_id(signature.v.to())
-                                .map_err(|_| ConversionError::InvalidSignature)?
-                                .0
-                        }
-                        _ => !signature.v.is_zero(),
-                    }
-                },
-            },
-        )
-        .try_into_ecrecovered()
-        .map_err(|_| ConversionError::InvalidSignature)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
