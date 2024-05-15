@@ -1885,9 +1885,7 @@ where
                     }
                 }
 
-                // We don't drain the messages right away, because we want to sneak a polling of
-                // running hook in between them.
-                if let Poll::Ready(Some(msg)) = this.engine_message_stream.poll_next_unpin(cx) {
+                while let Poll::Ready(Some(msg)) = this.engine_message_stream.poll_next_unpin(cx) {
                     this.queued_engine_messages.push_back(msg);
                     continue
                 }
