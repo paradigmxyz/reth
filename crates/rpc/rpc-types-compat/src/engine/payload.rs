@@ -42,6 +42,10 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         gas_used: payload.gas_used,
         timestamp: payload.timestamp,
         mix_hash: payload.prev_randao,
+        // WARNING: It’s allowed for a base fee in EIP1559 to increase unbounded. We assume that
+        // it will fit in an u64. This is not always necessarily true, although it is extremelly
+        // unlikely not to be the case, a u64 maximum would have 2^64 which equates to 18 ETH per
+        // gas.
         base_fee_per_gas: Some(
             payload
                 .base_fee_per_gas
