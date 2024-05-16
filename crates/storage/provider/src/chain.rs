@@ -591,7 +591,7 @@ mod tests {
         // split at higher number
         assert_eq!(
             chain.clone().split(ChainSplitTarget::Number(10)),
-            ChainSplit::NoSplitCanonical(chain.clone())
+            ChainSplit::NoSplitPending(chain.clone())
         );
 
         // split at lower number
