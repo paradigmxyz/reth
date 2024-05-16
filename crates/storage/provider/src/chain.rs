@@ -289,7 +289,10 @@ impl Chain {
                 block_number
             }
             ChainSplitTarget::Number(block_number) => {
-                if block_number >= chain_tip {
+                if block_number > chain_tip {
+                    return ChainSplit::NoSplitPending(self)
+                }
+                if block_number == chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
