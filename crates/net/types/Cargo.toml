@@ -17,6 +17,7 @@ workspace = true
 alloy-primitives = { workspace = true, features = ["rlp"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
 enr.workspace = true
+tokio.workspace = true
 
 # crypto
 secp256k1.workspace = true

@@ -394,7 +394,7 @@ impl From<RethError> for InsertBlockErrorKind {
             RethError::Consensus(err) => InsertBlockErrorKind::Consensus(err),
             RethError::Database(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             RethError::Provider(err) => InsertBlockErrorKind::Internal(Box::new(err)),
-            // RethError::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
+            RethError::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
             RethError::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
             RethError::Canonical(err) => InsertBlockErrorKind::Canonical(err),
         }
