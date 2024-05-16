@@ -361,6 +361,8 @@ where
 
             // Unwinds to block
             let (tx, rx) = oneshot::channel();
+            
+            // Pipeline should be run as blocking and panic if it fails.
             self.task_executor().spawn_critical_blocking(
                 "pipeline task",
                 Box::pin(async move {
