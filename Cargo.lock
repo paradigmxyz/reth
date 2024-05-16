@@ -9080,7 +9080,7 @@ dependencies = [
 [[package]]
 name = "sp1-precompiles"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/sp1.git#f50fb1c3b11993fa926c128b1d38db7af969ef51"
+source = "git+https://github.com/succinctlabs/sp1.git?rev=v1.0.0-testnet#e721b246243e40376f7b75d7330e53c7351b727f"
 dependencies = [
  "anyhow",
  "bincode",
@@ -9097,7 +9097,7 @@ dependencies = [
 [[package]]
 name = "sp1-zkvm"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/sp1.git#f50fb1c3b11993fa926c128b1d38db7af969ef51"
+source = "git+https://github.com/succinctlabs/sp1.git?rev=v1.0.0-testnet#e721b246243e40376f7b75d7330e53c7351b727f"
 dependencies = [
  "bincode",
  "cfg-if",
