@@ -9,7 +9,7 @@ use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use rusqlite::Connection;
-use std::path::Path;
+use std::path::PathBuf;
 
 pub mod config;
 pub mod db;
@@ -19,9 +19,8 @@ pub mod tx_manager;
 async fn init_exex<Node: FullNodeComponents>(
     ctx: ExExContext<Node>,
 ) -> eyre::Result<impl Future<Output = eyre::Result<()>>> {
-    // TODO: pass the config path as an arg instead of hardcoding
-    let config_file = Path::new("./op_proposer.toml");
-    let config = OpProposerConfig::load(Some(config_file))?;
+    let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("op_proposer.toml");
+    let config = OpProposerConfig::load(Some(config_path.as_path()))?;
 
     let l1_provider = ProviderBuilder::new()
         .with_recommended_fillers()
