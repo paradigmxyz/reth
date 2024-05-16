@@ -146,7 +146,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#c07aaee636212fc2601a3c694e78846e84a65451"
+source = "git+https://github.com/alloy-rs/alloy#af25c53f99a4549ece47625b7d65f088c3487864"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy)",
  "alloy-primitives",
@@ -197,7 +197,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#c07aaee636212fc2601a3c694e78846e84a65451"
+source = "git+https://github.com/alloy-rs/alloy#af25c53f99a4549ece47625b7d65f088c3487864"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -222,7 +222,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#c07aaee636212fc2601a3c694e78846e84a65451"
+source = "git+https://github.com/alloy-rs/alloy#af25c53f99a4549ece47625b7d65f088c3487864"
 dependencies = [
  "alloy-primitives",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy)",
@@ -408,7 +408,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#c07aaee636212fc2601a3c694e78846e84a65451"
+source = "git+https://github.com/alloy-rs/alloy#af25c53f99a4549ece47625b7d65f088c3487864"
 dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy)",
@@ -490,7 +490,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#c07aaee636212fc2601a3c694e78846e84a65451"
+source = "git+https://github.com/alloy-rs/alloy#af25c53f99a4549ece47625b7d65f088c3487864"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -897,9 +897,9 @@ dependencies = [
 
 [[package]]
 name = "async-channel"
-version = "2.3.0"
+version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f2776ead772134d55b62dd45e59a79e21612d85d0af729b8b7d3967d601a62a"
+checksum = "136d4d23bcc79e27423727b36823d86233aad06dfea531837b038394d11e9928"
 dependencies = [
  "concurrent-queue",
  "event-listener 5.3.0",
@@ -1248,7 +1248,7 @@ version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "495f7104e962b7356f0aeb34247aca1fe7d2e783b346582db7f2904cb5717e88"
 dependencies = [
- "async-channel 2.3.0",
+ "async-channel 2.2.1",
  "async-lock",
  "async-task",
  "futures-io",
@@ -3080,9 +3080,9 @@ dependencies = [
 
 [[package]]
 name = "fiat-crypto"
-version = "0.2.9"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+checksum = "38793c55593b33412e3ae40c2c9781ffaa6f438f6f8c10f24e71846fbd7ae01e"
 
 [[package]]
 name = "findshlibs"
@@ -3495,9 +3495,9 @@ dependencies = [
 
 [[package]]
 name = "hashlink"
-version = "0.9.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
+checksum = "692eaaf7f7607518dd3cef090f1474b61edc5301d8012f09579920df68b725ee"
 dependencies = [
  "hashbrown 0.14.5",
 ]
@@ -5702,9 +5702,9 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "piper"
-version = "0.2.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "464db0c665917b13ebb5d453ccdec4add5658ee1adc7affc7677615356a8afaf"
+checksum = "668d31b1c4eba19242f2088b2bf3316b82ca31082a8335764db4e083db7485d4"
 dependencies = [
  "atomic-waker",
  "fastrand 2.1.0",
@@ -8317,7 +8317,7 @@ dependencies = [
  "bitflags 2.5.0",
  "fallible-iterator",
  "fallible-streaming-iterator",
- "hashlink 0.9.1",
+ "hashlink 0.9.0",
  "libsqlite3-sys",
  "smallvec",
 ]
@@ -9080,7 +9080,7 @@ dependencies = [
 [[package]]
 name = "sp1-precompiles"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/sp1.git#2f57e1e77f7c88396b571bd961d3cbe4b1291c7a"
+source = "git+https://github.com/succinctlabs/sp1.git#f50fb1c3b11993fa926c128b1d38db7af969ef51"
 dependencies = [
  "anyhow",
  "bincode",
@@ -9097,7 +9097,7 @@ dependencies = [
 [[package]]
 name = "sp1-zkvm"
 version = "0.1.0"
-source = "git+https://github.com/succinctlabs/sp1.git#2f57e1e77f7c88396b571bd961d3cbe4b1291c7a"
+source = "git+https://github.com/succinctlabs/sp1.git#f50fb1c3b11993fa926c128b1d38db7af969ef51"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -10218,9 +10218,9 @@ dependencies = [
 
 [[package]]
 name = "waker-fn"
-version = "1.2.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "317211a0dc0ceedd78fb2ca9a44aed3d7b9b26f81870d485c07122b4350673b7"
+checksum = "f3c4517f54858c779bbcbf228f4fca63d121bf85fbecb2dc578cdf4a39395690"
 
 [[package]]
 name = "walkdir"
