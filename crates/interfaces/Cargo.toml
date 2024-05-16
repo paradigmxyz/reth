@@ -19,13 +19,13 @@ reth-network-api = { workspace = true, optional = true }
 reth-eth-wire-types = { workspace = true, optional = true }
 
 # async
-futures.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+futures = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["sync"], optional = true }
 
 # misc
 auto_impl.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, optional = true }
 secp256k1 = { workspace = true, default-features = false, features = [
     "alloc",
     "recovery",
@@ -45,7 +45,7 @@ secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
 default = ["p2p"]
-p2p = ["reth-network-api", "reth-eth-wire-types"]
+p2p = ["reth-network-api", "reth-eth-wire-types", "tracing", "tokio", "futures" ]
 test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
 cli = ["clap"]
 optimism = ["reth-eth-wire-types/optimism"]

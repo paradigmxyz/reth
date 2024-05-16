@@ -241,7 +241,7 @@ reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-exex = { path = "crates/exex" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
-reth-interfaces = { path = "crates/interfaces" }
+reth-interfaces = { path = "crates/interfaces", default-features = false }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
