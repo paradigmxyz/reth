@@ -43,10 +43,6 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    /// Configure data storage locations
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
     /// Secret key to use for this node.
     ///
     /// This also will deterministically set the peer ID.
@@ -71,6 +67,9 @@ pub struct Command {
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     db: DatabaseArgs,

@@ -17,10 +17,6 @@ use tracing::info;
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct InitStateCommand {
-    /// Configure data storage locations
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -32,6 +28,9 @@ pub struct InitStateCommand {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     /// JSONL file with state dump.
     ///

@@ -23,10 +23,6 @@ use std::{path::PathBuf, sync::Arc};
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct ImportReceiptsCommand {
-    /// Configure data storage locations
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -42,6 +38,9 @@ pub struct ImportReceiptsCommand {
     /// Chunk byte length.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     db: DatabaseArgs,

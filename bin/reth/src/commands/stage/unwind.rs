@@ -34,10 +34,6 @@ use crate::{
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Configure data storage locations
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -50,6 +46,9 @@ pub struct Command {
         global = true
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     db: DatabaseArgs,

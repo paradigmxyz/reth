@@ -44,10 +44,6 @@ pub struct Command {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
 
-    /// Configure data storage locations
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -98,12 +94,6 @@ pub struct Command {
     #[arg(long, short)]
     skip_unwind: bool,
 
-    #[command(flatten)]
-    network: NetworkArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
-
     /// Commits the changes in the database. WARNING: potentially destructive.
     ///
     /// Useful when you want to run diagnostics on the database.
@@ -115,6 +105,15 @@ pub struct Command {
     /// Save stage checkpoints
     #[arg(long)]
     checkpoints: bool,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
+
+    #[command(flatten)]
+    network: NetworkArgs,
+
+    #[command(flatten)]
+    db: DatabaseArgs,
 }
 
 impl Command {

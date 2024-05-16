@@ -17,11 +17,11 @@ pub struct DatadirArgs {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
+    pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// The absolute path to store static files in.
     #[arg(long = "datadir.static_files", verbatim_doc_comment, value_name = "PATH")]
-    pub(crate) static_files_path: Option<PathBuf>,
+    pub static_files_path: Option<PathBuf>,
 }
 
 impl DatadirArgs {

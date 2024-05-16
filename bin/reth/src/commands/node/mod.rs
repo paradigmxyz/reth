@@ -16,10 +16,6 @@ use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sy
 /// Start the node
 #[derive(Debug, Parser)]
 pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
-    /// Configure data storage locations
-    #[command(flatten)]
-    pub datadir: DatadirArgs,
-
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
@@ -66,6 +62,10 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Mutually exclusive with `--instance`.
     #[arg(long, conflicts_with = "instance", global = true)]
     pub with_unused_ports: bool,
+
+    /// All datadir related arguments
+    #[command(flatten)]
+    pub datadir: DatadirArgs,
 
     /// All networking related arguments
     #[command(flatten)]

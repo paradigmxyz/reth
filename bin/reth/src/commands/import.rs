@@ -44,10 +44,6 @@ pub struct ImportCommand {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
 
-    /// Configure data storage locations
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -67,6 +63,9 @@ pub struct ImportCommand {
     /// Chunk byte length.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     db: DatabaseArgs,

@@ -33,10 +33,6 @@ use merkle::dump_merkle_stage;
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// Configure data storage locations
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -48,6 +44,9 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     db: DatabaseArgs,
