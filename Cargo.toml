@@ -404,17 +404,16 @@ test-fuzz = "5"
 
 # Bitfinity Deps
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", branch = "add-endpoint" }
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", branch = "add-endpoint", features = [
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.18.x" }
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.18.x", features = [
     "reqwest",
 ] }
 evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
     "ic-agent-client",
-], branch = "add-endpoint" }
+], tag = "v0.18.x" }
 ic-cbor = "2.3"
 ic-certificate-verification = "2.3"
 ic-certification = "2.3"
 hex = "0.4"
 lightspeed_scheduler = { version = "0.58.0", features = ["tracing"] }
 rlp = "0.5"
-
