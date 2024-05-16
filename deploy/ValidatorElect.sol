@@ -98,12 +98,12 @@ contract ValidatorElect is VotingEvents {
                 Half2: 0x50d5ad437b3552f8f11144f9a2029736e46d63a2d3551b156aac9bff9a6e22bd
             })
         );
-        mValidators.push(
-            PeerKey({
-                Half1: 0x75b4f60228da49149a793f3e0cca2a280159c59d8ac0c5a4c55a73f9cea225e5,
-                Half2: 0xfc72166353550424a778bb9e15c47ed89a825e0ea61867ccecffbbf5ed963260
-            })
-        );
+        // mValidators.push(
+        //     PeerKey({
+        //         Half1: 0x75b4f60228da49149a793f3e0cca2a280159c59d8ac0c5a4c55a73f9cea225e5,
+        //         Half2: 0xfc72166353550424a778bb9e15c47ed89a825e0ea61867ccecffbbf5ed963260
+        //     })
+        // );
     }
 
     function allValidators() public view returns (bytes32[] memory) {
