@@ -574,23 +574,25 @@ impl StaticFileProvider {
         &self,
         provider: &DatabaseProvider<TX>,
         stage_id: StageId,
-        static_file_entry: Option<u64>,
-        highest_static_block: Option<BlockNumber>,
+        highest_static_file_entry: Option<u64>,
+        highest_static_file_block: Option<BlockNumber>,
     ) -> ProviderResult<Option<BlockNumber>> {
-        let static_file_entry = static_file_entry.unwrap_or_default();
-        let highest_static_block = highest_static_block.unwrap_or_default();
+        let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
+        let highest_static_file_block = highest_static_file_block.unwrap_or_default();
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
 
         if let Some((db_first_entry, _)) = db_cursor.first()? {
             // If there is a gap between the entry found in static file and
             // database, then we have most likely lost static file data and need to unwind so we can
             // load it again
-            if !(db_first_entry <= static_file_entry || static_file_entry + 1 == db_first_entry) {
-                return Ok(Some(highest_static_block))
+            if !(db_first_entry <= highest_static_file_entry ||
+                highest_static_file_entry + 1 == db_first_entry)
+            {
+                return Ok(Some(highest_static_file_block))
             }
 
             if let Some((db_last_entry, _)) = db_cursor.last()? {
-                if db_last_entry > static_file_entry {
+                if db_last_entry > highest_static_file_entry {
                     return Ok(None)
                 }
             }
@@ -600,8 +602,8 @@ impl StaticFileProvider {
         // number matches.
         let block_number =
             provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
-        if block_number != highest_static_block {
-            return Ok(Some(block_number.min(highest_static_block)));
+        if block_number != highest_static_file_block {
+            return Ok(Some(block_number.min(highest_static_file_block)));
         }
 
         Ok(None)

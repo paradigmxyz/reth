@@ -331,9 +331,9 @@ where
 
         let has_receipt_pruning =
             self.toml_config().prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
-            
+
         // Check for consistency between database and static files. If it fails, it unwinds to
-        // a previous block.
+        // the first block that's consistent between database and static files.
         if let Some(unwind_target) = factory
             .static_file_provider()
             .check_consistency(&factory.provider()?, has_receipt_pruning)?
