@@ -1,4 +1,4 @@
-//! Reth RPC testing utilities.
+//! Layer implementations used in RPC
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -8,11 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use assert_matches as _;
 use http::{HeaderMap, Response};
-use jsonrpsee as _;
-use tempfile as _;
-use tokio as _;
 
 mod auth_client_layer;
 mod auth_layer;
