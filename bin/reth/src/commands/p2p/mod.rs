@@ -136,10 +136,9 @@ impl Command {
                 } = self.network.discovery;
 
                 let rlpx_addr = self.network.addr;
-                // Overwrite with rlpx address if same IP version (max one address per IP version
-                // can be advertised in ENR)
-                let discv5_addr_ipv4 = rlpx_addr.ipv4().copied().or(discv5_addr);
-                let discv5_addr_ipv6 = rlpx_addr.ipv6().copied().or(discv5_addr_ipv6);
+                // Use rlpx address if none given
+                let discv5_addr_ipv4 = discv5_addr.or_else(|| rlpx_addr.ipv4().copied());
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| rlpx_addr.ipv6().copied());
 
                 builder
                     .discv5_config(
