@@ -1,13 +1,13 @@
 //! Runs the `reth benchmark` using a remote rpc api.
 
+use crate::{benchmark_mode::BenchmarkMode, block_fetcher::BlockStream};
 use alloy_provider::{Provider, ProviderBuilder};
 use clap::Parser;
+use futures::StreamExt;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::Block;
 use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
-
-use crate::payload_stream::BenchmarkMode;
 
 /// `reth benchmark from-rpc` command
 #[derive(Debug, Parser)]
@@ -30,15 +30,14 @@ impl Command {
         // TODO: construct this from args
         let benchmark_mode = BenchmarkMode::Range(19_000_000..=20_000_000);
 
-        // TODO: stream of _full_ blocks either from a range or from the latest block
-        for block in 19_000_000..20_000_000 {
-            let block = block_provider
-                .get_block_by_number(block.into(), true)
-                .await?
-                .expect("remove all of this code");
+        let mut block_stream = BlockStream::new(benchmark_mode, &block_provider, 10)?;
 
-            // let primitive_block = Block::try_from(block)?;
-            // block_to_payload_v3(value)
+        while let Some(block_res) = block_stream.next().await {
+            let block = block_res?.expect("block stream should not return None blocks");
+            let block_hash = block.header.hash.expect("block hash");
+            let block = Block::try_from(block)?.seal(block_hash);
+            let payload = block_to_payload_v3(block);
+            println!("{:?}", payload);
         }
 
         // TODO: support properly sending versioned fork stuff. like if timestamp > fork, use

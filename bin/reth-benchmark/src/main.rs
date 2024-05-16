@@ -5,8 +5,11 @@
 #[global_allocator]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+pub mod authenticated_transport;
 pub mod benchmark;
-pub mod payload_stream;
+pub mod benchmark_mode;
+pub mod block_fetcher;
+pub mod valid_payload;
 use benchmark::BenchmarkCommand;
 use clap::Parser;
 use reth_cli_runner::CliRunner;

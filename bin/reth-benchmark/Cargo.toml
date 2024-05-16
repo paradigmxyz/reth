@@ -20,10 +20,20 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-node-core.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
-reth-primitives = { workspace = true, features = ["clap"] }
+reth-primitives = { workspace = true, features = ["clap", "alloy-compat"] }
 
 # alloy
 alloy-provider.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+
+# tower
+tower.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -43,6 +53,7 @@ futures.workspace = true
 
 # misc
 eyre.workspace = true
+thiserror.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 [target.'cfg(unix)'.dependencies]
