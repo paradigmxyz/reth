@@ -1,11 +1,9 @@
 //! Optimism specific types.
 
 use jsonrpsee::types::ErrorObject;
+use reth_rpc_types::ToRpcError;
 
-use crate::{
-    eth::error::{EthApiError, ToRpcError},
-    result::internal_rpc_err,
-};
+use crate::{eth::error::EthApiError, result::internal_rpc_err};
 
 /// Eth Optimism Api Error
 #[cfg(feature = "optimism")]

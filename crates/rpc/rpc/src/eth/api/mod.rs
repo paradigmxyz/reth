@@ -355,7 +355,7 @@ where
             let now = Instant::now();
             *lock = Some(PendingBlock {
                 block: pending_block.clone(),
-                expires_at: now + Duration::from_secs(3),
+                expires_at: now + Duration::from_secs(1),
             });
 
             Ok(Some(pending_block))

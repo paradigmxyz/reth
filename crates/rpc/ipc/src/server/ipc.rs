@@ -1,7 +1,5 @@
 //! IPC request handling adapted from [`jsonrpsee`] http request handling
 
-use std::sync::Arc;
-
 use futures::{stream::FuturesOrdered, StreamExt};
 use jsonrpsee::{
     batch_response_error,
@@ -11,9 +9,13 @@ use jsonrpsee::{
         JsonRawValue,
     },
     server::middleware::rpc::RpcServiceT,
-    types::{error::ErrorCode, ErrorObject, Id, InvalidRequest, Notification, Request},
+    types::{
+        error::{reject_too_big_request, ErrorCode},
+        ErrorObject, Id, InvalidRequest, Notification, Request,
+    },
     BatchResponseBuilder, MethodResponse, ResponsePayload,
 };
+use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio_util::either::Either;
 use tracing::instrument;
@@ -124,6 +126,7 @@ pub(crate) async fn call_with_service<S>(
     request: String,
     rpc_service: S,
     max_response_body_size: usize,
+    max_request_body_size: usize,
     conn: Arc<OwnedSemaphorePermit>,
 ) -> Option<String>
 where
@@ -143,9 +146,17 @@ where
         })
         .unwrap_or(Kind::Single);
 
+    let data = request.into_bytes();
+    if data.len() > max_request_body_size {
+        return Some(batch_response_error(
+            Id::Null,
+            reject_too_big_request(max_request_body_size as u32),
+        ))
+    }
+
     // Single request or notification
     let res = if matches!(request_kind, Kind::Single) {
-        let response = process_single_request(request.into_bytes(), &rpc_service).await;
+        let response = process_single_request(data, &rpc_service).await;
         match response {
             Some(response) if response.is_method_call() => Some(response.to_result()),
             _ => {
@@ -155,11 +166,7 @@ where
             }
         }
     } else {
-        process_batch_request(
-            Batch { data: request.into_bytes(), rpc_service },
-            max_response_body_size,
-        )
-        .await
+        process_batch_request(Batch { data, rpc_service }, max_response_body_size).await
     };
 
     drop(conn);

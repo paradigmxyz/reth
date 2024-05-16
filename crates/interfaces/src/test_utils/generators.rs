@@ -4,10 +4,9 @@ use rand::{
 };
 use reth_primitives::{
     proofs, sign_message, Account, Address, BlockNumber, Bytes, Header, Log, Receipt, SealedBlock,
-    SealedHeader, StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, B256,
-    U256,
+    SealedHeader, StorageEntry, Transaction, TransactionSigned, TxKind, TxLegacy, B256, U256,
 };
-use secp256k1::{KeyPair, Secp256k1};
+use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
     collections::{hash_map::DefaultHasher, BTreeMap},
@@ -79,7 +78,7 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
         nonce: rng.gen::<u16>().into(),
         gas_price: rng.gen::<u16>().into(),
         gas_limit: rng.gen::<u16>().into(),
-        to: TransactionKind::Call(rng.gen()),
+        to: TxKind::Call(rng.gen()),
         value: U256::from(rng.gen::<u16>()),
         input: Bytes::default(),
     })
@@ -92,22 +91,22 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
 /// - There is no guarantee that the nonce is not used twice for the same account
 pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
     let secp = Secp256k1::new();
-    let key_pair = KeyPair::new(&secp, rng);
+    let key_pair = Keypair::new(&secp, rng);
     let tx = random_tx(rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 
 /// Signs the [Transaction] with the given key pair.
-pub fn sign_tx_with_key_pair(key_pair: KeyPair, tx: Transaction) -> TransactionSigned {
+pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
     TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
-/// Generates a set of [KeyPair]s based on the desired count.
-pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<KeyPair> {
+/// Generates a set of [Keypair]s based on the desired count.
+pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
     let secp = Secp256k1::new();
-    (0..count).map(|_| KeyPair::new(&secp, rng)).collect()
+    (0..count).map(|_| Keypair::new(&secp, rng)).collect()
 }
 
 /// Generate a random block filled with signed transactions (generated using
@@ -395,7 +394,7 @@ mod tests {
             chain_id: 1,
             nonce: 0x42,
             gas_limit: 44386,
-            to: TransactionKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
+            to: TxKind::Call(hex!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into()),
             value: U256::from(0_u64),
             input:  hex!("a22cb4650000000000000000000000005eee75727d804a2b13038928d36f8b188945a57a0000000000000000000000000000000000000000000000000000000000000000").into(),
             max_fee_per_gas: 0x4a817c800,
@@ -405,7 +404,7 @@ mod tests {
         let signature_hash = tx.signature_hash();
 
         for _ in 0..100 {
-            let key_pair = KeyPair::new(&secp, &mut rand::thread_rng());
+            let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
 
             let signature =
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
@@ -427,7 +426,7 @@ mod tests {
             nonce: 9,
             gas_price: 20 * 10_u128.pow(9),
             gas_limit: 21000,
-            to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+            to: TxKind::Call(hex!("3535353535353535353535353535353535353535").into()),
             value: U256::from(10_u128.pow(18)),
             input: Bytes::default(),
         });

@@ -5,13 +5,11 @@ use crate::{
     EthApi,
 };
 use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, B256, U256,
-};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_rpc_types::EIP1186AccountProofResponse;
+use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -84,7 +82,7 @@ where
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
         let chain_info = self.provider().chain_info()?;
-        let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = block_id.unwrap_or_default();
 
         // if we are trying to create a proof for the latest block, but have a BlockId as input
         // that is not BlockNumberOrTag::Latest, then we need to figure out whether or not the

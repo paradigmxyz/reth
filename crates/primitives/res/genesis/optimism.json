@@ -12,10 +12,10 @@
       "istanbulBlock": 0,
       "muirGlacierBlock": 0,
       "berlinBlock": 3950000,
-      "londonBlock": 3950000,
-      "arrowGlacierBlock": 3950000,
-      "grayGlacierBlock": 3950000,
-      "mergeNetsplitBlock": 3950000,
+      "londonBlock": 105235063,
+      "arrowGlacierBlock": 105235063,
+      "grayGlacierBlock": 105235063,
+      "mergeNetsplitBlock": 105235063,
       "bedrockBlock": 105235063,
       "terminalTotalDifficulty": 0,
       "terminalTotalDifficultyPassed": true,
@@ -28,5 +28,6 @@
   "difficulty": "1",
   "gasLimit": "15000000",
   "extradata": "0x000000000000000000000000000000000000000000000000000000000000000000000398232e2064f896018496b4b44b3d62751f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "stateRoot": "0xeddb4c1786789419153a27c4c80ff44a2226b6eda04f7e22ce5bae892ea568eb",
   "alloc": {}
 }

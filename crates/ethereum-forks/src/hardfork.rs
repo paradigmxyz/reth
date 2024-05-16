@@ -73,6 +73,9 @@ pub enum Hardfork {
     // Upcoming
     /// Prague: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/prague.md>
     Prague,
+    /// Fjord: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#fjord>
+    #[cfg(feature = "optimism")]
+    Fjord,
 }
 
 impl Hardfork {

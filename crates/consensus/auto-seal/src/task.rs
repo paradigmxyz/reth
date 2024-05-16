@@ -2,8 +2,10 @@ use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
-use reth_primitives::{Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders};
+use reth_evm::execute::BlockExecutorProvider;
+use reth_primitives::{
+    Block, ChainSpec, IntoRecoveredTransaction, SealedBlockWithSenders, Withdrawals,
+};
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;
@@ -20,7 +22,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
-pub struct MiningTask<Client, Pool: TransactionPool, EvmConfig, Engine: EngineTypes> {
+pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTypes> {
     /// The configured chain spec
     chain_spec: Arc<ChainSpec>,
     /// The client used to interact with the state
@@ -41,14 +43,14 @@ pub struct MiningTask<Client, Pool: TransactionPool, EvmConfig, Engine: EngineTy
     canon_state_notification: CanonStateNotificationSender,
     /// The pipeline events to listen on
     pipe_line_events: Option<UnboundedReceiverStream<PipelineEvent>>,
-    /// The type that defines how to configure the EVM.
-    evm_config: EvmConfig,
+    /// The type used for block execution
+    block_executor: Executor,
 }
 
 // === impl MiningTask ===
 
-impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
-    MiningTask<Client, Pool, EvmConfig, Engine>
+impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes>
+    MiningTask<Client, Pool, Executor, Engine>
 {
     /// Creates a new instance of the task
     #[allow(clippy::too_many_arguments)]
@@ -60,7 +62,7 @@ impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
         storage: Storage,
         client: Client,
         pool: Pool,
-        evm_config: EvmConfig,
+        block_executor: Executor,
     ) -> Self {
         Self {
             chain_spec,
@@ -73,7 +75,7 @@ impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
             canon_state_notification,
             queued: Default::default(),
             pipe_line_events: None,
-            evm_config,
+            block_executor,
         }
     }
 
@@ -83,13 +85,13 @@ impl<EvmConfig, Client, Pool: TransactionPool, Engine: EngineTypes>
     }
 }
 
-impl<EvmConfig, Client, Pool, Engine> Future for MiningTask<Client, Pool, EvmConfig, Engine>
+impl<Executor, Client, Pool, Engine> Future for MiningTask<Client, Pool, Executor, Engine>
 where
     Client: StateProviderFactory + CanonChainTracker + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
     Engine: EngineTypes + 'static,
-    EvmConfig: ConfigureEvm + Clone + Unpin + Send + Sync + 'static,
+    Executor: BlockExecutorProvider,
 {
     type Output = ();
 
@@ -119,7 +121,7 @@ where
                 let pool = this.pool.clone();
                 let events = this.pipe_line_events.take();
                 let canon_state_notification = this.canon_state_notification.clone();
-                let evm_config = this.evm_config.clone();
+                let executor = this.block_executor.clone();
 
                 // Create the mining future that creates a block, notifies the engine that drives
                 // the pipeline
@@ -134,12 +136,16 @@ where
                             (recovered.into_signed(), signer)
                         })
                         .unzip();
+                    let ommers = vec![];
+                    let withdrawals = Some(Withdrawals::default());
 
                     match storage.build_and_execute(
                         transactions.clone(),
+                        ommers.clone(),
+                        withdrawals.clone(),
                         &client,
                         chain_spec,
-                        evm_config,
+                        &executor,
                     ) {
                         Ok((new_header, bundle_state)) => {
                             // clear all transactions from pool
@@ -193,8 +199,8 @@ where
                             let block = Block {
                                 header: new_header.clone().unseal(),
                                 body: transactions,
-                                ommers: vec![],
-                                withdrawals: None,
+                                ommers,
+                                withdrawals,
                             };
                             let sealed_block = block.seal_slow();
 

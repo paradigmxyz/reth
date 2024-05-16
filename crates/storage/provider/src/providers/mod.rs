@@ -1,11 +1,11 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonChainTracker,
-    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, EvmEnvProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
-    WithdrawalsProvider,
+    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
+    CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    EvmEnvProvider, FullBundleStateDataProvider, HeaderProvider, ProviderError,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
 use reth_db::{
     database::Database,
@@ -60,8 +60,8 @@ mod chain_info;
 use chain_info::ChainInfoTracker;
 
 mod consistent_view;
+use alloy_rpc_types_engine::ForkchoiceState;
 pub use consistent_view::{ConsistentDbView, ConsistentViewError};
-use reth_rpc_types::engine::ForkchoiceState;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -88,6 +88,13 @@ impl<DB> BlockchainProvider<DB> {
         latest: SealedHeader,
     ) -> Self {
         Self { database, tree, chain_info: ChainInfoTracker::new(latest) }
+    }
+
+    /// Sets the treeviewer for the provider.
+    #[doc(hidden)]
+    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
+        self.tree = tree;
+        self
     }
 }
 
@@ -139,6 +146,12 @@ where
 {
     fn database_provider_ro(&self) -> ProviderResult<DatabaseProviderRO<DB>> {
         self.database.provider()
+    }
+}
+
+impl<DB> StaticFileProviderFactory for BlockchainProvider<DB> {
+    fn static_file_provider(&self) -> StaticFileProvider {
+        self.database.static_file_provider()
     }
 }
 
@@ -625,7 +638,7 @@ where
 
     fn pending_with_provider(
         &self,
-        bundle_state_data: Box<dyn BundleStateDataProvider>,
+        bundle_state_data: Box<dyn FullBundleStateDataProvider>,
     ) -> ProviderResult<StateProviderBox> {
         let canonical_fork = bundle_state_data.canonical_fork();
         trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
@@ -654,6 +667,10 @@ where
 
     fn finalize_block(&self, finalized_block: BlockNumber) {
         self.tree.finalize_block(finalized_block)
+    }
+
+    fn update_block_hashes_and_clear_buffered(&self) -> RethResult<BTreeMap<BlockNumber, B256>> {
+        self.tree.update_block_hashes_and_clear_buffered()
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
@@ -854,7 +871,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
         self.tree.find_pending_state_provider(block_hash)
     }
 }

@@ -77,6 +77,7 @@ impl StateChanges {
                 }
             }
         }
+
         Ok(())
     }
 }

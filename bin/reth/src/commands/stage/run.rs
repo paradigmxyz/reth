@@ -8,19 +8,24 @@ use crate::{
         utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, DatadirArgs, NetworkArgs, StageEnum,
     },
+    macros::block_executor,
     prometheus_exporter,
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
-use reth_config::{config::EtlConfig, Config};
+use reth_config::{
+    config::{EtlConfig, HashingConfig, SenderRecoveryConfig, TransactionLookupConfig},
+    Config,
+};
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::ChainSpec;
-use reth_provider::{ProviderFactory, StageCheckpointReader, StageCheckpointWriter};
+use reth_provider::{
+    ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+};
 use reth_stages::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
@@ -121,23 +126,20 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.datadir.resolve_datadir(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config_path());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);
 
         // use the overridden db path if specified
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = ProviderFactory::new(
-            Arc::clone(&db),
-            self.chain.clone(),
-            data_dir.static_files_path(),
-        )?;
+        let factory =
+            ProviderFactory::new(Arc::clone(&db), self.chain.clone(), data_dir.static_files())?;
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
@@ -156,16 +158,15 @@ impl Command {
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
         let etl_config = EtlConfig::new(
-            Some(
-                self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(&data_dir.data_dir_path())),
-            ),
+            Some(self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(data_dir.data_dir()))),
             self.etl_file_size.unwrap_or(EtlConfig::default_file_size()),
         );
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
                 StageEnum::Bodies => {
-                    let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+                    let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
@@ -179,15 +180,15 @@ impl Command {
                         .network
                         .p2p_secret_key
                         .clone()
-                        .unwrap_or_else(|| data_dir.p2p_secret_path());
+                        .unwrap_or_else(|| data_dir.p2p_secret());
                     let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
-                    let default_peers_path = data_dir.known_peers_path();
+                    let default_peers_path = data_dir.known_peers();
 
                     let provider_factory = Arc::new(ProviderFactory::new(
                         db.clone(),
                         self.chain.clone(),
-                        data_dir.static_files_path(),
+                        data_dir.static_files(),
                     )?);
 
                     let network = self
@@ -218,15 +219,17 @@ impl Command {
                     );
                     (Box::new(stage), None)
                 }
-                StageEnum::Senders => (Box::new(SenderRecoveryStage::new(batch_size)), None),
+                StageEnum::Senders => (
+                    Box::new(SenderRecoveryStage::new(SenderRecoveryConfig {
+                        commit_threshold: batch_size,
+                    })),
+                    None,
+                ),
                 StageEnum::Execution => {
-                    let factory = reth_revm::EvmProcessorFactory::new(
-                        self.chain.clone(),
-                        EthEvmConfig::default(),
-                    );
+                    let executor = block_executor!(self.chain.clone());
                     (
                         Box::new(ExecutionStage::new(
-                            factory,
+                            executor,
                             ExecutionStageThresholds {
                                 max_blocks: Some(batch_size),
                                 max_changes: None,
@@ -234,31 +237,52 @@ impl Command {
                                 max_duration: None,
                             },
                             config.stages.merkle.clean_threshold,
-                            config.prune.map(|prune| prune.segments).unwrap_or_default(),
+                            prune_modes,
                             ExExManagerHandle::empty(),
                         )),
                         None,
                     )
                 }
-                StageEnum::TxLookup => {
-                    (Box::new(TransactionLookupStage::new(batch_size, etl_config, None)), None)
-                }
-                StageEnum::AccountHashing => {
-                    (Box::new(AccountHashingStage::new(1, batch_size, etl_config)), None)
-                }
-                StageEnum::StorageHashing => {
-                    (Box::new(StorageHashingStage::new(1, batch_size, etl_config)), None)
-                }
+                StageEnum::TxLookup => (
+                    Box::new(TransactionLookupStage::new(
+                        TransactionLookupConfig { chunk_size: batch_size },
+                        etl_config,
+                        prune_modes.transaction_lookup,
+                    )),
+                    None,
+                ),
+                StageEnum::AccountHashing => (
+                    Box::new(AccountHashingStage::new(
+                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
+                        etl_config,
+                    )),
+                    None,
+                ),
+                StageEnum::StorageHashing => (
+                    Box::new(StorageHashingStage::new(
+                        HashingConfig { clean_threshold: 1, commit_threshold: batch_size },
+                        etl_config,
+                    )),
+                    None,
+                ),
                 StageEnum::Merkle => (
-                    Box::new(MerkleStage::default_execution()),
+                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (
-                    Box::new(IndexAccountHistoryStage::default().with_etl_config(etl_config)),
+                    Box::new(IndexAccountHistoryStage::new(
+                        config.stages.index_account_history,
+                        etl_config,
+                        prune_modes.account_history,
+                    )),
                     None,
                 ),
                 StageEnum::StorageHistory => (
-                    Box::new(IndexStorageHistoryStage::default().with_etl_config(etl_config)),
+                    Box::new(IndexStorageHistoryStage::new(
+                        config.stages.index_storage_history,
+                        etl_config,
+                        prune_modes.storage_history,
+                    )),
                     None,
                 ),
                 _ => return Ok(()),

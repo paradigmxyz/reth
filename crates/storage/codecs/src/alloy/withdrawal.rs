@@ -59,4 +59,22 @@ mod tests {
             assert_eq!(withdrawal, decoded)
         }
     }
+
+    // each value in the database has an extra field named flags that encodes metadata about other
+    // fields in the value, e.g. offset and length.
+    //
+    // this check is to ensure we do not inadvertently add too many fields to a struct which would
+    // expand the flags field and break backwards compatibility
+    #[test]
+    fn test_ensure_backwards_compatibility() {
+        #[cfg(not(feature = "optimism"))]
+        {
+            assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
+        }
+
+        #[cfg(feature = "optimism")]
+        {
+            assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
+        }
+    }
 }

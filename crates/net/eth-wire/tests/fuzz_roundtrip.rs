@@ -48,7 +48,7 @@ macro_rules! fuzz_type_and_name {
     };
 }
 
-#[cfg(any(test, feature = "bench"))]
+#[cfg(test)]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};

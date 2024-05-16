@@ -26,9 +26,9 @@ use reth_interfaces::{
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
+use reth_network_types::PeerId;
 use reth_primitives::{
-    FromRecoveredPooledTransaction, PeerId, PooledTransactionsElement, TransactionSigned, TxHash,
-    B256,
+    FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -945,13 +945,12 @@ where
             return
         }
 
+        let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let mut transactions = transactions.0;
 
         // mark the transactions as received
         self.transaction_fetcher
             .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| *tx.hash()));
-
-        let Some(peer) = self.peers.get_mut(&peer_id) else { return };
 
         // track that the peer knows these transaction, but only if this is a new broadcast.
         // If we received the transactions as the response to our `GetPooledTransactions``

@@ -14,11 +14,11 @@ use crate::{
 };
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, U256};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, TxKind, U256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, Bundle, EthCallResponse, StateContext,
     TransactionRequest,
@@ -31,6 +31,7 @@ use revm::{
     },
     DatabaseCommit,
 };
+use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
 
 // Gas per transaction not creating a contract.
@@ -71,13 +72,8 @@ where
         block_number: Option<BlockId>,
         overrides: EvmOverrides,
     ) -> EthResult<Bytes> {
-        let (res, _env) = self
-            .transact_call_at(
-                request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
-                overrides,
-            )
-            .await?;
+        let (res, _env) =
+            self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
         ensure_success(res.result)
     }
@@ -98,7 +94,7 @@ where
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
 
-        let target_block = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let target_block = block_number.unwrap_or_default();
         let is_block_target_pending = target_block.is_pending();
 
         let ((cfg, block_env, _), block) = futures::try_join!(
@@ -388,7 +384,7 @@ where
         mut request: TransactionRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessListWithGasUsed> {
-        let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = at.unwrap_or_default();
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
 
@@ -411,7 +407,7 @@ where
         }
 
         let from = request.from.unwrap_or_default();
-        let to = if let Some(to) = request.to {
+        let to = if let Some(TxKind::Call(to)) = request.to {
             to
         } else {
             let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
@@ -448,6 +444,7 @@ where
 
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }
+
     /// Executes the requests again after an out of gas error to check if the error is gas related
     /// or not
     #[inline]
@@ -455,14 +452,14 @@ where
         &self,
         env_gas_limit: U256,
         mut env: EnvWithHandlerCfg,
-        mut db: &mut CacheDB<StateProviderDatabase<S>>,
+        db: &mut CacheDB<StateProviderDatabase<S>>,
     ) -> EthApiError
     where
         S: StateProvider,
     {
         let req_gas_limit = env.tx.gas_limit;
         env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
-        let (res, _) = match self.transact(&mut db, env) {
+        let (res, _) = match self.transact(db, env) {
             Ok(res) => res,
             Err(err) => return err,
         };
@@ -470,7 +467,7 @@ where
             ExecutionResult::Success { .. } => {
                 // transaction succeeded by manually increasing the gas limit to
                 // highest, which means the caller lacks funds to pay for the tx
-                RpcInvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into()
+                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into()
             }
             ExecutionResult::Revert { output, .. } => {
                 // reverted again after bumping the limit

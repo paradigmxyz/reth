@@ -4,7 +4,7 @@
 
 use crate::Head;
 use alloy_primitives::{hex, BlockNumber, B256};
-use alloy_rlp::*;
+use alloy_rlp::{Error as RlpError, *};
 #[cfg(any(test, feature = "arbitrary"))]
 use arbitrary::Arbitrary;
 use crc::*;
@@ -113,6 +113,64 @@ pub struct ForkId {
     pub hash: ForkHash,
     /// Next upcoming fork block number or timestamp, 0 if not yet known.
     pub next: u64,
+}
+
+/// Represents a forward-compatible ENR entry for including the forkid in a node record via
+/// EIP-868. Forward compatibility is achieved via EIP-8.
+///
+/// See:
+/// <https://github.com/ethereum/devp2p/blob/master/enr-entries/eth.md#entry-format>
+///
+/// for how geth implements ForkId values and forward compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable)]
+pub struct EnrForkIdEntry {
+    /// The inner forkid
+    pub fork_id: ForkId,
+}
+
+impl Decodable for EnrForkIdEntry {
+    // NOTE(onbjerg): Manual implementation to satisfy EIP-8.
+    //
+    // See https://eips.ethereum.org/EIPS/eip-8
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let b = &mut &**buf;
+        let rlp_head = Header::decode(b)?;
+        if !rlp_head.list {
+            return Err(RlpError::UnexpectedString)
+        }
+        let started_len = b.len();
+
+        let this = Self { fork_id: Decodable::decode(b)? };
+
+        // NOTE(onbjerg): Because of EIP-8, we only check that we did not consume *more* than the
+        // payload length, i.e. it is ok if payload length is greater than what we consumed, as we
+        // just discard the remaining list items
+        let consumed = started_len - b.len();
+        if consumed > rlp_head.payload_length {
+            return Err(RlpError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+
+        let rem = rlp_head.payload_length - consumed;
+        b.advance(rem);
+        *buf = *b;
+
+        Ok(this)
+    }
+}
+
+impl From<ForkId> for EnrForkIdEntry {
+    fn from(fork_id: ForkId) -> Self {
+        Self { fork_id }
+    }
+}
+
+impl From<EnrForkIdEntry> for ForkId {
+    fn from(entry: EnrForkIdEntry) -> Self {
+        entry.fork_id
+    }
 }
 
 /// Reason for rejecting provided `ForkId`.
@@ -625,5 +683,40 @@ mod tests {
 
         assert!(fork_filter.set_head_priv(Head { number: b2, ..Default::default() }).is_some());
         assert_eq!(fork_filter.current(), h2);
+    }
+
+    mod eip8 {
+        use super::*;
+
+        fn junk_enr_fork_id_entry() -> Vec<u8> {
+            let mut buf = Vec::new();
+            // enr request is just an expiration
+            let fork_id = ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE };
+
+            // add some junk
+            let junk: u64 = 112233;
+
+            // rlp header encoding
+            let payload_length = fork_id.length() + junk.length();
+            alloy_rlp::Header { list: true, payload_length }.encode(&mut buf);
+
+            // fields
+            fork_id.encode(&mut buf);
+            junk.encode(&mut buf);
+
+            buf
+        }
+
+        #[test]
+        fn eip8_decode_enr_fork_id_entry() {
+            let enr_fork_id_entry_with_junk = junk_enr_fork_id_entry();
+
+            let mut buf = enr_fork_id_entry_with_junk.as_slice();
+            let decoded = EnrForkIdEntry::decode(&mut buf).unwrap();
+            assert_eq!(
+                decoded.fork_id,
+                ForkId { hash: ForkHash(hex!("deadbeef")), next: 0xBADDCAFE }
+            );
+        }
     }
 }

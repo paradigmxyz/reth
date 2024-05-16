@@ -33,7 +33,7 @@ impl Signature {
     /// signature.
     #[cfg(feature = "optimism")]
     pub const fn optimism_deposit_tx_signature() -> Self {
-        Signature { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
+        Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
     }
 }
 
@@ -52,7 +52,7 @@ impl Compact for Signature {
         let r = U256::from_le_slice(&buf[0..32]);
         let s = U256::from_le_slice(&buf[32..64]);
         buf.advance(64);
-        (Signature { r, s, odd_y_parity: identifier != 0 }, buf)
+        (Self { r, s, odd_y_parity: identifier != 0 }, buf)
     }
 }
 
@@ -112,18 +112,13 @@ impl Signature {
                 //
                 // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
                 if v == 0 && r.is_zero() && s.is_zero() {
-                    return Ok((Signature { r, s, odd_y_parity: false }, None))
+                    return Ok((Self { r, s, odd_y_parity: false }, None))
                 }
-                return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
             }
-            let odd_y_parity = v == 28;
-            Ok((Signature { r, s, odd_y_parity }, None))
-        } else {
-            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-            let odd_y_parity = ((v - 35) % 2) != 0;
-            let chain_id = (v - 35) >> 1;
-            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
         }
+
+        let (odd_y_parity, chain_id) = extract_chain_id(v)?;
+        Ok((Self { r, s, odd_y_parity }, chain_id))
     }
 
     /// Output the length of the signature without the length of the RLP header
@@ -140,7 +135,7 @@ impl Signature {
 
     /// Decodes the `odd_y_parity`, `r`, `s` values without a RLP header.
     pub fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Signature {
+        Ok(Self {
             odd_y_parity: Decodable::decode(buf)?,
             r: Decodable::decode(buf)?,
             s: Decodable::decode(buf)?,
@@ -198,6 +193,24 @@ impl Signature {
     #[inline]
     pub fn size(&self) -> usize {
         std::mem::size_of::<Self>()
+    }
+}
+
+/// Outputs (odd_y_parity, chain_id) from the `v` value.
+/// This doesn't check validity of the `v` value for optimism.
+#[inline]
+pub fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
+    if v < 35 {
+        // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
+        if v != 27 && v != 28 {
+            return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
+        }
+        Ok((v == 28, None))
+    } else {
+        // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+        let odd_y_parity = ((v - 35) % 2) != 0;
+        let chain_id = (v - 35) >> 1;
+        Ok((odd_y_parity, Some(chain_id)))
     }
 }
 

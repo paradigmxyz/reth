@@ -49,24 +49,36 @@ Options:
       --disable-discv4-discovery
           Disable Discv4 discovery
 
+      --enable-discv5-discovery
+          Enable Discv5 discovery
+
       --discovery.addr <DISCOVERY_ADDR>
-          The UDP address to use for P2P discovery/networking
+          The UDP address to use for devp2p peer discovery version 4
           
           [default: 0.0.0.0]
 
       --discovery.port <DISCOVERY_PORT>
-          The UDP port to use for P2P discovery/networking
+          The UDP port to use for devp2p peer discovery version 4
           
           [default: 30303]
 
-      --trusted-peer <TRUSTED_PEER>
-          Target trusted peer
+      --discovery.v5.addr <DISCOVERY_V5_ADDR>
+          The UDP address to use for devp2p peer discovery version 5
+          
+          [default: 0.0.0.0]
 
-      --trusted-only
-          Connect only to trusted peers
+      --discovery.v5.port <DISCOVERY_V5_PORT>
+          The UDP port to use for devp2p peer discovery version 5
+          
+          [default: 9000]
 
-      --retries <RETRIES>
-          The number of retries per request
+      --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
+          The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
+          
+          [default: 60]
+
+      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
+          The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
           
           [default: 5]
 
@@ -80,6 +92,22 @@ Options:
           Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
           
           [default: 1]
+
+      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
+          The number of times to carry out boost lookup queries at bootstrap
+          
+          [default: 100]
+
+      --trusted-peer <TRUSTED_PEER>
+          Target trusted peer
+
+      --trusted-only
+          Connect only to trusted peers
+
+      --retries <RETRIES>
+          The number of retries per request
+          
+          [default: 5]
 
       --nat <NAT>
           [default: any]

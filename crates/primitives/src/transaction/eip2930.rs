@@ -1,5 +1,5 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TransactionKind, TxType, B256, U256};
+use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -29,7 +29,7 @@ pub struct TxEip2930 {
     pub gas_limit: u64,
     /// The 160-bit address of the message call’s recipient or, for a contract creation
     /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TransactionKind,
+    pub to: TxKind,
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
@@ -157,7 +157,7 @@ impl TxEip2930 {
         TxType::Eip2930
     }
 
-    /// Encodes the legacy transaction in RLP for signing.
+    /// Encodes the EIP-2930 transaction in RLP for signing.
     ///
     /// This encodes the transaction as:
     /// `tx_type || rlp(chain_id, nonce, gas_price, gas_limit, to, value, input, access_list)`
@@ -189,7 +189,7 @@ impl TxEip2930 {
 mod tests {
     use super::TxEip2930;
     use crate::{
-        transaction::{signature::Signature, TransactionKind},
+        transaction::{signature::Signature, TxKind},
         Address, Bytes, Transaction, TransactionSigned, U256,
     };
     use alloy_rlp::{Decodable, Encodable};
@@ -202,7 +202,7 @@ mod tests {
             nonce: 0,
             gas_price: 1,
             gas_limit: 2,
-            to: TransactionKind::Create,
+            to: TxKind::Create,
             value: U256::from(3),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
@@ -225,7 +225,7 @@ mod tests {
             nonce: 0,
             gas_price: 1,
             gas_limit: 2,
-            to: TransactionKind::Call(Address::default()),
+            to: Address::default().into(),
             value: U256::from(3),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

@@ -1,3 +1,4 @@
+use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{
     cursor::DbCursorRW,
@@ -42,8 +43,8 @@ pub struct SenderRecoveryStage {
 
 impl SenderRecoveryStage {
     /// Create new instance of [SenderRecoveryStage].
-    pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+    pub fn new(config: SenderRecoveryConfig) -> Self {
+        Self { commit_threshold: config.commit_threshold }
     }
 }
 
@@ -292,7 +293,10 @@ mod tests {
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
     };
-    use reth_provider::{providers::StaticFileWriter, PruneCheckpointWriter, TransactionsProvider};
+    use reth_provider::{
+        providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
+        TransactionsProvider,
+    };
 
     use super::*;
     use crate::test_utils::{

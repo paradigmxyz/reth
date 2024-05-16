@@ -1,12 +1,12 @@
 use crate::{
-    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine,
+    engine::hooks::PruneHook, hooks::EngineHooks, BeaconConsensusEngine,
     BeaconConsensusEngineError, BeaconConsensusEngineHandle, BeaconForkChoiceUpdateError,
-    BeaconOnNewPayloadError, MIN_BLOCKS_FOR_PIPELINE_RUN,
+    BeaconOnNewPayloadError, EthBeaconConsensus, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
-use reth_config::config::EtlConfig;
+use reth_config::config::StageConfig;
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 use reth_downloaders::{
@@ -14,22 +14,20 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm::{either::Either, test_utils::MockExecutorProvider};
+use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_interfaces::{
-    executor::BlockExecutionError,
-    p2p::{bodies::client::BodiesClient, either::EitherDownloader, headers::client::HeadersClient},
+    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
     sync::NoopSyncStateUpdater,
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
 use reth_provider::{
-    providers::BlockchainProvider,
-    test_utils::{create_test_provider_factory_with_chain_spec, TestExecutorFactory},
-    BundleStateWithReceipts, ExecutorFactory, HeaderSyncMode, PrunableBlockExecutor,
+    providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    BundleStateWithReceipts, HeaderSyncMode, StaticFileProviderFactory,
 };
 use reth_prune::Pruner;
-use reth_revm::EvmProcessorFactory;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -44,7 +42,7 @@ type DatabaseEnv = TempDatabase<DE>;
 type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
     BlockchainProvider<Arc<DatabaseEnv>>,
-    Arc<EitherDownloader<Client, NoopFullBlockClient>>,
+    Arc<Either<Client, NoopFullBlockClient>>,
     EthEngineTypes,
 >;
 
@@ -113,7 +111,7 @@ impl<DB> TestEnv<DB> {
 }
 
 // TODO: add with_consensus in case we want to use the TestConsensus purposeful failure - this
-// would require similar patterns to how we use with_client and the EitherDownloader
+// would require similar patterns to how we use with_client and the downloader
 /// Represents either a real consensus engine, or a test consensus engine.
 #[derive(Debug, Default)]
 enum TestConsensusConfig {
@@ -151,31 +149,6 @@ enum TestExecutorConfig {
 impl Default for TestExecutorConfig {
     fn default() -> Self {
         Self::Test(Vec::new())
-    }
-}
-
-/// A type that represents one of two possible executor factories.
-#[derive(Debug, Clone)]
-pub enum EitherExecutorFactory<A: ExecutorFactory, B: ExecutorFactory> {
-    /// The first factory variant
-    Left(A),
-    /// The second factory variant
-    Right(B),
-}
-
-impl<A, B> ExecutorFactory for EitherExecutorFactory<A, B>
-where
-    A: ExecutorFactory,
-    B: ExecutorFactory,
-{
-    fn with_state<'a, SP: reth_provider::StateProvider + 'a>(
-        &'a self,
-        sp: SP,
-    ) -> Box<dyn PrunableBlockExecutor<Error = BlockExecutionError> + 'a> {
-        match self {
-            EitherExecutorFactory::Left(a) => a.with_state::<'a, SP>(sp),
-            EitherExecutorFactory::Right(b) => b.with_state::<'a, SP>(sp),
-        }
     }
 }
 
@@ -349,7 +322,7 @@ where
 
         let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
             TestConsensusConfig::Real => {
-                Arc::new(BeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
+                Arc::new(EthBeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
             }
             TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
         };
@@ -358,21 +331,20 @@ where
         // use either noop client or a user provided client (for example TestFullBlockClient)
         let client = Arc::new(
             self.client
-                .map(EitherDownloader::Left)
-                .unwrap_or_else(|| EitherDownloader::Right(NoopFullBlockClient::default())),
+                .map(Either::Left)
+                .unwrap_or_else(|| Either::Right(NoopFullBlockClient::default())),
         );
 
         // use either test executor or real executor
         let executor_factory = match self.base_config.executor_config {
             TestExecutorConfig::Test(results) => {
-                let executor_factory = TestExecutorFactory::default();
+                let executor_factory = MockExecutorProvider::default();
                 executor_factory.extend(results);
-                EitherExecutorFactory::Left(executor_factory)
+                Either::Left(executor_factory)
             }
-            TestExecutorConfig::Real => EitherExecutorFactory::Right(EvmProcessorFactory::new(
-                self.base_config.chain_spec.clone(),
-                EthEvmConfig::default(),
-            )),
+            TestExecutorConfig::Real => {
+                Either::Right(EthExecutorProvider::ethereum(self.base_config.chain_spec.clone()))
+            }
         };
 
         let static_file_producer = StaticFileProducer::new(
@@ -403,7 +375,8 @@ where
                     header_downloader,
                     body_downloader,
                     executor_factory.clone(),
-                    EtlConfig::default(),
+                    StageConfig::default(),
+                    PruneModes::default(),
                 ))
             }
         };

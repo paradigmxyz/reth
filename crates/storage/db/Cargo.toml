@@ -16,7 +16,10 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-codecs.workspace = true
-reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
+reth-libmdbx = { workspace = true, optional = true, features = [
+    "return-borrowed",
+    "read-tx-timeouts",
+] }
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
 
@@ -37,7 +40,7 @@ tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
 eyre.workspace = true
 paste.workspace = true
-rustc-hash = "1.1.0"
+rustc-hash.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -58,7 +61,11 @@ serde_json.workspace = true
 tempfile.workspace = true
 test-fuzz.workspace = true
 
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 criterion.workspace = true
 iai-callgrind = "0.10.2"
 
@@ -81,6 +88,7 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
+optimism = []
 
 [[bench]]
 name = "hash_keys"

@@ -255,7 +255,7 @@ mod tests {
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
-        ProviderFactory,
+        ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use std::{
@@ -272,12 +272,13 @@ mod tests {
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works
-        db.factory
-            .static_file_provider()
+        let static_file_provider = db.factory.static_file_provider();
+        let mut static_file_writer = static_file_provider
             .latest_writer(StaticFileSegment::Headers)
-            .expect("get static file writer for headers")
-            .prune_headers(blocks.len() as u64)
-            .expect("prune headers");
+            .expect("get static file writer for headers");
+        static_file_writer.prune_headers(blocks.len() as u64).unwrap();
+        static_file_writer.commit().expect("prune headers");
+
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
         blocks.iter().for_each(|block| {
             TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
