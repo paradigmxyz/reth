@@ -1,10 +1,10 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BundleStateDataProvider, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    FullBundleStateDataProvider, HeaderProvider, ReceiptProviderIdExt, RequestsProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullBundleStateDataProvider,
+    HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
