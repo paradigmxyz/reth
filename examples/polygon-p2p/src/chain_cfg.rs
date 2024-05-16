@@ -26,6 +26,7 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         deposit_contract: None,
         base_fee_params: reth_primitives::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
+        bitfinity_evm_url: Default::default(),
     }
     .into()
 }

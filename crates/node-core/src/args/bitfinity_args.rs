@@ -12,6 +12,11 @@ pub struct BitfinityArgs {
     #[arg(long, short = 'r', value_name = "BITFINITY_RPC_URL")]
     pub rpc_url: String,
 
+    /// Optional RPC URL where the send_raw_transaction requests are forwarded.
+    /// If not provided, the RPC URL will be used.
+    #[arg(long)]
+    pub send_raw_transaction_rpc_url: Option<String>,
+
     /// End Block
     #[arg(long, short = 'e', value_name = "END_BLOCK")]
     pub end_block: Option<u64>,
