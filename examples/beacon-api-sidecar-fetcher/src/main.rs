@@ -1,7 +1,7 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run -p beacon-api-beacon-sidecar-fetcher -- node --full
+//! cargo run -p beacon-api-beacon-sidecar-fetcher --node -- full
 //! ```
 //!
 //! This launches a regular reth instance and subscribes to payload attributes event stream.
@@ -27,11 +27,10 @@ use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    builder::{NodeBuilder, NodeConfig, NodeHandle},
+    builder::NodeHandle,
     cli::Cli,
     primitives::{BlobTransaction, B256},
     providers::{CanonStateNotification, CanonStateSubscriptions},
-    tasks::TaskManager,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
 
@@ -68,7 +67,6 @@ fn main() {
                     }
                 }
             }
-
             node_exit_future.await
         })
         .unwrap();
@@ -86,6 +84,7 @@ struct BeaconSidecarConfig {
 }
 
 impl Default for BeaconSidecarConfig {
+    /// Default setup for lighthouse client
     fn default() -> Self {
         Self {
             cl_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), // Equivalent to Ipv4Addr::LOCALHOST
@@ -95,16 +94,18 @@ impl Default for BeaconSidecarConfig {
 }
 
 impl BeaconSidecarConfig {
+    /// Returns the http url of the beacon node
     pub fn http_base_url(&self) -> String {
         format!("http://{}:{}", self.cl_addr, self.cl_port)
     }
 
+    /// Returns the URL to the beacon sidecars endpoint (https://ethereum.github.io/beacon-APIs/#/Beacon/getBlobSidecars)
     pub fn sidecar_url(&self, block_root: B256) -> String {
         format!("{}/eth/v1/beacon/blob_sidecars/{}", self.http_base_url(), block_root)
     }
 }
 
-// SideCarError Handles Errors from both EL and CL
+/// SideCarError Handles Errors from both EL and CL
 #[derive(Debug, Error)]
 pub enum SideCarError {
     #[error("Reqwest encountered an error: {0}")]
@@ -132,6 +133,11 @@ pub enum SideCarError {
     UnknownError(u16, String),
 }
 
+/// tracks the futures associated with retrieving blob data from the beacon client
+type BeaconFutures =
+    FuturesUnordered<Pin<Box<dyn Future<Output = Result<Vec<BlobTransaction>, SideCarError>>>>>;
+
+/// Wrapper struct for CanonStateNotifications
 pub struct MinedSidecarStream<St, P>
 where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
@@ -140,12 +146,12 @@ where
     pool: P,
     beacon_config: BeaconSidecarConfig,
     client: reqwest::Client,
-    pending_requests:
-        FuturesUnordered<Pin<Box<dyn Future<Output = Result<Vec<BlobTransaction>, SideCarError>>>>>, /* TODO make vec */
-    queued_actions: VecDeque<BlobTransaction>, /* Buffer for
-                                                * ready items */
+    pending_requests: BeaconFutures,
+    queued_actions: VecDeque<BlobTransaction>,
 }
 
+/// First checks if the Blobtranscation for a given EIP4844 is stored locally, if not attempts to
+/// retrieve it from the CL Layer
 impl<St, P> Stream for MinedSidecarStream<St, P>
 where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
