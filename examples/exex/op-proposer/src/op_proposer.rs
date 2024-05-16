@@ -171,12 +171,7 @@ where
                     Ordering::Less => {
                         // If the l2 output has already been submitted
                         // we can continue to the next block
-                        if transaction_manager
-                            .pending_transactions
-                            .lock()
-                            .await
-                            .contains(&target_block)
-                        {
+                        if transaction_manager.pending_transactions.lock().contains(&target_block) {
                             continue;
                         }
 

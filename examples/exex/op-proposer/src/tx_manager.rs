@@ -47,7 +47,7 @@ where
         l2_output_oracle: &L2OutputOracleInstance<T, Arc<P>, N>,
         l2_output: L2Output,
     ) -> eyre::Result<()> {
-        self.pending_transactions.lock().await.insert(l2_output.l2_block_number);
+        self.pending_transactions.lock().insert(l2_output.l2_block_number);
 
         // Submit a transaction to propose the L2Output to the L2OutputOracle contract
         let transport_result = l2_output_oracle
@@ -101,7 +101,7 @@ where
                     // regardless if the tx succeeded or failed
                     // If the transaction did not successfully complete, the l2_oracle.nextBlock
                     // will be the same and the next transaction will propose the same l2_output
-                    pending_transactions.lock().await.remove(&l2_block_number);
+                    pending_transactions.lock().remove(&l2_block_number);
                 }
             }
         }
