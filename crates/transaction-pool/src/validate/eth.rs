@@ -708,7 +708,7 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     if transaction.gas_limit() <
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
-            transaction.kind(),
+            &transaction.kind(),
             &access_list,
             is_shanghai,
         )

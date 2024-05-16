@@ -1,6 +1,6 @@
 use super::access_list::AccessList;
 use crate::{
-    constants::eip4844::DATA_GAS_PER_BLOB, keccak256, Bytes, ChainId, Signature, TxKind, TxType,
+    constants::eip4844::DATA_GAS_PER_BLOB, keccak256, Address, Bytes, ChainId, Signature, TxType,
     B256, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
@@ -46,9 +46,8 @@ pub struct TxEip4844 {
     ///
     /// This is also known as `GasTipCap`
     pub max_priority_fee_per_gas: u128,
-    /// The 160-bit address of the message call’s recipient or, for a contract creation
-    /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    pub to: TxKind,
+    /// The 160-bit address of the message call’s recipient.
+    pub to: Address,
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
@@ -195,7 +194,7 @@ impl TxEip4844 {
         mem::size_of::<u64>() + // gas_limit
         mem::size_of::<u128>() + // max_fee_per_gas
         mem::size_of::<u128>() + // max_priority_fee_per_gas
-        self.to.size() + // to
+        mem::size_of::<Address>() + // to
         mem::size_of::<U256>() + // value
         self.access_list.size() + // access_list
         self.input.len() +  // input

@@ -77,7 +77,7 @@ pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
 /// Minimum length of a rlp-encoded eip1559 transaction.
 pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
 /// Minimum length of a rlp-encoded eip4844 transaction.
-pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
+pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 37;
 /// Minimum length of a rlp-encoded deposit transaction.
 #[cfg(feature = "optimism")]
 pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
@@ -174,14 +174,14 @@ impl Transaction {
 
     /// Gets the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> &TxKind {
+    pub fn kind(&self) -> TxKind {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) |
-            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) => *to,
+            Transaction::Eip4844(TxEip4844 { to, .. }) => TxKind::Call(*to),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { to, .. }) => to,
+            Transaction::Deposit(TxDeposit { to, .. }) => *to,
         }
     }
 
@@ -2035,7 +2035,10 @@ mod tests {
         );
 
         let encoded = alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
+        assert_eq!(
+            hex!("a403e280808080809400000000000000000000000000000000000000008080c080c0808080"),
+            encoded[..]
+        );
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
