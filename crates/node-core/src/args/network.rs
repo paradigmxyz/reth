@@ -160,7 +160,7 @@ impl NetworkArgs {
         network_config_builder =
             self.discovery.apply_to_builder(network_config_builder, rlpx_socket);
 
-        if chain_spec.is_optimism() {
+        if chain_spec.is_optimism() && !self.discovery.disable_discovery {
             network_config_builder =
                 network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
         }
