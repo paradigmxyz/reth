@@ -110,6 +110,14 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
+    /// Checks the consistency of the file and heals it if necessary.
+    pub fn ensure_file_consistency(&mut self) -> ProviderResult<()> {
+        let err = |err: NippyJarError| ProviderError::NippyJar(err.to_string());
+        self.writer.check_consistency_and_heal().map_err(err)?;
+        self.writer.commit().map_err(err)?;
+        Ok(())
+    }
+
     /// Commits configuration changes to disk and updates the reader index with the new changes.
     pub fn commit(&mut self) -> ProviderResult<()> {
         let start = Instant::now();

@@ -124,7 +124,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     ///
     /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one
     /// to be updated when something is written, as by the `commit()` function shows.
-    fn check_consistency_and_heal(&mut self) -> Result<(), NippyJarError> {
+    pub fn check_consistency_and_heal(&mut self) -> Result<(), NippyJarError> {
         let reader = self.jar.open_data_reader()?;
 
         // When an offset size is smaller than the initial (8), we are dealing with immutable

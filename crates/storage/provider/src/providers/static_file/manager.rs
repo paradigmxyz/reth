@@ -492,20 +492,15 @@ impl StaticFileProvider {
 
             let initial_highest_block = self.get_highest_static_file_block(segment);
 
-            // By calling a writer, an inner consistency check will be triggered on
-            // [`NippyJarWriter::check_consistency_and_heal`]
+            //  File consistency is broken if:
             //
-            // * If appending data was interrupted before a config commit, then data file will be
+            // * appending data was interrupted before a config commit, then data file will be
             //   truncated according to the config.
             //
-            // * If pruning data was interrupted before a config commit, then we have deleted data
-            //   that we are expected to still have. We need to check the Database and unwind
-            //   everything accordingly.
-            let mut writer = self.latest_writer(segment)?;
-
-            // This will commit any inconsistencies found and update the reader index. If it
-            // happens, it means that the highest block of the segement has decreased.
-            writer.commit()?;
+            // * pruning data was interrupted before a config commit, then we have deleted data that
+            //   we are expected to still have. We need to check the Database and unwind everything
+            //   accordingly.
+            self.ensure_file_consistency(segment)?;
 
             // Only applies to block-based static files. (Headers)
             //
@@ -878,6 +873,9 @@ pub trait StaticFileWriter {
 
     /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
+
+    /// Checks consistency of the segment latest file and heals if necessary.
+    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()>;
 }
 
 impl StaticFileWriter for StaticFileProvider {
@@ -913,6 +911,10 @@ impl StaticFileWriter for StaticFileProvider {
             writer.commit()?;
         }
         Ok(())
+    }
+
+    fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
+        self.latest_writer(segment)?.ensure_file_consistency()
     }
 }
 
