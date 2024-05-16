@@ -2,10 +2,11 @@ use alloy_network::Network;
 use alloy_provider::{PendingTransaction, Provider};
 use alloy_transport::Transport;
 use futures::Future;
+use parking_lot::Mutex;
 use reth_primitives::U256;
 use reth_tracing::tracing::{info, warn};
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::{mpsc::Sender, Mutex};
+use tokio::sync::mpsc::Sender;
 
 use crate::op_proposer::{L2Output, L2OutputOracle::L2OutputOracleInstance};
 
