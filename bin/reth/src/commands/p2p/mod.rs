@@ -14,10 +14,9 @@ use clap::{Parser, Subcommand};
 use discv5::ListenConfig;
 use reth_config::Config;
 use reth_db::create_db;
-use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_net_common::ip::IpAddrExt;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
+use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use std::{
     net::{SocketAddrV4, SocketAddrV6},
@@ -54,30 +53,13 @@ pub struct Command {
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
-    /// Secret key to use for this node.
-    ///
-    /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH")]
-    p2p_secret_key: Option<PathBuf>,
-
     /// Disable the discovery service.
     #[command(flatten)]
     pub network: NetworkArgs,
 
-    /// Target trusted peer
-    #[arg(long)]
-    trusted_peer: Option<NodeRecord>,
-
-    /// Connect only to trusted peers
-    #[arg(long)]
-    trusted_only: bool,
-
     /// The number of retries per request
     #[arg(long, default_value = "5")]
     retries: usize,
-
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
 
     #[command(flatten)]
     db: DatabaseArgs,
@@ -114,24 +96,25 @@ impl Command {
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
-        if let Some(peer) = self.trusted_peer {
+        for &peer in &self.network.trusted_peers {
             config.peers.trusted_nodes.insert(peer);
         }
 
-        if config.peers.trusted_nodes.is_empty() && self.trusted_only {
+        if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
         }
 
-        config.peers.trusted_nodes_only = self.trusted_only;
+        config.peers.trusted_nodes_only = self.network.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret();
-        let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+        let secret_key_path =
+            self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
         let rlpx_socket = (self.network.addr, self.network.port).into();
         let boot_nodes = self.chain.bootnodes().unwrap_or_default();
 
         let mut network_config_builder = config
-            .network_config(self.nat, None, p2p_secret_key)
+            .network_config(self.network.nat, None, p2p_secret_key)
             .chain_spec(self.chain.clone())
             .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .boot_nodes(boot_nodes.clone());

@@ -119,7 +119,10 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
+        let boot_nodes = self
+            .bootnodes
+            .clone()
+            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
@@ -136,7 +139,6 @@ impl NetworkArgs {
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             ),
         };
-
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
@@ -144,7 +146,7 @@ impl NetworkArgs {
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
-            .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
+            .boot_nodes(boot_nodes.clone())
             .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config);
 
@@ -155,15 +157,11 @@ impl NetworkArgs {
         );
 
         let rlpx_socket = (self.addr, self.port).into();
-        network_config_builder =
-            self.discovery.apply_to_builder(network_config_builder, rlpx_socket);
-        if let Some(boot_nodes) = self.bootnodes.clone() {
-            network_config_builder = network_config_builder.discovery_v5_with_builder(|builder| {
+        self.discovery
+            .apply_to_builder(network_config_builder, rlpx_socket)
+            .discovery_v5_with_builder(|builder| {
                 builder.add_unsigned_boot_nodes(boot_nodes.into_iter())
-            });
-        }
-
-        network_config_builder
+            })
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.

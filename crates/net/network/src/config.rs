@@ -396,13 +396,14 @@ impl NetworkConfigBuilder {
     /// ```
     /// use reth_network::NetworkConfigBuilder;
     /// use reth_primitives::MAINNET;
+    /// use reth_provider::test_utils::NoopProvider;
     /// use secp256k1::{rand::thread_rng, SecretKey};
     ///
     /// let sk = SecretKey::new(&mut thread_rng());
     /// let fork_id = MAINNET.latest_fork_id();
     /// let network_config = NetworkConfigBuilder::new(sk)
-    ///     .discovery_v5_with_config_builder(|builder| builder.fork(b"eth", fork_id))
-    ///     .build();
+    ///     .discovery_v5_with_builder(|builder| builder.fork(b"eth", fork_id))
+    ///     .build(NoopProvider::default());
     /// ```
     pub fn discovery_v5_with_builder(
         mut self,
