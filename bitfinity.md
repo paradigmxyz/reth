@@ -62,7 +62,7 @@ Then to start it:
 docker run -d -p 8080:8080 bitfinity/reth node --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://testnet.bitfinity.network -i 30 -b 10
 ```
 
-Otherwise, the prebuilt docker image from `ghcr.io` can be used:
+Alternatively, you can use the prebuilt Docker image from `ghcr.io`:
 ```sh
 docker run ghcr.io/bitfinity-network/bitfinity-reth:main node --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://testnet.bitfinity.network
 ```
@@ -70,20 +70,20 @@ docker run ghcr.io/bitfinity-network/bitfinity-reth:main node --http.port 8080 -
 
 ### Reset the EVM canister state
 
-The current node state can be used to reset the state of an EVM canister. At the end of the process, the EVM canister will have the same state root and last block of the Reth node.
+You can use the current node state to reset the state of an EVM canister. By the end of this process, the EVM canister will have the same state root and last block as the Reth node.
 
-*Preconditions*: The IC account should have admin rights on the EVM canister
+*Preconditions*: The IC account must have admin rights on the EVM canister.
 
-To execute the reset command:
+To execute the reset command, follow these steps:
 
-1. Shutdown the reth node
+1. Shut down the reth node.
 
 2. Disable the EVM canister:
 ```sh
 dfx canister --network=ic call EVM_CANISTER_ID admin_disable_evm '(true)'
 ```
 
-3. Run the evm reset command, e.g.:
+3. Run the EVM reset command. For example:
 ```sh
 cargo run -p reth -- bitfinity-export-to-evm -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://orca-app-5yyst.ondigitalocean.app
 ```
