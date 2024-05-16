@@ -163,9 +163,13 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
             bitfinity,
         } = self;
 
-        let chain = Arc::new(
-            reth_downloaders::bitfinity_evm_client::BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?
-        );
+        let chain = {
+            let mut chain = reth_downloaders::bitfinity_evm_client::BitfinityEvmClient::fetch_chain_spec(bitfinity.rpc_url.to_owned()).await?;
+            if let Some(send_raw_transaction_rpc_url) = &bitfinity.send_raw_transaction_rpc_url {
+                chain.bitfinity_evm_url = Some(send_raw_transaction_rpc_url.to_owned());
+            }
+            Arc::new(chain)
+        };
 
         // set up node config
         let mut node_config = NodeConfig {
