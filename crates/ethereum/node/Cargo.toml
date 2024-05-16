@@ -1,0 +1,41 @@
+[package]
+name = "reth-node-ethereum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-payload-builder.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-node-builder.workspace = true
+reth-tracing.workspace = true
+reth-provider.workspace = true
+reth-transaction-pool.workspace = true
+reth-network.workspace = true
+reth-evm-ethereum.workspace = true
+
+# misc
+eyre.workspace = true
+
+[dev-dependencies]
+reth.workspace = true
+reth-db.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-primitives.workspace = true
+reth-e2e-test-utils.workspace = true
+futures.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+

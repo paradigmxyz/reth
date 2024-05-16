@@ -25,9 +25,4 @@ similar-asserts.workspace = true
 syn = { workspace = true, features = ["full", "extra-traits"] }
 
 [features]
-default = ["compact"]
-compact = []
-scale = []
-postcard = []
-no_codec = []
 optimism = []

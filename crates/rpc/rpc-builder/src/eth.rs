@@ -27,7 +27,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
     pub blocking_task_pool: BlockingTaskPool,
 }
 
-/// Additional config values for the eth namespace
+/// Additional config values for the eth namespace.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EthConfig {
     /// Settings for the caching layer

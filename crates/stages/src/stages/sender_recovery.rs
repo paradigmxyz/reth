@@ -1,4 +1,5 @@
-use crate::{BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_config::config::SenderRecoveryConfig;
+use reth_consensus::ConsensusError;
 use reth_db::{
     cursor::DbCursorRW,
     database::Database,
@@ -7,7 +8,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     RawValue,
 };
-use reth_interfaces::consensus;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
@@ -15,6 +15,9 @@ use reth_primitives::{
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
+};
+use reth_stages_api::{
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
@@ -40,8 +43,8 @@ pub struct SenderRecoveryStage {
 
 impl SenderRecoveryStage {
     /// Create new instance of [SenderRecoveryStage].
-    pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+    pub fn new(config: SenderRecoveryConfig) -> Self {
+        Self { commit_threshold: config.commit_threshold }
     }
 }
 
@@ -207,7 +210,7 @@ fn recover_range<DB: Database>(
                             Err(StageError::Block {
                                 block: Box::new(sealed_header),
                                 error: BlockErrorKind::Validation(
-                                    consensus::ConsensusError::TransactionSignerRecoveryError,
+                                    ConsensusError::TransactionSignerRecoveryError,
                                 ),
                             })
                         }
@@ -290,7 +293,10 @@ mod tests {
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
     };
-    use reth_provider::{providers::StaticFileWriter, PruneCheckpointWriter, TransactionsProvider};
+    use reth_provider::{
+        providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
+        TransactionsProvider,
+    };
 
     use super::*;
     use crate::test_utils::{

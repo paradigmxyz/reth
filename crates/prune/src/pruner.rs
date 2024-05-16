@@ -7,15 +7,18 @@ use crate::{
 };
 use reth_db::database::Database;
 use reth_primitives::{
-    BlockNumber, PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
-    StaticFileSegment,
+    BlockNumber, FinishedExExHeight, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
+    PruneSegment, StaticFileSegment,
 };
-use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
+use reth_provider::{
+    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
+};
 use reth_tokio_util::EventListeners;
 use std::{
     collections::BTreeMap,
     time::{Duration, Instant},
 };
+use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
 
@@ -46,6 +49,8 @@ pub struct Pruner<DB> {
     prune_max_blocks_per_run: usize,
     /// Maximum time for a one pruner run.
     timeout: Option<Duration>,
+    /// The finished height of all ExEx's.
+    finished_exex_height: watch::Receiver<FinishedExExHeight>,
     #[doc(hidden)]
     metrics: Metrics,
     listeners: EventListeners<PrunerEvent>,
@@ -60,6 +65,7 @@ impl<DB: Database> Pruner<DB> {
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
         timeout: Option<Duration>,
+        finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
         Self {
             provider_factory,
@@ -69,6 +75,7 @@ impl<DB: Database> Pruner<DB> {
             delete_limit_per_block: delete_limit,
             prune_max_blocks_per_run,
             timeout,
+            finished_exex_height,
             metrics: Metrics::default(),
             listeners: Default::default(),
         }
@@ -81,6 +88,11 @@ impl<DB: Database> Pruner<DB> {
 
     /// Run the pruner
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
+        let Some(tip_block_number) =
+            self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
+        else {
+            return Ok(PruneProgress::Finished)
+        };
         if tip_block_number == 0 {
             self.previous_tip_block_number = Some(tip_block_number);
 
@@ -269,6 +281,12 @@ impl<DB: Database> Pruner<DB> {
     /// Returns `true` if the pruning is needed at the provided tip block number.
     /// This determined by the check against minimum pruning interval and last pruned block number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
+        let Some(tip_block_number) =
+            self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
+        else {
+            return false
+        };
+
         // Saturating subtraction is needed for the case when the chain was reverted, meaning
         // current block number might be less than the previous tip block number.
         // If that's the case, no pruning is needed as outdated data is also reverted.
@@ -286,6 +304,30 @@ impl<DB: Database> Pruner<DB> {
             false
         }
     }
+
+    /// Adjusts the tip block number to the finished ExEx height. This is needed to not prune more
+    /// data than ExExs have processed. Depending on the height:
+    /// - [FinishedExExHeight::NoExExs] returns the tip block number as is as no adjustment for
+    ///   ExExs is needed.
+    /// - [FinishedExExHeight::NotReady] returns `None` as not all ExExs have emitted a
+    ///   `FinishedHeight` event yet.
+    /// - [FinishedExExHeight::Height] returns the finished ExEx height.
+    fn adjust_tip_block_number_to_finished_exex_height(
+        &self,
+        tip_block_number: BlockNumber,
+    ) -> Option<BlockNumber> {
+        match *self.finished_exex_height.borrow() {
+            FinishedExExHeight::NoExExs => Some(tip_block_number),
+            FinishedExExHeight::NotReady => {
+                debug!(target: "pruner", %tip_block_number, "Not all ExExs have emitted a `FinishedHeight` event yet, can't prune");
+                None
+            }
+            FinishedExExHeight::Height(finished_exex_height) => {
+                debug!(target: "pruner", %tip_block_number, %finished_exex_height, "Adjusting tip block number to the finished ExEx height");
+                Some(finished_exex_height)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -293,7 +335,7 @@ mod tests {
 
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::MAINNET;
+    use reth_primitives::{FinishedExExHeight, MAINNET};
     use reth_provider::ProviderFactory;
 
     #[test]
@@ -302,7 +344,12 @@ mod tests {
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
             .expect("create provide factory with static_files");
-        let mut pruner = Pruner::new(provider_factory, vec![], 5, 0, 5, None);
+
+        let (finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+
+        let mut pruner =
+            Pruner::new(provider_factory, vec![], 5, 0, 5, None, finished_exex_height_rx);
 
         // No last pruned block number was set before
         let first_block_number = 1;
@@ -315,7 +362,22 @@ mod tests {
         pruner.previous_tip_block_number = Some(second_block_number);
 
         // Tip block number delta is < than min block interval
-        let third_block_number = second_block_number;
+        assert!(!pruner.is_pruning_needed(second_block_number));
+
+        // Tip block number delta is >= than min block interval
+        let third_block_number = second_block_number + pruner.min_block_interval as u64;
+        assert!(pruner.is_pruning_needed(third_block_number));
+
+        // Not all ExExs have emitted a `FinishedHeight` event yet
+        finished_exex_height_tx.send(FinishedExExHeight::NotReady).unwrap();
         assert!(!pruner.is_pruning_needed(third_block_number));
+
+        // Adjust tip block number to the finished ExEx height that doesn't reach the threshold
+        finished_exex_height_tx.send(FinishedExExHeight::Height(second_block_number)).unwrap();
+        assert!(!pruner.is_pruning_needed(third_block_number));
+
+        // Adjust tip block number to the finished ExEx height that reaches the threshold
+        finished_exex_height_tx.send(FinishedExExHeight::Height(third_block_number)).unwrap();
+        assert!(pruner.is_pruning_needed(third_block_number));
     }
 }

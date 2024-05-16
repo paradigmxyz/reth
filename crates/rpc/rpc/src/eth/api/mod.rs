@@ -49,6 +49,7 @@ mod sign;
 mod state;
 mod transactions;
 
+use crate::eth::traits::RawTransactionForwarder;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -104,6 +105,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -116,6 +118,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
+            raw_transaction_forwarder,
         )
     }
 
@@ -132,6 +135,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -155,8 +159,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            #[cfg(feature = "optimism")]
-            http_client: reqwest::Client::builder().use_rustls_tls().build().unwrap(),
+            raw_transaction_forwarder,
         };
 
         Self { inner: Arc::new(inner) }
@@ -289,8 +292,9 @@ where
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
 
-            latest_header.base_fee_per_gas = latest_header
-                .next_block_base_fee(chain_spec.base_fee_params(latest_header.timestamp));
+            latest_header.base_fee_per_gas = latest_header.next_block_base_fee(
+                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp),
+            );
 
             // update excess blob gas consumed above target
             latest_header.excess_blob_gas = latest_header.next_block_excess_blob_gas();
@@ -351,7 +355,7 @@ where
             let now = Instant::now();
             *lock = Some(PendingBlock {
                 block: pending_block.clone(),
-                expires_at: now + Duration::from_secs(3),
+                expires_at: now + Duration::from_secs(1),
             });
 
             Ok(Some(pending_block))
@@ -486,7 +490,6 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     fee_history_cache: FeeHistoryCache,
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
-    /// An http client for communicating with sequencers.
-    #[cfg(feature = "optimism")]
-    http_client: reqwest::Client,
+    /// Allows forwarding received raw transactions
+    raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
 }

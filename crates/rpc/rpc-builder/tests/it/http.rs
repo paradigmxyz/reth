@@ -5,7 +5,6 @@ use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::{
     core::{
         client::{ClientT, SubscriptionClientT},
-        error::Error,
         params::ArrayParams,
     },
     http_client::HttpClient,
@@ -30,9 +29,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
-fn is_unimplemented(err: Error) -> bool {
+fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     match err {
-        Error::Call(error_obj) => {
+        jsonrpsee::core::client::Error::Call(error_obj) => {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }
@@ -168,7 +167,7 @@ where
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
-    EthApiClient::fee_history(client, 0.into(), block_number, None).await.unwrap();
+    EthApiClient::fee_history(client, 0, block_number, None).await.unwrap();
     EthApiClient::balance(client, address, None).await.unwrap();
     EthApiClient::transaction_count(client, address, None).await.unwrap();
     EthApiClient::storage_at(client, address, U256::default().into(), None).await.unwrap();

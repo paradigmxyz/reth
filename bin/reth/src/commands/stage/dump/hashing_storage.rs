@@ -15,17 +15,13 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
 ) -> Result<()> {
-    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db_path(), db_tool)?;
+    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
 
     if should_run {
         dry_run(
-            ProviderFactory::new(
-                output_db,
-                db_tool.chain.clone(),
-                output_datadir.static_files_path(),
-            )?,
+            ProviderFactory::new(output_db, db_tool.chain.clone(), output_datadir.static_files())?,
             to,
             from,
         )
@@ -65,7 +61,7 @@ fn unwind_and_copy<DB: Database>(
     Ok(())
 }
 
-/// Try to re-execute the stage straightaway
+/// Try to re-execute the stage straight away
 async fn dry_run<DB: Database>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,

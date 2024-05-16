@@ -2,29 +2,22 @@
 
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use alloy_sol_types::decode_revert_reason;
-use jsonrpsee::{
-    core::Error as RpcError,
-    types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject},
-};
+use jsonrpsee::types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject};
 use reth_interfaces::RethError;
-use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes, U256};
-use reth_revm::tracing::{js::JsInspectorError, MuxError};
-use reth_rpc_types::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
+use reth_rpc_types::{
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
+};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
     PoolTransactionError,
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
+use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
 use std::time::Duration;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
-
-/// A tait for custom rpc errors used by [EthApiError::Other].
-pub trait ToRpcError: std::error::Error + Send + Sync + 'static {
-    /// Converts the error to a JSON-RPC error object.
-    fn to_rpc_error(&self) -> ErrorObject<'static>;
-}
 
 /// Errors that can occur when interacting with the `eth_` namespace
 #[derive(Debug, thiserror::Error)]
@@ -46,7 +39,12 @@ pub enum EthApiError {
     UnknownBlockNumber,
     /// Thrown when querying for `finalized` or `safe` block before the merge transition is
     /// finalized, <https://github.com/ethereum/execution-apis/blob/6d17705a875e52c26826124c2a8a15ed542aeca2/src/schemas/block.yaml#L109>
-    #[error("unknown block")]
+    ///
+    /// op-node uses case sensitive string comparison to parse this error:
+    /// <https://github.com/ethereum-optimism/optimism/blob/0913776869f6cb2c1218497463d7377cf4de16de/op-service/sources/l2_client.go#L105>
+    ///
+    /// TODO(#8045): Temporary, until a version of <https://github.com/ethereum-optimism/optimism/pull/10071> is pushed through that doesn't require this to figure out the EL sync status.
+    #[error("Unknown block")]
     UnknownSafeOrFinalizedBlock,
     /// Thrown when an unknown block or transaction index is encountered
     #[error("unknown block or tx index")]
@@ -122,7 +120,7 @@ pub enum EthApiError {
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
     /// Any other error
-    #[error("0")]
+    #[error("{0}")]
     Other(Box<dyn ToRpcError>),
 }
 
@@ -175,11 +173,6 @@ impl From<EthApiError> for ErrorObject<'static> {
     }
 }
 
-impl From<EthApiError> for RpcError {
-    fn from(error: EthApiError) -> Self {
-        RpcError::Call(error.into())
-    }
-}
 impl From<JsInspectorError> for EthApiError {
     fn from(error: JsInspectorError) -> Self {
         match error {
@@ -274,14 +267,14 @@ pub enum RpcInvalidTransactionError {
     /// Thrown when calculating gas usage
     #[error("gas uint64 overflow")]
     GasUintOverflow,
-    /// returned if the transaction is specified to use less gas than required to start the
+    /// Thrown if the transaction is specified to use less gas than required to start the
     /// invocation.
     #[error("intrinsic gas too low")]
     GasTooLow,
-    /// returned if the transaction gas exceeds the limit
+    /// Thrown if the transaction gas exceeds the limit
     #[error("intrinsic gas too high")]
     GasTooHigh,
-    /// thrown if a transaction is not supported in the current network configuration.
+    /// Thrown if a transaction is not supported in the current network configuration.
     #[error("transaction type not supported")]
     TxTypeNotSupported,
     /// Thrown to ensure no one is able to specify a transaction with a tip higher than the total
@@ -298,25 +291,29 @@ pub enum RpcInvalidTransactionError {
     #[error("max fee per gas less than block base fee")]
     FeeCapTooLow,
     /// Thrown if the sender of a transaction is a contract.
-    #[error("sender not an eoa")]
+    #[error("sender is not an EOA")]
     SenderNoEOA,
-    /// Thrown during estimate if caller has insufficient funds to cover the tx.
-    #[error("out of gas: gas required exceeds allowance: {0:?}")]
-    BasicOutOfGas(U256),
-    /// As BasicOutOfGas but thrown when gas exhausts during memory expansion.
-    #[error("out of gas: gas exhausts during memory expansion: {0:?}")]
-    MemoryOutOfGas(U256),
-    /// As BasicOutOfGas but thrown when gas exhausts during precompiled contract execution.
-    #[error("out of gas: gas exhausts during precompiled contract execution: {0:?}")]
-    PrecompileOutOfGas(U256),
-    /// revm's Type cast error, U256 casts down to a u64 with overflow
-    #[error("out of gas: revm's Type cast error, U256 casts down to a u64 with overflow {0:?}")]
-    InvalidOperandOutOfGas(U256),
+    /// Gas limit was exceeded during execution.
+    /// Contains the gas limit.
+    #[error("out of gas: gas required exceeds allowance: {0}")]
+    BasicOutOfGas(u64),
+    /// Gas limit was exceeded during memory expansion.
+    /// Contains the gas limit.
+    #[error("out of gas: gas exhausted during memory expansion: {0}")]
+    MemoryOutOfGas(u64),
+    /// Gas limit was exceeded during precompile execution.
+    /// Contains the gas limit.
+    #[error("out of gas: gas exhausted during precompiled contract execution: {0}")]
+    PrecompileOutOfGas(u64),
+    /// An operand to an opcode was invalid or out of range.
+    /// Contains the gas limit.
+    #[error("out of gas: invalid operand to an opcode; {0}")]
+    InvalidOperandOutOfGas(u64),
     /// Thrown if executing a transaction failed during estimate/call
-    #[error("{0}")]
+    #[error(transparent)]
     Revert(RevertError),
     /// Unspecific EVM halt error.
-    #[error("EVM error {0:?}")]
+    #[error("EVM error: {0:?}")]
     EvmHalt(HaltReason),
     /// Invalid chain id set for the transaction.
     #[error("invalid chain ID")]
@@ -344,8 +341,13 @@ pub enum RpcInvalidTransactionError {
     #[error("blob transaction missing blob hashes")]
     BlobTransactionMissingBlobHashes,
     /// Blob transaction has too many blobs
-    #[error("blob transaction exceeds max blobs per block")]
-    TooManyBlobs,
+    #[error("blob transaction exceeds max blobs per block; got {have}, max {max}")]
+    TooManyBlobs {
+        /// The maximum number of blobs allowed.
+        max: usize,
+        /// The number of blobs in the transaction.
+        have: usize,
+    },
     /// Blob transaction is a create transaction
     #[error("blob transaction is a create transaction")]
     BlobTransactionIsCreate,
@@ -392,7 +394,6 @@ impl RpcInvalidTransactionError {
 
     /// Converts the out of gas error
     pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
-        let gas_limit = U256::from(gas_limit);
         match reason {
             OutOfGasError::Basic => RpcInvalidTransactionError::BasicOutOfGas(gas_limit),
             OutOfGasError::Memory => RpcInvalidTransactionError::MemoryOutOfGas(gas_limit),
@@ -469,7 +470,9 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionNotSupported => {
                 RpcInvalidTransactionError::BlobHashVersionMismatch
             }
-            InvalidTransaction::TooManyBlobs => RpcInvalidTransactionError::TooManyBlobs,
+            InvalidTransaction::TooManyBlobs { max, have } => {
+                RpcInvalidTransactionError::TooManyBlobs { max, have }
+            }
             InvalidTransaction::BlobCreateTransaction => {
                 RpcInvalidTransactionError::BlobTransactionIsCreate
             }
@@ -483,6 +486,11 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::HaltedDepositPostRegolith => RpcInvalidTransactionError::Optimism(
                 OptimismInvalidTransactionError::HaltedDepositPostRegolith,
             ),
+            // TODO(EOF)
+            InvalidTransaction::EofInitcodesNotSupported => todo!("EOF"),
+            InvalidTransaction::EofInitcodesNumberLimit => todo!("EOF"),
+            InvalidTransaction::EofInitcodesSizeLimit => todo!("EOF"),
+            InvalidTransaction::EofCrateShouldHaveToAddress => todo!("EOF"),
         }
     }
 }

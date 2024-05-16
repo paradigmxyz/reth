@@ -23,29 +23,30 @@ reth-rpc.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
+reth-rpc-layer.workspace = true
 reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
 reth-config.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-api.workspace = true
-reth-node-api.workspace = true
+reth-evm.workspace = true
+reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
+reth-trie.workspace = true
 reth-consensus-common.workspace = true
-reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
-reth-downloaders.workspace = true
-reth-revm.workspace = true
-reth-stages.workspace = true
-reth-prune.workspace = true
-reth-blockchain-tree.workspace = true
-reth-static-file.workspace = true
+reth-etl.workspace = true
+reth-codecs.workspace = true
 
 # ethereum
 discv5.workspace = true
 
 # async
 tokio.workspace = true
+tokio-util.workspace = true
+pin-project.workspace = true
 
 # metrics
 metrics-exporter-prometheus = "0.12.1"
@@ -58,11 +59,10 @@ reth-metrics.workspace = true
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
-humantime = "2.1.0"
+humantime.workspace = true
 thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
-pin-project.workspace = true
 derive_more.workspace = true
 
 # io
@@ -78,7 +78,11 @@ hyper.workspace = true
 tracing.workspace = true
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # async
 futures.workspace = true
@@ -94,7 +98,7 @@ procfs = "0.16.0"
 proptest.workspace = true
 tempfile.workspace = true
 jsonrpsee.workspace = true
-assert_matches = "1.5.0"
+assert_matches.workspace = true
 
 [features]
 optimism = [
@@ -103,12 +107,7 @@ optimism = [
     "reth-rpc/optimism",
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
-    "reth-network/optimism",
-    "reth-network-api/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-auto-seal-consensus/optimism",
-    "reth-consensus-common/optimism",
-    "reth-blockchain-tree/optimism",
     "reth-beacon-consensus/optimism",
 ]
 

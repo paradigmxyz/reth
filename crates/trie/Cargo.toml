@@ -20,7 +20,6 @@ revm.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
-alloy-chains.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -28,7 +27,7 @@ tracing.workspace = true
 # misc
 thiserror.workspace = true
 derive_more.workspace = true
-auto_impl = "1"
+auto_impl.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

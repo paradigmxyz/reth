@@ -88,7 +88,6 @@ Different consensus mechanisms.
 Crates related to transaction execution.
 
 - [`revm`](../../crates/revm): An implementation of an executor using `revm`
-- [`revm/revm-inspectors`](../../crates/revm/revm-inspectors): Various revm inspectors for debugging and building traces for the trace-related RPC APIs.
 
 ### Sync
 

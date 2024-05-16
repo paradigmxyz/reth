@@ -1,4 +1,8 @@
 //! Compact codec.
+//!
+//! ## Feature Flags
+//!
+//! - `alloy`: [Compact] implementation for various alloy types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -13,8 +17,11 @@
 
 pub use reth_codecs_derive::*;
 
-use alloy_primitives::{Address, Bloom, Bytes, B256, B512, U256};
+use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::Buf;
+
+#[cfg(any(test, feature = "alloy"))]
+mod alloy;
 
 /// Trait that implements the `Compact` codec.
 ///
@@ -294,9 +301,9 @@ impl<const N: usize> Compact for [u8; N] {
     }
 }
 
-/// Implements the [`Compact`] trait for fixed size byte array types like [`B256`].
+/// Implements the [`Compact`] trait for wrappers over fixed size byte array types.
 #[macro_export]
-macro_rules! impl_compact_for_bytes {
+macro_rules! impl_compact_for_wrapped_bytes {
     ($($name:tt),+) => {
         $(
             impl Compact for $name {
@@ -317,8 +324,23 @@ macro_rules! impl_compact_for_bytes {
         )+
     };
 }
+impl_compact_for_wrapped_bytes!(Address, Bloom);
 
-impl_compact_for_bytes!(Address, B256, B512, Bloom);
+impl<const N: usize> Compact for FixedBytes<N> {
+    #[inline]
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.0.to_compact(buf)
+    }
+
+    #[inline]
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (v, buf) = <[u8; N]>::from_compact(buf, len);
+        (Self::from(v), buf)
+    }
+}
 
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.
@@ -371,6 +393,7 @@ const fn decode_varuint_panic() -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
 
     #[test]
     fn compact_bytes() {

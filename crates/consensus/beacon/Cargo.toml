@@ -12,10 +12,10 @@ workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus-core.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
-reth-stages.workspace = true
+reth-stages-api.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
@@ -25,7 +25,7 @@ reth-payload-validator.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
-reth-node-api.workspace = true
+reth-engine-primitives.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -45,17 +45,22 @@ schnellru.workspace = true
 # reth
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-rpc-types-compat.workspace = true
+reth-rpc.workspace = true
 reth-tracing.workspace = true
 reth-revm.workspace = true
 reth-downloaders.workspace = true
-reth-node-ethereum.workspace = true
+reth-evm-ethereum.workspace = true
+reth-ethereum-engine-primitives.workspace = true
 reth-config.workspace = true
+reth-testing-utils.workspace = true
 
 assert_matches.workspace = true
 
@@ -65,4 +70,6 @@ optimism = [
     "reth-interfaces/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
+    "reth-ethereum-consensus/optimism",
+    "reth-rpc/optimism"
 ]

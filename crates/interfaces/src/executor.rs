@@ -80,7 +80,7 @@ pub enum BlockValidationError {
 }
 
 /// BlockExecutor Errors
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
@@ -118,39 +118,37 @@ pub enum BlockExecutionError {
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
-
     /// Optimism Block Executor Errors
-    #[cfg(feature = "optimism")]
     #[error(transparent)]
-    OptimismBlockExecution(#[from] OptimismBlockExecutionError),
-}
-
-/// Optimism Block Executor Errors
-#[cfg(feature = "optimism")]
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum OptimismBlockExecutionError {
-    /// Error when trying to parse L1 block info
-    #[error("could not get L1 block info from L2 block: {message:?}")]
-    L1BlockInfoError {
-        /// The inner error message
-        message: String,
-    },
-    /// Thrown when force deploy of create2deployer code fails.
-    #[error("failed to force create2deployer account code")]
-    ForceCreate2DeployerFail,
-    /// Thrown when a blob transaction is included in a sequencer's block.
-    #[error("blob transaction included in sequencer block")]
-    BlobTransactionRejected,
-    /// Thrown when a database account could not be loaded.
-    #[error("failed to load account {0}")]
-    AccountLoadFailed(reth_primitives::Address),
+    Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl BlockExecutionError {
+    /// Create a new `BlockExecutionError::Other` variant.
+    pub fn other<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Other(Box::new(error))
+    }
+
+    /// Returns the inner `BlockValidationError` if the error is a validation error.
+    pub const fn as_validation(&self) -> Option<&BlockValidationError> {
+        match self {
+            Self::Validation(err) => Some(err),
+            _ => None,
+        }
+    }
+
     /// Returns `true` if the error is fatal.
     ///
     /// This represents an unrecoverable database related error.
     pub fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
+    }
+
+    /// Returns `true` if the error is a state root error.
+    pub fn is_state_root_error(&self) -> bool {
+        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
     }
 }

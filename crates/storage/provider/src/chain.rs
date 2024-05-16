@@ -8,7 +8,7 @@ use reth_primitives::{
 };
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
-use std::{borrow::Cow, collections::BTreeMap, fmt};
+use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 
 /// A chain of blocks and their final state.
 ///
@@ -16,6 +16,10 @@ use std::{borrow::Cow, collections::BTreeMap, fmt};
 /// changesets for those blocks (and their transactions), as well as the blocks themselves.
 ///
 /// Used inside the BlockchainTree.
+///
+/// # Warning
+///
+/// A chain of blocks should not be empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
     /// All blocks in this chain.
@@ -26,22 +30,26 @@ pub struct Chain {
     /// This state also contains the individual changes that lead to the current state.
     state: BundleStateWithReceipts,
     /// State trie updates after block is added to the chain.
-    /// NOTE: Currently, trie updates are present only if the block extends canonical chain.
+    /// NOTE: Currently, trie updates are present only for
+    /// single-block chains that extend the canonical chain.
     trie_updates: Option<TrieUpdates>,
 }
 
 impl Chain {
     /// Create new Chain from blocks and state.
+    ///
+    /// # Warning
+    ///
+    /// A chain of blocks should not be empty.
     pub fn new(
         blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
         state: BundleStateWithReceipts,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        Self {
-            blocks: BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b))),
-            state,
-            trie_updates,
-        }
+        let blocks = BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b)));
+        debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
+
+        Self { blocks, state, trie_updates }
     }
 
     /// Create new Chain from a single block and its state.
@@ -157,16 +165,20 @@ impl Chain {
     }
 
     /// Get the first block in this chain.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn first(&self) -> &SealedBlockWithSenders {
-        self.blocks.first_key_value().expect("Chain has at least one block for first").1
+        self.blocks.first_key_value().expect("Chain should have at least one block").1
     }
 
     /// Get the tip of the chain.
     ///
-    /// # Note
+    /// # Panics
     ///
-    /// Chains always have at least one block.
+    /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn tip(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain should have at least one block").1
@@ -175,6 +187,15 @@ impl Chain {
     /// Returns length of the chain.
     pub fn len(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// Returns the range of block numbers in the chain.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
+    pub fn range(&self) -> RangeInclusive<BlockNumber> {
+        self.first().number..=self.tip().number
     }
 
     /// Get all receipts for the given block.
@@ -205,15 +226,10 @@ impl Chain {
 
     /// Append a single block with state to the chain.
     /// This method assumes that blocks attachment to the chain has already been validated.
-    pub fn append_block(
-        &mut self,
-        block: SealedBlockWithSenders,
-        state: BundleStateWithReceipts,
-        trie_updates: Option<TrieUpdates>,
-    ) {
+    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BundleStateWithReceipts) {
         self.blocks.insert(block.number, block);
         self.state.extend(state);
-        self.append_trie_updates(trie_updates);
+        self.trie_updates.take(); // reset
     }
 
     /// Merge two chains by appending the given chain into the current one.
@@ -233,21 +249,9 @@ impl Chain {
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
         self.state.extend(other.state);
-        self.append_trie_updates(other.trie_updates);
+        self.trie_updates.take(); // reset
 
         Ok(())
-    }
-
-    /// Append trie updates.
-    /// If existing or incoming trie updates are not set, reset as neither is valid anymore.
-    fn append_trie_updates(&mut self, other_trie_updates: Option<TrieUpdates>) {
-        if let Some((trie_updates, other)) = self.trie_updates.as_mut().zip(other_trie_updates) {
-            // Extend trie updates.
-            trie_updates.extend(other);
-        } else {
-            // Reset trie updates as they are no longer valid.
-            self.trie_updates.take();
-        }
     }
 
     /// Split this chain at the given block.
@@ -266,6 +270,10 @@ impl Chain {
     /// The second chain only contains the changes that were reverted on the first chain; however,
     /// it retains the up to date state as if the chains were one, i.e. the second chain is an
     /// extension of the first.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     #[track_caller]
     pub fn split(mut self, split_at: ChainSplitTarget) -> ChainSplit {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
@@ -320,26 +328,16 @@ pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithS
 
 impl<'a> fmt::Display for DisplayBlocksChain<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.len() <= 3 {
-            write!(f, "[")?;
-            let mut iter = self.0.values().map(|block| block.num_hash());
-            if let Some(block_num_hash) = iter.next() {
-                write!(f, "{block_num_hash:?}")?;
-                for block_num_hash_iter in iter {
-                    write!(f, ", {block_num_hash_iter:?}")?;
-                }
-            }
-            write!(f, "]")?;
+        let mut list = f.debug_list();
+        let mut values = self.0.values().map(|block| block.num_hash());
+        if values.len() <= 3 {
+            list.entries(values);
         } else {
-            write!(
-                f,
-                "[{:?}, ..., {:?}]",
-                self.0.values().next().unwrap().num_hash(),
-                self.0.values().last().unwrap().num_hash()
-            )?;
+            list.entry(&values.next().unwrap());
+            list.entry(&format_args!("..."));
+            list.entry(&values.next_back().unwrap());
         }
-
-        Ok(())
+        list.finish()
     }
 }
 
@@ -500,7 +498,7 @@ mod tests {
         let chain2 =
             Chain { blocks: BTreeMap::from([(3, block3), (4, block4)]), ..Default::default() };
 
-        assert_eq!(chain1.append_chain(chain2.clone()), Ok(()));
+        assert!(chain1.append_chain(chain2.clone()).is_ok());
 
         // chain1 got changed so this will fail
         assert!(chain1.append_chain(chain2).is_err());

@@ -11,7 +11,7 @@ use reth_interfaces::trie::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
-    trie::{AccountProof, HashBuilder, Nibbles, StorageProof, TrieAccount},
+    trie::{proof::ProofRetainer, AccountProof, HashBuilder, Nibbles, StorageProof, TrieAccount},
     Address, B256,
 };
 
@@ -60,8 +60,8 @@ where
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let mut hash_builder =
-            HashBuilder::default().with_proof_retainer(Vec::from([target_nibbles]));
+        let retainer = ProofRetainer::from_iter([target_nibbles]);
+        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);
@@ -126,7 +126,8 @@ where
         );
         let walker = TrieWalker::new(trie_cursor, prefix_set);
 
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(target_nibbles);
+        let retainer = ProofRetainer::from_iter(target_nibbles);
+        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
         let mut storage_node_iter =
             StorageNodeIter::new(walker, hashed_storage_cursor, hashed_address);
         while let Some(node) = storage_node_iter.try_next()? {
@@ -165,11 +166,10 @@ where
 mod tests {
     use super::*;
     use crate::StateRoot;
-    use alloy_chains::Chain;
     use once_cell::sync::Lazy;
     use reth_db::database::Database;
     use reth_interfaces::RethResult;
-    use reth_primitives::{Account, Bytes, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
+    use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
     use std::{str::FromStr, sync::Arc};
 
@@ -201,16 +201,15 @@ mod tests {
     fn insert_genesis<DB: Database>(
         provider_factory: &ProviderFactory<DB>,
         chain_spec: Arc<ChainSpec>,
-    ) -> RethResult<()> {
+    ) -> RethResult<B256> {
         let mut provider = provider_factory.provider_rw()?;
 
         // Hash accounts and insert them into hashing table.
         let genesis = chain_spec.genesis();
         let alloc_accounts = genesis
             .alloc
-            .clone()
-            .into_iter()
-            .map(|(addr, account)| (addr, Some(Account::from_genesis_account(account))));
+            .iter()
+            .map(|(addr, account)| (*addr, Some(Account::from_genesis_account(account))));
         provider.insert_account_for_hashing(alloc_accounts).unwrap();
 
         let alloc_storage = genesis.alloc.clone().into_iter().filter_map(|(addr, account)| {
@@ -226,21 +225,21 @@ mod tests {
         });
         provider.insert_storage_for_hashing(alloc_storage)?;
 
-        let (_, updates) = StateRoot::from_tx(provider.tx_ref())
+        let (root, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
         updates.flush(provider.tx_mut())?;
 
         provider.commit()?;
 
-        Ok(())
+        Ok(root)
     }
 
     #[test]
     fn testspec_proofs() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
+        let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
 
         let data = Vec::from([
             (
@@ -290,6 +289,7 @@ mod tests {
                 expected_proof,
                 "proof for {target:?} does not match"
             );
+            assert_eq!(account_proof.verify(root), Ok(()));
         }
     }
 
@@ -297,7 +297,7 @@ mod tests {
     fn testspec_empty_storage_proof() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
+        let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
 
         let target = Address::from_str("0x1ed9b1dd266b607ee278726d324b855a093394a6").unwrap();
         let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
@@ -308,15 +308,18 @@ mod tests {
 
         assert_eq!(slots.len(), account_proof.storage_proofs.len());
         for (idx, slot) in slots.into_iter().enumerate() {
-            assert_eq!(account_proof.storage_proofs.get(idx), Some(&StorageProof::new(slot)));
+            let proof = account_proof.storage_proofs.get(idx).unwrap();
+            assert_eq!(proof, &StorageProof::new(slot));
+            assert_eq!(proof.verify(account_proof.storage_root), Ok(()));
         }
+        assert_eq!(account_proof.verify(root), Ok(()));
     }
 
     #[test]
     fn mainnet_genesis_account_proof() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        insert_genesis(&factory, MAINNET.clone()).unwrap();
+        let root = insert_genesis(&factory, MAINNET.clone()).unwrap();
 
         // Address from mainnet genesis allocation.
         // keccak256 - `0xcf67b71c90b0d523dd5004cf206f325748da347685071b34812e21801f5270c4`
@@ -334,13 +337,14 @@ mod tests {
         let provider = factory.provider().unwrap();
         let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
+        assert_eq!(account_proof.verify(root), Ok(()));
     }
 
     #[test]
     fn mainnet_genesis_account_proof_nonexistent() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        insert_genesis(&factory, MAINNET.clone()).unwrap();
+        let root = insert_genesis(&factory, MAINNET.clone()).unwrap();
 
         // Address that does not exist in mainnet genesis allocation.
         // keccak256 - `0x18f415ffd7f66bb1924d90f0e82fb79ca8c6d8a3473cd9a95446a443b9db1761`
@@ -356,13 +360,14 @@ mod tests {
         let provider = factory.provider().unwrap();
         let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
+        assert_eq!(account_proof.verify(root), Ok(()));
     }
 
     #[test]
     fn holesky_deposit_contract_proof() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        insert_genesis(&factory, HOLESKY.clone()).unwrap();
+        let root = insert_genesis(&factory, HOLESKY.clone()).unwrap();
 
         let target = Address::from_str("0x4242424242424242424242424242424242424242").unwrap();
         // existent
@@ -441,5 +446,6 @@ mod tests {
         let provider = factory.provider().unwrap();
         let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots).unwrap();
         similar_asserts::assert_eq!(account_proof, expected);
+        assert_eq!(account_proof.verify(root), Ok(()));
     }
 }

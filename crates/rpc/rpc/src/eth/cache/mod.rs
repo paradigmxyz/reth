@@ -651,12 +651,9 @@ where
                 eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
         }
 
-        if let Some(committed) = event.committed() {
-            let chain_change = ChainChange::new(committed);
+        let chain_change = ChainChange::new(event.committed());
 
-            let _ = eth_state_cache
-                .to_service
-                .send(CacheAction::CacheNewCanonicalChain { chain_change });
-        }
+        let _ =
+            eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { chain_change });
     }
 }

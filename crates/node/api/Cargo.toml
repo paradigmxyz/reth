@@ -1,0 +1,22 @@
+[package]
+name = "reth-node-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-evm.workspace = true
+reth-provider.workspace = true
+reth-db.workspace = true
+reth-engine-primitives.workspace = true
+reth-transaction-pool.workspace = true
+reth-network.workspace = true
+reth-payload-builder.workspace = true
+reth-tasks.workspace = true

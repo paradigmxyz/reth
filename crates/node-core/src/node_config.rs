@@ -5,76 +5,31 @@ use crate::{
         get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
         PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
-    cli::config::RethTransactionPoolConfig,
     dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
-    utils::{get_single_header, write_peers_to_file},
+    utils::get_single_header,
 };
 use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
-use reth_auto_seal_consensus::{AutoSealConsensus, MiningMode};
-use reth_beacon_consensus::BeaconConsensus;
-use reth_blockchain_tree::{
-    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
-};
-use reth_config::{
-    config::{PruneConfig, StageConfig},
-    Config,
-};
+use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
-};
-use reth_interfaces::{
-    blockchain_tree::BlockchainTreeEngine,
-    consensus::Consensus,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
-        headers::{client::HeadersClient, downloader::HeaderDownloader},
-    },
-    RethResult,
-};
-use reth_network::{
-    transactions::{TransactionFetcherConfig, TransactionsManagerConfig},
-    NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager,
-};
-use reth_node_api::ConfigureEvm;
+use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
+use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, TxHash, B256, MAINNET,
+    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, BlockReader, BlockchainTreePendingStateProvider,
-    CanonStateSubscriptions, HeaderProvider, HeaderSyncMode, ProviderFactory,
-    StageCheckpointReader,
+    providers::StaticFileProvider, BlockHashReader, BlockNumReader, HeaderProvider,
+    ProviderFactory, StageCheckpointReader,
 };
-use reth_revm::{
-    stack::{Hook, InspectorStackConfig},
-    EvmProcessorFactory,
-};
-use reth_stages::{
-    prelude::*,
-    stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
-    },
-    MetricEvent,
-};
-use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::{
-    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
-    EthTransactionPool, TransactionPool, TransactionValidationTaskExecutor,
-};
 use secp256k1::SecretKey;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use tokio::sync::{
-    mpsc::{Receiver, UnboundedSender},
-    watch,
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    path::PathBuf,
+    sync::Arc,
 };
 use tracing::*;
 
@@ -283,7 +238,7 @@ impl NodeConfig {
     /// Get the network secret from the given data dir
     pub fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         Ok(secret_key)
@@ -311,15 +266,15 @@ impl NodeConfig {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> eyre::Result<Option<PruneConfig>> {
-        self.pruning.prune_config(Arc::clone(&self.chain))
+    pub fn prune_config(&self) -> Option<PruneConfig> {
+        self.pruning.prune_config(&self.chain)
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
     pub async fn max_block<Provider, Client>(
         &self,
-        network_client: &Client,
+        network_client: Client,
         provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
@@ -337,18 +292,6 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Get the [MiningMode] from the given dev args
-    pub fn mining_mode(&self, pending_transactions_listener: Receiver<TxHash>) -> MiningMode {
-        if let Some(interval) = self.dev.block_time {
-            MiningMode::interval(interval)
-        } else if let Some(max_transactions) = self.dev.block_max_transactions {
-            MiningMode::instant(max_transactions, pending_transactions_listener)
-        } else {
-            info!(target: "reth::cli", "No mining mode specified, defaulting to ReadyTransaction");
-            MiningMode::instant(1, pending_transactions_listener)
-        }
-    }
-
     /// Create the [NetworkConfig] for the node
     pub fn network_config<C>(
         &self,
@@ -360,7 +303,7 @@ impl NodeConfig {
     ) -> eyre::Result<NetworkConfig<C>> {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
-        let default_peers_path = data_dir.known_peers_path();
+        let default_peers_path = data_dir.known_peers();
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
@@ -383,208 +326,6 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Builds the blockchain tree for the node.
-    ///
-    /// This method configures the blockchain tree, which is a critical component of the node,
-    /// responsible for managing the blockchain state, including blocks, transactions, and receipts.
-    /// It integrates with the consensus mechanism and the EVM for executing transactions.
-    ///
-    /// # Parameters
-    /// - `provider_factory`: A factory for creating various blockchain-related providers, such as
-    ///   for accessing the database or static files.
-    /// - `consensus`: The consensus configuration, which defines how the node reaches agreement on
-    ///   the blockchain state with other nodes.
-    /// - `prune_config`: Configuration for pruning old blockchain data. This helps in managing the
-    ///   storage space efficiently. It's important to validate this configuration to ensure it does
-    ///   not lead to unintended data loss.
-    /// - `sync_metrics_tx`: A transmitter for sending synchronization metrics. This is used for
-    ///   monitoring the node's synchronization process with the blockchain network.
-    /// - `tree_config`: Configuration for the blockchain tree, including any parameters that affect
-    ///   its structure or performance.
-    /// - `evm_config`: The EVM (Ethereum Virtual Machine) configuration, which affects how smart
-    ///   contracts and transactions are executed. Proper validation of this configuration is
-    ///   crucial for the correct execution of transactions.
-    ///
-    /// # Returns
-    /// A `ShareableBlockchainTree` instance, which provides access to the blockchain state and
-    /// supports operations like block insertion, state reversion, and transaction execution.
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let tree = config.build_blockchain_tree(
-    ///     provider_factory,
-    ///     consensus,
-    ///     prune_config,
-    ///     sync_metrics_tx,
-    ///     BlockchainTreeConfig::default(),
-    ///     evm_config,
-    /// )?;
-    /// ```
-    ///
-    /// # Note
-    /// Ensure that all configurations passed to this method are validated beforehand to prevent
-    /// runtime errors. Specifically, `prune_config` and `evm_config` should be checked to ensure
-    /// they meet the node's operational requirements.
-    pub fn build_blockchain_tree<DB, EvmConfig>(
-        &self,
-        provider_factory: ProviderFactory<DB>,
-        consensus: Arc<dyn Consensus>,
-        prune_config: Option<PruneConfig>,
-        sync_metrics_tx: UnboundedSender<MetricEvent>,
-        tree_config: BlockchainTreeConfig,
-        evm_config: EvmConfig,
-    ) -> eyre::Result<BlockchainTree<DB, EvmProcessorFactory<EvmConfig>>>
-    where
-        DB: Database + Unpin + Clone + 'static,
-        EvmConfig: ConfigureEvm + Clone + 'static,
-    {
-        // configure blockchain tree
-        let tree_externals = TreeExternals::new(
-            provider_factory,
-            consensus.clone(),
-            EvmProcessorFactory::new(self.chain.clone(), evm_config),
-        );
-        let tree = BlockchainTree::new(
-            tree_externals,
-            tree_config,
-            prune_config.map(|config| config.segments),
-        )?
-        .with_sync_metrics_tx(sync_metrics_tx);
-
-        Ok(tree)
-    }
-
-    /// Build a transaction pool and spawn the transaction pool maintenance task
-    pub fn build_and_spawn_txpool<DB, Tree>(
-        &self,
-        blockchain_db: &BlockchainProvider<DB, Tree>,
-        head: Head,
-        executor: &TaskExecutor,
-        data_dir: &ChainPath<DataDirPath>,
-    ) -> eyre::Result<EthTransactionPool<BlockchainProvider<DB, Tree>, DiskFileBlobStore>>
-    where
-        DB: Database + Unpin + Clone + 'static,
-        Tree: BlockchainTreeEngine
-            + BlockchainTreePendingStateProvider
-            + CanonStateSubscriptions
-            + Clone
-            + 'static,
-    {
-        let blob_store = DiskFileBlobStore::open(
-            data_dir.blobstore_path(),
-            DiskFileBlobStoreConfig::default()
-                .with_max_cached_entries(self.txpool.max_cached_entries),
-        )?;
-        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
-            .with_head_timestamp(head.timestamp)
-            .kzg_settings(self.kzg_settings()?)
-            // use an additional validation task so we can validate transactions in parallel
-            .with_additional_tasks(1)
-            // set the max tx size in bytes allowed to enter the pool
-            .with_max_tx_input_bytes(self.txpool.max_tx_input_bytes)
-            .build_with_tasks(blockchain_db.clone(), executor.clone(), blob_store.clone());
-
-        let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.txpool.pool_config());
-        info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions_path();
-
-        // spawn txpool maintenance task
-        {
-            let pool = transaction_pool.clone();
-            let chain_events = blockchain_db.canonical_state_stream();
-            let client = blockchain_db.clone();
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
-
-            executor.spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool.clone(),
-                        transactions_backup_config,
-                    )
-                },
-            );
-
-            // spawn the maintenance task
-            executor.spawn_critical(
-                "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                    client,
-                    pool,
-                    chain_events,
-                    executor.clone(),
-                    Default::default(),
-                ),
-            );
-            debug!(target: "reth::cli", "Spawned txpool maintenance task");
-        }
-
-        Ok(transaction_pool)
-    }
-
-    /// Returns the [Consensus] instance to use.
-    ///
-    /// By default this will be a [BeaconConsensus] instance, but if the `--dev` flag is set, it
-    /// will be an [AutoSealConsensus] instance.
-    pub fn consensus(&self) -> Arc<dyn Consensus> {
-        if self.dev.dev {
-            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
-        } else {
-            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
-        }
-    }
-
-    /// Constructs a [Pipeline] that's wired to the network
-    #[allow(clippy::too_many_arguments)]
-    pub async fn build_networked_pipeline<DB, Client, EvmConfig>(
-        &self,
-        config: &StageConfig,
-        client: Client,
-        consensus: Arc<dyn Consensus>,
-        provider_factory: ProviderFactory<DB>,
-        task_executor: &TaskExecutor,
-        metrics_tx: reth_stages::MetricEventsSender,
-        prune_config: Option<PruneConfig>,
-        max_block: Option<BlockNumber>,
-        static_file_producer: StaticFileProducer<DB>,
-        evm_config: EvmConfig,
-    ) -> eyre::Result<Pipeline<DB>>
-    where
-        DB: Database + Unpin + Clone + 'static,
-        Client: HeadersClient + BodiesClient + Clone + 'static,
-        EvmConfig: ConfigureEvm + Clone + 'static,
-    {
-        // building network downloaders using the fetch client
-        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
-            .build(client.clone(), Arc::clone(&consensus))
-            .into_task_with(task_executor);
-
-        let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
-            .build(client, Arc::clone(&consensus), provider_factory.clone())
-            .into_task_with(task_executor);
-
-        let pipeline = self
-            .build_pipeline(
-                provider_factory,
-                config,
-                header_downloader,
-                body_downloader,
-                consensus,
-                max_block,
-                self.debug.continuous,
-                metrics_tx,
-                prune_config,
-                static_file_producer,
-                evm_config,
-            )
-            .await?;
-
-        Ok(pipeline)
-    }
-
     /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
         Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
@@ -601,6 +342,7 @@ impl NodeConfig {
         prometheus_handle: PrometheusHandle,
         db: Metrics,
         static_file_provider: StaticFileProvider,
+        task_executor: TaskExecutor,
     ) -> eyre::Result<()>
     where
         Metrics: DatabaseMetrics + 'static + Send + Sync,
@@ -613,56 +355,12 @@ impl NodeConfig {
                 db,
                 static_file_provider,
                 metrics_process::Collector::default(),
+                task_executor,
             )
             .await?;
         }
 
         Ok(())
-    }
-
-    /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
-    /// to that network.
-    pub fn start_network<C, Pool>(
-        &self,
-        builder: NetworkBuilder<C, (), ()>,
-        task_executor: &TaskExecutor,
-        pool: Pool,
-        client: C,
-        data_dir: &ChainPath<DataDirPath>,
-    ) -> NetworkHandle
-    where
-        C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
-    {
-        let (handle, network, txpool, eth) = builder
-            .transactions(
-                pool, // Configure transactions manager
-                TransactionsManagerConfig {
-                    transaction_fetcher_config: TransactionFetcherConfig::new(
-                        self.network.soft_limit_byte_size_pooled_transactions_response,
-                        self.network
-                            .soft_limit_byte_size_pooled_transactions_response_on_pack_request,
-                    ),
-                },
-            )
-            .request_handler(client)
-            .split_with_handle();
-
-        task_executor.spawn_critical("p2p txpool", txpool);
-        task_executor.spawn_critical("p2p eth request handler", eth);
-
-        let default_peers_path = data_dir.known_peers_path();
-        let known_peers_file = self.network.persistent_peers_file(default_peers_path);
-        task_executor.spawn_critical_with_graceful_shutdown_signal(
-            "p2p network task",
-            |shutdown| {
-                network.run_until_graceful_shutdown(shutdown, |network| {
-                    write_peers_to_file(network, known_peers_file)
-                })
-            },
-        );
-
-        handle
     }
 
     /// Fetches the head block from the database.
@@ -731,6 +429,7 @@ impl NodeConfig {
         Client: HeadersClient,
     {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
+        let mut fetch_failures = 0;
         loop {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
@@ -738,7 +437,10 @@ impl NodeConfig {
                     return Ok(tip_header);
                 }
                 Err(error) => {
-                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                    fetch_failures += 1;
+                    if fetch_failures % 20 == 0 {
+                        error!(target: "reth::cli", ?fetch_failures, %error, "Failed to fetch the tip. Retrying...");
+                    }
                 }
             }
         }
@@ -764,6 +466,7 @@ impl NodeConfig {
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
             ))
+            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 // set discovery port based on instance number
@@ -772,140 +475,47 @@ impl NodeConfig {
 
         let config = cfg_builder.build(client);
 
-        if !self.network.discovery.enable_discv5_discovery {
+        if self.network.discovery.disable_discovery ||
+            !self.network.discovery.enable_discv5_discovery &&
+                !config.chain_spec.chain.is_optimism()
+        {
             return config
         }
+
+        let rlpx_addr = config.listener_addr().ip();
         // work around since discv5 config builder can't be integrated into network config builder
         // due to unsatisfied trait bounds
         config.discovery_v5_with_config_builder(|builder| {
-            let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.network.discovery;
+            let DiscoveryArgs {
+                discv5_addr,
+                discv5_addr_ipv6,
+                discv5_port,
+                discv5_port_ipv6,
+                discv5_lookup_interval,
+                discv5_bootstrap_lookup_interval,
+                discv5_bootstrap_lookup_countdown,
+                ..
+            } = self.network.discovery;
+
+            let discv5_addr_ipv4 = discv5_addr.or_else(|| ipv4(rlpx_addr));
+            let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| ipv6(rlpx_addr));
+            let discv5_port_ipv4 = discv5_port + self.instance - 1;
+            let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
+
             builder
                 .discv5_config(
-                    discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
-                        discv5_addr,
-                        discv5_port + self.instance - 1,
-                    ))))
+                    discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                        discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
+                        discv5_addr_ipv6
+                            .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                    ))
                     .build(),
                 )
+                .lookup_interval(discv5_lookup_interval)
+                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
                 .build()
         })
-    }
-
-    /// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn build_pipeline<DB, H, B, EvmConfig>(
-        &self,
-        provider_factory: ProviderFactory<DB>,
-        stage_config: &StageConfig,
-        header_downloader: H,
-        body_downloader: B,
-        consensus: Arc<dyn Consensus>,
-        max_block: Option<u64>,
-        continuous: bool,
-        metrics_tx: reth_stages::MetricEventsSender,
-        prune_config: Option<PruneConfig>,
-        static_file_producer: StaticFileProducer<DB>,
-        evm_config: EvmConfig,
-    ) -> eyre::Result<Pipeline<DB>>
-    where
-        DB: Database + Clone + 'static,
-        H: HeaderDownloader + 'static,
-        B: BodyDownloader + 'static,
-        EvmConfig: ConfigureEvm + Clone + 'static,
-    {
-        let mut builder = Pipeline::builder();
-
-        if let Some(max_block) = max_block {
-            debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
-            builder = builder.with_max_block(max_block)
-        }
-
-        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory = reth_revm::EvmProcessorFactory::new(self.chain.clone(), evm_config);
-
-        let stack_config = InspectorStackConfig {
-            use_printer_tracer: self.debug.print_inspector,
-            hook: if let Some(hook_block) = self.debug.hook_block {
-                Hook::Block(hook_block)
-            } else if let Some(tx) = self.debug.hook_transaction {
-                Hook::Transaction(tx)
-            } else if self.debug.hook_all {
-                Hook::All
-            } else {
-                Hook::None
-            },
-        };
-
-        let factory = factory.with_stack_config(stack_config);
-
-        let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
-
-        let header_mode =
-            if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
-        let pipeline = builder
-            .with_tip_sender(tip_tx)
-            .with_metrics_tx(metrics_tx.clone())
-            .add_stages(
-                DefaultStages::new(
-                    provider_factory.clone(),
-                    header_mode,
-                    Arc::clone(&consensus),
-                    header_downloader,
-                    body_downloader,
-                    factory.clone(),
-                    stage_config.etl.clone(),
-                )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_config.sender_recovery.commit_threshold,
-                })
-                .set(
-                    ExecutionStage::new(
-                        factory,
-                        ExecutionStageThresholds {
-                            max_blocks: stage_config.execution.max_blocks,
-                            max_changes: stage_config.execution.max_changes,
-                            max_cumulative_gas: stage_config.execution.max_cumulative_gas,
-                            max_duration: stage_config.execution.max_duration,
-                        },
-                        stage_config
-                            .merkle
-                            .clean_threshold
-                            .max(stage_config.account_hashing.clean_threshold)
-                            .max(stage_config.storage_hashing.clean_threshold),
-                        prune_modes.clone(),
-                    )
-                    .with_metrics_tx(metrics_tx),
-                )
-                .set(AccountHashingStage::new(
-                    stage_config.account_hashing.clean_threshold,
-                    stage_config.account_hashing.commit_threshold,
-                    stage_config.etl.clone(),
-                ))
-                .set(StorageHashingStage::new(
-                    stage_config.storage_hashing.clean_threshold,
-                    stage_config.storage_hashing.commit_threshold,
-                    stage_config.etl.clone(),
-                ))
-                .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
-                .set(TransactionLookupStage::new(
-                    stage_config.transaction_lookup.chunk_size,
-                    stage_config.etl.clone(),
-                    prune_modes.transaction_lookup,
-                ))
-                .set(IndexAccountHistoryStage::new(
-                    stage_config.index_account_history.commit_threshold,
-                    prune_modes.account_history,
-                    stage_config.etl.clone(),
-                ))
-                .set(IndexStorageHistoryStage::new(
-                    stage_config.index_storage_history.commit_threshold,
-                    prune_modes.storage_history,
-                    stage_config.etl.clone(),
-                )),
-            )
-            .build(provider_factory, static_file_producer);
-
-        Ok(pipeline)
     }
 
     /// Change rpc port numbers based on the instance number, using the inner
@@ -939,5 +549,21 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
         }
+    }
+}
+
+/// Returns the address if this is an [`Ipv4Addr`].
+pub fn ipv4(ip: IpAddr) -> Option<Ipv4Addr> {
+    match ip {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
+    }
+}
+
+/// Returns the address if this is an [`Ipv6Addr`].
+pub fn ipv6(ip: IpAddr) -> Option<Ipv6Addr> {
+    match ip {
+        IpAddr::V4(_) => None,
+        IpAddr::V6(ip) => Some(ip),
     }
 }

@@ -3,6 +3,7 @@
 use super::BlockchainTree;
 use parking_lot::RwLock;
 use reth_db::database::Database;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_interfaces::{
     blockchain_tree::{
         error::{CanonicalError, InsertBlockError},
@@ -16,8 +17,8 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
-    ExecutorFactory, ProviderError,
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
+    ProviderError,
 };
 use std::{
     collections::{BTreeMap, HashSet},
@@ -25,28 +26,24 @@ use std::{
 };
 use tracing::trace;
 
-/// Shareable blockchain tree that is behind tokio::RwLock
+/// Shareable blockchain tree that is behind a RwLock
 #[derive(Clone, Debug)]
-pub struct ShareableBlockchainTree<DB: Database + Clone, EF: ExecutorFactory> {
+pub struct ShareableBlockchainTree<DB, E> {
     /// BlockchainTree
-    pub tree: Arc<RwLock<BlockchainTree<DB, EF>>>,
+    pub tree: Arc<RwLock<BlockchainTree<DB, E>>>,
 }
 
-impl<DB, EF> ShareableBlockchainTree<DB, EF>
-where
-    DB: Database + Clone,
-    EF: ExecutorFactory,
-{
+impl<DB, E> ShareableBlockchainTree<DB, E> {
     /// Create a new shareable database.
-    pub fn new(tree: BlockchainTree<DB, EF>) -> Self {
+    pub fn new(tree: BlockchainTree<DB, E>) -> Self {
         Self { tree: Arc::new(RwLock::new(tree)) }
     }
 }
 
-impl<DB, EF> BlockchainTreeEngine for ShareableBlockchainTree<DB, EF>
+impl<DB, E> BlockchainTreeEngine for ShareableBlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    EF: ExecutorFactory,
+    E: BlockExecutorProvider,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         let mut tree = self.tree.write();
@@ -86,6 +83,15 @@ where
         res
     }
 
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        let mut tree = self.tree.write();
+        let res = tree.update_block_hashes_and_clear_buffered();
+        tree.update_chains_metrics();
+        res
+    }
+
     fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
         trace!(target: "blockchain_tree", "Connecting buffered blocks to canonical hashes");
         let mut tree = self.tree.write();
@@ -101,20 +107,12 @@ where
         tree.update_chains_metrics();
         res
     }
-
-    fn unwind(&self, unwind_to: BlockNumber) -> RethResult<()> {
-        trace!(target: "blockchain_tree", unwind_to, "Unwinding to block number");
-        let mut tree = self.tree.write();
-        let res = tree.unwind(unwind_to);
-        tree.update_chains_metrics();
-        res
-    }
 }
 
-impl<DB, EF> BlockchainTreeViewer for ShareableBlockchainTree<DB, EF>
+impl<DB, E> BlockchainTreeViewer for ShareableBlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    EF: ExecutorFactory,
+    E: BlockExecutorProvider,
 {
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
         trace!(target: "blockchain_tree", "Returning all blocks in blockchain tree");
@@ -147,21 +145,6 @@ where
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
         trace!(target: "blockchain_tree", "Returning canonical blocks in tree");
         self.tree.read().block_indices().canonical_chain().inner().clone()
-    }
-
-    fn find_canonical_ancestor(&self, mut parent: BlockHash) -> Option<BlockHash> {
-        let tree = self.tree.read();
-
-        // walk up the tree and check if the parent is in the sidechain
-        while let Some(block) = tree.block_by_hash(parent) {
-            parent = block.parent_hash;
-        }
-
-        if tree.block_indices().is_block_hash_canonical(&parent) {
-            return Some(parent)
-        }
-
-        None
     }
 
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
@@ -208,25 +191,25 @@ where
     }
 }
 
-impl<DB, EF> BlockchainTreePendingStateProvider for ShareableBlockchainTree<DB, EF>
+impl<DB, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<DB, E>
 where
     DB: Database + Clone,
-    EF: ExecutorFactory,
+    E: BlockExecutorProvider,
 {
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
         trace!(target: "blockchain_tree", ?block_hash, "Finding pending state provider");
         let provider = self.tree.read().post_state_data(block_hash)?;
         Some(Box::new(provider))
     }
 }
 
-impl<DB, EF> CanonStateSubscriptions for ShareableBlockchainTree<DB, EF>
+impl<DB, E> CanonStateSubscriptions for ShareableBlockchainTree<DB, E>
 where
-    DB: Database + Clone,
-    EF: ExecutorFactory,
+    DB: Send + Sync,
+    E: Send + Sync,
 {
     fn subscribe_to_canonical_state(&self) -> reth_provider::CanonStateNotifications {
         trace!(target: "blockchain_tree", "Registered subscriber for canonical state");

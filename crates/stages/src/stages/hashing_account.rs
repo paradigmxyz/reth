@@ -1,6 +1,5 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use itertools::Itertools;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -16,6 +15,7 @@ use reth_primitives::{
     Account, B256,
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
@@ -44,8 +44,12 @@ pub struct AccountHashingStage {
 
 impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
-    pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
-        Self { clean_threshold, commit_threshold, etl_config }
+    pub fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
+        Self {
+            clean_threshold: config.clean_threshold,
+            commit_threshold: config.commit_threshold,
+            etl_config,
+        }
     }
 }
 
@@ -206,7 +210,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 if index > 0 && index % interval == 0 {
                     info!(
                         target: "sync::stages::hashing_account",
-                        progress = format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
+                        progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
                         "Inserting hashes"
                     );
                 }

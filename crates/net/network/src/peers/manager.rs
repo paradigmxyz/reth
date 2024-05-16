@@ -14,7 +14,8 @@ use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
 use reth_network_api::{PeerKind, ReputationChangeKind};
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{ForkId, NodeRecord};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,
@@ -1275,7 +1276,7 @@ pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub refill_slots_interval: Duration,
-    /// Trusted nodes to connect to.
+    /// Trusted nodes to connect to or accept from
     pub trusted_nodes: HashSet<NodeRecord>,
     /// Connect to or accept from trusted nodes only?
     #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
@@ -1558,7 +1559,8 @@ mod tests {
     };
     use reth_net_common::ban_list::BanList;
     use reth_network_api::{Direction, ReputationChangeKind};
-    use reth_primitives::{PeerId, B512};
+    use reth_network_types::PeerId;
+    use reth_primitives::B512;
     use std::{
         collections::HashSet,
         future::{poll_fn, Future},

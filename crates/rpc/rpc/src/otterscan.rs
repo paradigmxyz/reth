@@ -1,7 +1,6 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use revm::inspectors::NoOpInspector;
 use revm_inspectors::transfer::{TransferInspector, TransferKind};
 use revm_primitives::ExecutionResult;
 
@@ -12,7 +11,7 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
         OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
     },
-    BlockTransactions, Transaction, TransactionReceipt,
+    BlockTransactions, Transaction,
 };
 
 use crate::{eth::EthTransactions, result::internal_rpc_err};
@@ -81,14 +80,10 @@ where
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
         let maybe_revert = self
             .eth
-            .spawn_trace_transaction_in_block_with_inspector(
-                tx_hash,
-                NoOpInspector,
-                |_tx_info, _inspector, res, _| match res.result {
-                    ExecutionResult::Revert { output, .. } => Ok(Some(output)),
-                    _ => Ok(None),
-                },
-            )
+            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| match res.result {
+                ExecutionResult::Revert { output, .. } => Ok(Some(output)),
+                _ => Ok(None),
+            })
             .await
             .map(Option::flatten)?;
         Ok(maybe_revert)
@@ -158,46 +153,18 @@ where
         }
 
         // Crop receipts and transform them into OtsTransactionReceipt
-        let timestamp = Some(u64::try_from(block.header.timestamp).unwrap_or(u64::MAX));
+        let timestamp = Some(block.header.timestamp);
         let receipts = receipts
             .drain(page_start..page_end)
             .map(|receipt| {
-                let TransactionReceipt {
-                    inner,
-                    transaction_hash,
-                    transaction_index,
-                    block_hash,
-                    block_number,
-                    gas_used,
-                    effective_gas_price,
-                    blob_gas_used,
-                    blob_gas_price,
-                    from,
-                    to,
-                    contract_address,
-                    state_root,
-                } = receipt.inner;
-                let receipt = TransactionReceipt {
-                    inner: OtsReceipt {
-                        status: inner.inner.receipt.status,
-                        cumulative_gas_used: inner.inner.receipt.cumulative_gas_used,
-                        logs: None,
-                        logs_bloom: None,
-                        r#type: inner.r#type,
-                    },
-                    transaction_hash,
-                    transaction_index,
-                    block_hash,
-                    block_number,
-                    gas_used,
-                    effective_gas_price,
-                    blob_gas_used,
-                    blob_gas_price,
-                    from,
-                    to,
-                    contract_address,
-                    state_root,
-                };
+                let receipt = receipt.inner.map_inner(|receipt| OtsReceipt {
+                    status: receipt.inner.receipt.status,
+                    cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used as u64,
+                    logs: None,
+                    logs_bloom: None,
+                    r#type: receipt.r#type,
+                });
+
                 OtsTransactionReceipt { receipt, timestamp }
             })
             .collect();

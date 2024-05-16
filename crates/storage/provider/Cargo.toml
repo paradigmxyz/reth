@@ -21,6 +21,8 @@ reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
 
+# ethereum
+alloy-rpc-types-engine.workspace = true
 revm.workspace = true
 
 # async
@@ -35,11 +37,11 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-auto_impl = "1.0"
+auto_impl.workspace = true
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
-dashmap = { version = "5.5", features = ["inline"] }
+dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 
 # test-utils

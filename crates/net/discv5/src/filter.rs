@@ -35,13 +35,11 @@ impl MustIncludeKey {
     /// Returns [`FilterOutcome::Ok`] if [`Enr`](discv5::Enr) contains the configured kv-pair key.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         if enr.get_raw_rlp(self.key).is_none() {
-            return FilterOutcome::Ignore { reason: self.ignore_reason() }
+            return FilterOutcome::Ignore {
+                reason: format!("{} fork required", String::from_utf8_lossy(self.key)),
+            }
         }
         FilterOutcome::Ok
-    }
-
-    fn ignore_reason(&self) -> String {
-        format!("{} fork required", String::from_utf8_lossy(self.key))
     }
 }
 
@@ -69,18 +67,16 @@ impl MustNotIncludeKeys {
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
         for key in self.keys.iter() {
             if matches!(key.filter(enr), FilterOutcome::Ok) {
-                return FilterOutcome::Ignore { reason: self.ignore_reason() }
+                return FilterOutcome::Ignore {
+                    reason: format!(
+                        "{} forks not allowed",
+                        self.keys.iter().map(|key| String::from_utf8_lossy(key.key)).format(",")
+                    ),
+                }
             }
         }
 
         FilterOutcome::Ok
-    }
-
-    fn ignore_reason(&self) -> String {
-        format!(
-            "{} forks not allowed",
-            self.keys.iter().map(|key| String::from_utf8_lossy(key.key)).format(",")
-        )
     }
 
     /// Adds a key that must not be present for any kv-pair in a node record.
@@ -96,7 +92,7 @@ mod tests {
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
 
-    use crate::config::{ETH, ETH2};
+    use crate::NetworkStackId;
 
     use super::*;
 
@@ -104,16 +100,21 @@ mod tests {
     fn must_not_include_key_filter() {
         // rig test
 
-        let filter = MustNotIncludeKeys::new(&[ETH, ETH2]);
+        let filter = MustNotIncludeKeys::new(&[NetworkStackId::ETH, NetworkStackId::ETH2]);
 
         // enr_1 advertises a fork from one of the keys configured in filter
         let sk = CombinedKey::generate_secp256k1();
-        let enr_1 =
-            Enr::builder().add_value_rlp(ETH as &[u8], Bytes::from("cancun")).build(&sk).unwrap();
+        let enr_1 = Enr::builder()
+            .add_value_rlp(NetworkStackId::ETH as &[u8], Bytes::from("cancun"))
+            .build(&sk)
+            .unwrap();
 
         // enr_2 advertises a fork from one the other key configured in filter
         let sk = CombinedKey::generate_secp256k1();
-        let enr_2 = Enr::builder().add_value_rlp(ETH2, Bytes::from("deneb")).build(&sk).unwrap();
+        let enr_2 = Enr::builder()
+            .add_value_rlp(NetworkStackId::ETH2, Bytes::from("deneb"))
+            .build(&sk)
+            .unwrap();
 
         // test
 

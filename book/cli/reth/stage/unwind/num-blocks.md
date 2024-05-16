@@ -1,6 +1,6 @@
 # reth stage unwind num-blocks
 
-Unwinds the given number of blocks from the database
+Unwinds the database from the latest block, until the given number of blocks have been reached
 
 ```bash
 $ reth stage unwind num-blocks --help

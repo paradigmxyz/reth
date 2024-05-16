@@ -9,6 +9,9 @@
 //!   and leak detection functionality. See [jemalloc's opt.prof](https://jemalloc.net/jemalloc.3.html#opt.prof)
 //!   documentation for usage details. This is **not recommended on Windows**. See [here](https://rust-lang.github.io/rfcs/1974-global-allocators.html#jemalloc)
 //!   for more info.
+//! - `asm-keccak`: replaces the default, pure-Rust implementation of Keccak256 with one implemented
+//!   in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more
+//!   details and supported targets
 //! - `min-error-logs`: Disables all logs below `error` level.
 //! - `min-warn-logs`: Disables all logs below `warn` level.
 //! - `min-info-logs`: Disables all logs below `info` level. This can speed up the node, since fewer
@@ -28,12 +31,18 @@
 
 pub mod cli;
 pub mod commands;
+mod macros;
 pub mod utils;
 
 /// Re-exported payload related types
 pub mod payload {
     pub use reth_payload_builder::*;
     pub use reth_payload_validator::ExecutionPayloadValidator;
+}
+
+/// Re-exported from `reth_node_api`.
+pub mod api {
+    pub use reth_node_api::*;
 }
 
 /// Re-exported from `reth_node_core`.
@@ -149,6 +158,10 @@ pub mod rpc {
         pub use reth_rpc_types_compat::*;
     }
 }
+
+// re-export for convenience
+#[doc(inline)]
+pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
 
 #[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
 pub mod sigsegv_handler;

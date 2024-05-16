@@ -6,37 +6,36 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_runner::CliContext;
 use reth_config::Config;
+use reth_consensus::Consensus;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
-use reth_interfaces::{consensus::Consensus, p2p::full_block::FullBlockClient};
+use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
+use reth_interfaces::p2p::full_block::FullBlockClient;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{
-    fs,
-    stage::{StageCheckpoint, StageId},
-    BlockHashOrNumber, ChainSpec, PruneModes,
+use reth_primitives::{fs, stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, PruneModes};
+use reth_provider::{
+    BlockNumReader, BlockWriter, BundleStateWithReceipts, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
-use reth_provider::{BlockWriter, ProviderFactory, StageCheckpointReader};
+use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
-    stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-    },
+    stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
     ExecInput, Stage,
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-use tracing::{debug, info, warn};
+use tracing::*;
 
-/// `reth merkle-debug` command
+/// `reth debug merkle` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the data dir for all reth files and subdirectories.
@@ -102,7 +101,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
             )?)
             .start_network()
             .await?;
@@ -117,26 +116,28 @@ impl Command {
 
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
         let provider_rw = factory.provider_rw()?;
 
         // Configure and build network
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
                 db.clone(),
                 network_secret_path,
-                data_dir.known_peers_path(),
+                data_dir.known_peers(),
             )
             .await?;
+
+        let executor_provider = block_executor!(self.chain.clone());
 
         // Initialize the fetch client
         info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
@@ -155,226 +156,184 @@ impl Command {
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
 
         // build the full block client
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 
-        // get the execution checkpoint
-        let execution_checkpoint_block =
-            provider_rw.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
-        assert!(execution_checkpoint_block < self.to, "Nothing to run");
+        // get best block number
+        let best_block_number = provider_rw.best_block_number()?;
+        assert!(best_block_number < self.to, "Nothing to run");
 
         // get the block range from the network
-        info!(target: "reth::cli", target_block_number=?self.to, "Downloading range of blocks");
-        let block_range = block_range_client
-            .get_full_block_range(to_header.hash_slow(), self.to - execution_checkpoint_block)
+        let block_range = best_block_number + 1..=self.to;
+        info!(target: "reth::cli", ?block_range, "Downloading range of blocks");
+        let blocks = block_range_client
+            .get_full_block_range(to_header.hash_slow(), self.to - best_block_number)
             .await;
 
-        // recover senders
-        let blocks_with_senders =
-            block_range.into_iter().map(|block| block.try_seal_with_senders());
-
-        // insert the blocks
-        for senders_res in blocks_with_senders {
-            let sealed_block = match senders_res {
-                Ok(senders) => senders,
-                Err(err) => {
-                    warn!(target: "reth::cli", "Error sealing block with senders: {err:?}. Skipping...");
-                    continue
-                }
-            };
-            provider_rw.insert_block(sealed_block, None)?;
-        }
-
-        // Check if any of hashing or merkle stages aren't on the same block number as
-        // Execution stage or have any intermediate progress.
-        let should_reset_stages =
-            [StageId::AccountHashing, StageId::StorageHashing, StageId::MerkleExecute]
-                .into_iter()
-                .map(|stage_id| provider_rw.get_stage_checkpoint(stage_id))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(Option::unwrap_or_default)
-                .any(|checkpoint| {
-                    checkpoint.block_number != execution_checkpoint_block ||
-                        checkpoint.stage_checkpoint.is_some()
-                });
-
-        let factory =
-            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
-        let mut execution_stage = ExecutionStage::new(
-            factory,
-            ExecutionStageThresholds {
-                max_blocks: Some(1),
-                max_changes: None,
-                max_cumulative_gas: None,
-                max_duration: None,
-            },
-            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-            PruneModes::all(),
-        );
+        let mut td = provider_rw
+            .header_td_by_number(best_block_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound(best_block_number))?;
 
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();
         let mut merkle_stage = MerkleStage::default_execution();
 
-        for block in execution_checkpoint_block + 1..=self.to {
-            tracing::trace!(target: "reth::cli", block, "Executing block");
-            let progress =
-                if (!should_reset_stages || block > execution_checkpoint_block + 1) && block > 0 {
-                    Some(block - 1)
-                } else {
-                    None
-                };
+        for block in blocks.into_iter().rev() {
+            let block_number = block.number;
+            let sealed_block = block
+                .try_seal_with_senders()
+                .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
+            trace!(target: "reth::cli", block_number, "Executing block");
 
-            execution_stage.execute(
-                &provider_rw,
-                ExecInput {
-                    target: Some(block),
-                    checkpoint: block.checked_sub(1).map(StageCheckpoint::new),
-                },
+            provider_rw.insert_block(sealed_block.clone(), None)?;
+
+            td += sealed_block.difficulty;
+            let mut executor = executor_provider.batch_executor(
+                StateProviderDatabase::new(LatestStateProviderRef::new(
+                    provider_rw.tx_ref(),
+                    provider_rw.static_file_provider().clone(),
+                )),
+                PruneModes::none(),
+            );
+            executor.execute_one((&sealed_block.clone().unseal(), td).into())?;
+            let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+            BundleStateWithReceipts::new(bundle, receipts, first_block).write_to_storage(
+                provider_rw.tx_ref(),
+                None,
+                OriginalValuesKnown::Yes,
             )?;
+
+            let checkpoint = Some(StageCheckpoint::new(block_number - 1));
 
             let mut account_hashing_done = false;
             while !account_hashing_done {
-                let output = account_hashing_stage.execute(
-                    &provider_rw,
-                    ExecInput {
-                        target: Some(block),
-                        checkpoint: progress.map(StageCheckpoint::new),
-                    },
-                )?;
+                let output = account_hashing_stage
+                    .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint })?;
                 account_hashing_done = output.done;
             }
 
             let mut storage_hashing_done = false;
             while !storage_hashing_done {
-                let output = storage_hashing_stage.execute(
-                    &provider_rw,
-                    ExecInput {
-                        target: Some(block),
-                        checkpoint: progress.map(StageCheckpoint::new),
-                    },
-                )?;
+                let output = storage_hashing_stage
+                    .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint })?;
                 storage_hashing_done = output.done;
             }
 
-            let incremental_result = merkle_stage.execute(
-                &provider_rw,
-                ExecInput { target: Some(block), checkpoint: progress.map(StageCheckpoint::new) },
-            );
+            let incremental_result = merkle_stage
+                .execute(&provider_rw, ExecInput { target: Some(block_number), checkpoint });
 
-            if incremental_result.is_err() {
-                tracing::warn!(target: "reth::cli", block, "Incremental calculation failed, retrying from scratch");
-                let incremental_account_trie = provider_rw
-                    .tx_ref()
-                    .cursor_read::<tables::AccountsTrie>()?
-                    .walk_range(..)?
-                    .collect::<Result<Vec<_>, _>>()?;
-                let incremental_storage_trie = provider_rw
-                    .tx_ref()
-                    .cursor_dup_read::<tables::StoragesTrie>()?
-                    .walk_range(..)?
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let clean_input = ExecInput { target: Some(block), checkpoint: None };
-                loop {
-                    let clean_result = merkle_stage.execute(&provider_rw, clean_input);
-                    assert!(clean_result.is_ok(), "Clean state root calculation failed");
-                    if clean_result.unwrap().done {
-                        break
-                    }
-                }
-
-                let clean_account_trie = provider_rw
-                    .tx_ref()
-                    .cursor_read::<tables::AccountsTrie>()?
-                    .walk_range(..)?
-                    .collect::<Result<Vec<_>, _>>()?;
-                let clean_storage_trie = provider_rw
-                    .tx_ref()
-                    .cursor_dup_read::<tables::StoragesTrie>()?
-                    .walk_range(..)?
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                tracing::info!(target: "reth::cli", block, "Comparing incremental trie vs clean trie");
-
-                // Account trie
-                let mut incremental_account_mismatched = Vec::new();
-                let mut clean_account_mismatched = Vec::new();
-                let mut incremental_account_trie_iter =
-                    incremental_account_trie.into_iter().peekable();
-                let mut clean_account_trie_iter = clean_account_trie.into_iter().peekable();
-                while incremental_account_trie_iter.peek().is_some() ||
-                    clean_account_trie_iter.peek().is_some()
-                {
-                    match (incremental_account_trie_iter.next(), clean_account_trie_iter.next()) {
-                        (Some(incremental), Some(clean)) => {
-                            similar_asserts::assert_eq!(
-                                incremental.0,
-                                clean.0,
-                                "Nibbles don't match"
-                            );
-                            if incremental.1 != clean.1 &&
-                                clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
-                            {
-                                incremental_account_mismatched.push(incremental);
-                                clean_account_mismatched.push(clean);
-                            }
-                        }
-                        (Some(incremental), None) => {
-                            tracing::warn!(target: "reth::cli", next = ?incremental, "Incremental account trie has more entries");
-                        }
-                        (None, Some(clean)) => {
-                            tracing::warn!(target: "reth::cli", next = ?clean, "Clean account trie has more entries");
-                        }
-                        (None, None) => {
-                            tracing::info!(target: "reth::cli", "Exhausted all account trie entries");
-                        }
-                    }
-                }
-
-                // Stoarge trie
-                let mut first_mismatched_storage = None;
-                let mut incremental_storage_trie_iter =
-                    incremental_storage_trie.into_iter().peekable();
-                let mut clean_storage_trie_iter = clean_storage_trie.into_iter().peekable();
-                while incremental_storage_trie_iter.peek().is_some() ||
-                    clean_storage_trie_iter.peek().is_some()
-                {
-                    match (incremental_storage_trie_iter.next(), clean_storage_trie_iter.next()) {
-                        (Some(incremental), Some(clean)) => {
-                            if incremental != clean &&
-                                clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
-                            {
-                                first_mismatched_storage = Some((incremental, clean));
-                                break
-                            }
-                        }
-                        (Some(incremental), None) => {
-                            tracing::warn!(target: "reth::cli", next = ?incremental, "Incremental storage trie has more entries");
-                        }
-                        (None, Some(clean)) => {
-                            tracing::warn!(target: "reth::cli", next = ?clean, "Clean storage trie has more entries")
-                        }
-                        (None, None) => {
-                            tracing::info!(target: "reth::cli", "Exhausted all storage trie entries.")
-                        }
-                    }
-                }
-
-                similar_asserts::assert_eq!(
-                    (
-                        incremental_account_mismatched,
-                        first_mismatched_storage.as_ref().map(|(incremental, _)| incremental)
-                    ),
-                    (
-                        clean_account_mismatched,
-                        first_mismatched_storage.as_ref().map(|(_, clean)| clean)
-                    ),
-                    "Mismatched trie nodes"
-                );
+            if incremental_result.is_ok() {
+                debug!(target: "reth::cli", block_number, "Successfully computed incremental root");
+                continue
             }
+
+            warn!(target: "reth::cli", block_number, "Incremental calculation failed, retrying from scratch");
+            let incremental_account_trie = provider_rw
+                .tx_ref()
+                .cursor_read::<tables::AccountsTrie>()?
+                .walk_range(..)?
+                .collect::<Result<Vec<_>, _>>()?;
+            let incremental_storage_trie = provider_rw
+                .tx_ref()
+                .cursor_dup_read::<tables::StoragesTrie>()?
+                .walk_range(..)?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let clean_input = ExecInput { target: Some(sealed_block.number), checkpoint: None };
+            loop {
+                let clean_result = merkle_stage.execute(&provider_rw, clean_input);
+                assert!(clean_result.is_ok(), "Clean state root calculation failed");
+                if clean_result.unwrap().done {
+                    break
+                }
+            }
+
+            let clean_account_trie = provider_rw
+                .tx_ref()
+                .cursor_read::<tables::AccountsTrie>()?
+                .walk_range(..)?
+                .collect::<Result<Vec<_>, _>>()?;
+            let clean_storage_trie = provider_rw
+                .tx_ref()
+                .cursor_dup_read::<tables::StoragesTrie>()?
+                .walk_range(..)?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            info!(target: "reth::cli", block_number, "Comparing incremental trie vs clean trie");
+
+            // Account trie
+            let mut incremental_account_mismatched = Vec::new();
+            let mut clean_account_mismatched = Vec::new();
+            let mut incremental_account_trie_iter = incremental_account_trie.into_iter().peekable();
+            let mut clean_account_trie_iter = clean_account_trie.into_iter().peekable();
+            while incremental_account_trie_iter.peek().is_some() ||
+                clean_account_trie_iter.peek().is_some()
+            {
+                match (incremental_account_trie_iter.next(), clean_account_trie_iter.next()) {
+                    (Some(incremental), Some(clean)) => {
+                        similar_asserts::assert_eq!(incremental.0, clean.0, "Nibbles don't match");
+                        if incremental.1 != clean.1 &&
+                            clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
+                        {
+                            incremental_account_mismatched.push(incremental);
+                            clean_account_mismatched.push(clean);
+                        }
+                    }
+                    (Some(incremental), None) => {
+                        warn!(target: "reth::cli", next = ?incremental, "Incremental account trie has more entries");
+                    }
+                    (None, Some(clean)) => {
+                        warn!(target: "reth::cli", next = ?clean, "Clean account trie has more entries");
+                    }
+                    (None, None) => {
+                        info!(target: "reth::cli", "Exhausted all account trie entries");
+                    }
+                }
+            }
+
+            // Stoarge trie
+            let mut first_mismatched_storage = None;
+            let mut incremental_storage_trie_iter = incremental_storage_trie.into_iter().peekable();
+            let mut clean_storage_trie_iter = clean_storage_trie.into_iter().peekable();
+            while incremental_storage_trie_iter.peek().is_some() ||
+                clean_storage_trie_iter.peek().is_some()
+            {
+                match (incremental_storage_trie_iter.next(), clean_storage_trie_iter.next()) {
+                    (Some(incremental), Some(clean)) => {
+                        if incremental != clean &&
+                            clean.1.nibbles.len() > self.skip_node_depth.unwrap_or_default()
+                        {
+                            first_mismatched_storage = Some((incremental, clean));
+                            break
+                        }
+                    }
+                    (Some(incremental), None) => {
+                        warn!(target: "reth::cli", next = ?incremental, "Incremental storage trie has more entries");
+                    }
+                    (None, Some(clean)) => {
+                        warn!(target: "reth::cli", next = ?clean, "Clean storage trie has more entries")
+                    }
+                    (None, None) => {
+                        info!(target: "reth::cli", "Exhausted all storage trie entries.")
+                    }
+                }
+            }
+
+            similar_asserts::assert_eq!(
+                (
+                    incremental_account_mismatched,
+                    first_mismatched_storage.as_ref().map(|(incremental, _)| incremental)
+                ),
+                (
+                    clean_account_mismatched,
+                    first_mismatched_storage.as_ref().map(|(_, clean)| clean)
+                ),
+                "Mismatched trie nodes"
+            );
         }
+
+        info!(target: "reth::cli", ?block_range, "Successfully validated incremental roots");
 
         Ok(())
     }

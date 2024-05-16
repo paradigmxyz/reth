@@ -5,8 +5,8 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
 };
 use alloy_rlp::Decodable;
 use clap::Parser;
@@ -14,15 +14,16 @@ use eyre::Context;
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_runner::CliContext;
+use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
-use reth_interfaces::{consensus::Consensus, RethResult};
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_interfaces::RethResult;
 use reth_node_api::PayloadBuilderAttributes;
-#[cfg(not(feature = "optimism"))]
-use reth_node_ethereum::EthEvmConfig;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
@@ -30,13 +31,14 @@ use reth_primitives::{
     revm_primitives::KzgSettings,
     stage::StageId,
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
-    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    Receipts, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256,
+    U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ExecutorFactory,
-    ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
+    BundleStateWithReceipts, ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::EvmProcessorFactory;
+use reth_revm::database::StateProviderDatabase;
 #[cfg(feature = "optimism")]
 use reth_rpc_types::engine::OptimismPayloadAttributes;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
@@ -113,7 +115,7 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
         )?;
         let provider = factory.provider()?;
 
@@ -147,7 +149,7 @@ impl Command {
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
         // initialize the database
@@ -155,25 +157,19 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
             Arc::clone(&self.chain),
-            data_dir.static_files_path(),
+            data_dir.static_files(),
         )?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
-        #[cfg(feature = "optimism")]
-        let evm_config = reth_node_optimism::OptimismEvmConfig::default();
-
-        #[cfg(not(feature = "optimism"))]
-        let evm_config = EthEvmConfig::default();
+        let executor = block_executor!(self.chain.clone());
 
         // configure blockchain tree
-        let tree_externals = TreeExternals::new(
-            provider_factory.clone(),
-            Arc::clone(&consensus),
-            EvmProcessorFactory::new(self.chain.clone(), evm_config),
-        );
+        let tree_externals =
+            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
-        let blockchain_tree = ShareableBlockchainTree::new(tree);
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
         let best_block =
@@ -218,7 +214,7 @@ impl Command {
                     ))?;
 
                     let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len()).into();
+                        blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
 
                     // first construct the tx, calculating the length of the tx with sidecar before
                     // insertion
@@ -286,8 +282,11 @@ impl Command {
         );
 
         #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(self.chain.clone())
-            .compute_pending_block();
+        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
+            self.chain.clone(),
+            reth_node_optimism::OptimismEvmConfig::default(),
+        )
+        .compute_pending_block();
 
         #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
@@ -305,11 +304,16 @@ impl Command {
                 let block_with_senders =
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
-                let executor_factory = EvmProcessorFactory::new(self.chain.clone(), evm_config);
-                let mut executor = executor_factory.with_state(blockchain_db.latest()?);
-                executor
-                    .execute_and_verify_receipt(&block_with_senders.clone().unseal(), U256::MAX)?;
-                let state = executor.take_output_state();
+                let db = StateProviderDatabase::new(blockchain_db.latest()?);
+                let executor = block_executor!(self.chain.clone()).executor(db);
+
+                let BlockExecutionOutput { state, receipts, .. } =
+                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
+                let state = BundleStateWithReceipts::new(
+                    state,
+                    Receipts::from_block_receipt(receipts),
+                    block.number,
+                );
                 debug!(target: "reth::cli", ?state, "Executed block");
 
                 let hashed_state = state.hash_state_slow();

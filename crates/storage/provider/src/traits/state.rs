@@ -1,11 +1,16 @@
 use super::AccountReader;
-use crate::{BlockHashReader, BlockIdReader, BundleStateWithReceipts, StateRootProvider};
+use crate::{
+    providers::StaticFileProviderRWRefMut, BlockHashReader, BlockIdReader, BundleStateWithReceipts,
+    StateRootProvider,
+};
 use auto_impl::auto_impl;
+use reth_db::transaction::{DbTx, DbTxMut};
 use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     trie::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
+use revm::db::OriginalValuesKnown;
 
 /// Type alias of boxed [StateProvider].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -97,6 +102,7 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
+#[auto_impl(&, Arc, Box)]
 pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
@@ -181,7 +187,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Used to inspect or execute transaction on the pending state.
     fn pending_with_provider(
         &self,
-        bundle_state_data: Box<dyn BundleStateDataProvider>,
+        bundle_state_data: Box<dyn FullBundleStateDataProvider>,
     ) -> ProviderResult<StateProviderBox>;
 }
 
@@ -195,7 +201,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn BundleStateDataProvider>> {
+    ) -> ProviderResult<Box<dyn FullBundleStateDataProvider>> {
         self.find_pending_state_provider(block_hash)
             .ok_or(ProviderError::StateForHashNotFound(block_hash))
     }
@@ -204,24 +210,56 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>>;
+    ) -> Option<Box<dyn FullBundleStateDataProvider>>;
 }
 
-/// Post state data needs for execution on it.
-/// This trait is used to create a state provider over pending state.
+/// Post state data needed for execution on it.
 ///
-/// Pending state contains:
+/// State contains:
 /// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
-/// * canonical fork, the block on what pending chain was forked from.
 #[auto_impl(&, Box)]
 pub trait BundleStateDataProvider: Send + Sync {
     /// Return post state
     fn state(&self) -> &BundleStateWithReceipts;
     /// Return block hash by block number of pending or canonical chain.
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
-    /// return canonical fork, the block on what post state was forked from.
+}
+
+/// Fork data needed for execution on it.
+///
+/// It contains a canonical fork, the block on what pending chain was forked from.
+#[auto_impl(&, Box)]
+pub trait BundleStateForkProvider {
+    /// Return canonical fork, the block on what post state was forked from.
     ///
     /// Needed to create state provider.
     fn canonical_fork(&self) -> BlockNumHash;
+}
+
+/// Full post state data needed for execution on it.
+/// This trait is used to create a state provider over pending state.
+///
+/// This trait is a combination of [`BundleStateDataProvider`] and [`BundleStateForkProvider`].
+///
+/// Pending state contains:
+/// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
+/// * block hashes of pending chain and canonical blocks.
+/// * canonical fork, the block on what pending chain was forked from.
+pub trait FullBundleStateDataProvider: BundleStateDataProvider + BundleStateForkProvider {}
+
+impl<T> FullBundleStateDataProvider for T where T: BundleStateDataProvider + BundleStateForkProvider {}
+
+/// A helper trait for [BundleStateWithReceipts] to write state and receipts to storage.
+pub trait StateWriter {
+    /// Write the data and receipts to the database or static files if `static_file_producer` is
+    /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
+    fn write_to_storage<TX>(
+        self,
+        tx: &TX,
+        static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
+        is_value_known: OriginalValuesKnown,
+    ) -> ProviderResult<()>
+    where
+        TX: DbTxMut + DbTx;
 }

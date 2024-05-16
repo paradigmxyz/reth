@@ -6,14 +6,3 @@ Examples:
 
 - [`Header` struct](../../primitives/src/header.rs)
 - [DB usage](../db/src/kv/codecs/scale.rs)
-
-### Features
-
-Feature defines what is the main codec used by `#[main_codec]`. However it is still possible to define them directly: `#[use_scale]`, `#[use_postcat]`, `#[no_codec]`.
-
-```rust
-default = ["scale"]
-scale = ["reth-codecs-derive/scale"]
-postcard = ["reth-codecs-derive/postcard"]
-no_codec = ["reth-codecs-derive/no_codec"]
-```

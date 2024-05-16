@@ -1,6 +1,5 @@
 use super::{collect_history_indices, load_history_indices};
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::{
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
@@ -15,6 +14,7 @@ use reth_primitives::{
 use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
 use tracing::info;
 
@@ -35,11 +35,11 @@ pub struct IndexStorageHistoryStage {
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
     pub fn new(
-        commit_threshold: u64,
-        prune_mode: Option<PruneMode>,
+        config: IndexHistoryConfig,
         etl_config: EtlConfig,
+        prune_mode: Option<PruneMode>,
     ) -> Self {
-        Self { commit_threshold, prune_mode, etl_config }
+        Self { commit_threshold: config.commit_threshold, prune_mode, etl_config }
     }
 }
 

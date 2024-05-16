@@ -8,6 +8,7 @@ use crate::{
     },
     EthApi, EthApiSpec,
 };
+use alloy_primitives::TxKind as RpcTransactionKind;
 use async_trait::async_trait;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -15,25 +16,23 @@ use reth_primitives::{
     eip4844::calc_blob_gasprice,
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionKind::{Call, Create},
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256, U256, U64,
+    IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered,
+    TxKind::{Call, Create},
+    B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
-use reth_revm::{
-    database::StateProviderDatabase,
-    tracing::{TracingInspector, TracingInspectorConfig},
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
     AnyReceiptEnvelope, AnyTransactionReceipt, Index, Log, ReceiptWithBloom, Transaction,
-    TransactionInfo, TransactionKind as RpcTransactionKind, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest, WithOtherFields,
+    TransactionInfo, TransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    WithOtherFields,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -45,19 +44,12 @@ use revm::{
     },
     GetInspector, Inspector,
 };
+use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::future::Future;
 
-#[cfg(feature = "optimism")]
-use crate::eth::api::optimism::OptimismTxMeta;
-#[cfg(feature = "optimism")]
-use crate::eth::optimism::OptimismEthApiError;
 use crate::eth::revm_utils::FillableTransaction;
 #[cfg(feature = "optimism")]
-use reth_revm::optimism::RethL1BlockInfo;
-#[cfg(feature = "optimism")]
 use reth_rpc_types::OptimismTransactionReceiptFields;
-#[cfg(feature = "optimism")]
-use revm::L1BlockInfo;
 use revm_primitives::db::{Database, DatabaseRef};
 
 /// Helper alias type for the state's [CacheDB]
@@ -285,7 +277,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: FnOnce(StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
+        F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
     /// Executes the call request at the given [BlockId].
@@ -306,7 +298,7 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
-        I: Inspector<StateCacheDB> + Send + 'static;
+        I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -373,6 +365,20 @@ pub trait EthTransactions: Send + Sync {
         self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
             .await
     }
+
+    /// Retrieves the transaction if it exists and returns its trace.
+    ///
+    /// Before the transaction is traced, all previous transaction in the block are applied to the
+    /// state by executing them first.
+    /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
+    /// the database that points to the beginning of the transaction.
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
+    async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
+        R: Send + 'static;
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
@@ -569,10 +575,7 @@ where
         <DB as Database>::Error: Into<EthApiError>,
         I: GetInspector<DB>,
     {
-        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(db, env, inspector);
-        let res = evm.transact()?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env))
+        self.inspect_and_return_db(db, env, inspector).map(|(res, env, _)| (res, env))
     }
 
     fn inspect_and_return_db<DB, I>(
@@ -848,8 +851,10 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
-        #[cfg(feature = "optimism")]
-        self.forward_to_sequencer(&tx).await?;
+        if let Some(client) = self.inner.raw_transaction_forwarder.as_ref() {
+            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            client.forward_raw_transaction(&tx).await?;
+        }
 
         let recovered = recover_raw_transaction(tx)?;
         let pool_transaction = <Pool::Transaction>::from_recovered_pooled_transaction(recovered);
@@ -910,15 +915,12 @@ where
             // gas price required
             (Some(_), None, None, None, None, None) => {
                 Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    gas_price: gas_price.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    gas_price: U256::from(gas_price.unwrap_or_default()),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     chain_id: None,
                 }))
             }
@@ -926,15 +928,12 @@ where
             // if only accesslist is set, and no eip1599 fees
             (_, None, Some(access_list), None, None, None) => {
                 Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    gas_price: gas_price.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    gas_price: U256::from(gas_price.unwrap_or_default()),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     chain_id: 0,
                     access_list,
                 }))
@@ -946,16 +945,15 @@ where
             (None, _, _, None, None, None) => {
                 // Empty fields fall back to the canonical transaction schema.
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
+                    max_priority_fee_per_gas: U256::from(
+                        max_priority_fee_per_gas.unwrap_or_default(),
+                    ),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     chain_id: 0,
                     access_list: access_list.unwrap_or_default(),
                 }))
@@ -973,20 +971,19 @@ where
                 // As per the EIP, we follow the same semantics as EIP-1559.
                 Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
                     chain_id: 0,
-                    nonce: U64::from(nonce.unwrap_or_default()),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or_default(),
-                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
-                    gas_limit: gas.unwrap_or_default(),
+                    nonce: nonce.unwrap_or_default(),
+                    max_priority_fee_per_gas: U256::from(
+                        max_priority_fee_per_gas.unwrap_or_default(),
+                    ),
+                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
+                    gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: match to {
-                        Some(to) => RpcTransactionKind::Call(to),
-                        None => RpcTransactionKind::Create,
-                    },
+                    kind: to.unwrap_or(RpcTransactionKind::Create),
                     access_list: access_list.unwrap_or_default(),
 
                     // eip-4844 specific.
-                    max_fee_per_blob_gas,
+                    max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
                     blob_versioned_hashes,
                     sidecar,
                 }))
@@ -998,36 +995,45 @@ where
         let transaction = match transaction {
             Some(TypedTransactionRequest::Legacy(mut req)) => {
                 req.chain_id = Some(chain_id.to());
-                req.gas_limit = gas_limit;
-                req.gas_price = self.legacy_gas_price(gas_price).await?;
+                req.gas_limit = gas_limit.saturating_to();
+                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
 
                 TypedTransactionRequest::Legacy(req)
             }
             Some(TypedTransactionRequest::EIP2930(mut req)) => {
                 req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit;
-                req.gas_price = self.legacy_gas_price(gas_price).await?;
+                req.gas_limit = gas_limit.saturating_to();
+                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
 
                 TypedTransactionRequest::EIP2930(req)
             }
             Some(TypedTransactionRequest::EIP1559(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) =
-                    self.eip1559_fees(max_fee_per_gas, max_priority_fee_per_gas).await?;
+                let (max_fee_per_gas, max_priority_fee_per_gas) = self
+                    .eip1559_fees(
+                        max_fee_per_gas.map(U256::from),
+                        max_priority_fee_per_gas.map(U256::from),
+                    )
+                    .await?;
 
                 req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit;
-                req.max_fee_per_gas = max_fee_per_gas;
-                req.max_priority_fee_per_gas = max_priority_fee_per_gas;
+                req.gas_limit = gas_limit.saturating_to();
+                req.max_fee_per_gas = max_fee_per_gas.saturating_to();
+                req.max_priority_fee_per_gas = max_priority_fee_per_gas.saturating_to();
 
                 TypedTransactionRequest::EIP1559(req)
             }
             Some(TypedTransactionRequest::EIP4844(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) =
-                    self.eip1559_fees(max_fee_per_gas, max_priority_fee_per_gas).await?;
+                let (max_fee_per_gas, max_priority_fee_per_gas) = self
+                    .eip1559_fees(
+                        max_fee_per_gas.map(U256::from),
+                        max_priority_fee_per_gas.map(U256::from),
+                    )
+                    .await?;
 
                 req.max_fee_per_gas = max_fee_per_gas;
                 req.max_priority_fee_per_gas = max_priority_fee_per_gas;
-                req.max_fee_per_blob_gas = self.eip4844_blob_fee(max_fee_per_blob_gas).await?;
+                req.max_fee_per_blob_gas =
+                    self.eip4844_blob_fee(max_fee_per_blob_gas.map(U256::from)).await?;
 
                 req.chain_id = chain_id.to();
                 req.gas_limit = gas_limit;
@@ -1061,7 +1067,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: FnOnce(StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
+        F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
@@ -1080,7 +1086,7 @@ where
                     &mut db,
                     overrides,
                 )?;
-                f(db, env)
+                f(&mut db, env)
             })
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)?
@@ -1093,10 +1099,7 @@ where
         overrides: EvmOverrides,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)> {
         let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |mut db, env| {
-            this.transact(&mut db, env)
-        })
-        .await
+        self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env)).await
     }
 
     async fn spawn_inspect_call_at<I>(
@@ -1107,7 +1110,7 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
-        I: Inspector<StateCacheDB> + Send + 'static,
+        I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
     {
         let this = self.clone();
         self.spawn_with_call_at(request, at, overrides, move |db, env| {
@@ -1128,11 +1131,9 @@ where
     {
         let this = self.clone();
         self.with_state_at_block(at, |state| {
-            let db = CacheDB::new(StateProviderDatabase::new(state));
-
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(db, env, &mut inspector)?;
-
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
             f(inspector, res)
         })
     }
@@ -1150,10 +1151,9 @@ where
     {
         let this = self.clone();
         self.spawn_with_state_at_block(at, move |state| {
-            let db = CacheDB::new(StateProviderDatabase::new(state));
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _, db) = this.inspect_and_return_db(db, env, &mut inspector)?;
-
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
             f(inspector, res, db)
         })
         .await
@@ -1175,6 +1175,47 @@ where
         };
         let block = self.cache().get_block_with_senders(block_hash).await?;
         Ok(block.map(|block| (transaction, block.seal(block_hash))))
+    }
+
+    async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        let (transaction, block) = match self.transaction_and_block(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+        let (tx, tx_info) = transaction.split();
+
+        let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
+
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let parent_block = block.parent_hash;
+        let block_txs = block.into_transactions_ecrecovered();
+
+        let this = self.clone();
+        self.spawn_with_state_at_block(parent_block.into(), move |state| {
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+            // replay all transactions prior to the targeted transaction
+            this.replay_transactions_until(
+                &mut db,
+                cfg.clone(),
+                block_env.clone(),
+                block_txs,
+                tx.hash,
+            )?;
+
+            let env =
+                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+
+            let (res, _) = this.transact(&mut db, env)?;
+            f(tx_info, res, db)
+        })
+        .await
+        .map(Some)
     }
 
     async fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
@@ -1265,7 +1306,7 @@ where
             let block_hash = block.hash();
 
             let block_number = block_env.number.saturating_to::<u64>();
-            let base_fee = block_env.basefee.saturating_to::<u64>();
+            let base_fee = block_env.basefee.saturating_to::<u128>();
 
             // prepare transactions, we do everything upfront to reduce time spent with open state
             let max_transactions = highest_index.map_or(block.body.len(), |highest| {
@@ -1447,7 +1488,7 @@ where
             .ok_or(EthApiError::UnknownBlockNumber)?;
 
         let block = block.unseal();
-        let l1_block_info = reth_revm::optimism::extract_l1_info(&block).ok();
+        let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();
         let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
 
         build_transaction_receipt_with_block_receipts(
@@ -1459,17 +1500,19 @@ where
         )
     }
 
-    /// Builds [OptimismTxMeta] object using the provided [TransactionSigned],
-    /// [L1BlockInfo] and `block_timestamp`. The [L1BlockInfo] is used to calculate
-    /// the l1 fee and l1 data gas for the transaction.
-    /// If the [L1BlockInfo] is not provided, the [OptimismTxMeta] will be empty.
+    /// Builds op metadata object using the provided [TransactionSigned], L1 block info and
+    /// `block_timestamp`. The L1BlockInfo is used to calculate the l1 fee and l1 data gas for the
+    /// transaction. If the L1BlockInfo is not provided, the meta info will be empty.
     #[cfg(feature = "optimism")]
     pub(crate) fn build_op_tx_meta(
         &self,
         tx: &TransactionSigned,
-        l1_block_info: Option<L1BlockInfo>,
+        l1_block_info: Option<revm::L1BlockInfo>,
         block_timestamp: u64,
-    ) -> EthResult<OptimismTxMeta> {
+    ) -> EthResult<crate::eth::api::optimism::OptimismTxMeta> {
+        use crate::eth::{api::optimism::OptimismTxMeta, optimism::OptimismEthApiError};
+        use reth_evm_optimism::RethL1BlockInfo;
+
         let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
 
         let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
@@ -1486,45 +1529,15 @@ where
             let inner_l1_data_gas = l1_block_info
                 .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
                 .map_err(|_| OptimismEthApiError::L1BlockGasError)?;
-            (Some(inner_l1_fee), Some(inner_l1_data_gas))
+            (
+                Some(inner_l1_fee.saturating_to::<u128>()),
+                Some(inner_l1_data_gas.saturating_to::<u128>()),
+            )
         } else {
             (None, None)
         };
 
         Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
-    }
-
-    /// Helper function for `eth_sendRawTransaction` for Optimism.
-    ///
-    /// Forwards the raw transaction bytes to the configured sequencer endpoint.
-    /// This is a no-op if the sequencer endpoint is not configured.
-    #[cfg(feature = "optimism")]
-    pub async fn forward_to_sequencer(&self, tx: &Bytes) -> EthResult<()> {
-        if let Some(endpoint) = self.network().sequencer_endpoint() {
-            let body = serde_json::to_string(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "eth_sendRawTransaction",
-                "params": [format!("0x{}", alloy_primitives::hex::encode(tx))],
-                "id": self.network().chain_id()
-            }))
-            .map_err(|_| {
-                tracing::warn!(
-                    target = "rpc::eth",
-                    "Failed to serialize transaction for forwarding to sequencer"
-                );
-                OptimismEthApiError::InvalidSequencerTransaction
-            })?;
-
-            self.inner
-                .http_client
-                .post(endpoint)
-                .header(http::header::CONTENT_TYPE, "application/json")
-                .body(body)
-                .send()
-                .await
-                .map_err(OptimismEthApiError::HttpError)?;
-        }
-        Ok(())
     }
 }
 
@@ -1647,7 +1660,7 @@ impl TransactionSource {
                         index: Some(index),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
-                        base_fee,
+                        base_fee: base_fee.map(u128::from),
                     },
                 )
             }
@@ -1674,7 +1687,7 @@ impl From<TransactionSource> for Transaction {
                     block_hash,
                     block_number,
                     base_fee,
-                    U256::from(index),
+                    index as usize,
                 )
             }
         }
@@ -1690,7 +1703,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     meta: TransactionMeta,
     receipt: Receipt,
     all_receipts: &[Receipt],
-    #[cfg(feature = "optimism")] optimism_tx_meta: OptimismTxMeta,
+    #[cfg(feature = "optimism")] optimism_tx_meta: crate::eth::api::optimism::OptimismTxMeta,
 ) -> EthResult<AnyTransactionReceipt> {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
     // we don't need to check for pre EIP-2
@@ -1722,7 +1735,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     let mut logs = Vec::with_capacity(receipt.logs.len());
     for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
         let rpclog = Log {
-            inner: log.into(),
+            inner: log,
             block_hash: Some(meta.block_hash),
             block_number: Some(meta.block_number),
             block_timestamp: Some(meta.timestamp),
@@ -1736,7 +1749,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
 
     let rpc_receipt = reth_rpc_types::Receipt {
         status: receipt.success,
-        cumulative_gas_used: receipt.cumulative_gas_used,
+        cumulative_gas_used: receipt.cumulative_gas_used as u128,
         logs,
     };
 
@@ -1747,19 +1760,19 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             r#type: transaction.transaction.tx_type().into(),
         },
         transaction_hash: meta.tx_hash,
-        transaction_index: meta.index,
+        transaction_index: Some(meta.index),
         block_hash: Some(meta.block_hash),
         block_number: Some(meta.block_number),
         from,
         to: None,
-        gas_used: Some(gas_used),
+        gas_used: gas_used as u128,
         contract_address: None,
-        effective_gas_price: transaction.effective_gas_price(meta.base_fee) as u64,
+        effective_gas_price: transaction.effective_gas_price(meta.base_fee),
         // TODO pre-byzantium receipts have a post-transaction state root
         state_root: None,
         // EIP-4844 fields
-        blob_gas_price: blob_gas_price.map(|gas| gas as u64),
-        blob_gas_used,
+        blob_gas_price,
+        blob_gas_used: blob_gas_used.map(u128::from),
     };
     let mut res_receipt = WithOtherFields::new(res_receipt);
 
@@ -1768,16 +1781,17 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
         let mut op_fields = OptimismTransactionReceiptFields::default();
 
         if transaction.is_deposit() {
-            op_fields.deposit_nonce = receipt.deposit_nonce.map(U64::from);
-            op_fields.deposit_receipt_version = receipt.deposit_receipt_version.map(U64::from);
+            op_fields.deposit_nonce = receipt.deposit_nonce.map(reth_primitives::U64::from);
+            op_fields.deposit_receipt_version =
+                receipt.deposit_receipt_version.map(reth_primitives::U64::from);
         } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
             op_fields.l1_fee = optimism_tx_meta.l1_fee;
-            op_fields.l1_gas_used = optimism_tx_meta
-                .l1_data_gas
-                .map(|dg| dg + l1_block_info.l1_fee_overhead.unwrap_or_default());
+            op_fields.l1_gas_used = optimism_tx_meta.l1_data_gas.map(|dg| {
+                dg + l1_block_info.l1_fee_overhead.unwrap_or_default().saturating_to::<u128>()
+            });
             op_fields.l1_fee_scalar =
                 Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
-            op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee);
+            op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee.saturating_to());
         }
 
         res_receipt.other = op_fields.into();
@@ -1829,6 +1843,7 @@ mod tests {
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
+            None,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

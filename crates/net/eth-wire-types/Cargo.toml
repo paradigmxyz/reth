@@ -7,7 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-exclude.workspace = true
 
 [lints]
 workspace = true
@@ -17,7 +16,6 @@ workspace = true
 reth-codecs.workspace = true
 reth-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
-alloy-chains = { workspace = true, features = ["serde", "rlp", "arbitrary"] }
 
 bytes.workspace = true
 derive_more.workspace = true
@@ -37,15 +35,24 @@ reth-tracing.workspace = true
 test-fuzz.workspace = true
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
-async-stream = "0.3"
+async-stream.workspace = true
 
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
-arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
+arbitrary = [
+    "reth-primitives/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-derive",
+]
 optimism = ["reth-primitives/optimism"]
