@@ -5522,6 +5522,7 @@ dependencies = [
  "config",
  "eyre",
  "futures",
+ "parking_lot 0.12.2",
  "reth",
  "reth-exex",
  "reth-node-api",

@@ -17,19 +17,22 @@ reth-node-ethereum.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-tracing.workspace = true
-eyre.workspace = true
-tokio.workspace = true
-futures.workspace = true
+
 alloy-primitives.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 alloy-signer.workspace = true
 alloy-signer-wallet.workspace = true
 alloy-network.workspace = true
 alloy-provider.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, features = ["raw_value"] }
 alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
 alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "77c1240" }
+
+tokio.workspace = true
+futures.workspace = true
+
+eyre.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["raw_value"] }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 config = "0.14.0"
 parking_lot = "0.12.2"
