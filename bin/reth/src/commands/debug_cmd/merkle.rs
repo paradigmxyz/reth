@@ -15,7 +15,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_db::{cursor::DbCursorRO, database::Database, init_db, tables, transaction::DbTx};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
 use reth_interfaces::p2p::full_block::FullBlockClient;
 use reth_network::NetworkHandle;
@@ -73,11 +73,11 @@ pub struct Command {
 }
 
 impl Command {
-    async fn build_network(
+    async fn build_network<DB: Database + 'static>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        provider_factory: ProviderFactory<DB>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -91,11 +91,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             ))
-            .build(ProviderFactory::new(
-                db,
-                self.chain.clone(),
-                self.datadir.clone().resolve_datadir(self.chain.chain).static_files(),
-            )?)
+            .build(provider_factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -114,7 +110,7 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
+        let factory = ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
         let provider_rw = factory.provider_rw()?;
 
         // Configure and build network
@@ -124,7 +120,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )

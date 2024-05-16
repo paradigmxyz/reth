@@ -15,7 +15,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db::{database::Database, init_db};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -139,11 +139,11 @@ impl Command {
         Ok(pipeline)
     }
 
-    async fn build_network(
+    async fn build_network<DB: Database + 'static>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        provider_factory: ProviderFactory<DB>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -157,11 +157,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             ))
-            .build(ProviderFactory::new(
-                db,
-                self.chain.clone(),
-                self.datadir.clone().resolve_datadir(self.chain.chain).static_files(),
-            )?)
+            .build(provider_factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -188,7 +184,7 @@ impl Command {
         }
     }
 
-    /// Execute `execution-debudb_path command
+    /// Execute `execution-debug` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         let mut config = Config::default();
 
@@ -218,7 +214,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )

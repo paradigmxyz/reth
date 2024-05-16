@@ -94,7 +94,7 @@ impl ImportCommand {
         );
 
         // add network name to data dir
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = load_config(config_path.clone())?;

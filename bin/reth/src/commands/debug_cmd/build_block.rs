@@ -19,7 +19,7 @@ use reth_blockchain_tree::{
 };
 use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{database::Database, init_db};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_interfaces::RethResult;
 use reth_node_api::PayloadBuilderAttributes;
@@ -104,13 +104,11 @@ impl Command {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block(&self, db: Arc<DatabaseEnv>) -> RethResult<Arc<SealedBlock>> {
-        let factory = ProviderFactory::new(
-            db,
-            self.chain.clone(),
-            self.datadir.clone().resolve_datadir(self.chain.chain).static_files(),
-        )?;
-        let provider = factory.provider()?;
+    fn lookup_best_block<DB: Database>(
+        &self,
+        provider_factory: ProviderFactory<DB>,
+    ) -> RethResult<Arc<SealedBlock>> {
+        let provider = provider_factory.provider()?;
 
         let best_number =
             provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
@@ -165,8 +163,9 @@ impl Command {
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
-        let best_block =
-            self.lookup_best_block(Arc::clone(&db)).wrap_err("the head block is missing")?;
+        let best_block = self
+            .lookup_best_block(provider_factory.clone())
+            .wrap_err("the head block is missing")?;
 
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
