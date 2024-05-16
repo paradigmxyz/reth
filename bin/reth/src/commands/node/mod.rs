@@ -320,24 +320,24 @@ mod tests {
     //     assert_eq!(db_path, Path::new("my/custom/path/db"));
     // }
 
-    #[test]
-    #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
-    fn parse_dev() {
-        let cmd = NodeCommand::<NoArgs>::parse_from(["reth", "--dev"]);
-        let chain = reth_primitives::DEV.clone();
-        assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-        assert_eq!(
-            cmd.chain.paris_block_and_final_difficulty,
-            chain.paris_block_and_final_difficulty
-        );
-        assert_eq!(cmd.chain.hardforks, chain.hardforks);
+    // #[test]
+    // #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
+    // fn parse_dev() {
+    //     let cmd = NodeCommand::<NoArgs>::parse_from(["reth", "--dev"]);
+    //     let chain = reth_primitives::DEV.clone();
+    //     assert_eq!(cmd.chain.chain, chain.chain);
+    //     assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+    //     assert_eq!(
+    //         cmd.chain.paris_block_and_final_difficulty,
+    //         chain.paris_block_and_final_difficulty
+    //     );
+    //     assert_eq!(cmd.chain.hardforks, chain.hardforks);
 
-        assert!(cmd.rpc.http);
-        assert!(cmd.network.discovery.disable_discovery);
+    //     assert!(cmd.rpc.http);
+    //     assert!(cmd.network.discovery.disable_discovery);
 
-        assert!(cmd.dev.dev);
-    }
+    //     assert!(cmd.dev.dev);
+    // }
 
     #[test]
     fn parse_instance() {

@@ -1,23 +1,99 @@
+use std::time::Duration;
+
+///
+/// Integration tests for the bitfinity import command.
+/// These tests requires a running EVM node or EVM block extractor node at the specified URL.
+/// 
+use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use reth::commands::bitfinity_import::BitfinityImportCommand;
+use reth_provider::{BlockNumReader, BlockReader};
+use super::utils::*;
 
 #[tokio::test]
-async fn test_should_import_data_from_evm() {
-
-    // Step 1: Prepare the data
+async fn bitfinity_test_should_import_data_from_evm() {
+    // Arrange
     let evm_datasource_url = "https://orca-app-5yyst.ondigitalocean.app";
-    let () super::utils::temp_data(evm_datasource_url).await.unwrap();
+    let temp_data = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
 
-    // Step 2: Import the data
-    bitfinity_import_it::import_evm_data(&provider_factory, &blockchain_db).await.unwrap();
+    let mut bitfinity = temp_data.bitfinity_args;
+    let end_block = 100;
+    bitfinity.end_block = Some(end_block);
+    bitfinity.batch_size = (end_block as usize) * 10;
 
-    // Step 3: Verify the data
-    // let chain = provider_factory.chain();
-    // let chain_id = chain.chain_id();
-    // let chain_name = chain.chain_name();
-    // let chain_spec = chain.chain_spec();
-    // let chain_genesis_hash = chain.genesis_hash();
-    // let chain_genesis_block = chain.genesis_block();
-    // let chain_latest_block = chain.latest_block();
+    // Act
+    {
+        let import = BitfinityImportCommand::new(
+            None,
+            temp_data.data_dir,
+            temp_data.chain.clone(),
+            bitfinity,
+            temp_data.provider_factory.clone(),
+            temp_data.blockchain_db,
+        );
+        let _import_handle = import.execute().await.unwrap();
+
+        wait_until_local_block_imported(&temp_data.provider_factory, end_block, Duration::from_secs(20)).await;
+
+    }
+
+    // Assert
+    {
+        let provider = temp_data.provider_factory.provider().unwrap();
+        assert_eq!(end_block, provider.last_block_number().unwrap());
+
+        // create evm client
+        let evm_rpc_client =
+            EthJsonRpcClient::new(ReqwestClient::new(evm_datasource_url.to_string()));
+
+        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
+        let local_block = provider.block_by_number(end_block).unwrap().unwrap();
+
+        assert_eq!(remote_block.hash.unwrap().0, local_block.header.hash_slow().0);
+        assert_eq!(remote_block.state_root.0, local_block.state_root.0);
+    }
+}
 
 
+#[tokio::test]
+async fn bitfinity_test_should_import_with_small_batch_size() {
+    // Arrange
+    let evm_datasource_url = "https://orca-app-5yyst.ondigitalocean.app";
+    let temp_data = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
 
+    let mut bitfinity = temp_data.bitfinity_args;
+    let end_block = 101;
+    bitfinity.end_block = Some(end_block);
+    bitfinity.batch_size = 10;
+
+    // Act
+    {
+        let import = BitfinityImportCommand::new(
+            None,
+            temp_data.data_dir,
+            temp_data.chain.clone(),
+            bitfinity,
+            temp_data.provider_factory.clone(),
+            temp_data.blockchain_db,
+        );
+        let _import_handle = import.execute().await.unwrap();
+
+        wait_until_local_block_imported(&temp_data.provider_factory, end_block, Duration::from_secs(20)).await;
+
+    }
+
+    // Assert
+    {
+        let provider = temp_data.provider_factory.provider().unwrap();
+        assert_eq!(end_block, provider.last_block_number().unwrap());
+
+        // create evm client
+        let evm_rpc_client =
+            EthJsonRpcClient::new(ReqwestClient::new(evm_datasource_url.to_string()));
+
+        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
+        let local_block = provider.block_by_number(end_block).unwrap().unwrap();
+
+        assert_eq!(remote_block.hash.unwrap().0, local_block.header.hash_slow().0);
+        assert_eq!(remote_block.state_root.0, local_block.state_root.0);
+    }
 }

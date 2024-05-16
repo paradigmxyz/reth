@@ -97,25 +97,27 @@ impl BitfinityEvmClient {
 
         const MAX_BLOCKS: u64 = 10_000;
 
-        let last_block = provider
+        let latest_remote_block = provider
             .get_block_number()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
-        let mut end_block = min(end_block.unwrap_or(last_block), start_block + MAX_BLOCKS);
+        let mut end_block = min(end_block.unwrap_or(latest_remote_block), start_block + MAX_BLOCKS - 1);
+
         if let Some(block_checker) = &block_checker {
             end_block = min(end_block, block_checker.get_block_number());
         }
 
-        info!(target: "downloaders::bitfinity_evm_client", start_block, end_block, "Fetching blocks");
+        info!(target: "downloaders::bitfinity_evm_client", "Start fetching blocks from {} to {}", start_block, end_block);
 
         for begin_block in (start_block..=end_block).step_by(batch_size) {
-            let count = std::cmp::min(batch_size as u64, end_block - begin_block);
+            let count = std::cmp::min(batch_size as u64, end_block + 1 - begin_block);
+            let last_block = begin_block + count - 1;
 
-            debug!(target: "downloaders::bitfinity_evm_client", begin_block, count, "Fetching blocks");
+            debug!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
 
             let blocks_to_fetch =
-                (begin_block..(begin_block + count)).map(Into::into).collect::<Vec<_>>();
+                (begin_block..=last_block).map(Into::into).collect::<Vec<_>>();
 
             let full_blocks = provider
                 .get_full_blocks_by_number(blocks_to_fetch, batch_size)
