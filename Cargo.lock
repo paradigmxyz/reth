@@ -8098,7 +8098,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "9.0.0"
-source = "git+https://github.com/bluealloy/revm#6e81b880c928a008cab16621b090c657014979e8"
+source = "git+https://github.com/bluealloy/revm#f07c0ef1c27d7a7a6b160849f4f2c88dcd843cfe"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8130,7 +8130,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "5.0.0"
-source = "git+https://github.com/bluealloy/revm#6e81b880c928a008cab16621b090c657014979e8"
+source = "git+https://github.com/bluealloy/revm#f07c0ef1c27d7a7a6b160849f4f2c88dcd843cfe"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8139,7 +8139,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "7.0.0"
-source = "git+https://github.com/bluealloy/revm#6e81b880c928a008cab16621b090c657014979e8"
+source = "git+https://github.com/bluealloy/revm#f07c0ef1c27d7a7a6b160849f4f2c88dcd843cfe"
 dependencies = [
  "aurora-engine-modexp",
  "c-kzg",
@@ -8155,7 +8155,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "4.0.0"
-source = "git+https://github.com/bluealloy/revm#6e81b880c928a008cab16621b090c657014979e8"
+source = "git+https://github.com/bluealloy/revm#f07c0ef1c27d7a7a6b160849f4f2c88dcd843cfe"
 dependencies = [
  "alloy-primitives",
  "auto_impl",
