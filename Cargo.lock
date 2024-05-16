@@ -7302,6 +7302,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
+ "revm-primitives",
  "rlp",
  "serde",
  "serde_json",

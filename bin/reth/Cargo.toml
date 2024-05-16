@@ -124,6 +124,10 @@ rlp = { workspace = true }
 jsonrpsee.workspace = true
 assert_matches = "1.5.0"
 
+# bitfinity dev dependencies
+tempfile.workspace = true
+revm-primitives.workspace = true
+
 [features]
 default = ["jemalloc"]
 
