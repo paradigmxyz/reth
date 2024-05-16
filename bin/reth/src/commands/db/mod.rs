@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn parse_stats_globals() {
         let path = format!("../{}", SUPPORTED_CHAINS[0]);
-        let cmd = Command::try_parse_from(["reth", "stats", "--datadir", &path]).unwrap();
+        let cmd = Command::try_parse_from(["reth", "--datadir", &path, "stats"]).unwrap();
         assert_eq!(cmd.datadir.resolve_datadir(cmd.chain.chain).as_ref(), Path::new(&path));
     }
 }
