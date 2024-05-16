@@ -1,6 +1,6 @@
 //! This contains all of the `reth` commands
 
-pub mod bitfinity_export_to_evm;
+pub mod bitfinity_reset_evm_state;
 pub mod bitfinity_import;
 pub mod config_cmd;
 pub mod db;
