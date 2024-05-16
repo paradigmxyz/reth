@@ -402,6 +402,3 @@ proptest-derive = "0.4"
 serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
-
-[patch.crates-io]
-c-kzg = { git = "https://github.com/sp1-patches/c-kzg-4844", branch = "uma/remove-taiko" }

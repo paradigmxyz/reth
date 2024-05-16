@@ -1493,7 +1493,8 @@ dependencies = [
 [[package]]
 name = "c-kzg"
 version = "1.0.2"
-source = "git+https://github.com/sp1-patches/c-kzg-4844?branch=uma/remove-taiko#ba2780307b218dd36851a22708f722b03b2f23a1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdf100c4cea8f207e883ff91ca886d621d8a166cb04971dfaa9bb8fd99ed95df"
 dependencies = [
  "blst",
  "cc",
