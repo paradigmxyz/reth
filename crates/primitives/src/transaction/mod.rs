@@ -2153,4 +2153,14 @@ mod tests {
         let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
         from_compact_zstd_unaware(&buff, written_bytes);
     }
+
+    #[test]
+    fn create_txs_disallowed_for_eip4844() {
+        let data = vec![
+            3, 208, 128, 128, 123, 128, 120, 128, 129, 129, 128, 192, 129, 129, 192, 128, 128, 9,
+        ];
+        let res = TransactionSigned::decode_enveloped(&mut &data[..]);
+
+        assert!(res.is_err());
+    }
 }
