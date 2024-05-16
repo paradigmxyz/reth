@@ -3,15 +3,14 @@
 
 use eyre::Result;
 use reth_consensus_common::validation::validate_block_standalone;
+use reth_fs_utils as fs;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
 use reth_network::NetworkManager;
-use reth_primitives::{
-    fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader};
 use reth_provider::BlockReader;
 use reth_rpc_layer::{JwtError, JwtSecret};
 use std::{

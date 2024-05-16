@@ -132,16 +132,16 @@ impl StaticFileProvider {
 
                 entries += jar_provider.rows();
 
-                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
+                let data_size = reth_fs_utils::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
+                let index_size = reth_fs_utils::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
+                let offsets_size = reth_fs_utils::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
+                let config_size = reth_fs_utils::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 

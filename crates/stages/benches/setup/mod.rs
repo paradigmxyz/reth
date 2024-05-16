@@ -7,6 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
+use reth_fs_utils as fs;
 use reth_interfaces::test_utils::{
     generators,
     generators::{
@@ -14,7 +15,7 @@ use reth_interfaces::test_utils::{
         random_eoa_accounts,
     },
 };
-use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
+use reth_primitives::{Account, Address, SealedBlock, B256, U256};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},

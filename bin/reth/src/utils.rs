@@ -9,7 +9,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
-use reth_primitives::{fs, ChainSpec};
+use reth_fs_utils as fs;
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
