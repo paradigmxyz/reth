@@ -129,6 +129,9 @@ impl Command {
                     discv5_addr_ipv6,
                     discv5_port,
                     discv5_port_ipv6,
+                    discv5_lookup_interval,
+                    discv5_bootstrap_lookup_interval,
+                    discv5_bootstrap_lookup_countdown,
                     ..
                 } = self.network.discovery;
 
@@ -148,6 +151,9 @@ impl Command {
                         .build(),
                     )
                     .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                    .lookup_interval(discv5_lookup_interval)
+                    .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                    .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
             });
 
         let network_config = network_config_builder.build(Arc::new(ProviderFactory::new(

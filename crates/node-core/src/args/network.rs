@@ -147,7 +147,7 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(boot_nodes.clone())
-            .chain_spec(chain_spec)
+            .chain_spec(chain_spec.clone())
             .transactions_manager_config(transactions_manager_config);
 
         // Configure node identity
@@ -157,11 +157,28 @@ impl NetworkArgs {
         );
 
         let rlpx_socket = (self.addr, self.port).into();
-        self.discovery
-            .apply_to_builder(network_config_builder, rlpx_socket)
-            .discovery_v5_with_builder(|builder| {
-                builder.add_unsigned_boot_nodes(boot_nodes.into_iter())
-            })
+        network_config_builder =
+            self.discovery.apply_to_builder(network_config_builder, rlpx_socket);
+
+        if chain_spec.is_optimism() {
+            network_config_builder =
+                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
+        }
+
+        network_config_builder.discovery_v5_with_builder(|builder| {
+            let DiscoveryArgs {
+                discv5_lookup_interval,
+                discv5_bootstrap_lookup_interval,
+                discv5_bootstrap_lookup_countdown,
+                ..
+            } = self.discovery;
+
+            builder
+                .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                .lookup_interval(discv5_lookup_interval)
+                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
+        })
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -290,18 +307,8 @@ impl DiscoveryArgs {
         }
 
         if !self.disable_discovery && self.enable_discv5_discovery {
-            let DiscoveryArgs {
-                discv5_lookup_interval,
-                discv5_bootstrap_lookup_interval,
-                discv5_bootstrap_lookup_countdown,
-                ..
-            } = *self;
-            network_config_builder = network_config_builder.discovery_v5(
-                reth_discv5::Config::builder(rlpx_tcp_socket)
-                    .lookup_interval(discv5_lookup_interval)
-                    .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
-                    .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown),
-            );
+            network_config_builder =
+                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_tcp_socket));
         }
 
         network_config_builder
@@ -320,8 +327,8 @@ impl Default for DiscoveryArgs {
         Self {
             disable_discovery: false,
             disable_dns_discovery: false,
-            disable_discv4_discovery: cfg!(feature = "optimism"),
-            enable_discv5_discovery: cfg!(feature = "optimism"),
+            disable_discv4_discovery: false,
+            enable_discv5_discovery: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: None,
