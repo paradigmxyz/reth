@@ -1,0 +1,25 @@
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+
+# Install system dependencies
+RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config
+
+# Install the Succinct toolchain
+RUN curl -L https://sp1.succinct.xyz | bash
+RUN /root/.sp1/bin/sp1up
+
+# Install the RISC-V toolchain for gcc, used for compiling libraries with C dependencies.
+RUN mkdir -p /opt/riscv
+RUN wget -O /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz https://github.com/stnolting/riscv-gcc-prebuilt/releases/download/rv32i-131023/riscv32-unknown-elf.gcc-13.2.0.tar.gz
+RUN tar -xzf /tmp/riscv32-unknown-elf.gcc-13.2.0.tar.gz -C /opt/riscv/
+
+WORKDIR /opt/riscv
+
+COPY . .
+
+ENV RUSTUP_TOOLCHAIN="succinct"
+ENV RUSTFLAGS="-C passes=loweratomic -C link-arg=-Ttext=0x00200800 -C panic=abort" 
+ENV CARGO_BUILD_TARGET="riscv32im-succinct-zkvm-elf"
+ENV CC="gcc"
+ENV CC_riscv32im_succinct_zkvm_elf="/opt/riscv/bin/riscv32-unknown-elf-gcc -mstrict-align" 
+
+RUN cargo build -p zkvm-test --release --ignore-rust-version

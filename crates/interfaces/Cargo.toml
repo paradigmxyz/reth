@@ -44,7 +44,7 @@ tokio = { workspace = true, features = ["full"] }
 secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
-default = ["p2p"]
+default = []
 p2p = ["reth-network-api", "reth-eth-wire-types", "tracing", "tokio", "futures" ]
 test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
 cli = ["clap"]
