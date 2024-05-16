@@ -8,6 +8,7 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{mpsc::Sender, Mutex};
 
 use crate::op_proposer::{L2Output, L2OutputOracle::L2OutputOracleInstance};
+
 pub struct TxManager<T, N, P>
 where
     T: Transport + Clone,
