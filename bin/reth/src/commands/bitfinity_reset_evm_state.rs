@@ -13,7 +13,7 @@ use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
 use reth_db::{init_db, tables};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
-use reth_node_core::args::BitfinityExportToEvmArgs;
+use reth_node_core::args::BitfinityResetEvmStateArgs;
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
 use reth_primitives::{StorageEntry, B256};
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
@@ -30,11 +30,11 @@ pub struct BitfinityResetEvmStateCommand {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
     /// - macOS: `$HOME/Library/Application Support/reth/`
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
+    pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// Bitfinity Related Args
     #[clap(flatten)]
-    bitfinity: BitfinityExportToEvmArgs,
+    pub bitfinity: BitfinityResetEvmStateArgs,
 }
 
 impl BitfinityResetEvmStateCommand {

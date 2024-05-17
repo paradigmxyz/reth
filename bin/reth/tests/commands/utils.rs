@@ -13,6 +13,9 @@ use reth_provider::{providers::BlockchainProvider, BlockNumReader, ProviderError
 use revm_primitives::db::Database;
 use tempfile::TempDir;
 
+pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
+/// EVM block extractor for devnet running on Digital Ocean.
+pub const DEFAULT_EVM_DATASOURCE_URL: &str = "https://orca-app-5yyst.ondigitalocean.app";
 
 pub struct ImportTempData {
     pub temp_dir: TempDir,
@@ -103,6 +106,19 @@ pub async fn wait_until_local_block_imported(
             panic!("Timeout waiting for the last block to be imported. Waiting for block: {} but last block found was {}", block, last_block);
         }
     }
+}
+
+pub fn get_dfx_local_port() -> u16 {
+    use std::process::Command;
+    let output = Command::new("dfx")
+                        .arg("info")
+                        .arg("replica-port")
+                        .output()
+                        .expect("failed to execute process");
+
+    let port = String::from_utf8_lossy(&output.stdout);
+    println!("dfx port: {}", port);
+    u16::from_str(port.trim()).unwrap()
 }
 
 

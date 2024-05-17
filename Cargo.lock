@@ -7247,6 +7247,7 @@ dependencies = [
  "confy",
  "crossterm",
  "did",
+ "dirs",
  "discv5",
  "ethereum-json-rpc-client",
  "evm-canister-client",

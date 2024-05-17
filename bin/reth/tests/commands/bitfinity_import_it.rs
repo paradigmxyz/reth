@@ -12,7 +12,7 @@ use super::utils::*;
 #[tokio::test]
 async fn bitfinity_test_should_import_data_from_evm() {
     // Arrange
-    let evm_datasource_url = "https://orca-app-5yyst.ondigitalocean.app";
+    let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
     let temp_data = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
 
     let mut bitfinity = temp_data.bitfinity_args;
@@ -57,7 +57,7 @@ async fn bitfinity_test_should_import_data_from_evm() {
 #[tokio::test]
 async fn bitfinity_test_should_import_with_small_batch_size() {
     // Arrange
-    let evm_datasource_url = "https://orca-app-5yyst.ondigitalocean.app";
+    let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
     let temp_data = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
 
     let mut bitfinity = temp_data.bitfinity_args;

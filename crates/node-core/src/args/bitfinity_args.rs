@@ -45,7 +45,7 @@ pub struct BitfinityImportArgs {
 /// Bitfinity Related Args
 #[derive(Debug, Args, PartialEq, Default, Clone)]
 #[clap(next_help_heading = "Bitfinity Args")]
-pub struct BitfinityExportToEvmArgs {
+pub struct BitfinityResetEvmStateArgs {
 
     /// Canister principal
     /// Default value corresponds to testnet

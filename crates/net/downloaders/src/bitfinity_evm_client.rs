@@ -473,7 +473,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn remote_client_from_rpc_url() {
+    async fn bitfinity_remote_client_from_rpc_url() {
         let client =
             BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
                 .await
@@ -482,7 +482,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_headers_client() {
+    async fn bitfinity_test_headers_client() {
         let client =
             BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
                 .await
@@ -502,7 +502,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_bodies_client() {
+    async fn bitfinity_test_bodies_client() {
         let client =
             BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, None)
                 .await

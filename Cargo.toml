@@ -405,6 +405,7 @@ test-fuzz = "5"
 # Bitfinity Deps
 candid = "0.10"
 did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.18.x" }
+dirs = "5.0.1"
 ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.18.x", features = [
     "reqwest",
 ] }
