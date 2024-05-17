@@ -1332,16 +1332,16 @@ impl TransactionSigned {
         // Check if the tx is a list
         let result = if data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            TransactionSigned::decode_rlp_legacy_transaction(data)
+            TransactionSigned::decode_rlp_legacy_transaction(data)?
         } else {
-            TransactionSigned::decode_enveloped_typed_transaction(data)
+            TransactionSigned::decode_enveloped_typed_transaction(data)?
         };
 
         if !data.is_empty() {
             return Err(RlpError::UnexpectedLength);
         }
 
-        result
+        Ok(result)
     }
 
     /// Returns the length without an RLP header - this is used for eth/68 sizes.
