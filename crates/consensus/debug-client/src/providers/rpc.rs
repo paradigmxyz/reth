@@ -46,16 +46,16 @@ impl BlockProvider for RpcBlockProvider {
         }
     }
 
-    async fn get_block(&self, block_number: u64) -> RichBlock {
+    async fn get_block(&self, block_number: u64) -> eyre::Result<RichBlock> {
         let http_provider = ProviderBuilder::new()
             .on_builtin(&self.http_rpc_url)
             .await
             .expect("failed to create HTTP provider");
-        http_provider
+        let block: RichBlock = http_provider
             .get_block_by_number(BlockNumberOrTag::Number(block_number), true)
-            .await
-            .expect("failed to get block")
-            .expect("block not found")
-            .into()
+            .await?
+            .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?
+            .into();
+        Ok(block)
     }
 }

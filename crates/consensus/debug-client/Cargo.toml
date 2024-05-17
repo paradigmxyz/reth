@@ -16,15 +16,17 @@ reth-node-core.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-builder.workspace = true
+reth-tracing.workspace = true
 
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips = { workspace = true }
 alloy-provider = { workspace = true, features = ["ws"] }
 
 futures.workspace = true
+eyre.workspace = true
 jsonrpsee.workspace = true
 reqwest = { workspace = true, features = ["default-tls", "json"] }
 serde = { workspace = true, features = ["derive"] }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 
 ringbuffer = "0.15.0"

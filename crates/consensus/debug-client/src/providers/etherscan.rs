@@ -2,9 +2,10 @@ use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
 use reqwest::Client;
 use reth_node_core::rpc::types::RichBlock;
+use reth_tracing::tracing::warn;
 use serde::Deserialize;
 use std::time::Duration;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{sync::mpsc, time::interval};
 
 /// Block provider that fetches new blocks from Etherscan API.
 #[derive(Debug)]
@@ -24,28 +25,35 @@ impl EtherscanBlockProvider {
 impl BlockProvider for EtherscanBlockProvider {
     async fn spawn(&self, tx: mpsc::Sender<RichBlock>) {
         let mut last_block_number: Option<u64> = None;
+        // TODO: make interval configurable
+        let mut interval = interval(Duration::from_secs(3));
         loop {
-            let block = load_etherscan_block(
+            interval.tick().await;
+            let block = match load_etherscan_block(
                 &self.http_client,
                 &self.base_url,
                 &self.api_key,
                 BlockNumberOrTag::Latest,
             )
-            .await;
+            .await
+            {
+                Ok(block) => block,
+                Err(err) => {
+                    warn!(target: "consensus::debug-client", %err, "failed to fetch a block from Etherscan");
+                    continue
+                }
+            };
             let block_number = block.header.number.unwrap();
             if Some(block_number) == last_block_number {
-                // TODO: Make configurable
-                sleep(Duration::from_secs(3)).await;
                 continue;
             }
 
             tx.send(block).await.unwrap();
-            sleep(Duration::from_secs(3)).await;
             last_block_number = Some(block_number);
         }
     }
 
-    async fn get_block(&self, block_number: u64) -> RichBlock {
+    async fn get_block(&self, block_number: u64) -> eyre::Result<RichBlock> {
         load_etherscan_block(
             &self.http_client,
             &self.base_url,
@@ -68,7 +76,7 @@ async fn load_etherscan_block(
     base_url: &str,
     api_key: &str,
     block_number_or_tag: BlockNumberOrTag,
-) -> RichBlock {
+) -> eyre::Result<RichBlock> {
     let block: EtherscanBlockResponse = http_client
         .get(base_url)
         .query(&[
@@ -79,11 +87,8 @@ async fn load_etherscan_block(
             ("apikey", api_key),
         ])
         .send()
-        .await
-        .unwrap()
+        .await?
         .json()
-        .await
-        // TODO: Handle errors gracefully and do not stop the loop
-        .unwrap();
-    block.result
+        .await?;
+    Ok(block.result)
 }

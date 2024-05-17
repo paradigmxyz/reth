@@ -7,6 +7,7 @@ use reth_node_core::{
 };
 use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_types::ExecutionPayloadV1;
+use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::{future::Future, sync::Arc};
 use tokio::sync::mpsc;
@@ -18,7 +19,7 @@ pub trait BlockProvider: Send + Sync + 'static {
     fn spawn(&self, tx: mpsc::Sender<RichBlock>) -> impl Future<Output = ()> + Send;
 
     /// Get a past block by number.
-    fn get_block(&self, block_number: u64) -> impl Future<Output = RichBlock> + Send;
+    fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<RichBlock>> + Send;
 
     /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
     /// started more recently than `offset`), fetch it using `get_block`.
@@ -27,23 +28,23 @@ pub trait BlockProvider: Send + Sync + 'static {
         previous_block_hashes: &AllocRingBuffer<B256>,
         current_block_number: u64,
         offset: usize,
-    ) -> impl std::future::Future<Output = B256> + Send {
+    ) -> impl Future<Output = eyre::Result<B256>> + Send {
         async move {
             let stored_hash = previous_block_hashes
                 .len()
                 .checked_sub(offset)
                 .and_then(|index| previous_block_hashes.get(index));
             if let Some(hash) = stored_hash {
-                return *hash;
+                return Ok(*hash);
             }
 
             // Return zero hash if the chain isn't long enough to have the block at the offset.
             let previous_block_number = match current_block_number.checked_sub(offset as u64) {
                 Some(number) => number,
-                None => return B256::default(),
+                None => return Ok(B256::default()),
             };
-            let block = self.get_block(previous_block_number).await;
-            block.header.hash.unwrap()
+            let block = self.get_block(previous_block_number).await?;
+            Ok(block.header.hash.ok_or_else(|| eyre::eyre!("previous block does not have hash"))?)
         }
     }
 }
@@ -112,6 +113,18 @@ impl<P: BlockProvider> DebugConsensusClient<P> {
             );
             let (safe_block_hash, finalized_block_hash) =
                 tokio::join!(safe_block_hash, finalized_block_hash);
+            let (safe_block_hash, finalized_block_hash) = match (
+                safe_block_hash,
+                finalized_block_hash,
+            ) {
+                (Ok(safe_block_hash), Ok(finalized_block_hash)) => {
+                    (safe_block_hash, finalized_block_hash)
+                }
+                (safe_block_hash, finalized_block_hash) => {
+                    warn!(target: "consensus::debug-client", ?safe_block_hash, ?finalized_block_hash, "failed to fetch safe or finalized hash from etherscan");
+                    continue;
+                }
+            };
             reth_rpc_api::EngineApiClient::<T>::fork_choice_updated_v3(
                 &execution_client,
                 reth_rpc_types::engine::ForkchoiceState {
