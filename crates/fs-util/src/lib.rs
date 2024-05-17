@@ -1,10 +1,20 @@
 //! Wrapper for `std::fs` methods
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use std::{
     fs::{self, ReadDir},
     io,
     path::{Path, PathBuf},
 };
+
+/// Result alias for [FsPathError].
+pub type Result<T> = std::result::Result<T, FsPathError>;
 
 /// Various error variants for `std::fs` operations that serve as an addition to the io::Error which
 /// does not provide any information about the path.
@@ -186,8 +196,6 @@ impl FsPathError {
         FsPathError::Metadata { source, path: path.into() }
     }
 }
-
-type Result<T> = std::result::Result<T, FsPathError>;
 
 /// Wrapper for `std::fs::read_to_string`
 pub fn read_to_string(path: impl AsRef<Path>) -> Result<String> {

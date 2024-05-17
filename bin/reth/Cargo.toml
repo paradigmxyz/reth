@@ -16,6 +16,7 @@ workspace = true
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
+reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-exex.workspace = true
 reth-provider = { workspace = true }
