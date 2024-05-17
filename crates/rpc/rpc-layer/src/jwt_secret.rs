@@ -1,10 +1,7 @@
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
-use reth_primitives::{
-    fs,
-    fs::FsPathError,
-    hex::{self, encode as hex_encode},
-};
+use reth_fs_util::{self as fs, FsPathError};
+use reth_primitives::hex::{self, encode as hex_encode};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,

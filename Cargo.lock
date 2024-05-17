@@ -6416,6 +6416,7 @@ dependencies = [
  "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-exex",
+ "reth-fs-util",
  "reth-interfaces",
  "reth-network",
  "reth-network-api",
@@ -6660,6 +6661,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
+ "reth-fs-util",
  "reth-interfaces",
  "reth-libmdbx",
  "reth-metrics",
@@ -7034,6 +7036,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-fs-util"
+version = "0.2.0-beta.7"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
@@ -7044,6 +7054,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-consensus",
  "reth-eth-wire-types",
+ "reth-fs-util",
  "reth-network-api",
  "reth-network-types",
  "reth-primitives",
@@ -7253,7 +7264,7 @@ dependencies = [
  "memmap2 0.7.1",
  "ph",
  "rand 0.8.5",
- "reth-primitives",
+ "reth-fs-util",
  "serde",
  "sucds",
  "tempfile",
@@ -7351,6 +7362,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-etl",
  "reth-evm",
+ "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
@@ -7602,6 +7614,7 @@ dependencies = [
  "reth-codecs",
  "reth-db",
  "reth-evm",
+ "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
  "reth-nippy-jar",
@@ -7814,6 +7827,7 @@ dependencies = [
  "jsonwebtoken 8.3.0",
  "pin-project",
  "rand 0.8.5",
+ "reth-fs-util",
  "reth-primitives",
  "serde",
  "tempfile",
@@ -8006,6 +8020,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-eth-wire",
+ "reth-fs-util",
  "reth-metrics",
  "reth-network-types",
  "reth-primitives",
