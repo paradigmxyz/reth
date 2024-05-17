@@ -127,9 +127,9 @@ where
     /// block(s), as well as the ones that are being scheduled for future execution only.
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
-    /// Handler for `txpool_inspect`
+    /// Handler for `txpool_content`
     async fn txpool_content(&self) -> Result<TxpoolContent> {
-        trace!(target: "rpc::eth", "Serving txpool_inspect");
+        trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content())
     }
 }
