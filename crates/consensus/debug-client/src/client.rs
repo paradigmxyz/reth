@@ -16,8 +16,36 @@ use tokio::sync::mpsc;
 pub trait BlockProvider: Send + Sync + 'static {
     /// Spawn a block provider to send new blocks to the given sender.
     fn spawn(&self, tx: mpsc::Sender<RichBlock>) -> impl Future<Output = ()> + Send;
+
     /// Get a past block by number.
     fn get_block(&self, block_number: u64) -> impl Future<Output = RichBlock> + Send;
+
+    /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
+    /// started more recently than `offset`), fetch it using `get_block`.
+    fn get_or_fetch_previous_block(
+        &self,
+        previous_block_hashes: &AllocRingBuffer<B256>,
+        current_block_number: u64,
+        offset: usize,
+    ) -> impl std::future::Future<Output = B256> + Send {
+        async move {
+            let stored_hash = previous_block_hashes
+                .len()
+                .checked_sub(offset)
+                .and_then(|index| previous_block_hashes.get(index));
+            if let Some(hash) = stored_hash {
+                return *hash;
+            }
+
+            // Return zero hash if the chain isn't long enough to have the block at the offset.
+            let previous_block_number = match current_block_number.checked_sub(offset as u64) {
+                Some(number) => number,
+                None => return B256::default(),
+            };
+            let block = self.get_block(previous_block_number).await;
+            block.header.hash.unwrap()
+        }
+    }
 }
 
 /// Debyg consensus client that sends FCUs and new payloads using recent blocks from an external
@@ -40,7 +68,6 @@ impl<P: BlockProvider> DebugConsensusClient<P> {
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
     /// blocks.
     pub async fn spawn<T: EngineTypes>(&self) {
-        // TODO: Add logs
         let execution_client = self.auth_server.http_client();
         let mut previous_block_hashes = AllocRingBuffer::new(64);
 
@@ -73,15 +100,12 @@ impl<P: BlockProvider> DebugConsensusClient<P> {
 
             // Load previous block hashes. We're using (head - 32) and (head - 64) as the safe and
             // finalized block hashes.
-            // todo: chdeck for off by ones in offset
-            let safe_block_hash = get_or_fetch_previous_block(
-                self.block_provider.as_ref(),
+            let safe_block_hash = self.block_provider.get_or_fetch_previous_block(
                 &previous_block_hashes,
                 block_number,
                 32,
             );
-            let finalized_block_hash = get_or_fetch_previous_block(
-                self.block_provider.as_ref(),
+            let finalized_block_hash = self.block_provider.get_or_fetch_previous_block(
                 &previous_block_hashes,
                 block_number,
                 64,
@@ -101,31 +125,6 @@ impl<P: BlockProvider> DebugConsensusClient<P> {
             .unwrap();
         }
     }
-}
-
-/// Get previous block hash using previous block hash buffer. If it isn't available (buffer
-/// started more recently than `offset`), fetch it from block provider.
-async fn get_or_fetch_previous_block<P: BlockProvider>(
-    block_provider: &P,
-    previous_block_hashes: &AllocRingBuffer<B256>,
-    current_block_number: u64,
-    offset: usize,
-) -> B256 {
-    let stored_hash = previous_block_hashes
-        .len()
-        .checked_sub(offset)
-        .and_then(|index| previous_block_hashes.get(index));
-    if let Some(hash) = stored_hash {
-        return *hash;
-    }
-
-    // Return default hash if the chain isn't long enough to have the block at the offset.
-    let previous_block_number = match current_block_number.checked_sub(offset as u64) {
-        Some(number) => number,
-        None => return B256::default(),
-    };
-    let block = block_provider.get_block(previous_block_number).await;
-    block.header.hash.unwrap()
 }
 
 /// Cancun "new payload" event.
