@@ -7896,7 +7896,6 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-exex",
- "reth-fs-util",
  "reth-interfaces",
  "reth-network-types",
  "reth-primitives",

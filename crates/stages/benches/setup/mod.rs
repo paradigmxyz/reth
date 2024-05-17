@@ -7,7 +7,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
-use reth_fs_util as fs;
 use reth_interfaces::test_utils::{
     generators,
     generators::{
@@ -21,7 +20,7 @@ use reth_stages::{
     test_utils::{StorageKind, TestStageDB},
 };
 use reth_trie::StateRoot;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 use tokio::runtime::Handle;
 
 mod constants;
