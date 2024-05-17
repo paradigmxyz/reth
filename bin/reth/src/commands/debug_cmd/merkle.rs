@@ -18,7 +18,7 @@ use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_interfaces::p2p::full_block::FullBlockClient;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;

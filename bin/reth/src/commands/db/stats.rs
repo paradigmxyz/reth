@@ -15,7 +15,7 @@ use reth_db::{
     Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders, Transactions,
     VersionHistory,
 };
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;

@@ -7,7 +7,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_interfaces::test_utils::{
     generators,
     generators::{

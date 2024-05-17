@@ -4,7 +4,7 @@ use super::constants;
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},

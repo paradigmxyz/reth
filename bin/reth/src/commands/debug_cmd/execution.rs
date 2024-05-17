@@ -22,7 +22,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;

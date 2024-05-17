@@ -239,6 +239,7 @@ reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-exex = { path = "crates/exex" }
+reth-fs-util = { path = "crates/fs-util" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
@@ -278,7 +279,6 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-node-events = { path = "crates/node/events" }
 reth-testing-utils = { path = "testing/testing-utils" }
-reth-fs-utils = { path = "crates/fs-utils" }
 
 # revm
 revm = { version = "9.0.0", features = [

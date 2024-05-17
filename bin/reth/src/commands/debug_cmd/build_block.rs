@@ -22,7 +22,7 @@ use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_interfaces::RethResult;
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::database::CachedReads;

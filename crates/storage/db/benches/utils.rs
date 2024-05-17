@@ -5,7 +5,7 @@ use reth_db::{
     transaction::DbTxMut,
     DatabaseEnv,
 };
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_primitives::Bytes;
 use std::{path::Path, sync::Arc};
 

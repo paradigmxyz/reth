@@ -1,6 +1,6 @@
 //! Clap parser utilities
 
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_primitives::{AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},

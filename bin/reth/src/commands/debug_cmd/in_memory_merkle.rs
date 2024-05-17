@@ -16,7 +16,7 @@ use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_fs_utils as fs;
+use reth_fs_util as fs;
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;

@@ -1,12 +1,12 @@
 [package]
-name = "reth-fs-utils"
+name = "reth-fs-util"
 version.workspace = true
 edition.workspace = true
 homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Commonly used fs capabilities in reth."
+description = "Commonly used fs utils in reth."
 
 [lints]
 workspace = true
