@@ -117,8 +117,7 @@ contract ValidatorElect is VotingEvents {
     }
 
     function _addValidator(PeerKey memory p) private {
-        uint arrayLength = mValidators.length;
-        mValidators[arrayLength] = PeerKey({Half1: p.Half1, Half2: p.Half2});
+        mValidators.push(PeerKey({Half1: p.Half1, Half2: p.Half2}));
     }
 
     function _delValidator(PeerKey memory p) private {
