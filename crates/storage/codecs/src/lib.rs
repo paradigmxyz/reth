@@ -70,6 +70,24 @@ pub trait Compact: Sized {
     }
 }
 
+/// To be used with Option<CompactPlaceholder> to place or replace one bit on the bitflag struct.
+pub type CompactPlaceholder = ();
+
+impl Compact for CompactPlaceholder {
+    #[inline]
+    fn to_compact<B>(self, _: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        0
+    }
+
+    #[inline]
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        ((), buf)
+    }
+}
+
 macro_rules! impl_uint_compact {
     ($($name:tt),+) => {
         $(
