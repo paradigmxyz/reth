@@ -1,10 +1,7 @@
 use crate::metrics::BlockBufferMetrics;
-use lru::LruCache;
+use reth_network::cache::LruCache;
 use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
-use std::{
-    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet},
-    num::NonZeroUsize,
-};
+use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -32,19 +29,19 @@ pub struct BlockBuffer {
     /// first in line for evicting if `max_blocks` limit is hit.
     ///
     /// Used as counter of amount of blocks inside buffer.
-    pub(crate) lru: LruCache<BlockHash, ()>,
+    pub(crate) lru: LruCache<BlockHash>,
     /// Various metrics for the block buffer.
     pub(crate) metrics: BlockBufferMetrics,
 }
 
 impl BlockBuffer {
     /// Create new buffer with max limit of blocks
-    pub fn new(limit: usize) -> Self {
+    pub fn new(limit: u32) -> Self {
         Self {
             blocks: Default::default(),
             parent_to_child: Default::default(),
             earliest_blocks: Default::default(),
-            lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
+            lru: LruCache::new(limit),
             metrics: Default::default(),
         }
     }
@@ -76,7 +73,7 @@ impl BlockBuffer {
         self.earliest_blocks.entry(block.number).or_default().insert(hash);
         self.blocks.insert(hash, block);
 
-        if let Some((evicted_hash, _)) = self.lru.push(hash, ()).filter(|(b, _)| *b != hash) {
+        if let (_, Some(evicted_hash)) = self.lru.insert_and_get_evicted(hash) {
             // evict the block if limit is hit
             if let Some(evicted_block) = self.remove_block(&evicted_hash) {
                 // evict the block if limit is hit
@@ -85,7 +82,6 @@ impl BlockBuffer {
         }
         self.metrics.blocks.set(self.blocks.len() as f64);
     }
-
     /// Removes the given block from the buffer and also all the children of the block.
     ///
     /// This is used to get all the blocks that are dependent on the block that is included.
@@ -157,7 +153,7 @@ impl BlockBuffer {
         let block = self.blocks.remove(hash)?;
         self.remove_from_earliest_blocks(block.number, hash);
         self.remove_from_parent(block.parent_hash, hash);
-        self.lru.pop(hash);
+        self.lru.remove(hash);
         Some(block)
     }
 

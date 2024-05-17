@@ -21,11 +21,11 @@ reth-provider.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-parallel = { workspace = true, features = ["parallel"] }
+reth-network = { workspace = true }
 reth-consensus.workspace = true
 
 # common
 parking_lot.workspace = true
-lru = "0.12"
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 
