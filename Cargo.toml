@@ -92,6 +92,7 @@ members = [
     "examples/db-access",
     "testing/ef-tests/",
     "testing/testing-utils",
+    "testing/test",
 ]
 default-members = ["bin/reth"]
 
@@ -306,6 +307,7 @@ alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
 alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
 alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
 
 # misc
 auto_impl = "1"

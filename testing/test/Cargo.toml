@@ -1,0 +1,24 @@
+[package]
+name = "debugging"
+description = "Testing utils for reth."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+secp256k1.workspace = true
+alloy-genesis.workspace = true
+reth-primitives = { workspace = true, features = ["alloy-compat"] }
+alloy-rpc-types.workspace = true
+alloy-provider = { workspace = true, features = ["reqwest"] }  
+alloy-transport-http.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+url.workspace = true
+eyre.workspace = true
+futures-util.workspace = true
