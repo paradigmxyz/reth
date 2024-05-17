@@ -81,6 +81,11 @@ impl Chain {
         self.trie_updates.as_ref()
     }
 
+    /// Reset cached trie updates for this chain.
+    pub fn reset_trie_updates(&mut self) {
+        self.trie_updates.take();
+    }
+
     /// Get post state of this chain
     pub fn state(&self) -> &BundleStateWithReceipts {
         &self.state

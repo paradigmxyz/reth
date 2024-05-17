@@ -1195,6 +1195,29 @@ where
             "Canonicalization finished"
         );
 
+        // reset trie updates for other childs
+        let children_chain_id: Vec<_> = self
+            .block_indices()
+            .fork_to_child()
+            .get(&old_tip.hash)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|child| child != &block_hash)
+            .filter_map(|child| {
+                self.block_indices().get_blocks_chain_id(&child).map(|chain_id| (child, chain_id))
+            })
+            .collect();
+
+        for (child, chain_id) in children_chain_id {
+            if let Some(mut chain) =
+                self.remove_and_split_chain(chain_id, ChainSplitTarget::Hash(child))
+            {
+                chain.reset_trie_updates();
+            }
+        }
+        durations_recorder.record_relative(MakeCanonicalAction::ResetTrieUpdatesForOtherChilds);
+
         // Send notification about new canonical chain and return outcome of canonicalization.
         let outcome = CanonicalOutcome::Committed { head: chain_notification.tip().header.clone() };
         let _ = self.canon_state_notification_sender.send(chain_notification);
