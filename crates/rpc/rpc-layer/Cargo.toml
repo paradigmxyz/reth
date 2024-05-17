@@ -11,19 +11,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
-reth-fs-util.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
 
 http.workspace = true
 hyper.workspace = true
 tower.workspace = true
 http-body.workspace = true
 pin-project.workspace = true
-jsonwebtoken = "8"
 
-rand.workspace = true
-serde.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

@@ -133,6 +133,19 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "0.1.0"
+source = "git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file#5d580fa25c8203570c829b89ea7b3526df684ffd"
+dependencies = [
+ "alloy-eips 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "c-kzg",
+ "serde",
+]
+
+[[package]]
+name = "alloy-consensus"
+version = "0.1.0"
 source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
@@ -177,6 +190,22 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "0.1.0"
+source = "git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file#5d580fa25c8203570c829b89ea7b3526df684ffd"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "c-kzg",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "once_cell",
+ "serde",
+ "sha2 0.10.8",
+]
+
+[[package]]
+name = "alloy-eips"
+version = "0.1.0"
 source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-primitives",
@@ -206,6 +235,17 @@ dependencies = [
  "once_cell",
  "serde",
  "sha2 0.10.8",
+]
+
+[[package]]
+name = "alloy-genesis"
+version = "0.1.0"
+source = "git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file#5d580fa25c8203570c829b89ea7b3526df684ffd"
+dependencies = [
+ "alloy-primitives",
+ "alloy-serde 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -386,6 +426,24 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
+source = "git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file#5d580fa25c8203570c829b89ea7b3526df684ffd"
+dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-eips 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-genesis 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-sol-types",
+ "itertools 0.12.1",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "alloy-rpc-types"
+version = "0.1.0"
 source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999#dd7a999d9efe259c47a34dde046952de795a8f6a"
 dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
@@ -440,9 +498,29 @@ source = "git+https://github.com/alloy-rs/alloy?rev=dd7a999#dd7a999d9efe259c47a3
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-primitives",
- "alloy-rpc-types-engine",
+ "alloy-rpc-types-engine 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "serde",
  "serde_with",
+]
+
+[[package]]
+name = "alloy-rpc-types-engine"
+version = "0.1.0"
+source = "git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file#5d580fa25c8203570c829b89ea7b3526df684ffd"
+dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-eips 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "alloy-serde 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "jsonrpsee-types",
+ "jsonwebtoken 9.3.0",
+ "rand 0.8.5",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -456,9 +534,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
- "ethereum_ssz",
- "ethereum_ssz_derive",
- "jsonrpsee-types",
  "jsonwebtoken 9.3.0",
  "rand 0.8.5",
  "serde",
@@ -473,6 +548,16 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "alloy-serde"
+version = "0.1.0"
+source = "git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file#5d580fa25c8203570c829b89ea7b3526df684ffd"
+dependencies = [
+ "alloy-primitives",
  "serde",
  "serde_json",
 ]
@@ -6416,7 +6501,6 @@ dependencies = [
  "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-exex",
- "reth-fs-util",
  "reth-interfaces",
  "reth-network",
  "reth-network-api",
@@ -6546,6 +6630,7 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "linked_hash_set",
+ "lru",
  "metrics",
  "parking_lot 0.12.2",
  "reth-consensus",
@@ -6554,7 +6639,6 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-interfaces",
  "reth-metrics",
- "reth-network",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6661,7 +6745,6 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
- "reth-fs-util",
  "reth-interfaces",
  "reth-libmdbx",
  "reth-metrics",
@@ -7036,14 +7119,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-fs-util"
-version = "0.2.0-beta.7"
-dependencies = [
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
@@ -7054,7 +7129,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-consensus",
  "reth-eth-wire-types",
- "reth-fs-util",
  "reth-network-api",
  "reth-network-types",
  "reth-primitives",
@@ -7264,7 +7338,7 @@ dependencies = [
  "memmap2 0.7.1",
  "ph",
  "rand 0.8.5",
- "reth-fs-util",
+ "reth-primitives",
  "serde",
  "sucds",
  "tempfile",
@@ -7362,7 +7436,6 @@ dependencies = [
  "reth-engine-primitives",
  "reth-etl",
  "reth-evm",
- "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
@@ -7601,7 +7674,7 @@ name = "reth-provider"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-rlp",
- "alloy-rpc-types-engine",
+ "alloy-rpc-types-engine 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
  "assert_matches",
  "auto_impl",
  "dashmap",
@@ -7614,7 +7687,6 @@ dependencies = [
  "reth-codecs",
  "reth-db",
  "reth-evm",
- "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
  "reth-nippy-jar",
@@ -7819,19 +7891,14 @@ dependencies = [
 name = "reth-rpc-layer"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-rpc-types-engine 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
  "assert_matches",
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.28",
  "jsonrpsee",
- "jsonwebtoken 8.3.0",
  "pin-project",
- "rand 0.8.5",
- "reth-fs-util",
- "reth-primitives",
- "serde",
  "tempfile",
- "thiserror",
  "tokio",
  "tower",
  "tracing",
@@ -7845,7 +7912,7 @@ dependencies = [
  "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=dd7a999)",
  "alloy-rpc-types-anvil",
  "alloy-rpc-types-beacon",
- "alloy-rpc-types-engine",
+ "alloy-rpc-types-engine 0.1.0 (git+https://github.com/quentinv72/alloy?branch=read-write-jwt-file)",
  "alloy-rpc-types-trace",
  "arbitrary",
  "bytes",
@@ -8020,7 +8087,6 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-eth-wire",
- "reth-fs-util",
  "reth-metrics",
  "reth-network-types",
  "reth-primitives",
