@@ -404,7 +404,7 @@ similar-asserts = "1.5.0"
 test-fuzz = "5"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "276cdfb" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "276cdfb" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "276cdfb" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "276cdfb" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "8fd85f1" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "8fd85f1" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "8fd85f1" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "8fd85f1" }
