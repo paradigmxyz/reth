@@ -70,7 +70,7 @@ pub trait Compact: Sized {
     }
 }
 
-/// To be used with Option<CompactPlaceholder> to place or replace one bit on the bitflag struct.
+/// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
 pub type CompactPlaceholder = ();
 
 impl Compact for CompactPlaceholder {
