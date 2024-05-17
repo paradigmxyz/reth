@@ -28,10 +28,13 @@ use reth_rpc::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig, FeeHistoryCache,
         FeeHistoryCacheConfig,
     },
-    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, EngineEthApi, EthApi,
-    EthFilter, EthSubscriptionIdProvider, JwtAuthValidator, JwtSecret,
+    EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
 };
 use reth_rpc_api::servers::*;
+use reth_rpc_layer::{
+    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
+    JwtSecret,
+};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

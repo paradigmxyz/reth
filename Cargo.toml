@@ -47,6 +47,7 @@ members = [
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
+    "crates/rpc/rpc-layer",
     "crates/engine-primitives/",
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/node",
@@ -266,6 +267,7 @@ reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
+reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-stages = { path = "crates/stages" }
 reth-stages-api = { path = "crates/stages-api" }
 reth-static-file = { path = "crates/static-file" }
@@ -280,9 +282,9 @@ reth-node-events = { path = "crates/node/events" }
 reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
-revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "c1b5dd0" }
+revm = { version = "9.0.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "4.0.0", features = ["std"], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "21a2db5" }
 
 # eth
 alloy-chains = "0.1.15"
@@ -290,22 +292,22 @@ alloy-primitives = "0.7.2"
 alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
-alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51", default-features = false, features = [
+alloy-trie = "0.4.0"
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "899fc51" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "899fc51" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "dd7a999" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "dd7a999" }
 
 # misc
 auto_impl = "1"

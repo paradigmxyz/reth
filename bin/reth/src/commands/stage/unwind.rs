@@ -15,11 +15,7 @@ use reth_provider::{
 };
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
-    },
+    stages::{ExecutionStage, ExecutionStageThresholds},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
@@ -133,6 +129,7 @@ impl Command {
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let stage_conf = &config.stages;
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
@@ -148,11 +145,9 @@ impl Command {
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
                     executor.clone(),
-                    stage_conf.etl.clone(),
+                    stage_conf.clone(),
+                    prune_modes.clone(),
                 )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })
                 .set(ExecutionStage::new(
                     executor,
                     ExecutionStageThresholds {
@@ -161,20 +156,10 @@ impl Command {
                         max_cumulative_gas: None,
                         max_duration: None,
                     },
-                    stage_conf
-                        .merkle
-                        .clean_threshold
-                        .max(stage_conf.account_hashing.clean_threshold)
-                        .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    stage_conf.execution_external_clean_threshold(),
+                    prune_modes,
                     ExExManagerHandle::empty(),
-                ))
-                .set(AccountHashingStage::default())
-                .set(StorageHashingStage::default())
-                .set(MerkleStage::default_unwind())
-                .set(TransactionLookupStage::default())
-                .set(IndexAccountHistoryStage::default())
-                .set(IndexStorageHistoryStage::default()),
+                )),
             )
             .build(
                 provider_factory.clone(),
