@@ -8142,6 +8142,7 @@ version = "7.0.0"
 source = "git+https://github.com/bluealloy/revm?rev=7af1986#7af19862ee47304d7e31dba2380073ab2f77edf1"
 dependencies = [
  "aurora-engine-modexp",
+ "blst",
  "c-kzg",
  "hex",
  "k256",
