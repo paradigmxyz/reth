@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use reth_primitives::U256;
 use reth_tracing::tracing::{info, warn};
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::op_proposer::{L2Output, L2OutputOracle::L2OutputOracleInstance};
 
@@ -28,10 +28,10 @@ where
     N: Network,
     P: Provider<T, N>,
 {
-    pub fn new(l2_output: Arc<L2OutputOracleInstance<T, Arc<P>, N>>) -> Self {
-        let (pending_transaction_tx, _) =
-            tokio::sync::mpsc::channel::<(u64, PendingTransaction)>(1);
-
+    pub fn new(
+        l2_output: Arc<L2OutputOracleInstance<T, Arc<P>, N>>,
+        pending_transaction_tx: Sender<(u64, PendingTransaction)>,
+    ) -> Self {
         Self {
             pending_transactions: Arc::new(Mutex::new(HashSet::new())),
             l2_output_oracle: l2_output,
@@ -79,10 +79,10 @@ where
     /// the `pending_transaction_tx` and wait for them to complete. Once the transaction has
     /// succeeded or failed, the transaction will be removed from the `pending_transactions`
     /// HashSet.
-    pub fn run(&mut self) -> impl Future<Output = ()> {
-        let (pending_tx, mut pending_rx) =
-            tokio::sync::mpsc::channel::<(u64, PendingTransaction)>(100);
-        self.pending_transaction_tx = pending_tx;
+    pub fn run(
+        &mut self,
+        mut pending_rx: Receiver<(u64, PendingTransaction)>,
+    ) -> impl Future<Output = eyre::Result<()>> {
         let pending_transactions = self.pending_transactions.clone();
 
         async move {
