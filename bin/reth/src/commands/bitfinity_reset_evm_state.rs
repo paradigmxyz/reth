@@ -1,5 +1,5 @@
 //! Command that initializes the reset of remote EVM node using the current node state
-//!
+
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::Arc;

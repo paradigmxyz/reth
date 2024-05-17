@@ -1,8 +1,9 @@
-///
-/// These are integration tests for the BitfinityResetEvmStateCommand.
-/// These tests requires a running EVM node or EVM block extractor node at the specified URL
-/// and a running EVM canister on a local dfx node.
-///
+//!
+//! These are integration tests for the BitfinityResetEvmStateCommand.
+//! These tests requires a running EVM node or EVM block extractor node at the specified URL
+//! and a running EVM canister on a local dfx node.
+//!
+
 use std::{sync::Arc, time::Duration};
 
 use did::block::BlockResult;

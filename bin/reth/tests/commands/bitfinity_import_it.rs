@@ -1,12 +1,12 @@
-use std::time::Duration;
+//!
+//! Integration tests for the bitfinity import command.
+//! These tests requires a running EVM node or EVM block extractor node at the specified URL.
+//! 
 
-///
-/// Integration tests for the bitfinity import command.
-/// These tests requires a running EVM node or EVM block extractor node at the specified URL.
-/// 
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use reth::commands::bitfinity_import::BitfinityImportCommand;
 use reth_provider::{BlockNumReader, BlockReader};
+use std::time::Duration;
 use super::utils::*;
 
 #[tokio::test]
