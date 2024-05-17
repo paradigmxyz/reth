@@ -392,7 +392,8 @@ impl NetworkConfigBuilder {
         }
     }
 
-    /// Exposes the discovery v5 config builder.
+    /// Calls a closure on [`reth_discv5::ConfigBuilder`], if discv5 discovery is enabled and the
+    /// builder has been set.
     /// ```
     /// use reth_network::NetworkConfigBuilder;
     /// use reth_primitives::MAINNET;
@@ -402,10 +403,10 @@ impl NetworkConfigBuilder {
     /// let sk = SecretKey::new(&mut thread_rng());
     /// let fork_id = MAINNET.latest_fork_id();
     /// let network_config = NetworkConfigBuilder::new(sk)
-    ///     .discovery_v5_with_builder(|builder| builder.fork(b"eth", fork_id))
+    ///     .map_discv5_config_builder(|builder| builder.fork(b"eth", fork_id))
     ///     .build(NoopProvider::default());
     /// ```
-    pub fn discovery_v5_with_builder(
+    pub fn map_discv5_config_builder(
         mut self,
         f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::ConfigBuilder,
     ) -> Self {

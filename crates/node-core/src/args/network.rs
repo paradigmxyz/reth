@@ -165,7 +165,7 @@ impl NetworkArgs {
                 network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
         }
 
-        network_config_builder.discovery_v5_with_builder(|builder| {
+        network_config_builder.map_discv5_config_builder(|builder| {
             let DiscoveryArgs {
                 discv5_lookup_interval,
                 discv5_bootstrap_lookup_interval,

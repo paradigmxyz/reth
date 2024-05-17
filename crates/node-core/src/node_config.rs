@@ -471,7 +471,7 @@ impl NodeConfig {
                 // set discovery port based on instance number
                 self.network.discovery.port + self.instance - 1,
             ))
-            .discovery_v5_with_builder(|builder| {
+            .map_discv5_config_builder(|builder| {
                 let DiscoveryArgs {
                     discv5_addr,
                     discv5_addr_ipv6,
