@@ -46,6 +46,10 @@ pub struct TxEip4844 {
     ///
     /// This is also known as `GasTipCap`
     pub max_priority_fee_per_gas: u128,
+    /// TODO(debt): this should be removed if we break the DB.
+    /// Makes sure that the Compact bitflag struct has one bit after the above field:
+    /// <https://github.com/paradigmxyz/reth/pull/8291#issuecomment-2117545016>
+    pub placeholder: Option<()>,
     /// The 160-bit address of the message call’s recipient.
     pub to: Address,
     /// A scalar value equal to the number of Wei to
