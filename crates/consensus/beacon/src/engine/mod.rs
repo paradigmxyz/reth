@@ -1870,7 +1870,7 @@ where
                 //
                 // These messages can affect the state of the SyncController and they're also time
                 // sensitive, hence they are polled first.
-                if let Some(msg) = this.queued_engine_messages.pop_front() {
+                while let Some(msg) = this.queued_engine_messages.pop_front() {
                     match msg {
                         BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                             this.on_forkchoice_updated(state, payload_attrs, tx);
