@@ -390,6 +390,24 @@ const fn decode_varuint_panic() -> ! {
     panic!("could not decode varuint");
 }
 
+/// TODO(debt): this should be removed if we break the DB.
+/// Needed to make sure that the Compact bitflag struct has one bit before the new `to` field:
+/// <https://github.com/paradigmxyz/reth/pull/8291#issuecomment-2117545016>
+impl Compact for () {
+    #[inline]
+    fn to_compact<B>(self, _: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        0
+    }
+
+    #[inline]
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        ((), buf)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
