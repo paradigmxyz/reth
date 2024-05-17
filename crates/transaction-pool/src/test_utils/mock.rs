@@ -857,6 +857,7 @@ impl TryFromRecoveredTransaction for MockTransaction {
                 access_list,
                 blob_versioned_hashes: _,
                 max_fee_per_blob_gas,
+                placeholder: _,
             }) => Ok(MockTransaction::Eip4844 {
                 chain_id,
                 hash,
@@ -989,6 +990,7 @@ impl From<MockTransaction> for Transaction {
                 blob_versioned_hashes: sidecar.versioned_hashes().collect(),
                 max_fee_per_blob_gas,
                 input,
+                placeholder: Some(()),
             }),
         }
     }
@@ -1081,6 +1083,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     max_fee_per_blob_gas,
                     access_list,
                     blob_versioned_hashes: _,
+                    placeholder: _,
                 }) => MockTransaction::Eip4844 {
                     chain_id: *chain_id,
                     sender,

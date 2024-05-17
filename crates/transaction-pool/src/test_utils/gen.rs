@@ -184,6 +184,7 @@ impl TransactionBuilder {
                 gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
+                placeholder: Some(()),
                 to: match self.to {
                     TxKind::Call(to) => to,
                     TxKind::Create => Address::default(),
