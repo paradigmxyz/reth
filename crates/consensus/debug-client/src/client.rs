@@ -44,7 +44,7 @@ pub trait BlockProvider: Send + Sync + 'static {
                 None => return Ok(B256::default()),
             };
             let block = self.get_block(previous_block_number).await?;
-            Ok(block.header.hash.ok_or_else(|| eyre::eyre!("previous block does not have hash"))?)
+            block.header.hash.ok_or_else(|| eyre::eyre!("previous block does not have hash"))
         }
     }
 }
