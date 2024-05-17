@@ -10,7 +10,6 @@
 
 pub mod ban_list;
 pub mod bandwidth_meter;
-pub mod ip;
 /// Traits related to tokio streams
 pub mod stream;
 

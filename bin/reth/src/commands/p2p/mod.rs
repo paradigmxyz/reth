@@ -15,11 +15,10 @@ use discv5::ListenConfig;
 use reth_config::Config;
 use reth_db::create_db;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
-use reth_net_common::ip::IpAddrExt;
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use std::{
-    net::{SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::Arc,
 };
@@ -135,10 +134,9 @@ impl Command {
                     ..
                 } = self.network.discovery;
 
-                let rlpx_addr = self.network.addr;
                 // Use rlpx address if none given
-                let discv5_addr_ipv4 = discv5_addr.or_else(|| rlpx_addr.ipv4().copied());
-                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| rlpx_addr.ipv6().copied());
+                let discv5_addr_ipv4 = discv5_addr.or_else(|| ipv4(self.network.addr));
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| ipv6(self.network.addr));
 
                 builder
                     .discv5_config(
@@ -209,5 +207,19 @@ impl Command {
         }
 
         Ok(())
+    }
+}
+
+fn ipv4(ip: IpAddr) -> Option<Ipv4Addr> {
+    match ip {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
+    }
+}
+
+fn ipv6(ip: IpAddr) -> Option<Ipv6Addr> {
+    match ip {
+        IpAddr::V4(_) => None,
+        IpAddr::V6(ip) => Some(ip),
     }
 }

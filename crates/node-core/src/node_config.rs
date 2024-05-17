@@ -15,7 +15,6 @@ use once_cell::sync::Lazy;
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
-use reth_net_common::ip::IpAddrExt;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
@@ -28,7 +27,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
-    net::{SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::Arc,
 };
@@ -481,10 +480,9 @@ impl NodeConfig {
                     ..
                 } = self.network.discovery;
 
-                let rlpx_addr = self.network.addr;
                 // Use rlpx address if none given
-                let discv5_addr_ipv4 = discv5_addr.or_else(|| rlpx_addr.ipv4().copied());
-                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| rlpx_addr.ipv6().copied());
+                let discv5_addr_ipv4 = discv5_addr.or_else(|| ipv4(self.network.addr));
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| ipv6(self.network.addr));
 
                 let discv5_port_ipv4 = discv5_port + self.instance - 1;
                 let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
@@ -532,5 +530,19 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
         }
+    }
+}
+
+fn ipv4(ip: IpAddr) -> Option<Ipv4Addr> {
+    match ip {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
+    }
+}
+
+fn ipv6(ip: IpAddr) -> Option<Ipv6Addr> {
+    match ip {
+        IpAddr::V4(_) => None,
+        IpAddr::V6(ip) => Some(ip),
     }
 }

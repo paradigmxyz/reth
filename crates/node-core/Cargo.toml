@@ -30,7 +30,6 @@ reth-config.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
-reth-net-common.workspace = true
 reth-network-api.workspace = true
 reth-evm.workspace = true
 reth-engine-primitives.workspace = true
