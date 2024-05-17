@@ -5,21 +5,23 @@ use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
 // use linked_hash_set::LinkedHashSet;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
-use std::{borrow::Borrow, fmt, hash::Hash, num::NonZeroUsize};
+use std::{fmt, hash::Hash};
 
 /// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
-pub struct LruCache<T: Hash + Eq> {
-    limit: NonZeroUsize,
+pub struct LruCache<T: Hash + Eq + fmt::Debug> {
+    limit: u32,
     inner: LruMap<T, ()>,
 }
 
-impl<T: Hash + Eq> LruCache<T> {
+impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// Creates a new [`LruCache`] using the given limit
-    pub fn new(limit: NonZeroUsize) -> Self {
-        Self { inner: LruMap::new(limit.get().try_into().unwrap()), limit }
+    pub fn new(limit: u32) -> Self {
+        // limit of lru map is one element more, so can give eviction feedback, which isn't
+        // supported by LruMap
+        Self { inner: LruMap::new(limit + 1), limit }
     }
 
     /// Insert an element into the set.
@@ -38,14 +40,12 @@ impl<T: Hash + Eq> LruCache<T> {
     /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
     /// if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
-        if self.inner.insert(entry, ()) {
-            if self.limit.get() < self.inner.len() {
-                // remove the oldest element in the set
-                return (true, self.remove_lru());
-            }
-            return (true, None);
-        }
-        (false, None)
+        let new = self.inner.peek(&entry).is_none();
+        let evicted =
+            if new && (self.limit as usize) <= self.inner.len() { self.remove_lru() } else { None };
+        _ = self.inner.get_or_insert(entry, || ());
+
+        (new, evicted)
     }
 
     /// Remove the least recently used entry and return it.
@@ -63,17 +63,13 @@ impl<T: Hash + Eq> LruCache<T> {
     }
 
     /// Returns `true` if the set contains a value.
-    pub fn contains<Q>(&self, value: &Q) -> bool
-    where
-        T: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        self.inner.iter().any(|(k, _v)| k.borrow() == value)
+    pub fn contains(&self, value: &T) -> bool {
+        self.inner.peek(value).is_some()
     }
 
     /// Returns an iterator over all cached entries in lru order
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.inner.iter().rev().map(|(k, _v)| k)
+        self.inner.iter().map(|(k, _v)| k)
     }
 
     /// Returns number of elements currently in cache.
@@ -91,11 +87,11 @@ impl<T: Hash + Eq> LruCache<T> {
 
 impl<T> Extend<T> for LruCache<T>
 where
-    T: Eq + Hash,
+    T: Eq + Hash + fmt::Debug,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter.into_iter() {
-            self.insert(item);
+            _ = self.insert(item);
         }
     }
 }
@@ -176,17 +172,15 @@ mod test {
 
     #[test]
     fn test_cache_should_insert_into_empty_set() {
-        let limit = NonZeroUsize::new(5).unwrap();
-        let mut cache = LruCache::new(limit);
+        let mut cache = LruCache::new(5);
         let entry = "entry";
         assert!(cache.insert(entry));
-        assert!(cache.contains(entry));
+        assert!(cache.contains(&entry));
     }
 
     #[test]
     fn test_cache_should_not_insert_same_value_twice() {
-        let limit = NonZeroUsize::new(5).unwrap();
-        let mut cache = LruCache::new(limit);
+        let mut cache = LruCache::new(5);
         let entry = "entry";
         assert!(cache.insert(entry));
         assert!(!cache.insert(entry));
@@ -194,25 +188,23 @@ mod test {
 
     #[test]
     fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
-        let limit = NonZeroUsize::new(2).unwrap();
-        let mut cache = LruCache::new(limit);
+        let mut cache = LruCache::new(2);
         let old_entry = "old_entry";
         let new_entry = "new_entry";
         cache.insert(old_entry);
         cache.insert("entry");
         cache.insert(new_entry);
-        assert!(cache.contains(new_entry));
-        assert!(!cache.contains(old_entry));
+        assert!(cache.contains(&new_entry));
+        assert!(!cache.contains(&old_entry));
     }
 
     #[test]
     fn test_cache_should_extend_an_array() {
-        let limit = NonZeroUsize::new(5).unwrap();
-        let mut cache = LruCache::new(limit);
+        let mut cache = LruCache::new(5);
         let entries = ["some_entry", "another_entry"];
         cache.extend(entries);
         for e in entries {
-            assert!(cache.contains(e));
+            assert!(cache.contains(&e));
         }
     }
 
@@ -244,7 +236,7 @@ mod test {
         #[derive(Debug, Hash, PartialEq, Eq)]
         struct Key(i8);
 
-        let mut cache = LruCache::new(NonZeroUsize::new(2).unwrap());
+        let mut cache = LruCache::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
         let key_2 = Key(2);

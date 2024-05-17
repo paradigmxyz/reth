@@ -1,10 +1,7 @@
 use crate::metrics::BlockBufferMetrics;
 use reth_network::cache::LruCache;
 use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
-use std::{
-    collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet},
-    num::NonZeroUsize,
-};
+use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -39,12 +36,12 @@ pub struct BlockBuffer {
 
 impl BlockBuffer {
     /// Create new buffer with max limit of blocks
-    pub fn new(limit: usize) -> Self {
+    pub fn new(limit: u32) -> Self {
         Self {
             blocks: Default::default(),
             parent_to_child: Default::default(),
             earliest_blocks: Default::default(),
-            lru: LruCache::new(NonZeroUsize::new(limit).unwrap()),
+            lru: LruCache::new(limit),
             metrics: Default::default(),
         }
     }

@@ -48,7 +48,6 @@ use schnellru::ByLength;
 use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
-    num::NonZeroUsize,
     pin::Pin,
     task::{ready, Context, Poll},
     time::{Duration, Instant},
@@ -576,11 +575,8 @@ impl TransactionFetcher {
             #[cfg(debug_assertions)]
             previously_unseen_hashes.push(*hash);
 
-            // todo: allow `MAX_ALTERNATIVE_PEERS_PER_TX` to be zero
-            let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).expect("MAX_ALTERNATIVE_PEERS_PER_TX should be non-zero");
-
             if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
-                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(limit), tx_encoded_length: None}
+                TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
             ).is_none() {
 
                 debug!(target: "net::tx",
@@ -1062,14 +1058,9 @@ impl Default for TransactionFetcher {
         Self {
             active_peers: LruMap::new(DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS),
             inflight_requests: Default::default(),
-            hashes_pending_fetch: LruCache::new(
-                NonZeroUsize::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH)
-                    .expect("buffered cache limit should be non-zero"),
-            ),
+            hashes_pending_fetch: LruCache::new(DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH),
             hashes_fetch_inflight_and_pending_fetch: LruMap::new(
-                DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH
-                    .try_into()
-                    .expect("proper size for inflight and pending fetch cache"),
+                DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH,
             ),
             filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),

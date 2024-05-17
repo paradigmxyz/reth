@@ -26,7 +26,7 @@ impl TreeState {
     pub(crate) fn new(
         last_finalized_block_number: BlockNumber,
         last_canonical_hashes: impl IntoIterator<Item = (BlockNumber, BlockHash)>,
-        buffer_limit: usize,
+        buffer_limit: u32,
     ) -> Self {
         Self {
             block_chain_id_generator: 0,
