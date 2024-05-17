@@ -228,9 +228,7 @@ where
             let requests = [deposit_requests, withdrawal_requests].concat();
 
             // Validate that the header requests root matches the calculated requests root
-            let Some(header_requests_root) = block
-                .header
-                .requests_root else {
+            let Some(header_requests_root) = block.header.requests_root else {
                 return Err(BlockValidationError::RequestsRootMissing.into())
             };
             let requests_root = reth_primitives::proofs::calculate_requests_root(&requests);
