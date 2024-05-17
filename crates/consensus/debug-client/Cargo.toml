@@ -25,7 +25,7 @@ alloy-provider = { workspace = true, features = ["ws"] }
 futures.workspace = true
 eyre.workspace = true
 jsonrpsee.workspace = true
-reqwest = { workspace = true, features = ["default-tls", "json"] }
+reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["time"] }
 
