@@ -1,0 +1,1 @@
+This has a sample `Cargo.toml` with all crates from `reth` that we want to compile within a zkVM. The `Dockerfile.zkvm` in the workspace directory contains an environment that ensures that this package will compile to a `RISC-V 32` toolchain. 

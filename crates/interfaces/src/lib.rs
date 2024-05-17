@@ -22,6 +22,7 @@ pub mod executor;
 mod error;
 pub use error::{RethError, RethResult};
 
+#[cfg(feature = "p2p")]
 /// P2P traits.
 pub mod p2p;
 

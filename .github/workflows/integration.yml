@@ -89,3 +89,16 @@ jobs:
         uses: re-actors/alls-green@release/v1
         with:
           jobs: ${{ toJSON(needs) }}
+
+  zkvm:
+    name: zkVM compilation
+    # Only run sync tests in merge groups
+    if: github.event_name == 'merge_group'
+    runs-on:
+      group: Reth
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run zkVM compilation
+        run: |
+          docker build -t zkvm_image -f Dockerfile.zkvm .

@@ -10,10 +10,9 @@ use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, Shar
 use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
-    NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
-    ReputationChangeKind,
+    NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation, ReputationChangeKind,
 };
-use reth_network_types::PeerId;
+use reth_network_types::{NetworkError, PeerId};
 use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use secp256k1::SecretKey;

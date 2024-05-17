@@ -21,6 +21,10 @@ pub use enr::Enr;
 /// Alias for a peer identifier
 pub type PeerId = B512;
 
+/// Network Error.
+pub mod error;
+pub use error::NetworkError;
+
 pub mod node_record;
 pub use node_record::{NodeRecord, NodeRecordParseError};
 

@@ -14,17 +14,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_eth_wire::{DisconnectReason, EthVersion, Status};
-use reth_network_types::PeerId;
+use reth_network_types::{NetworkError, PeerId};
 use reth_primitives::NodeRecord;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
-pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
 use reth_eth_wire::capability::Capabilities;
 use reth_rpc_types::NetworkStatus;
 
-/// Network Error
-pub mod error;
 /// Reputation score
 pub mod reputation;
 
