@@ -233,10 +233,9 @@ where
             };
             let requests_root = reth_primitives::proofs::calculate_requests_root(&requests);
             if requests_root != header_requests_root {
-                return Err(BlockValidationError::RequestsRootMismatch(GotExpected::new(
-                    requests_root,
-                    header_requests_root,
-                ))
+                return Err(BlockValidationError::RequestsRootMismatch(
+                    GotExpected::new(requests_root, header_requests_root).into(),
+                )
                 .into())
             }
 

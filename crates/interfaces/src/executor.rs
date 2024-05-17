@@ -108,7 +108,7 @@ pub enum BlockValidationError {
     RequestsRootMissing,
     /// Error when requests root doesn't match expected value
     #[error("requests root mismatch: {0}")]
-    RequestsRootMismatch(GotExpected<B256>),
+    RequestsRootMismatch(GotExpectedBoxed<B256>),
 }
 
 /// BlockExecutor Errors
