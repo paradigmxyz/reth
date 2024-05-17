@@ -186,6 +186,8 @@ pub enum MockTransaction {
         max_fee_per_blob_gas: u128,
         /// The gas limit for the transaction.
         gas_limit: u64,
+        /// Placeholder for backwards compatibility.
+        placeholder: Option<()>,
         /// The transaction's destination.
         to: Address,
         /// The value of the transaction.
@@ -276,6 +278,7 @@ impl MockTransaction {
             max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
             max_fee_per_blob_gas: DATA_GAS_PER_BLOB as u128,
             gas_limit: 0,
+            placeholder: Some(()),
             to: Address::random(),
             value: Default::default(),
             input: Bytes::new(),
@@ -858,7 +861,7 @@ impl TryFromRecoveredTransaction for MockTransaction {
                 access_list,
                 blob_versioned_hashes: _,
                 max_fee_per_blob_gas,
-                placeholder: _,
+                placeholder,
             }) => Ok(MockTransaction::Eip4844 {
                 chain_id,
                 hash,
@@ -868,6 +871,7 @@ impl TryFromRecoveredTransaction for MockTransaction {
                 max_priority_fee_per_gas,
                 max_fee_per_blob_gas,
                 gas_limit,
+                placeholder,
                 to,
                 value,
                 input,
@@ -979,6 +983,7 @@ impl From<MockTransaction> for Transaction {
                 input,
                 sidecar,
                 size: _,
+                placeholder,
             } => Self::Eip4844(TxEip4844 {
                 chain_id,
                 nonce,
@@ -992,7 +997,7 @@ impl From<MockTransaction> for Transaction {
                 blob_versioned_hashes: sidecar.versioned_hashes().collect(),
                 max_fee_per_blob_gas,
                 input,
-                placeholder: Some(()),
+                placeholder,
             }),
         }
     }
@@ -1085,7 +1090,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     max_fee_per_blob_gas,
                     access_list,
                     blob_versioned_hashes: _,
-                    placeholder: _,
+                    placeholder,
                 }) => MockTransaction::Eip4844 {
                     chain_id: *chain_id,
                     sender,
@@ -1095,6 +1100,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     max_priority_fee_per_gas: *max_priority_fee_per_gas,
                     max_fee_per_blob_gas: *max_fee_per_blob_gas,
                     gas_limit: *gas_limit,
+                    placeholder: *placeholder,
                     to: *to,
                     value: *value,
                     input: input.clone(),
