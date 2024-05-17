@@ -1,6 +1,7 @@
 //! Command that initializes the reset of remote EVM node using the current node state
 //!
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use alloy_rlp::Encodable;
@@ -11,7 +12,7 @@ use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
 use itertools::Itertools;
 use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
-use reth_db::{init_db, tables};
+use reth_db::{init_db, tables, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
 use reth_node_core::args::BitfinityResetEvmStateArgs;
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
@@ -19,9 +20,9 @@ use reth_primitives::{StorageEntry, B256};
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
 use tracing::{debug, info};
 
-/// Reset the EVM state to a specific block number.
+/// Builder for the `bitfinity reset evm state` command
 #[derive(Debug, Parser)]
-pub struct BitfinityResetEvmStateCommand {
+pub struct BitfinityResetEvmStateCommandBuilder {
     /// The path to the data dir for all reth files and subdirectories.
     ///
     /// Defaults to the OS-specific data directory:
@@ -37,9 +38,39 @@ pub struct BitfinityResetEvmStateCommand {
     pub bitfinity: BitfinityResetEvmStateArgs,
 }
 
+impl BitfinityResetEvmStateCommandBuilder {
+
+    /// Build the command
+    pub async fn build(self) -> eyre::Result<BitfinityResetEvmStateCommand> {
+        let evm_datasource_url = self.bitfinity.evm_datasource_url.clone();
+        info!(target: "reth::cli", "Fetching chain spec from: {}", evm_datasource_url);
+        let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(evm_datasource_url).await?);
+
+        let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
+        let db_path = data_dir.db();
+        let db = Arc::new(init_db(db_path, Default::default())?);
+        let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files())?;
+
+        Ok(BitfinityResetEvmStateCommand::new(provider_factory, self.bitfinity))
+    }
+}
+
+/// Command that initializes the reset of remote EVM node using the current node state
+#[derive(Debug)]
+pub struct BitfinityResetEvmStateCommand {
+    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    bitfinity: BitfinityResetEvmStateArgs,
+}
+
 impl BitfinityResetEvmStateCommand {
+
+    /// Create a new instance of the command
+    pub fn new(provider_factory: ProviderFactory<Arc<DatabaseEnv>>, bitfinity: BitfinityResetEvmStateArgs) -> Self {
+        Self { provider_factory, bitfinity }
+    }
+
     /// Execute the command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(&self) -> eyre::Result<()> {
         let principal = candid::Principal::from_text(self.bitfinity.evmc_principal.as_str())?;
 
         let evm_client = EvmCanisterClient::new(
@@ -52,16 +83,7 @@ impl BitfinityResetEvmStateCommand {
             .await?,
         );
 
-        let evm_datasource_url = self.bitfinity.evm_datasource_url.clone();
-        info!(target: "reth::cli", "Fetching chain spec from: {}", evm_datasource_url);
-        let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(evm_datasource_url).await?);
-
-        let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
-        let db_path = data_dir.db();
-        let db = Arc::new(init_db(db_path, Default::default())?);
-        let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files())?;
-
-        let provider = provider_factory.provider()?;
+        let provider = self.provider_factory.provider()?;
         let last_block_number = provider.last_block_number()?;
         let last_block =
             provider.block_by_number(last_block_number)?.expect("Block should be present");

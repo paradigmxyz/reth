@@ -161,7 +161,9 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-            Commands::BitfinityResetEvmState(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::BitfinityResetEvmState(builder) => runner.run_until_ctrl_c(async move {
+                builder.build().await.unwrap().execute().await
+            }),
         }
     }
 
@@ -223,7 +225,7 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
 
     /// Export state to EVM canister
     #[command(name = "bitfinity-reset-evm-state")]
-    BitfinityResetEvmState(bitfinity_reset_evm_state::BitfinityResetEvmStateCommand),
+    BitfinityResetEvmState(bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder),
 }
 
 #[cfg(test)]

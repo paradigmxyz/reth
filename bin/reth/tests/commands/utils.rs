@@ -17,8 +17,7 @@ pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 /// EVM block extractor for devnet running on Digital Ocean.
 pub const DEFAULT_EVM_DATASOURCE_URL: &str = "https://orca-app-5yyst.ondigitalocean.app";
 
-pub struct ImportTempData {
-    pub temp_dir: TempDir,
+pub struct ImportData {
     pub chain: Arc<ChainSpec>,
     pub data_dir: ChainPath<DataDirPath>,
     pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
@@ -26,10 +25,9 @@ pub struct ImportTempData {
     pub bitfinity_args: BitfinityImportArgs,
 }
 
-impl Debug for ImportTempData {
+impl Debug for ImportData {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ImportTempData")
-            .field("temp_dir", &self.temp_dir)
             .field("chain", &self.chain)
             .finish()
     }
@@ -38,7 +36,7 @@ impl Debug for ImportTempData {
 /// Initializes the database and the blockchain tree for the bitfinity import tests.
 pub async fn bitfinity_import_config_data(
     evm_datasource_url: &str,
-) -> eyre::Result<ImportTempData> {
+) -> eyre::Result<(TempDir, ImportData)> {
     
     let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(evm_datasource_url.to_owned()).await?);
     
@@ -74,18 +72,17 @@ pub async fn bitfinity_import_config_data(
         end_block: Some(100), 
         import_interval: 1, 
         batch_size: 1000, 
-        evmc_principal: "4fe7g-7iaaa-aaaak-aegcq-cai".to_string(), // TESTNET
+        evmc_principal: LOCAL_EVM_CANISTER_ID.to_string(),
         ic_root_key: IC_MAINNET_KEY.to_string(),
     };
     
-    Ok(ImportTempData {
-        temp_dir,
+    Ok((temp_dir, ImportData {
         data_dir,
         chain,
         provider_factory,
         blockchain_db,
         bitfinity_args,
-    })
+    }))
 }
 
 /// Waits until the block is imported.

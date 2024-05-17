@@ -13,9 +13,9 @@ use super::utils::*;
 async fn bitfinity_test_should_import_data_from_evm() {
     // Arrange
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
-    let temp_data = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
+    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
 
-    let mut bitfinity = temp_data.bitfinity_args;
+    let mut bitfinity = import_data.bitfinity_args;
     let end_block = 100;
     bitfinity.end_block = Some(end_block);
     bitfinity.batch_size = (end_block as usize) * 10;
@@ -24,21 +24,19 @@ async fn bitfinity_test_should_import_data_from_evm() {
     {
         let import = BitfinityImportCommand::new(
             None,
-            temp_data.data_dir,
-            temp_data.chain.clone(),
+            import_data.data_dir,
+            import_data.chain.clone(),
             bitfinity,
-            temp_data.provider_factory.clone(),
-            temp_data.blockchain_db,
+            import_data.provider_factory.clone(),
+            import_data.blockchain_db,
         );
-        let _import_handle = import.execute().await.unwrap();
-
-        wait_until_local_block_imported(&temp_data.provider_factory, end_block, Duration::from_secs(20)).await;
-
+        let _import_handle = import.schedule_execution().await.unwrap();
+        wait_until_local_block_imported(&import_data.provider_factory, end_block, Duration::from_secs(20)).await;
     }
 
     // Assert
     {
-        let provider = temp_data.provider_factory.provider().unwrap();
+        let provider = import_data.provider_factory.provider().unwrap();
         assert_eq!(end_block, provider.last_block_number().unwrap());
 
         // create evm client
@@ -58,9 +56,9 @@ async fn bitfinity_test_should_import_data_from_evm() {
 async fn bitfinity_test_should_import_with_small_batch_size() {
     // Arrange
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
-    let temp_data = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
+    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
 
-    let mut bitfinity = temp_data.bitfinity_args;
+    let mut bitfinity = import_data.bitfinity_args;
     let end_block = 101;
     bitfinity.end_block = Some(end_block);
     bitfinity.batch_size = 10;
@@ -69,21 +67,19 @@ async fn bitfinity_test_should_import_with_small_batch_size() {
     {
         let import = BitfinityImportCommand::new(
             None,
-            temp_data.data_dir,
-            temp_data.chain.clone(),
+            import_data.data_dir,
+            import_data.chain.clone(),
             bitfinity,
-            temp_data.provider_factory.clone(),
-            temp_data.blockchain_db,
+            import_data.provider_factory.clone(),
+            import_data.blockchain_db,
         );
-        let _import_handle = import.execute().await.unwrap();
-
-        wait_until_local_block_imported(&temp_data.provider_factory, end_block, Duration::from_secs(20)).await;
-
+        let _import_handle = import.schedule_execution().await.unwrap();
+        wait_until_local_block_imported(&import_data.provider_factory, end_block, Duration::from_secs(20)).await;
     }
 
     // Assert
     {
-        let provider = temp_data.provider_factory.provider().unwrap();
+        let provider = import_data.provider_factory.provider().unwrap();
         assert_eq!(end_block, provider.last_block_number().unwrap());
 
         // create evm client
