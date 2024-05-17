@@ -445,7 +445,6 @@ where
 
         if ctx.node_config().debug.etherscan {
             let chain = ctx.node_config().chain.chain;
-            // todo: move this piping into a helperfunction
             let block_provider = EtherscanBlockProvider::new(
                 chain
                     .etherscan_urls()
