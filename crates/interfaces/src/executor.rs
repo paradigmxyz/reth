@@ -103,6 +103,12 @@ pub enum BlockValidationError {
     // do we want to?
     #[error("could not decode deposit request: {0}")]
     DepositRequestDecode(String),
+    /// Error when requests root is missing
+    #[error("requests root missing")]
+    RequestsRootMissing,
+    /// Error when requests root doesn't match expected value
+    #[error("requests root mismatch: {0}")]
+    RequestsRootMismatch(GotExpected<B256>),
 }
 
 /// BlockExecutor Errors

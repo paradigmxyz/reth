@@ -212,15 +212,40 @@ where
             .into())
         }
 
-        // Collect all EIP-6110 deposits
-        let deposit_requests =
-            crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
+        let requests = if self.chain_spec.is_prague_active_at_timestamp(block.header.timestamp) {
+            // Collect all EIP-6110 deposits
+            let deposit_requests =
+                crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-        // Collect all EIP-7685 requests
-        let withdrawal_requests =
-            apply_withdrawal_requests_contract_call(&self.chain_spec, block.timestamp, &mut evm)?;
-        // Requests are ordered by Request Type ID.
-        let requests = [deposit_requests, withdrawal_requests].concat();
+            // Collect all EIP-7685 requests
+            let withdrawal_requests = apply_withdrawal_requests_contract_call(
+                &self.chain_spec,
+                block.timestamp,
+                &mut evm,
+            )?;
+
+            // Requests are ordered by Request Type ID
+            let requests = [deposit_requests, withdrawal_requests].concat();
+
+            // Validate that the header requests root matches the calculated requests root
+            let Some(header_requests_root) = block
+                .header
+                .requests_root else {
+                return Err(BlockValidationError::RequestsRootMissing.into())
+            };
+            let requests_root = reth_primitives::proofs::calculate_requests_root(&requests);
+            if requests_root != header_requests_root {
+                return Err(BlockValidationError::RequestsRootMismatch(GotExpected::new(
+                    requests_root,
+                    header_requests_root,
+                ))
+                .into())
+            }
+
+            requests
+        } else {
+            vec![]
+        };
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
