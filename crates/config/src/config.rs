@@ -333,7 +333,7 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 5, segments: PruneModes::none() }
+        Self { block_interval: 100_000, segments: PruneModes::none() }
     }
 }
 
