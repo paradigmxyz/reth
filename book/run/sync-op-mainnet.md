@@ -18,7 +18,7 @@ Output from running the command to export state, can also be downloaded from <ht
 
 ## Manual Import Steps
 
-### Import Blocks
+### 1. Import Blocks
 
 Imports a `.rlp` file of blocks.
 
@@ -28,7 +28,7 @@ Note! Requires running in debug mode (TODO: <https://github.com/paradigmxyz/reth
 ./op-reth import-op <exported-blocks>
 ```
 
-### Import Receipts
+### 2. Import Receipts
 
 Imports a `.rlp` file of receipts, that has been exported with command to export receipts specified in 
 <https://github.com/testinprod-io/op-geth/pull/1> (export command uses custom RLP-encoding). 
@@ -37,7 +37,7 @@ Imports a `.rlp` file of receipts, that has been exported with command to export
 ./op-reth import-receipts --chain optimism  <exported-receipts>
 ```
 
-### Import State
+### 3. Import State
 
 Imports a `.jsonl` state dump.
 
