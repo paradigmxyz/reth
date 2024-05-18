@@ -1324,24 +1324,27 @@ impl TransactionSigned {
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if data.is_empty() {
+    ///
+    /// Both for legacy and EIP-2718 transactions, an error will be returned if there is an excess
+    /// of bytes in input data.
+    pub fn decode_enveloped(input_data: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        if input_data.is_empty() {
             return Err(RlpError::InputTooShort)
         }
 
         // Check if the tx is a list
-        let result = if data[0] >= EMPTY_LIST_CODE {
+        let output_data = if input_data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            TransactionSigned::decode_rlp_legacy_transaction(data)?
+            TransactionSigned::decode_rlp_legacy_transaction(input_data)?
         } else {
-            TransactionSigned::decode_enveloped_typed_transaction(data)?
+            TransactionSigned::decode_enveloped_typed_transaction(input_data)?
         };
 
-        if !data.is_empty() {
+        if !input_data.is_empty() {
             return Err(RlpError::UnexpectedLength);
         }
 
-        Ok(result)
+        Ok(output_data)
     }
 
     /// Returns the length without an RLP header - this is used for eth/68 sizes.
