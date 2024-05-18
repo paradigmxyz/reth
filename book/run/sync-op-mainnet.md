@@ -7,7 +7,7 @@ execution in reth's sync pipeline.
 
 Importing OP mainnet pre-bedrock requires exported data:
 
-- Blocks and receipts below Bedrock
+- Blocks [and receipts] below Bedrock
 - State snapshot at first Bedrock block
 
 ## Manual Export Steps
