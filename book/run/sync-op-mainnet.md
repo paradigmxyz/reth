@@ -1,9 +1,9 @@
 # Sync OP Mainnet
 
-To sync OP mainnet, the Bedrock datadir needs to be imported to use ase starting point.
-Blocks lower than the OP mainnet Bedrock fork, are built on the OVM and cannot be executed with EVM.
+To sync OP mainnet, the Bedrock datadir needs to be imported to use as starting point.
+Blocks lower than the OP mainnet Bedrock fork, are built on the OVM and cannot be executed on the EVM.
 For this reason, the chain segment from genesis until Bedrock, must be manually imported to circumvent
-execution in the pipeline.
+execution in reth's sync pipeline.
 
 Importing OP mainnet pre-bedrock requires exported data:
 
