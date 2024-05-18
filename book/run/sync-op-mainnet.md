@@ -30,7 +30,10 @@ Note! Requires running in debug mode (TODO: <https://github.com/paradigmxyz/reth
 
 ### 2. Import Receipts
 
-Imports a `.rlp` file of receipts, that has been exported with command to export receipts specified in 
+This step is optional. To run a full node, skip this step. If however receipts are to be imported, the
+corresponding transactions must already be imported (see [step 1](#1-import-blocks)).
+
+Imports a `.rlp` file of receipts, that has been exported with command to export receipts specified in
 <https://github.com/testinprod-io/op-geth/pull/1> (command for exporting receipts uses custom RLP-encoding). 
 
 ```bash
@@ -39,7 +42,7 @@ Imports a `.rlp` file of receipts, that has been exported with command to export
 
 ### 3. Import State
 
-Imports a `.jsonl` state dump. The block at which the state dump is made, must be the latest block in 
+Imports a `.jsonl` state dump. The block at which the state dump is made, must be the latest block in
 reth's database.
 
 ```bash
