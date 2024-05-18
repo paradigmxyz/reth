@@ -1,7 +1,7 @@
 //! Pruning and full node arguments
 
 use clap::Args;
-use reth_config::config::PruneConfig;
+use reth_config::{PruneConfig, DEFAULT_COUNT_BLOCKS_PRUNER_INTERVAL};
 use reth_primitives::{
     ChainSpec, PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
 };
@@ -23,7 +23,7 @@ impl PruningArgs {
             return None;
         }
         Some(PruneConfig {
-            block_interval: 5,
+            block_interval: DEFAULT_COUNT_BLOCKS_PRUNER_INTERVAL,
             segments: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: None,

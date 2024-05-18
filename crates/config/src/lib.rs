@@ -8,4 +8,4 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod config;
-pub use config::{BodiesConfig, Config, PruneConfig};
+pub use config::{BodiesConfig, Config, PruneConfig, DEFAULT_COUNT_BLOCKS_PRUNER_INTERVAL};

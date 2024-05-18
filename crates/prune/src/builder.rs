@@ -1,5 +1,5 @@
 use crate::{segments::SegmentSet, Pruner};
-use reth_config::PruneConfig;
+use reth_config::{PruneConfig, DEFAULT_COUNT_BLOCKS_PRUNER_INTERVAL};
 use reth_db::database::Database;
 use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
@@ -97,7 +97,7 @@ impl PrunerBuilder {
 impl Default for PrunerBuilder {
     fn default() -> Self {
         Self {
-            block_interval: 5,
+            block_interval: DEFAULT_COUNT_BLOCKS_PRUNER_INTERVAL,
             segments: PruneModes::none(),
             max_reorg_depth: 64,
             prune_delete_limit: MAINNET.prune_delete_limit,

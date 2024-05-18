@@ -13,6 +13,11 @@ use std::{
 
 const EXTENSION: &str = "toml";
 
+/// Default number of blocks after which a periodic prune job is triggered.
+///
+/// Default is 500k blocks (equivalent to the number of blocks that map to one static file).
+pub const DEFAULT_COUNT_BLOCKS_PRUNER_INTERVAL: usize = 500_000;
+
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
@@ -333,7 +338,7 @@ pub struct PruneConfig {
 
 impl Default for PruneConfig {
     fn default() -> Self {
-        Self { block_interval: 100_000, segments: PruneModes::none() }
+        Self { block_interval: DEFAULT_COUNT_BLOCKS_PRUNER_INTERVAL, segments: PruneModes::none() }
     }
 }
 
