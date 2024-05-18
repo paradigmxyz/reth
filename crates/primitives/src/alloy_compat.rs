@@ -28,7 +28,7 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                                 s: signature.s,
                                 odd_y_parity: signature
                                     .y_parity
-                                    .unwrap_or(alloy_rpc_types::Parity(!signature.v.bit(0)))
+                                    .unwrap_or_else(|| reth_rpc_types::Parity(!signature.v.bit(0)))
                                     .0,
                             },
                         ))
