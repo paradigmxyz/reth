@@ -5,7 +5,7 @@ Blocks lower than the OP mainnet Bedrock fork, are built on the OVM and cannot b
 For this reason, the chain segment from genesis until Bedrock, must be manually imported to circumvent
 execution in reth's sync pipeline.
 
-Importing OP mainnet pre-bedrock requires exported data:
+Importing OP mainnet Bedrock datadir requires exported data:
 
 - Blocks [and receipts] below Bedrock
 - State snapshot at first Bedrock block
