@@ -7783,19 +7783,14 @@ dependencies = [
 name = "reth-rpc-layer"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-rpc-types-engine",
  "assert_matches",
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.28",
  "jsonrpsee",
- "jsonwebtoken 8.3.0",
  "pin-project",
- "rand 0.8.5",
- "reth-fs-util",
- "reth-primitives",
- "serde",
  "tempfile",
- "thiserror",
  "tokio",
  "tower",
  "tracing",
