@@ -315,6 +315,12 @@ pub struct EthRequestHandlerMetrics {
 
     /// Number of received bodies requests
     pub(crate) received_bodies_requests: Counter,
+
+    /// Number of received receipts requests
+    pub(crate) received_receipts_requests: Counter,
+
+    /// Number of received node data requests
+    pub(crate) received_node_data_requests: Counter,
 }
 
 /// Eth67 announcement metrics, track entries by TxType

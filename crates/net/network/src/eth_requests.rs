@@ -192,6 +192,8 @@ where
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,
     ) {
+        self.metrics.received_receipts_requests.increment(1);
+
         let mut receipts = Vec::new();
 
         let mut total_bytes = 0;
@@ -249,7 +251,9 @@ where
                     IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
                         this.on_bodies_request(peer_id, request, response)
                     }
-                    IncomingEthRequest::GetNodeData { .. } => {}
+                    IncomingEthRequest::GetNodeData { .. } => {
+                        this.metrics.received_node_data_requests.increment(1);
+                    }
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
                     }
