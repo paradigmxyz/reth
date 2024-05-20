@@ -239,10 +239,7 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, .. } = value;
 
-        Self {
-            block_value: fees,
-            execution_payload: convert_block_to_payload_field_v2(block),
-        }
+        Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
     }
 }
 

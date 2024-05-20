@@ -1459,9 +1459,7 @@ impl PooledTransactionsHashesBuilder {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         match version {
-            EthVersion::Eth66 | EthVersion::Eth67 => {
-                Self::Eth66(Default::default())
-            }
+            EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
             EthVersion::Eth68 => Self::Eth68(Default::default()),
         }
     }

@@ -1176,10 +1176,7 @@ impl PeerConnectionState {
     /// Returns whether we're currently connected with this peer
     #[inline]
     fn is_connected(&self) -> bool {
-        matches!(
-            self,
-            Self::In | Self::Out | Self::PendingOut
-        )
+        matches!(self, Self::In | Self::Out | Self::PendingOut)
     }
 
     /// Returns if there's currently no connection to that peer.

@@ -227,8 +227,9 @@ impl EthMessage {
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             Self::NewBlock(_) => EthMessageID::NewBlock,
             Self::Transactions(_) => EthMessageID::Transactions,
-            Self::NewPooledTransactionHashes66(_) |
-            Self::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
+            Self::NewPooledTransactionHashes66(_) | Self::NewPooledTransactionHashes68(_) => {
+                EthMessageID::NewPooledTransactionHashes
+            }
             Self::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             Self::BlockHeaders(_) => EthMessageID::BlockHeaders,
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,

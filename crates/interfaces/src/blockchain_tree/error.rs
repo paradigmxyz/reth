@@ -84,10 +84,7 @@ impl CanonicalError {
     /// Returns `true` if the underlying error matches
     /// [BlockchainTreeError::BlockHashNotFoundInChain].
     pub fn is_block_hash_not_found(&self) -> bool {
-        matches!(
-            self,
-            Self::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. })
-        )
+        matches!(self, Self::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. }))
     }
 
     /// Returns `Some(BlockNumber)` if the underlying error matches

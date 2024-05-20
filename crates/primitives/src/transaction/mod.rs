@@ -320,9 +320,7 @@ impl Transaction {
     /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
     pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
-            Self::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => {
-                Some(*max_fee_per_blob_gas)
-            }
+            Self::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => Some(*max_fee_per_blob_gas),
             _ => None,
         }
     }
@@ -348,9 +346,7 @@ impl Transaction {
             Self::Legacy(TxLegacy { gas_price, .. }) |
             Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
             Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
-            Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => {
-                *max_priority_fee_per_gas
-            }
+            Self::Eip4844(TxEip4844 { max_priority_fee_per_gas, .. }) => *max_priority_fee_per_gas,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => 0,
         }
@@ -474,9 +470,7 @@ impl Transaction {
             Self::Eip1559(dynamic_fee_tx) => {
                 dynamic_fee_tx.encode_with_signature(signature, out, with_header)
             }
-            Self::Eip4844(blob_tx) => {
-                blob_tx.encode_with_signature(signature, out, with_header)
-            }
+            Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.encode(out, with_header),
         }
@@ -1239,10 +1233,8 @@ impl TransactionSigned {
     // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
     // so decoding methods do not need to manually advance the buffer
     pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let (transaction, hash, signature) =
-            Self::decode_rlp_legacy_transaction_tuple(data)?;
-        let signed =
-            Self { transaction: Transaction::Legacy(transaction), hash, signature };
+        let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
+        let signed = Self { transaction: Transaction::Legacy(transaction), hash, signature };
         Ok(signed)
     }
 
@@ -1256,9 +1248,7 @@ impl TransactionSigned {
     /// byte indicating the transaction type.
     ///
     /// CAUTION: this expects that `data` is `tx-type || rlp(tx-data)`
-    pub fn decode_enveloped_typed_transaction(
-        data: &mut &[u8],
-    ) -> alloy_rlp::Result<Self> {
+    pub fn decode_enveloped_typed_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
         // keep this around so we can use it to calculate the hash
         let original_encoding_without_header = *data;
 
@@ -1462,8 +1452,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                     .then(Signature::optimism_deposit_tx_signature)
                     .unwrap_or(sig);
 
-                let mut tx =
-                    Self { hash: Default::default(), signature: sig, transaction };
+                let mut tx = Self { hash: Default::default(), signature: sig, transaction };
                 tx.hash = tx.recalculate_hash();
                 tx
             })

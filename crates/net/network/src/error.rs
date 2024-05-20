@@ -215,9 +215,7 @@ impl SessionError for EthStreamError {
         match self {
             // timeouts
             Self::EthHandshakeError(EthHandshakeError::NoResponse) |
-            Self::P2PStreamError(P2PStreamError::HandshakeError(
-                P2PHandshakeError::NoResponse,
-            )) |
+            Self::P2PStreamError(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse)) |
             Self::P2PStreamError(P2PStreamError::PingTimeout) => Some(BackoffKind::Low),
             // malformed messages
             Self::P2PStreamError(P2PStreamError::Rlp(_)) |
