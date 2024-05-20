@@ -84,7 +84,7 @@ impl Cli {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        Cli::try_parse_from(itr)
+        Self::try_parse_from(itr)
     }
 }
 

@@ -26,11 +26,11 @@ impl From<PrunerError> for RethError {
     fn from(err: PrunerError) -> Self {
         match err {
             PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
-                RethError::Custom(err.to_string())
+                Self::Custom(err.to_string())
             }
             PrunerError::Interface(err) => err,
-            PrunerError::Database(err) => RethError::Database(err),
-            PrunerError::Provider(err) => RethError::Provider(err),
+            PrunerError::Database(err) => Self::Database(err),
+            PrunerError::Provider(err) => Self::Provider(err),
         }
     }
 }

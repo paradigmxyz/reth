@@ -38,7 +38,7 @@ pub enum TrieOp {
 impl TrieOp {
     /// Returns `true` if the operation is an update.
     pub fn is_update(&self) -> bool {
-        matches!(self, TrieOp::Update(..))
+        matches!(self, Self::Update(..))
     }
 }
 

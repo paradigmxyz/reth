@@ -272,7 +272,7 @@ impl std::fmt::Display for JsTracerBuilder {
 
 impl From<JsTracerBuilder> for GethDebugTracingOptions {
     fn from(b: JsTracerBuilder) -> Self {
-        GethDebugTracingOptions {
+        Self {
             tracer: Some(GethDebugTracerType::JsTracer(b.code())),
             tracer_config: serde_json::Value::Object(Default::default()).into(),
             ..Default::default()
@@ -356,7 +356,7 @@ pub struct NoopJsTracer;
 
 impl From<NoopJsTracer> for GethDebugTracingOptions {
     fn from(_: NoopJsTracer) -> Self {
-        GethDebugTracingOptions {
+        Self {
             tracer: Some(GethDebugTracerType::JsTracer(NOOP_TRACER.to_string())),
             tracer_config: serde_json::Value::Object(Default::default()).into(),
             ..Default::default()

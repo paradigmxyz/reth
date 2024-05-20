@@ -77,7 +77,7 @@ impl<K: Key> RawKey<K> {
 
 impl<K: Key> From<K> for RawKey<K> {
     fn from(key: K) -> Self {
-        RawKey::new(key)
+        Self::new(key)
     }
 }
 
@@ -142,7 +142,7 @@ impl<V: Value> RawValue<V> {
 
 impl<V: Value> From<V> for RawValue<V> {
     fn from(value: V) -> Self {
-        RawValue::new(value)
+        Self::new(value)
     }
 }
 

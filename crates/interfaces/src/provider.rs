@@ -132,7 +132,7 @@ pub enum ProviderError {
 
 impl From<reth_primitives::fs::FsPathError> for ProviderError {
     fn from(err: reth_primitives::fs::FsPathError) -> Self {
-        ProviderError::FsPathError(err.to_string())
+        Self::FsPathError(err.to_string())
     }
 }
 

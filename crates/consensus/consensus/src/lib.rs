@@ -262,7 +262,7 @@ pub enum ConsensusError {
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
     pub fn is_state_root_error(&self) -> bool {
-        matches!(self, ConsensusError::BodyStateRootDiff(_))
+        matches!(self, Self::BodyStateRootDiff(_))
     }
 }
 

@@ -24,8 +24,8 @@ impl BlockErrorKind {
     /// Returns `true` if the error is a state root error.
     pub fn is_state_root_error(&self) -> bool {
         match self {
-            BlockErrorKind::Validation(err) => err.is_state_root_error(),
-            BlockErrorKind::Execution(err) => err.is_state_root_error(),
+            Self::Validation(err) => err.is_state_root_error(),
+            Self::Execution(err) => err.is_state_root_error(),
         }
     }
 }
@@ -139,24 +139,24 @@ impl StageError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            StageError::Database(_) |
-                StageError::Download(_) |
-                StageError::DatabaseIntegrity(_) |
-                StageError::StageCheckpoint(_) |
-                StageError::MissingDownloadBuffer |
-                StageError::MissingSyncGap |
-                StageError::ChannelClosed |
-                StageError::InconsistentBlockNumber { .. } |
-                StageError::InconsistentTxNumber { .. } |
-                StageError::Internal(_) |
-                StageError::Fatal(_)
+            Self::Database(_) |
+                Self::Download(_) |
+                Self::DatabaseIntegrity(_) |
+                Self::StageCheckpoint(_) |
+                Self::MissingDownloadBuffer |
+                Self::MissingSyncGap |
+                Self::ChannelClosed |
+                Self::InconsistentBlockNumber { .. } |
+                Self::InconsistentTxNumber { .. } |
+                Self::Internal(_) |
+                Self::Fatal(_)
         )
     }
 }
 
 impl From<std::io::Error> for StageError {
     fn from(source: std::io::Error) -> Self {
-        StageError::Fatal(Box::new(source))
+        Self::Fatal(Box::new(source))
     }
 }
 

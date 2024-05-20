@@ -250,7 +250,7 @@ impl DatabaseEnv {
         path: &Path,
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
-    ) -> Result<DatabaseEnv, DatabaseError> {
+    ) -> Result<Self, DatabaseError> {
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -379,7 +379,7 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
-        let env = DatabaseEnv {
+        let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
         };

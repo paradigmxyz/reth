@@ -43,12 +43,12 @@ pub struct Status {
 }
 
 impl From<Genesis> for Status {
-    fn from(genesis: Genesis) -> Status {
+    fn from(genesis: Genesis) -> Self {
         let chain = genesis.config.chain_id;
         let total_difficulty = genesis.difficulty;
         let chainspec = ChainSpec::from(genesis);
 
-        Status {
+        Self {
             version: EthVersion::Eth68 as u8,
             chain: Chain::from_id(chain),
             total_difficulty,
@@ -135,7 +135,7 @@ impl Debug for Status {
 impl Default for Status {
     fn default() -> Self {
         let mainnet_genesis = MAINNET.genesis_hash();
-        Status {
+        Self {
             version: EthVersion::Eth68 as u8,
             chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),

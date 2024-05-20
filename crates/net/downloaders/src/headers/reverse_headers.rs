@@ -1090,7 +1090,7 @@ impl ReverseHeadersDownloaderBuilder {
     /// Creates a new [ReverseHeadersDownloaderBuilder] with configurations based on the provided
     /// [HeadersConfig].
     pub fn new(config: HeadersConfig) -> Self {
-        ReverseHeadersDownloaderBuilder::default()
+        Self::default()
             .request_limit(config.downloader_request_limit)
             .min_concurrent_requests(config.downloader_min_concurrent_requests)
             .max_concurrent_requests(config.downloader_max_concurrent_requests)

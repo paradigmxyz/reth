@@ -64,7 +64,7 @@ impl SenderId {
 
 impl From<u64> for SenderId {
     fn from(value: u64) -> Self {
-        SenderId(value)
+        Self(value)
     }
 }
 
@@ -96,7 +96,7 @@ impl TransactionId {
         transaction_nonce: u64,
         on_chain_nonce: u64,
         sender: SenderId,
-    ) -> Option<TransactionId> {
+    ) -> Option<Self> {
         if transaction_nonce == on_chain_nonce {
             return None
         }
@@ -105,13 +105,13 @@ impl TransactionId {
     }
 
     /// Returns the `TransactionId` that would come before this transaction.
-    pub(crate) fn unchecked_ancestor(&self) -> Option<TransactionId> {
-        (self.nonce != 0).then(|| TransactionId::new(self.sender, self.nonce - 1))
+    pub(crate) fn unchecked_ancestor(&self) -> Option<Self> {
+        (self.nonce != 0).then(|| Self::new(self.sender, self.nonce - 1))
     }
 
     /// Returns the `TransactionId` that directly follows this transaction: `self.nonce + 1`
-    pub const fn descendant(&self) -> TransactionId {
-        TransactionId::new(self.sender, self.nonce + 1)
+    pub const fn descendant(&self) -> Self {
+        Self::new(self.sender, self.nonce + 1)
     }
 
     /// Returns the nonce that follows immediately after this one.

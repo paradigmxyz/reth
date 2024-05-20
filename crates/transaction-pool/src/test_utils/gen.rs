@@ -142,7 +142,7 @@ pub struct TransactionBuilder {
 impl TransactionBuilder {
     /// Converts the transaction builder into a legacy transaction format.
     pub fn into_legacy(self) -> TransactionSigned {
-        TransactionBuilder::signed(
+        Self::signed(
             TxLegacy {
                 chain_id: Some(self.chain_id),
                 nonce: self.nonce,
@@ -159,7 +159,7 @@ impl TransactionBuilder {
 
     /// Converts the transaction builder into a transaction format using EIP-1559.
     pub fn into_eip1559(self) -> TransactionSigned {
-        TransactionBuilder::signed(
+        Self::signed(
             TxEip1559 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,
@@ -177,7 +177,7 @@ impl TransactionBuilder {
     }
     /// Converts the transaction builder into a transaction format using EIP-4844.
     pub fn into_eip4844(self) -> TransactionSigned {
-        TransactionBuilder::signed(
+        Self::signed(
             TxEip4844 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,

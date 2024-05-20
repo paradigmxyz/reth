@@ -41,8 +41,8 @@ pub struct MockEthProvider {
 }
 
 impl Default for MockEthProvider {
-    fn default() -> MockEthProvider {
-        MockEthProvider {
+    fn default() -> Self {
+        Self {
             blocks: Default::default(),
             headers: Default::default(),
             accounts: Default::default(),

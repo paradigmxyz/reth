@@ -1638,7 +1638,7 @@ impl TransactionSource {
     /// Returns the transaction and block related info, if not pending
     pub fn split(self) -> (TransactionSignedEcRecovered, TransactionInfo) {
         match self {
-            TransactionSource::Pool(tx) => {
+            Self::Pool(tx) => {
                 let hash = tx.hash();
                 (
                     tx,
@@ -1651,7 +1651,7 @@ impl TransactionSource {
                     },
                 )
             }
-            TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
+            Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let hash = transaction.hash();
                 (
                     transaction,

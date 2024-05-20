@@ -564,7 +564,7 @@ where
 
 impl Default for RpcModuleBuilder<(), (), (), (), (), ()> {
     fn default() -> Self {
-        RpcModuleBuilder::new((), (), (), (), (), ())
+        Self::new((), (), (), (), (), ())
     }
 }
 
@@ -605,7 +605,7 @@ impl RpcModuleConfigBuilder {
 
     /// Consumes the type and creates the [RpcModuleConfig]
     pub fn build(self) -> RpcModuleConfig {
-        let RpcModuleConfigBuilder { eth } = self;
+        let Self { eth } = self;
         RpcModuleConfig { eth: eth.unwrap_or_default() }
     }
 }
@@ -640,14 +640,14 @@ impl RpcModuleSelection {
 
     /// Returns a selection of [RethRpcModule] with all [RethRpcModule::all_variants].
     pub fn all_modules() -> Vec<RethRpcModule> {
-        RpcModuleSelection::try_from_selection(RethRpcModule::all_variants().iter().copied())
+        Self::try_from_selection(RethRpcModule::all_variants().iter().copied())
             .expect("valid selection")
             .into_selection()
     }
 
     /// Returns the [RpcModuleSelection::STANDARD_MODULES] as a selection.
     pub fn standard_modules() -> Vec<RethRpcModule> {
-        RpcModuleSelection::try_from_selection(RpcModuleSelection::STANDARD_MODULES.iter().copied())
+        Self::try_from_selection(Self::STANDARD_MODULES.iter().copied())
             .expect("valid selection")
             .into_selection()
     }
@@ -704,13 +704,13 @@ impl RpcModuleSelection {
                 s.push(item);
             }
         }
-        Ok(RpcModuleSelection::Selection(s))
+        Ok(Self::Selection(s))
     }
 
     /// Returns true if no selection is configured
     pub fn is_empty(&self) -> bool {
         match self {
-            RpcModuleSelection::Selection(sel) => sel.is_empty(),
+            Self::Selection(sel) => sel.is_empty(),
             _ => false,
         }
     }
@@ -755,23 +755,23 @@ impl RpcModuleSelection {
     /// Returns an iterator over all configured [RethRpcModule]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
-            RpcModuleSelection::All => Box::new(Self::all_modules().into_iter()),
-            RpcModuleSelection::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
-            RpcModuleSelection::Selection(s) => Box::new(s.iter().copied()),
+            Self::All => Box::new(Self::all_modules().into_iter()),
+            Self::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
+            Self::Selection(s) => Box::new(s.iter().copied()),
         }
     }
 
     /// Returns the list of configured [RethRpcModule]
     pub fn into_selection(self) -> Vec<RethRpcModule> {
         match self {
-            RpcModuleSelection::All => Self::all_modules(),
-            RpcModuleSelection::Selection(s) => s,
-            RpcModuleSelection::Standard => Self::STANDARD_MODULES.to_vec(),
+            Self::All => Self::all_modules(),
+            Self::Selection(s) => s,
+            Self::Standard => Self::STANDARD_MODULES.to_vec(),
         }
     }
 
     /// Returns true if both selections are identical.
-    fn are_identical(http: Option<&RpcModuleSelection>, ws: Option<&RpcModuleSelection>) -> bool {
+    fn are_identical(http: Option<&Self>, ws: Option<&Self>) -> bool {
         match (http, ws) {
             (Some(http), Some(ws)) => {
                 let http = http.clone().iter_selection().collect::<HashSet<_>>();
@@ -792,7 +792,7 @@ where
     T: Into<RethRpcModule>,
 {
     fn from(value: I) -> Self {
-        RpcModuleSelection::Selection(value.into_iter().map(Into::into).collect())
+        Self::Selection(value.into_iter().map(Into::into).collect())
     }
 }
 
@@ -806,9 +806,9 @@ impl FromStr for RpcModuleSelection {
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
-            "all" | "All" => Ok(RpcModuleSelection::All),
+            "all" | "All" => Ok(Self::All),
             "none" | "None" => Ok(Selection(vec![])),
-            _ => RpcModuleSelection::try_from_selection(modules),
+            _ => Self::try_from_selection(modules),
         }
     }
 }
@@ -882,7 +882,7 @@ impl RethRpcModule {
     }
 
     /// Returns all variants of the enum
-    pub fn modules() -> impl IntoIterator<Item = RethRpcModule> {
+    pub fn modules() -> impl IntoIterator<Item = Self> {
         use strum::IntoEnumIterator;
         Self::iter()
     }
@@ -899,17 +899,17 @@ impl FromStr for RethRpcModule {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
-            "admin" => RethRpcModule::Admin,
-            "debug" => RethRpcModule::Debug,
-            "eth" => RethRpcModule::Eth,
-            "net" => RethRpcModule::Net,
-            "trace" => RethRpcModule::Trace,
-            "txpool" => RethRpcModule::Txpool,
-            "web3" => RethRpcModule::Web3,
-            "rpc" => RethRpcModule::Rpc,
-            "reth" => RethRpcModule::Reth,
-            "ots" => RethRpcModule::Ots,
-            "eth-call-bundle" | "eth_callBundle" => RethRpcModule::EthCallBundle,
+            "admin" => Self::Admin,
+            "debug" => Self::Debug,
+            "eth" => Self::Eth,
+            "net" => Self::Net,
+            "trace" => Self::Trace,
+            "txpool" => Self::Txpool,
+            "web3" => Self::Web3,
+            "rpc" => Self::Rpc,
+            "reth" => Self::Reth,
+            "ots" => Self::Ots,
+            "eth-call-bundle" | "eth_callBundle" => Self::EthCallBundle,
             _ => return Err(ParseError::VariantNotFound),
         })
     }
@@ -917,7 +917,7 @@ impl FromStr for RethRpcModule {
 
 impl TryFrom<&str> for RethRpcModule {
     type Error = ParseError;
-    fn try_from(s: &str) -> Result<RethRpcModule, <Self as TryFrom<&str>>::Error> {
+    fn try_from(s: &str) -> Result<Self, <Self as TryFrom<&str>>::Error> {
         FromStr::from_str(s)
     }
 }
@@ -2006,7 +2006,7 @@ impl WsHttpServers {
         let mut http_handle = None;
         let mut ws_handle = None;
         match self {
-            WsHttpServers::SamePort(server) => {
+            Self::SamePort(server) => {
                 // Make sure http and ws modules are identical, since we currently can't run
                 // different modules on same server
                 config.ensure_ws_http_identical()?;
@@ -2017,7 +2017,7 @@ impl WsHttpServers {
                     ws_handle = Some(handle);
                 }
             }
-            WsHttpServers::DifferentPort { http, ws } => {
+            Self::DifferentPort { http, ws } => {
                 if let Some((server, module)) =
                     http.and_then(|server| http_module.map(|module| (server, module)))
                 {
@@ -2052,8 +2052,8 @@ pub struct RpcServer {
 // === impl RpcServer ===
 
 impl RpcServer {
-    fn empty() -> RpcServer {
-        RpcServer { ws_http: Default::default(), ipc: None }
+    fn empty() -> Self {
+        Self { ws_http: Default::default(), ipc: None }
     }
 
     /// Returns the [`SocketAddr`] of the http server if started.

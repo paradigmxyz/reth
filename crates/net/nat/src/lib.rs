@@ -57,11 +57,11 @@ impl NatResolver {
 impl fmt::Display for NatResolver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NatResolver::Any => f.write_str("any"),
-            NatResolver::Upnp => f.write_str("upnp"),
-            NatResolver::PublicIp => f.write_str("publicip"),
-            NatResolver::ExternalIp(ip) => write!(f, "extip:{ip}"),
-            NatResolver::None => f.write_str("none"),
+            Self::Any => f.write_str("any"),
+            Self::Upnp => f.write_str("upnp"),
+            Self::PublicIp => f.write_str("publicip"),
+            Self::ExternalIp(ip) => write!(f, "extip:{ip}"),
+            Self::None => f.write_str("none"),
         }
     }
 }
@@ -82,17 +82,17 @@ impl FromStr for NatResolver {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let r = match s {
-            "any" => NatResolver::Any,
-            "upnp" => NatResolver::Upnp,
-            "none" => NatResolver::None,
-            "publicip" | "public-ip" => NatResolver::PublicIp,
+            "any" => Self::Any,
+            "upnp" => Self::Upnp,
+            "none" => Self::None,
+            "publicip" | "public-ip" => Self::PublicIp,
             s => {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
                         "Unknown Nat Resolver: {s}"
                     )))
                 };
-                NatResolver::ExternalIp(ip.parse::<IpAddr>()?)
+                Self::ExternalIp(ip.parse::<IpAddr>()?)
             }
         };
         Ok(r)

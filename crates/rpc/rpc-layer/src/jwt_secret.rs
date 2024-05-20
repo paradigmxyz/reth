@@ -92,7 +92,7 @@ impl JwtSecret {
             let hex_bytes = hex::decode(hex)?;
             // is 32bytes, see length check
             let bytes = hex_bytes.try_into().expect("is expected len");
-            Ok(JwtSecret(bytes))
+            Ok(Self(bytes))
         }
     }
 
@@ -101,7 +101,7 @@ impl JwtSecret {
     /// a [`JwtError`].
     pub fn from_file(fpath: &Path) -> Result<Self, JwtError> {
         let hex = fs::read_to_string(fpath)?;
-        let secret = JwtSecret::from_hex(hex)?;
+        let secret = Self::from_hex(hex)?;
         Ok(secret)
     }
 
@@ -113,7 +113,7 @@ impl JwtSecret {
             fs::create_dir_all(dir)?
         }
 
-        let secret = JwtSecret::random();
+        let secret = Self::random();
         let bytes = &secret.0;
         let hex = hex::encode(bytes);
         fs::write(fpath, hex)?;
@@ -155,7 +155,7 @@ impl JwtSecret {
     pub fn random() -> Self {
         let random_bytes: [u8; 32] = rand::thread_rng().gen();
         let secret = hex_encode(random_bytes);
-        JwtSecret::from_hex(secret).unwrap()
+        Self::from_hex(secret).unwrap()
     }
 
     /// Encode the header and claims given and sign the payload using the algorithm from the header
@@ -186,7 +186,7 @@ impl FromStr for JwtSecret {
     type Err = JwtError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        JwtSecret::from_hex(s)
+        Self::from_hex(s)
     }
 }
 

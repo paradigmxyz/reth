@@ -281,14 +281,14 @@ impl EnvironmentKind {
     /// Returns true if the environment was opened as WRITEMAP.
     #[inline]
     pub const fn is_write_map(&self) -> bool {
-        matches!(self, EnvironmentKind::WriteMap)
+        matches!(self, Self::WriteMap)
     }
 
     /// Additional flags required when opening the environment.
     pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
         match self {
-            EnvironmentKind::Default => ffi::MDBX_ENV_DEFAULTS,
-            EnvironmentKind::WriteMap => ffi::MDBX_WRITEMAP,
+            Self::Default => ffi::MDBX_ENV_DEFAULTS,
+            Self::WriteMap => ffi::MDBX_WRITEMAP,
         }
     }
 }
@@ -307,8 +307,8 @@ pub struct Stat(ffi::MDBX_stat);
 
 impl Stat {
     /// Create a new Stat with zero'd inner struct `ffi::MDB_stat`.
-    pub(crate) fn new() -> Stat {
-        unsafe { Stat(mem::zeroed()) }
+    pub(crate) fn new() -> Self {
+        unsafe { Self(mem::zeroed()) }
     }
 
     /// Returns a mut pointer to `ffi::MDB_stat`.
@@ -859,8 +859,8 @@ pub(crate) mod read_transactions {
     impl MaxReadTransactionDuration {
         pub fn as_duration(&self) -> Option<Duration> {
             match self {
-                MaxReadTransactionDuration::Unbounded => None,
-                MaxReadTransactionDuration::Set(duration) => Some(*duration),
+                Self::Unbounded => None,
+                Self::Set(duration) => Some(*duration),
             }
         }
     }

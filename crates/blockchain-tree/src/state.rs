@@ -124,6 +124,6 @@ impl From<BlockchainId> for u64 {
 #[cfg(test)]
 impl From<u64> for BlockchainId {
     fn from(value: u64) -> Self {
-        BlockchainId(value)
+        Self(value)
     }
 }

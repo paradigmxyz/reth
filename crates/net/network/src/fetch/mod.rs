@@ -372,7 +372,7 @@ enum PeerState {
 impl PeerState {
     /// Returns true if the peer is currently idle.
     fn is_idle(&self) -> bool {
-        matches!(self, PeerState::Idle)
+        matches!(self, Self::Idle)
     }
 
     /// Resets the state on a received response.
@@ -381,8 +381,8 @@ impl PeerState {
     ///
     /// Returns `true` if the peer is ready for another request.
     fn on_request_finished(&mut self) -> bool {
-        if !matches!(self, PeerState::Closing) {
-            *self = PeerState::Idle;
+        if !matches!(self, Self::Closing) {
+            *self = Self::Idle;
             return true
         }
         false
@@ -423,16 +423,16 @@ impl DownloadRequest {
     /// Returns the corresponding state for a peer that handles the request.
     fn peer_state(&self) -> PeerState {
         match self {
-            DownloadRequest::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
-            DownloadRequest::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
+            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
         }
     }
 
     /// Returns the requested priority of this request
     fn get_priority(&self) -> &Priority {
         match self {
-            DownloadRequest::GetBlockHeaders { priority, .. } => priority,
-            DownloadRequest::GetBlockBodies { priority, .. } => priority,
+            Self::GetBlockHeaders { priority, .. } => priority,
+            Self::GetBlockBodies { priority, .. } => priority,
         }
     }
 

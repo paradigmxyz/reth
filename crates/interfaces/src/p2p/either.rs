@@ -17,14 +17,14 @@ where
 {
     fn report_bad_message(&self, peer_id: reth_network_types::PeerId) {
         match self {
-            Either::Left(a) => a.report_bad_message(peer_id),
-            Either::Right(b) => b.report_bad_message(peer_id),
+            Self::Left(a) => a.report_bad_message(peer_id),
+            Self::Right(b) => b.report_bad_message(peer_id),
         }
     }
     fn num_connected_peers(&self) -> usize {
         match self {
-            Either::Left(a) => a.num_connected_peers(),
-            Either::Right(b) => b.num_connected_peers(),
+            Self::Left(a) => a.num_connected_peers(),
+            Self::Right(b) => b.num_connected_peers(),
         }
     }
 }
@@ -42,8 +42,8 @@ where
         priority: Priority,
     ) -> Self::Output {
         match self {
-            Either::Left(a) => Either::Left(a.get_block_bodies_with_priority(hashes, priority)),
-            Either::Right(b) => Either::Right(b.get_block_bodies_with_priority(hashes, priority)),
+            Self::Left(a) => Either::Left(a.get_block_bodies_with_priority(hashes, priority)),
+            Self::Right(b) => Either::Right(b.get_block_bodies_with_priority(hashes, priority)),
         }
     }
 }
@@ -61,8 +61,8 @@ where
         priority: Priority,
     ) -> Self::Output {
         match self {
-            Either::Left(a) => Either::Left(a.get_headers_with_priority(request, priority)),
-            Either::Right(b) => Either::Right(b.get_headers_with_priority(request, priority)),
+            Self::Left(a) => Either::Left(a.get_headers_with_priority(request, priority)),
+            Self::Right(b) => Either::Right(b.get_headers_with_priority(request, priority)),
         }
     }
 }

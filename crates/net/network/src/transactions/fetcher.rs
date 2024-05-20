@@ -125,7 +125,7 @@ impl TransactionFetcher {
 
     /// Sets up transaction fetcher with config
     pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
-        let mut tx_fetcher = TransactionFetcher::default();
+        let mut tx_fetcher = Self::default();
 
         tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response =
             config.soft_limit_byte_size_pooled_transactions_response;

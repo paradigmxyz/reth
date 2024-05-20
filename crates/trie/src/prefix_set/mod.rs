@@ -58,7 +58,7 @@ where
     I: IntoIterator<Item = Nibbles>,
 {
     fn from(value: I) -> Self {
-        PrefixSetMut { keys: value.into_iter().collect(), ..Default::default() }
+        Self { keys: value.into_iter().collect(), ..Default::default() }
     }
 }
 

@@ -559,7 +559,7 @@ impl ExecutionStageThresholds {
 
 impl From<ExecutionConfig> for ExecutionStageThresholds {
     fn from(config: ExecutionConfig) -> Self {
-        ExecutionStageThresholds {
+        Self {
             max_blocks: config.max_blocks,
             max_changes: config.max_changes,
             max_cumulative_gas: config.max_cumulative_gas,

@@ -48,7 +48,7 @@ pub struct PruneModes {
 impl PruneModes {
     /// Sets pruning to no target.
     pub fn none() -> Self {
-        PruneModes::default()
+        Self::default()
     }
 
     /// Sets pruning to all targets.

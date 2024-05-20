@@ -93,7 +93,7 @@ where
         &self,
         block_id: BlockId,
     ) -> RpcResult<HashMap<Address, U256>> {
-        Ok(RethApi::balance_changes_in_block(self, block_id).await?)
+        Ok(Self::balance_changes_in_block(self, block_id).await?)
     }
 }
 

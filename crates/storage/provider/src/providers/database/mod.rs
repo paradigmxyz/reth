@@ -50,7 +50,7 @@ impl<DB> ProviderFactory<DB> {
         db: DB,
         chain_spec: Arc<ChainSpec>,
         static_files_path: PathBuf,
-    ) -> RethResult<ProviderFactory<DB>> {
+    ) -> RethResult<Self> {
         Ok(Self {
             db: Arc::new(db),
             chain_spec,
@@ -85,7 +85,7 @@ impl ProviderFactory<DatabaseEnv> {
         args: DatabaseArguments,
         static_files_path: PathBuf,
     ) -> RethResult<Self> {
-        Ok(ProviderFactory::<DatabaseEnv> {
+        Ok(Self {
             db: Arc::new(init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?),
             chain_spec,
             static_file_provider: StaticFileProvider::new(static_files_path)?,
@@ -560,7 +560,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 
 impl<DB> Clone for ProviderFactory<DB> {
     fn clone(&self) -> Self {
-        ProviderFactory {
+        Self {
             db: Arc::clone(&self.db),
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),

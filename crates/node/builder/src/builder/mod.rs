@@ -164,7 +164,7 @@ impl<DB> NodeBuilder<DB> {
         self,
         task_executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> WithLaunchContext<NodeBuilder<DB>> {
+    ) -> WithLaunchContext<Self> {
         WithLaunchContext { builder: self, task_executor, data_dir }
     }
 

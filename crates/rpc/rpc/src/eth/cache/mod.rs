@@ -92,7 +92,7 @@ impl EthStateCache {
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
             evm_config,
         };
-        let cache = EthStateCache { to_service };
+        let cache = Self { to_service };
         (cache, service)
     }
 

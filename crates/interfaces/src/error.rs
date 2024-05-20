@@ -49,13 +49,13 @@ pub enum RethError {
 
 impl From<BlockchainTreeError> for RethError {
     fn from(error: BlockchainTreeError) -> Self {
-        RethError::Canonical(CanonicalError::BlockchainTree(error))
+        Self::Canonical(CanonicalError::BlockchainTree(error))
     }
 }
 
 impl From<FsPathError> for RethError {
     fn from(err: FsPathError) -> Self {
-        RethError::Custom(err.to_string())
+        Self::Custom(err.to_string())
     }
 }
 
