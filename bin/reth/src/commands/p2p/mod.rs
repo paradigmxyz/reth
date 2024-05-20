@@ -18,7 +18,7 @@ use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::Arc,
 };
@@ -135,11 +135,11 @@ impl Command {
                 } = self.network.discovery;
 
                 // Use rlpx address if none given
-                let discv5_addr_ipv4 = discv5_addr.or_else(|| match self.network.addr {
+                let discv5_addr_ipv4 = discv5_addr.or(match self.network.addr {
                     IpAddr::V4(ip) => Some(ip),
                     IpAddr::V6(_) => None,
                 });
-                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| match self.network.addr {
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or(match self.network.addr {
                     IpAddr::V4(_) => None,
                     IpAddr::V6(ip) => Some(ip),
                 });
