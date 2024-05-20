@@ -144,7 +144,7 @@ where
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     ) {
-        self.metrics.received_headers_requests.increment(1);
+        self.metrics.eth_requests_get_block_headers_received_total.increment(1);
         let headers = self.get_headers_response(request);
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
@@ -155,7 +155,7 @@ where
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     ) {
-        self.metrics.received_bodies_requests.increment(1);
+        self.metrics.eth_requests_get_block_bodies_received_total.increment(1);
         let mut bodies = Vec::new();
 
         let mut total_bytes = 0;
@@ -192,7 +192,7 @@ where
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,
     ) {
-        self.metrics.received_receipts_requests.increment(1);
+        self.metrics.eth_requests_get_receipts_received_total.increment(1);
 
         let mut receipts = Vec::new();
 
@@ -252,7 +252,7 @@ where
                         this.on_bodies_request(peer_id, request, response)
                     }
                     IncomingEthRequest::GetNodeData { .. } => {
-                        this.metrics.received_node_data_requests.increment(1);
+                        this.metrics.eth_requests_get_node_data_received_total.increment(1);
                     }
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
