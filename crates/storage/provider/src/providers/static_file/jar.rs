@@ -63,7 +63,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 
     /// Adds a new auxiliary static file to help query data from the main one
-    pub fn with_auxiliary(mut self, auxiliary_jar: StaticFileJarProvider<'a>) -> Self {
+    pub fn with_auxiliary(mut self, auxiliary_jar: Self) -> Self {
         self.auxiliary_jar = Some(Box::new(auxiliary_jar));
         self
     }
