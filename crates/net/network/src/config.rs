@@ -104,42 +104,6 @@ impl<C> NetworkConfig<C> {
         self
     }
 
-    /// Sets the config to use for the discovery v5 protocol, with help of the
-    /// [`reth_discv5::ConfigBuilder`].
-    /// ```
-    /// use reth_network::NetworkConfigBuilder;
-    /// use secp256k1::{rand::thread_rng, SecretKey};
-    ///
-    /// let sk = SecretKey::new(&mut thread_rng());
-    /// let network_config = NetworkConfigBuilder::new(sk).build(());
-    /// let fork_id = network_config.status.forkid;
-    /// let network_config = network_config
-    ///     .discovery_v5_with_config_builder(|builder| builder.fork(b"eth", fork_id).build());
-    /// ```
-    pub fn discovery_v5_with_config_builder(
-        self,
-        f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::Config,
-    ) -> Self {
-        let network_stack_id = NetworkStackId::id(&self.chain_spec);
-        let fork_id = self.chain_spec.latest_fork_id();
-        let boot_nodes = self.boot_nodes.clone();
-
-        let mut builder = reth_discv5::Config::builder(self.listener_addr)
-            .add_unsigned_boot_nodes(boot_nodes.into_iter());
-
-        if let Some(id) = network_stack_id {
-            builder = builder.fork(id, fork_id)
-        }
-
-        self.set_discovery_v5(f(builder))
-    }
-
-    /// Sets the config to use for the discovery v5 protocol.
-    pub fn set_discovery_v5(mut self, discv5_config: reth_discv5::Config) -> Self {
-        self.discovery_v5_config = Some(discv5_config);
-        self
-    }
-
     /// Sets the address for the incoming RLPx connection listener.
     pub fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
@@ -410,12 +374,6 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Disable the Discv5 discovery.
-    pub fn disable_discv5_discovery(mut self) -> Self {
-        self.discovery_v5_builder = None;
-        self
-    }
-
     /// Disable the DNS discovery if the given condition is true.
     pub fn disable_dns_discovery_if(self, disable: bool) -> Self {
         if disable {
@@ -432,6 +390,36 @@ impl NetworkConfigBuilder {
         } else {
             self
         }
+    }
+
+    /// Calls a closure on [`reth_discv5::ConfigBuilder`], if discv5 discovery is enabled and the
+    /// builder has been set.
+    /// ```
+    /// use reth_network::NetworkConfigBuilder;
+    /// use reth_primitives::MAINNET;
+    /// use reth_provider::test_utils::NoopProvider;
+    /// use secp256k1::{rand::thread_rng, SecretKey};
+    ///
+    /// let sk = SecretKey::new(&mut thread_rng());
+    /// let fork_id = MAINNET.latest_fork_id();
+    /// let network_config = NetworkConfigBuilder::new(sk)
+    ///     .map_discv5_config_builder(|builder| builder.fork(b"eth", fork_id))
+    ///     .build(NoopProvider::default());
+    /// ```
+    pub fn map_discv5_config_builder(
+        mut self,
+        f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::ConfigBuilder,
+    ) -> Self {
+        if let Some(mut builder) = self.discovery_v5_builder {
+            if let Some(network_stack_id) = NetworkStackId::id(&self.chain_spec) {
+                let fork_id = self.chain_spec.latest_fork_id();
+                builder = builder.fork(network_stack_id, fork_id);
+            }
+
+            self.discovery_v5_builder = Some(f(builder));
+        }
+
+        self
     }
 
     /// Adds a new additional protocol to the RLPx sub-protocol list.

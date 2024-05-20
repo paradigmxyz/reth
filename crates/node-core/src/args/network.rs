@@ -20,7 +20,7 @@ use reth_network::{
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::Not,
     path::PathBuf,
     sync::Arc,
@@ -119,7 +119,10 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
+        let boot_nodes = self
+            .bootnodes
+            .clone()
+            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
@@ -136,7 +139,6 @@ impl NetworkArgs {
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             ),
         };
-
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
@@ -144,8 +146,8 @@ impl NetworkArgs {
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
-            .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
-            .chain_spec(chain_spec)
+            .boot_nodes(boot_nodes.clone())
+            .chain_spec(chain_spec.clone())
             .transactions_manager_config(transactions_manager_config);
 
         // Configure node identity
@@ -154,7 +156,29 @@ impl NetworkArgs {
             HelloMessageWithProtocols::builder(peer_id).client_version(&self.identity).build(),
         );
 
-        self.discovery.apply_to_builder(network_config_builder)
+        let rlpx_socket = (self.addr, self.port).into();
+        network_config_builder =
+            self.discovery.apply_to_builder(network_config_builder, rlpx_socket);
+
+        if chain_spec.is_optimism() && !self.discovery.disable_discovery {
+            network_config_builder =
+                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
+        }
+
+        network_config_builder.map_discv5_config_builder(|builder| {
+            let DiscoveryArgs {
+                discv5_lookup_interval,
+                discv5_bootstrap_lookup_interval,
+                discv5_bootstrap_lookup_countdown,
+                ..
+            } = self.discovery;
+
+            builder
+                .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                .lookup_interval(discv5_lookup_interval)
+                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
+        })
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -228,11 +252,13 @@ pub struct DiscoveryArgs {
     #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// The UDP IPv4 address to use for devp2p peer discovery version 5.
+    /// The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx
+    /// address, if it's also IPv4.
     #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR", default_value = None)]
     pub discv5_addr: Option<Ipv4Addr>,
 
-    /// The UDP IPv6 address to use for devp2p peer discovery version 5.
+    /// The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx
+    /// address, if it's also IPv6.
     #[arg(id = "discovery.v5.addr.ipv6", long = "discovery.v5.addr.ipv6", value_name = "DISCOVERY_V5_ADDR_IPV6", default_value = None)]
     pub discv5_addr_ipv6: Option<Ipv6Addr>,
 
@@ -270,6 +296,7 @@ impl DiscoveryArgs {
     pub fn apply_to_builder(
         &self,
         mut network_config_builder: NetworkConfigBuilder,
+        rlpx_tcp_socket: SocketAddr,
     ) -> NetworkConfigBuilder {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
@@ -279,9 +306,9 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
 
-        if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
+        if !self.disable_discovery && self.enable_discv5_discovery {
             network_config_builder =
-                network_config_builder.disable_discv4_discovery().discovery_v5(Default::default());
+                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_tcp_socket));
         }
 
         network_config_builder
@@ -300,8 +327,8 @@ impl Default for DiscoveryArgs {
         Self {
             disable_discovery: false,
             disable_dns_discovery: false,
-            disable_discv4_discovery: cfg!(feature = "optimism"),
-            enable_discv5_discovery: cfg!(feature = "optimism"),
+            disable_discv4_discovery: false,
+            enable_discv5_discovery: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: None,
