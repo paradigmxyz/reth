@@ -6376,6 +6376,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
+ "reth-discv5",
  "reth-downloaders",
  "reth-ethereum-payload-builder",
  "reth-evm",
