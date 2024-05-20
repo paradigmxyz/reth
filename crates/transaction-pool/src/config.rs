@@ -42,10 +42,10 @@ impl PoolConfig {
     /// Returns whether or not the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
-        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size)
-            || self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size)
-            || self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size)
-            || self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
+        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size) ||
+            self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size) ||
+            self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size) ||
+            self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
     }
 }
 

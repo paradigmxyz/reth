@@ -293,8 +293,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             }
 
             // Delete all transaction to block values.
-            if !block_meta.is_empty()
-                && tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
+            if !block_meta.is_empty() &&
+                tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
             {
                 tx_block_cursor.delete_current()?;
             }

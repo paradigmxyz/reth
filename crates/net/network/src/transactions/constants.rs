@@ -138,8 +138,8 @@ pub mod tx_fetcher {
     /// [`DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES`], which is 25600 hashes and
     /// 65 requests, so it is 25665 hashes.
     pub const DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH: u32 =
-        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH
-            + DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES as u32;
+        DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH +
+            DEFAULT_MAX_COUNT_INFLIGHT_REQUESTS_ON_FETCH_PENDING_HASHES as u32;
 
     /// Default maximum number of hashes pending fetch to tolerate at any time.
     ///
@@ -190,8 +190,8 @@ pub mod tx_fetcher {
     /// which defaults to 128 KiB, so 64 KiB.
     pub const DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES:
         usize =
-        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ
-            / 2;
+        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ /
+            2;
 
     /// Default max inflight request when fetching pending hashes.
     ///
@@ -238,8 +238,8 @@ pub mod tx_fetcher {
     /// divided by [`SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`], which
     /// is spec'd at 4096 hashes, so 521 bytes.
     pub const AVERAGE_BYTE_SIZE_TX_ENCODED: usize =
-        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE
-            / SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE /
+            SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
     /// Median observed size in bytes of a small encoded legacy transaction.
     ///
@@ -267,8 +267,8 @@ pub mod tx_fetcher {
         let max_size_expected_response =
             info.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
 
-        max_size_expected_response / MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED
-            + DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST
+        max_size_expected_response / MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED +
+            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST
     }
 
     /// Returns the approx number of transactions that a

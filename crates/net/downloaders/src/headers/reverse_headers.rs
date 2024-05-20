@@ -838,8 +838,8 @@ where
 
             let concurrent_request_limit = this.concurrent_request_limit();
             // populate requests
-            while this.in_progress_queue.len() < concurrent_request_limit
-                && this.buffered_responses.len() < this.max_buffered_responses
+            while this.in_progress_queue.len() < concurrent_request_limit &&
+                this.buffered_responses.len() < this.max_buffered_responses
             {
                 if let Some(request) = this.next_request() {
                     trace!(

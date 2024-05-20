@@ -356,8 +356,8 @@ impl FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             base_fee_per_blob_gas: block.blob_fee(),
-            blob_gas_used_ratio: block.blob_gas_used() as f64
-                / reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+            blob_gas_used_ratio: block.blob_gas_used() as f64 /
+                reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.excess_blob_gas,
             blob_gas_used: block.blob_gas_used,
             gas_used: block.gas_used,

@@ -293,8 +293,8 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size
-                <= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+            if next_acc_size <=
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
             {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
@@ -305,8 +305,8 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
-                    - acc_size_response;
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request -
+                    acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
                 break;
@@ -740,8 +740,8 @@ impl TransactionFetcher {
             .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
         // if request full enough already, we're satisfied, send request for single tx
-        if acc_size_response
-            >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
+        if acc_size_response >=
+            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
         {
             return;
         }
@@ -816,8 +816,8 @@ impl TransactionFetcher {
         let info = &self.info;
 
         let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests
-                / DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
+            info.max_inflight_requests /
+                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
         );
         let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
             DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_IDLE_PEER,
@@ -855,8 +855,8 @@ impl TransactionFetcher {
         let info = &self.info;
 
         let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests
-                / DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
+            info.max_inflight_requests /
+                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
         );
         let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
             DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION,

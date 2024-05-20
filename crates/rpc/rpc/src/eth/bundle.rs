@@ -77,8 +77,8 @@ where
                     None
                 }
             })
-            .sum::<u64>()
-            > MAX_BLOB_GAS_PER_BLOCK
+            .sum::<u64>() >
+            MAX_BLOB_GAS_PER_BLOCK
         {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::Eip4844BlobGasExceeded.to_string(),

@@ -96,10 +96,10 @@ impl<T: PoolTransaction> BlobTransactions<T> {
                 let mut iter = self.by_id.iter().peekable();
 
                 while let Some((id, tx)) = iter.next() {
-                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default()
-                        < blob_fee_to_satisfy
-                        || tx.transaction.max_fee_per_gas()
-                            < best_transactions_attributes.basefee as u128
+                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default() <
+                        blob_fee_to_satisfy ||
+                        tx.transaction.max_fee_per_gas() <
+                            best_transactions_attributes.basefee as u128
                     {
                         // does not satisfy the blob fee or base fee
                         // still parked in blob pool -> skip descendant transactions
@@ -150,8 +150,8 @@ impl<T: PoolTransaction> BlobTransactions<T> {
             let mut iter = self.by_id.iter().peekable();
 
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee)
-                    || tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
+                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee) ||
+                    tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
                 {
                     // still parked in blob pool -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {

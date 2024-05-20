@@ -746,8 +746,8 @@ impl Discv4Service {
             self.kbuckets
                 .closest_values(&target_key)
                 .filter(|node| {
-                    node.value.has_endpoint_proof
-                        && !self.pending_find_nodes.contains_key(&node.key.preimage().0)
+                    node.value.has_endpoint_proof &&
+                        !self.pending_find_nodes.contains_key(&node.key.preimage().0)
                 })
                 .take(MAX_NODES_PER_BUCKET)
                 .map(|n| (target_key.distance(&n.key), n.value.record)),
@@ -1120,8 +1120,8 @@ impl Discv4Service {
             return;
         }
 
-        if self.pending_pings.contains_key(&node.id)
-            || self.pending_find_nodes.contains_key(&node.id)
+        if self.pending_pings.contains_key(&node.id) ||
+            self.pending_find_nodes.contains_key(&node.id)
         {
             return;
         }
@@ -2446,8 +2446,8 @@ mod tests {
         })
         .await;
 
-        let expiry = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
-            + 10000000000000;
+        let expiry = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() +
+            10000000000000;
         let msg = Neighbours { nodes: vec![service2.local_node_record], expire: expiry };
         service.on_neighbours(msg, record.tcp_addr(), id);
         // wait for the processed ping

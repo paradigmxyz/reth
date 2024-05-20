@@ -243,8 +243,8 @@ impl<DB> NodeState<DB> {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
                     state;
-                if self.safe_block_hash != Some(safe_block_hash)
-                    && self.finalized_block_hash != Some(finalized_block_hash)
+                if self.safe_block_hash != Some(safe_block_hash) &&
+                    self.finalized_block_hash != Some(finalized_block_hash)
                 {
                     let msg = match status {
                         ForkchoiceStatus::Valid => "Forkchoice updated",
@@ -636,8 +636,8 @@ impl Eta {
     /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
     /// [StageId::Execution] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
-        if !self.is_available()
-            || matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
+        if !self.is_available() ||
+            matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)
         {
             None
         } else {

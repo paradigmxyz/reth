@@ -268,10 +268,10 @@ impl InsertBlockErrorKind {
             Self::Canonical(err) => {
                 matches!(
                     err,
-                    CanonicalError::Validation(BlockValidationError::StateRoot { .. })
-                        | CanonicalError::Provider(
-                            ProviderError::StateRootMismatch(_)
-                                | ProviderError::UnwindStateRootMismatch(_)
+                    CanonicalError::Validation(BlockValidationError::StateRoot { .. }) |
+                        CanonicalError::Provider(
+                            ProviderError::StateRootMismatch(_) |
+                                ProviderError::UnwindStateRootMismatch(_)
                         )
                 )
             }
@@ -299,12 +299,12 @@ impl InsertBlockErrorKind {
                         true
                     }
                     // these are internal errors, not caused by an invalid block
-                    BlockExecutionError::LatestBlock(_)
-                    | BlockExecutionError::Pruning(_)
-                    | BlockExecutionError::CanonicalRevert { .. }
-                    | BlockExecutionError::CanonicalCommit { .. }
-                    | BlockExecutionError::AppendChainDoesntConnect { .. }
-                    | BlockExecutionError::UnavailableForTest => false,
+                    BlockExecutionError::LatestBlock(_) |
+                    BlockExecutionError::Pruning(_) |
+                    BlockExecutionError::CanonicalRevert { .. } |
+                    BlockExecutionError::CanonicalCommit { .. } |
+                    BlockExecutionError::AppendChainDoesntConnect { .. } |
+                    BlockExecutionError::UnavailableForTest => false,
                     BlockExecutionError::Other(_) => false,
                 }
             }
@@ -314,12 +314,12 @@ impl InsertBlockErrorKind {
                         // the block's number is lower than the finalized block's number
                         true
                     }
-                    BlockchainTreeError::BlockSideChainIdConsistency { .. }
-                    | BlockchainTreeError::CanonicalChain { .. }
-                    | BlockchainTreeError::BlockNumberNotFoundInChain { .. }
-                    | BlockchainTreeError::BlockHashNotFoundInChain { .. }
-                    | BlockchainTreeError::BlockBufferingFailed { .. }
-                    | BlockchainTreeError::GenesisBlockHasNoParent => false,
+                    BlockchainTreeError::BlockSideChainIdConsistency { .. } |
+                    BlockchainTreeError::CanonicalChain { .. } |
+                    BlockchainTreeError::BlockNumberNotFoundInChain { .. } |
+                    BlockchainTreeError::BlockHashNotFoundInChain { .. } |
+                    BlockchainTreeError::BlockBufferingFailed { .. } |
+                    BlockchainTreeError::GenesisBlockHasNoParent => false,
                 }
             }
             Self::Provider(_) | Self::Internal(_) => {
@@ -327,10 +327,10 @@ impl InsertBlockErrorKind {
                 false
             }
             Self::Canonical(err) => match err {
-                CanonicalError::BlockchainTree(_)
-                | CanonicalError::CanonicalCommit(_)
-                | CanonicalError::CanonicalRevert(_)
-                | CanonicalError::OptimisticTargetRevert(_) => false,
+                CanonicalError::BlockchainTree(_) |
+                CanonicalError::CanonicalCommit(_) |
+                CanonicalError::CanonicalRevert(_) |
+                CanonicalError::OptimisticTargetRevert(_) => false,
                 CanonicalError::Validation(_) => true,
                 CanonicalError::Provider(_) => false,
             },

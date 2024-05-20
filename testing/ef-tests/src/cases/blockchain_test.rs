@@ -69,13 +69,13 @@ impl Case for BlockchainTestCase {
             .filter(|case| {
                 !matches!(
                     case.network,
-                    ForkSpec::ByzantiumToConstantinopleAt5
-                        | ForkSpec::Constantinople
-                        | ForkSpec::ConstantinopleFix
-                        | ForkSpec::MergeEOF
-                        | ForkSpec::MergeMeterInitCode
-                        | ForkSpec::MergePush0
-                        | ForkSpec::Unknown
+                    ForkSpec::ByzantiumToConstantinopleAt5 |
+                        ForkSpec::Constantinople |
+                        ForkSpec::ConstantinopleFix |
+                        ForkSpec::MergeEOF |
+                        ForkSpec::MergeMeterInitCode |
+                        ForkSpec::MergePush0 |
+                        ForkSpec::Unknown
                 )
             })
             .par_bridge()

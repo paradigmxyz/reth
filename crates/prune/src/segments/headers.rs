@@ -270,8 +270,8 @@ mod tests {
             provider.commit().expect("commit");
 
             let last_pruned_block_number = to_block.min(
-                next_block_number_to_prune
-                    + (input.limiter.deleted_entries_limit().unwrap() / HEADER_TABLES_TO_PRUNE - 1)
+                next_block_number_to_prune +
+                    (input.limiter.deleted_entries_limit().unwrap() / HEADER_TABLES_TO_PRUNE - 1)
                         as u64,
             );
 

@@ -256,11 +256,7 @@ where
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
-                    return Poll::Ready(Err(StageError::DetachedHead {
-                        local_head,
-                        header,
-                        error,
-                    }));
+                    return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }));
                 }
                 None => return Poll::Ready(Err(StageError::ChannelClosed)),
             }

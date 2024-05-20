@@ -240,8 +240,8 @@ impl Command {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
                     similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
-                    if in_mem.1 != incr.1
-                        && matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.0.len() > self.skip_node_depth.unwrap_or_default())
+                    if in_mem.1 != incr.1 &&
+                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.0.len() > self.skip_node_depth.unwrap_or_default())
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

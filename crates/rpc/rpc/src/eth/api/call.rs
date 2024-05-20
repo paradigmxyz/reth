@@ -333,8 +333,8 @@ where
             // An estimation error is allowed once the current gas limit range used in the binary
             // search is small enough (less than 1.5% of the highest gas limit)
             // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L152
-            if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64)
-                < ESTIMATE_GAS_ERROR_RATIO
+            if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64) <
+                ESTIMATE_GAS_ERROR_RATIO
             {
                 break;
             };

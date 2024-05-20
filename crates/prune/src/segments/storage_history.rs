@@ -210,8 +210,8 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip_while(|(i, (block_number, _, _))| {
-                    *i < deleted_entries_limit / STORAGE_HISTORY_TABLES_TO_PRUNE * run
-                        && *block_number <= to_block as usize
+                    *i < deleted_entries_limit / STORAGE_HISTORY_TABLES_TO_PRUNE * run &&
+                        *block_number <= to_block as usize
                 })
                 .next()
                 .map(|(i, _)| i)

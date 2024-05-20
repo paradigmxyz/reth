@@ -255,8 +255,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let old_first = old_blocks.first();
 
                 // check if the reorg is not canonical with the pool's block
-                if !(old_first.parent_hash == pool_info.last_seen_block_hash
-                    || new_first.parent_hash == pool_info.last_seen_block_hash)
+                if !(old_first.parent_hash == pool_info.last_seen_block_hash ||
+                    new_first.parent_hash == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;

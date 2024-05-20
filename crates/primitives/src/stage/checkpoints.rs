@@ -230,14 +230,14 @@ impl StageCheckpoint {
         match stage_checkpoint {
             StageUnitCheckpoint::Account(AccountHashingCheckpoint {
                 progress: entities, ..
-            })
-            | StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
+            }) |
+            StageUnitCheckpoint::Storage(StorageHashingCheckpoint {
                 progress: entities, ..
-            })
-            | StageUnitCheckpoint::Entities(entities)
-            | StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. })
-            | StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. })
-            | StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
+            }) |
+            StageUnitCheckpoint::Entities(entities) |
+            StageUnitCheckpoint::Execution(ExecutionCheckpoint { progress: entities, .. }) |
+            StageUnitCheckpoint::Headers(HeadersCheckpoint { progress: entities, .. }) |
+            StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint {
                 progress: entities,
                 ..
             }) => Some(entities),
@@ -270,10 +270,10 @@ impl StageUnitCheckpoint {
     /// range.
     pub fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
         match self {
-            Self::Account(AccountHashingCheckpoint { ref mut block_range, .. })
-            | Self::Storage(StorageHashingCheckpoint { ref mut block_range, .. })
-            | Self::Execution(ExecutionCheckpoint { ref mut block_range, .. })
-            | Self::IndexHistory(IndexHistoryCheckpoint { ref mut block_range, .. }) => {
+            Self::Account(AccountHashingCheckpoint { ref mut block_range, .. }) |
+            Self::Storage(StorageHashingCheckpoint { ref mut block_range, .. }) |
+            Self::Execution(ExecutionCheckpoint { ref mut block_range, .. }) |
+            Self::IndexHistory(IndexHistoryCheckpoint { ref mut block_range, .. }) => {
                 let old_range = *block_range;
                 *block_range = CheckpointBlockRange { from, to };
 

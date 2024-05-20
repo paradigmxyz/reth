@@ -743,8 +743,8 @@ where
 
                 // If current_header is None, then the current_hash does not have an invalid
                 // ancestor in the cache, check its presence in blockchain tree
-                if current_header.is_none()
-                    && matches!(
+                if current_header.is_none() &&
+                    matches!(
                         // TODO: handle find_block_by_hash errors.
                         self.blockchain.find_block_by_hash(current_hash, BlockSource::Any),
                         Ok(Some(_))
@@ -849,8 +849,8 @@ where
         //
         // This ensures that the finalized block is consistent with the head block, i.e. the
         // finalized block is an ancestor of the head block.
-        if !state.finalized_block_hash.is_zero()
-            && !self.blockchain.is_canonical(state.finalized_block_hash)?
+        if !state.finalized_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.finalized_block_hash)?
         {
             return Ok(Some(OnForkChoiceUpdated::invalid_state()));
         }
@@ -863,8 +863,8 @@ where
         //
         // This ensures that the safe block is consistent with the head block, i.e. the safe
         // block is an ancestor of the head block.
-        if !state.safe_block_hash.is_zero()
-            && !self.blockchain.is_canonical(state.safe_block_hash)?
+        if !state.safe_block_hash.is_zero() &&
+            !self.blockchain.is_canonical(state.safe_block_hash)?
         {
             return Ok(Some(OnForkChoiceUpdated::invalid_state()));
         }
@@ -1262,8 +1262,8 @@ where
                 latest_valid_hash = Some(block_hash);
                 PayloadStatusEnum::Valid
             }
-            InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. })
-            | InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+            InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                 // check if the block's parent is already marked as invalid
                 if let Some(status) =
                     self.check_invalid_ancestor_with_head(block.parent_hash, block.hash())

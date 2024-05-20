@@ -166,8 +166,8 @@ mod tests {
                 .map(|block| block.body.len())
                 .sum::<usize>()
                 .min(
-                    next_tx_number_to_prune as usize
-                        + input.limiter.deleted_entries_limit().unwrap(),
+                    next_tx_number_to_prune as usize +
+                        input.limiter.deleted_entries_limit().unwrap(),
                 )
                 .sub(1);
 

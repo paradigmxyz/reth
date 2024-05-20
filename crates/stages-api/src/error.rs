@@ -139,17 +139,17 @@ impl StageError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            Self::Database(_)
-                | Self::Download(_)
-                | Self::DatabaseIntegrity(_)
-                | Self::StageCheckpoint(_)
-                | Self::MissingDownloadBuffer
-                | Self::MissingSyncGap
-                | Self::ChannelClosed
-                | Self::InconsistentBlockNumber { .. }
-                | Self::InconsistentTxNumber { .. }
-                | Self::Internal(_)
-                | Self::Fatal(_)
+            Self::Database(_) |
+                Self::Download(_) |
+                Self::DatabaseIntegrity(_) |
+                Self::StageCheckpoint(_) |
+                Self::MissingDownloadBuffer |
+                Self::MissingSyncGap |
+                Self::ChannelClosed |
+                Self::InconsistentBlockNumber { .. } |
+                Self::InconsistentTxNumber { .. } |
+                Self::Internal(_) |
+                Self::Fatal(_)
         )
     }
 }

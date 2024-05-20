@@ -211,9 +211,9 @@ impl Header {
 
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
-        self.transaction_root_is_empty()
-            && self.ommers_hash_is_empty()
-            && self.withdrawals_root.map_or(true, |root| root == EMPTY_ROOT_HASH)
+        self.transaction_root_is_empty() &&
+            self.ommers_hash_is_empty() &&
+            self.withdrawals_root.map_or(true, |root| root == EMPTY_ROOT_HASH)
     }
 
     /// Check if the ommers hash equals to empty hash list.
@@ -654,8 +654,8 @@ impl SealedHeader {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
         let parent_gas_limit =
             if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-                parent.gas_limit
-                    * chain_spec.base_fee_params_at_timestamp(self.timestamp).elasticity_multiplier
+                parent.gas_limit *
+                    chain_spec.base_fee_params_at_timestamp(self.timestamp).elasticity_multiplier
                         as u64
             } else {
                 parent.gas_limit
@@ -732,8 +732,8 @@ impl SealedHeader {
 
         // timestamp in past check
         #[cfg(feature = "optimism")]
-        if chain_spec.is_bedrock_active_at_block(self.header.number)
-            && self.header.is_timestamp_in_past(parent.timestamp)
+        if chain_spec.is_bedrock_active_at_block(self.header.number) &&
+            self.header.is_timestamp_in_past(parent.timestamp)
         {
             return Err(HeaderValidationError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,

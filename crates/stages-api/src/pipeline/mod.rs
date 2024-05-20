@@ -170,9 +170,8 @@ where
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
-            if next_action.should_continue()
-                && self
-                    .progress
+            if next_action.should_continue() &&
+                self.progress
                     .minimum_block_number
                     .zip(self.max_block)
                     .map_or(false, |(progress, target)| progress >= target)

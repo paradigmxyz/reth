@@ -84,8 +84,8 @@ pub fn calculate_receipt_root_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
-        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -127,8 +127,8 @@ pub fn calculate_receipt_root_ref_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
-        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
