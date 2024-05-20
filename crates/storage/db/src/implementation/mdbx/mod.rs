@@ -272,7 +272,7 @@ impl DatabaseEnv {
             // We grow the database in increments of 4 gigabytes
             growth_step: Some(4 * GIGABYTE as isize),
             // The database never shrinks
-            shrink_threshold: None,
+            shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
         });
         #[cfg(not(windows))]
