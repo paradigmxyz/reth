@@ -19,7 +19,7 @@ impl<T: Clone> Clone for EventListeners<T> {
 
 impl<T: Clone + Send + Sync + 'static> Default for EventListeners<T> {
     fn default() -> Self {
-        Self::new(DEFAULT_BROADCAST_CHANNEL_SIZE)
+        Self::new(DEFAULT_SIZE_BROADCAST_CHANNEL)
     }
 }
 
