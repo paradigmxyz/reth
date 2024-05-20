@@ -440,7 +440,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Adds a new listener for `NetworkEvent`.
-    EventListener(Sender<NetworkEvent>),
+    EventListener(broadcast::Sender<NetworkEvent>),
     /// Broadcasts an event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, B256),
     /// Sends a list of transactions to the given peer.
