@@ -182,7 +182,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         .gas
                         .try_into()
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    placeholder: Some(()),
+                    placeholder: tx.to.map(|_| ()),
                     to: tx.to.unwrap_or_default(),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,

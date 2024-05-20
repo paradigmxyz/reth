@@ -1462,6 +1462,11 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                     .then(Signature::optimism_deposit_tx_signature)
                     .unwrap_or(sig);
 
+                if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
+                    tx_eip_4844.placeholder =
+                        if tx_eip_4844.to != Address::default() { Some(()) } else { None };
+                }
+
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
                 tx.hash = tx.recalculate_hash();

@@ -73,9 +73,6 @@ pub trait Compact: Sized {
 /// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
 pub type CompactPlaceholder = ();
 
-/// TODO(debt): this should be removed if we break the DB.
-/// Needed to make sure that the Compact bitflag struct has one bit before the new `to` field:
-/// <https://github.com/paradigmxyz/reth/pull/8291#issuecomment-2117545016>
 impl Compact for CompactPlaceholder {
     #[inline]
     fn to_compact<B>(self, _: &mut B) -> usize
