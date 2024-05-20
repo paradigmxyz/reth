@@ -12,7 +12,8 @@
 use reth_consensus::{Consensus, ConsensusError};
 use reth_consensus_common::validation::{self, validate_header_extradata};
 use reth_primitives::{
-    ChainSpec, Header, Receipt, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    BlockWithSenders, ChainSpec, Header, Receipt, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
@@ -104,7 +105,7 @@ impl Consensus for OptimismBeaconConsensus {
 
     fn validate_block_post_execution(
         &self,
-        block: &SealedBlock,
+        block: &BlockWithSenders,
         receipts: &[Receipt],
     ) -> Result<(), ConsensusError> {
         validation::validate_block_post_execution(block, &self.chain_spec, receipts)
