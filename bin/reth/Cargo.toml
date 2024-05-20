@@ -113,11 +113,21 @@ tikv-jemallocator = { version = "0.5.0", optional = true }
 libc = "0.2"
 
 # bitfinity dependencies
+candid.workspace = true
+did.workspace = true
+ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
+evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
+rlp = { workspace = true }
 
 [dev-dependencies]
 jsonrpsee.workspace = true
 assert_matches = "1.5.0"
+
+# bitfinity dev dependencies
+dirs.workspace = true
+revm-primitives.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["jemalloc"]

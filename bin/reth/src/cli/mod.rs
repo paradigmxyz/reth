@@ -8,9 +8,7 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, import_receipts, init_cmd, init_state,
-        node::{self, NoArgs},
-        p2p, recover, stage, test_vectors,
+        bitfinity_reset_evm_state, config_cmd, db, debug_cmd, dump_genesis, import, import_receipts, init_cmd, init_state, node::{self, NoArgs}, p2p, recover, stage, test_vectors
     },
     version::{LONG_VERSION, SHORT_VERSION},
 };
@@ -163,6 +161,9 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::BitfinityResetEvmState(builder) => runner.run_until_ctrl_c(async move {
+                builder.build().await.unwrap().execute().await
+            }),
         }
     }
 
@@ -221,6 +222,10 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
+
+    /// Export state to EVM canister
+    #[command(name = "bitfinity-reset-evm-state")]
+    BitfinityResetEvmState(bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder),
 }
 
 #[cfg(test)]
