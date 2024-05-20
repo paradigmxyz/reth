@@ -52,21 +52,15 @@ impl Display for DisconnectReason {
         let message = match self {
             Self::DisconnectRequested => "disconnect requested",
             Self::TcpSubsystemError => "TCP sub-system error",
-            Self::ProtocolBreach => {
-                "breach of protocol, e.g. a malformed message, bad RLP, etc."
-            }
+            Self::ProtocolBreach => "breach of protocol, e.g. a malformed message, bad RLP, etc.",
             Self::UselessPeer => "useless peer",
             Self::TooManyPeers => "too many peers",
             Self::AlreadyConnected => "already connected",
             Self::IncompatibleP2PProtocolVersion => "incompatible P2P protocol version",
-            Self::NullNodeIdentity => {
-                "null node identity received - this is automatically invalid"
-            }
+            Self::NullNodeIdentity => "null node identity received - this is automatically invalid",
             Self::ClientQuitting => "client quitting",
             Self::UnexpectedHandshakeIdentity => "unexpected identity in handshake",
-            Self::ConnectedToSelf => {
-                "identity is the same as this node (i.e. connected to itself)"
-            }
+            Self::ConnectedToSelf => "identity is the same as this node (i.e. connected to itself)",
             Self::PingTimeout => "ping timeout",
             Self::SubprotocolSpecific => "some other reason specific to a subprotocol",
         };
@@ -120,9 +114,9 @@ impl Decodable for DisconnectReason {
     /// reason encoded a single byte or a RLP list containing the disconnect reason.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort)
+            return Err(RlpError::InputTooShort);
         } else if buf.len() > 2 {
-            return Err(RlpError::Overflow)
+            return Err(RlpError::Overflow);
         }
 
         if buf.len() > 1 {
@@ -131,11 +125,14 @@ impl Decodable for DisconnectReason {
             let header = Header::decode(buf)?;
 
             if !header.list {
-                return Err(RlpError::UnexpectedString)
+                return Err(RlpError::UnexpectedString);
             }
 
             if header.payload_length != 1 {
-                return Err(RlpError::ListLengthMismatch { expected: 1, got: header.payload_length })
+                return Err(RlpError::ListLengthMismatch {
+                    expected: 1,
+                    got: header.payload_length,
+                });
             }
         }
 

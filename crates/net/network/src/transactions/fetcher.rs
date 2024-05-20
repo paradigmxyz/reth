@@ -156,7 +156,7 @@ impl TransactionFetcher {
             if let Some(inflight_count) = self.active_peers.get(peer_id) {
                 *inflight_count -= 1;
                 if *inflight_count == 0 {
-                    return true
+                    return true;
                 }
             }
             false
@@ -171,7 +171,7 @@ impl TransactionFetcher {
     pub fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
         if *inflight_count < DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
-            return true
+            return true;
         }
         false
     }
@@ -187,7 +187,7 @@ impl TransactionFetcher {
 
         for peer_id in fallback_peers.iter() {
             if self.is_idle(peer_id) && is_session_active(peer_id) {
-                return Some(peer_id)
+                return Some(peer_id);
             }
         }
 
@@ -214,13 +214,13 @@ impl TransactionFetcher {
 
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
-                break idle_peer.copied()
+                break idle_peer.copied();
             }
 
             if let Some(ref mut bud) = budget {
                 *bud = bud.saturating_sub(1);
                 if *bud == 0 {
-                    return None
+                    return None;
                 }
             }
         };
@@ -243,7 +243,7 @@ impl TransactionFetcher {
         hashes_from_announcement: ValidAnnouncementData,
     ) -> RequestTxHashes {
         if hashes_from_announcement.msg_version().is_eth68() {
-            return self.pack_request_eth68(hashes_to_request, hashes_from_announcement)
+            return self.pack_request_eth68(hashes_to_request, hashes_from_announcement);
         }
         self.pack_request_eth66(hashes_to_request, hashes_from_announcement)
     }
@@ -274,7 +274,7 @@ impl TransactionFetcher {
 
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
-                return hashes_from_announcement_iter.collect::<RequestTxHashes>()
+                return hashes_from_announcement_iter.collect::<RequestTxHashes>();
             } else {
                 acc_size_response = size;
             }
@@ -293,8 +293,8 @@ impl TransactionFetcher {
 
             let next_acc_size = acc_size_response + size;
 
-            if next_acc_size <=
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+            if next_acc_size
+                <= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
             {
                 // only update accumulated size of tx response if tx will fit in without exceeding
                 // soft limit
@@ -305,11 +305,11 @@ impl TransactionFetcher {
             }
 
             let free_space =
-                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request -
-                    acc_size_response;
+                self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request
+                    - acc_size_response;
 
             if free_space < MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED {
-                break
+                break;
             }
         }
 
@@ -358,7 +358,7 @@ impl TransactionFetcher {
         hashes.retain(|hash| {
             if let Some(entry) = self.hashes_fetch_inflight_and_pending_fetch.get(hash) {
                 entry.fallback_peers_mut().remove(peer_failed_to_serve);
-                return true
+                return true;
             }
             // tx has been seen over broadcast in the time it took for the request to resolve
             false
@@ -377,13 +377,13 @@ impl TransactionFetcher {
         for hash in hashes.into_iter() {
             // hash could have been evicted from bounded lru map
             if self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_none() {
-                continue
+                continue;
             }
 
             let Some(TxFetchMetadata { retries, fallback_peers, .. }) =
                 self.hashes_fetch_inflight_and_pending_fetch.get(&hash)
             else {
-                return
+                return;
             };
 
             if let Some(peer_id) = fallback_peer {
@@ -398,7 +398,7 @@ impl TransactionFetcher {
                     );
 
                     max_retried_and_evicted_hashes.push(hash);
-                    continue
+                    continue;
                 }
                 *retries += 1;
             }
@@ -439,7 +439,7 @@ impl TransactionFetcher {
                     budget_find_idle_fallback_peer,
                 ) else {
                     // no peers are idle or budget is depleted
-                    return
+                    return;
                 };
 
                 peer_id
@@ -635,7 +635,7 @@ impl TransactionFetcher {
                 max_inflight_transaction_requests=self.info.max_inflight_requests,
                 "limit for concurrent `GetPooledTransactions` requests reached, dropping request for hashes to peer"
             );
-            return Some(new_announced_hashes)
+            return Some(new_announced_hashes);
         }
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
@@ -645,7 +645,7 @@ impl TransactionFetcher {
                 conn_eth_version=%conn_eth_version,
                 "failed to cache active peer in schnellru::LruMap, dropping request to peer"
             );
-            return Some(new_announced_hashes)
+            return Some(new_announced_hashes);
         };
 
         if *inflight_count >= DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER {
@@ -656,7 +656,7 @@ impl TransactionFetcher {
                 max_concurrent_tx_reqs_per_peer=DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
                 "limit for concurrent `GetPooledTransactions` requests per peer reached"
             );
-            return Some(new_announced_hashes)
+            return Some(new_announced_hashes);
         }
 
         *inflight_count += 1;
@@ -693,7 +693,7 @@ impl TransactionFetcher {
                     self.metrics.egress_peer_channel_full.increment(1);
                     Some(new_announced_hashes)
                 }
-            }
+            };
         } else {
             // stores a new request future for the request
             self.inflight_requests.push(GetPooledTxRequestFut::new(
@@ -740,10 +740,10 @@ impl TransactionFetcher {
             .unwrap_or(AVERAGE_BYTE_SIZE_TX_ENCODED);
 
         // if request full enough already, we're satisfied, send request for single tx
-        if acc_size_response >=
-            DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
+        if acc_size_response
+            >= DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE_ON_FETCH_PENDING_HASHES
         {
-            return
+            return;
         }
 
         // try to fill request by checking if any other hashes pending fetch (in lru order) are
@@ -751,7 +751,7 @@ impl TransactionFetcher {
         for hash in self.hashes_pending_fetch.iter() {
             // 1. Check if a hash pending fetch is seen by peer.
             if !seen_hashes.contains(hash) {
-                continue
+                continue;
             };
 
             // 2. Optimistically include the hash in the request.
@@ -780,7 +780,7 @@ impl TransactionFetcher {
             if let Some(ref mut bud) = budget_fill_request {
                 *bud = bud.saturating_sub(1);
                 if *bud == 0 {
-                    return
+                    return;
                 }
             }
         }
@@ -816,8 +816,8 @@ impl TransactionFetcher {
         let info = &self.info;
 
         let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests /
-                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
+            info.max_inflight_requests
+                / DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER,
         );
         let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
             DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_IDLE_PEER,
@@ -855,8 +855,8 @@ impl TransactionFetcher {
         let info = &self.info;
 
         let tx_fetcher_has_capacity = self.has_capacity(
-            info.max_inflight_requests /
-                DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
+            info.max_inflight_requests
+                / DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION,
         );
         let tx_pool_has_capacity = has_capacity_wrt_pending_pool_imports(
             DEFAULT_DIVISOR_MAX_COUNT_PENDING_POOL_IMPORTS_ON_FIND_INTERSECTION,
@@ -931,7 +931,7 @@ impl TransactionFetcher {
                         "received empty `PooledTransactions` response from peer, peer failed to serve hashes it announced"
                     );
 
-                    return FetchEvent::EmptyResponse { peer_id }
+                    return FetchEvent::EmptyResponse { peer_id };
                 }
 
                 //
@@ -958,7 +958,7 @@ impl TransactionFetcher {
                 }
                 // peer has only sent hashes that we didn't request
                 if verified_payload.is_empty() {
-                    return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
+                    return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse };
                 }
 
                 //
@@ -995,7 +995,7 @@ impl TransactionFetcher {
                     if valid_payload.contains_key(requested_hash) {
                         // hash is now known, stop tracking
                         fetched.push(*requested_hash);
-                        return false
+                        return false;
                     }
                     true
                 });
@@ -1042,11 +1042,11 @@ impl Stream for TransactionFetcher {
         // `FuturesUnordered` doesn't close when `None` is returned. so just return pending.
         // <https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=815be2b6c8003303757c3ced135f363e>
         if self.inflight_requests.is_empty() {
-            return Poll::Pending
+            return Poll::Pending;
         }
 
         if let Some(resp) = ready!(self.inflight_requests.poll_next_unpin(cx)) {
-            return Poll::Ready(Some(self.on_resolved_get_pooled_transactions_request_fut(resp)))
+            return Poll::Ready(Some(self.on_resolved_get_pooled_transactions_request_fut(resp)));
         }
 
         Poll::Pending
@@ -1250,7 +1250,7 @@ impl VerifyPooledTransactionsResponse for UnverifiedPooledTransactions {
                     tx_hashes_not_requested_count += 1;
                 }
 
-                return false
+                return false;
             }
             true
         });

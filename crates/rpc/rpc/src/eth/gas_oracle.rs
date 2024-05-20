@@ -134,7 +134,7 @@ where
 
         // if we have stored a last price, then we check whether or not it was for the same head
         if inner.last_price.block_hash == header.hash() {
-            return Ok(inner.last_price.price)
+            return Ok(inner.last_price.price);
         }
 
         // if all responses are empty, then we can return a maximum of 2*check_block blocks' worth
@@ -179,7 +179,7 @@ where
 
             // break when we have enough populated blocks
             if populated_blocks >= self.oracle_config.blocks {
-                break
+                break;
             }
 
             current_hash = parent_hash;
@@ -240,14 +240,14 @@ where
                 let tip = tx.effective_tip_per_gas(base_fee_per_gas);
                 effective_gas_tip = Some(tip);
                 if tip < Some(ignore_under) {
-                    continue
+                    continue;
                 }
             }
 
             // check if the sender was the coinbase, if so, ignore
             if let Some(sender) = tx.recover_signer() {
                 if sender == block.beneficiary {
-                    continue
+                    continue;
                 }
             }
 
@@ -261,7 +261,7 @@ where
 
             // we have enough entries
             if prices.len() >= limit {
-                break
+                break;
             }
         }
 

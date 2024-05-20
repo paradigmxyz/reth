@@ -37,7 +37,7 @@ impl<DB: Database> Segment<DB> for Transactions {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transactions to prune");
-                return Ok(PruneOutput::done())
+                return Ok(PruneOutput::done());
             }
         };
 
@@ -151,8 +151,8 @@ mod tests {
                 .map(|block| block.body.len())
                 .sum::<usize>()
                 .min(
-                    next_tx_number_to_prune as usize +
-                        input.limiter.deleted_entries_limit().unwrap(),
+                    next_tx_number_to_prune as usize
+                        + input.limiter.deleted_entries_limit().unwrap(),
                 )
                 .sub(1);
 

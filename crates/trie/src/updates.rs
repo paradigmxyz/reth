@@ -132,7 +132,7 @@ impl TrieUpdates {
     /// Flush updates all aggregated updates to the database.
     pub fn flush(self, tx: &(impl DbTx + DbTxMut)) -> Result<(), reth_db::DatabaseError> {
         if self.trie_operations.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;

@@ -13,7 +13,7 @@ impl From<IntegerListInput> for IntegerList {
 
         // Empty lists are not supported by `IntegerList`, so we want to skip these cases.
         if v.is_empty() {
-            return vec![1u64].into()
+            return vec![1u64].into();
         }
         v.sort();
         v.into()

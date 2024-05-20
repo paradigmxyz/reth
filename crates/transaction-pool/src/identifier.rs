@@ -92,13 +92,9 @@ impl TransactionId {
     ///
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
     /// `on_chain_nonce`
-    pub fn ancestor(
-        transaction_nonce: u64,
-        on_chain_nonce: u64,
-        sender: SenderId,
-    ) -> Option<Self> {
+    pub fn ancestor(transaction_nonce: u64, on_chain_nonce: u64, sender: SenderId) -> Option<Self> {
         if transaction_nonce == on_chain_nonce {
-            return None
+            return None;
         }
         let prev_nonce = transaction_nonce.saturating_sub(1);
         (on_chain_nonce <= prev_nonce).then(|| Self::new(sender, prev_nonce))

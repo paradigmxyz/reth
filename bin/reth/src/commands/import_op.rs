@@ -127,7 +127,7 @@ impl ImportOpCommand {
                 body.transactions.retain(|tx| {
                     if is_duplicate(tx.hash, *block_number) {
                         total_filtered_out_dup_txns += 1;
-                        return false
+                        return false;
                     }
                     true
                 })
@@ -175,8 +175,8 @@ impl ImportOpCommand {
         let total_imported_blocks = provider.tx_ref().entries::<tables::Headers>()?;
         let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
-        if total_decoded_blocks != total_imported_blocks ||
-            total_decoded_txns != total_imported_txns
+        if total_decoded_blocks != total_imported_blocks
+            || total_decoded_txns != total_imported_txns
         {
             error!(target: "reth::cli",
                 total_decoded_blocks,
@@ -243,7 +243,7 @@ pub const TX_DUP_ORIGINALS: [ReplayedTx; 4] =
 pub fn is_duplicate(tx_hash: TxHash, block_number: u64) -> bool {
     for ReplayedTx { tx_hash: dup_tx_hash, original_block } in TX_DUP_ORIGINALS {
         if tx_hash == dup_tx_hash && block_number != original_block {
-            return true
+            return true;
         }
     }
     false

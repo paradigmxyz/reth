@@ -137,7 +137,7 @@ impl Message {
     /// Returns the decoded message and the public key of the sender.
     pub fn decode(packet: &[u8]) -> Result<Packet, DecodePacketError> {
         if packet.len() < MIN_PACKET_SIZE {
-            return Err(DecodePacketError::PacketTooShort)
+            return Err(DecodePacketError::PacketTooShort);
         }
 
         // parses the wire-protocol, every packet starts with a header:
@@ -148,7 +148,7 @@ impl Message {
         let header_hash = keccak256(&packet[32..]);
         let data_hash = B256::from_slice(&packet[..32]);
         if data_hash != header_hash {
-            return Err(DecodePacketError::HashMismatch)
+            return Err(DecodePacketError::HashMismatch);
         }
 
         let signature = &packet[32..96];
@@ -231,7 +231,7 @@ impl Decodable for FindNode {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -245,7 +245,7 @@ impl Decodable for FindNode {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -273,7 +273,7 @@ impl Decodable for Neighbours {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -287,7 +287,7 @@ impl Decodable for Neighbours {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -316,7 +316,7 @@ impl Decodable for EnrRequest {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -330,7 +330,7 @@ impl Decodable for EnrRequest {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -424,7 +424,7 @@ impl Decodable for Ping {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -449,7 +449,7 @@ impl Decodable for Ping {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);
@@ -504,7 +504,7 @@ impl Decodable for Pong {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
         let mut this = Self {
@@ -524,7 +524,7 @@ impl Decodable for Pong {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);

@@ -90,13 +90,13 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
         Ok(Some(block_hash)) => {
             if block_hash == hash {
                 debug!("Genesis already written, skipping.");
-                return Ok(hash)
+                return Ok(hash);
             }
 
             return Err(InitDatabaseError::GenesisHashMismatch {
                 chainspec_hash: hash,
                 database_hash: block_hash,
-            })
+            });
         }
         Err(e) => return Err(dbg!(e).into()),
     }
@@ -409,8 +409,8 @@ fn dump_state<DB: Database>(
 
         accounts.push((address, account));
 
-        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0) ||
-            index == accounts_len - 1
+        if (index > 0 && index % AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP == 0)
+            || index == accounts_len - 1
         {
             total_inserted_accounts += accounts.len();
 
@@ -496,7 +496,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                     "State root has been computed"
                 );
 
-                return Ok(root)
+                return Ok(root);
             }
         }
     }

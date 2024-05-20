@@ -151,7 +151,7 @@ impl Header {
     /// Returns an error if the extradata size is larger than 100 KB.
     pub fn ensure_extradata_valid(&self) -> Result<(), HeaderError> {
         if self.extra_data.len() > 100 * 1024 {
-            return Err(HeaderError::LargeExtraData)
+            return Err(HeaderError::LargeExtraData);
         }
         Ok(())
     }
@@ -163,7 +163,7 @@ impl Header {
     /// Returns an error if the block difficulty exceeds 80 bits.
     pub fn ensure_difficulty_valid(&self) -> Result<(), HeaderError> {
         if self.difficulty.bit_len() > 80 {
-            return Err(HeaderError::LargeDifficulty)
+            return Err(HeaderError::LargeDifficulty);
         }
         Ok(())
     }
@@ -211,9 +211,9 @@ impl Header {
 
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
-        self.transaction_root_is_empty() &&
-            self.ommers_hash_is_empty() &&
-            self.withdrawals_root.map_or(true, |root| root == EMPTY_ROOT_HASH)
+        self.transaction_root_is_empty()
+            && self.ommers_hash_is_empty()
+            && self.withdrawals_root.map_or(true, |root| root == EMPTY_ROOT_HASH)
     }
 
     /// Check if the ommers hash equals to empty hash list.
@@ -420,7 +420,7 @@ impl Decodable for Header {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let rlp_head = alloy_rlp::Header::decode(buf)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
+            return Err(alloy_rlp::Error::UnexpectedString);
         }
         let started_len = buf.len();
         let mut this = Self {
@@ -479,7 +479,7 @@ impl Decodable for Header {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
         Ok(this)
     }
@@ -654,8 +654,8 @@ impl SealedHeader {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
         let parent_gas_limit =
             if chain_spec.fork(Hardfork::London).transitions_at_block(self.number) {
-                parent.gas_limit *
-                    chain_spec.base_fee_params_at_timestamp(self.timestamp).elasticity_multiplier
+                parent.gas_limit
+                    * chain_spec.base_fee_params_at_timestamp(self.timestamp).elasticity_multiplier
                         as u64
             } else {
                 parent.gas_limit
@@ -667,7 +667,7 @@ impl SealedHeader {
                 return Err(HeaderValidationError::GasLimitInvalidIncrease {
                     parent_gas_limit,
                     child_gas_limit: self.gas_limit,
-                })
+                });
             }
         }
         // Check for a decrease in gas limit beyond the allowed threshold.
@@ -675,13 +675,13 @@ impl SealedHeader {
             return Err(HeaderValidationError::GasLimitInvalidDecrease {
                 parent_gas_limit,
                 child_gas_limit: self.gas_limit,
-            })
+            });
         }
         // Check if the self gas limit is below the minimum required limit.
         else if self.gas_limit < MINIMUM_GAS_LIMIT {
             return Err(HeaderValidationError::GasLimitInvalidMinimum {
                 child_gas_limit: self.gas_limit,
-            })
+            });
         }
 
         Ok(())
@@ -721,24 +721,24 @@ impl SealedHeader {
             return Err(HeaderValidationError::ParentBlockNumberMismatch {
                 parent_block_number: parent.number,
                 block_number: self.number,
-            })
+            });
         }
 
         if parent.hash != self.parent_hash {
             return Err(HeaderValidationError::ParentHashMismatch(
                 GotExpected { got: self.parent_hash, expected: parent.hash }.into(),
-            ))
+            ));
         }
 
         // timestamp in past check
         #[cfg(feature = "optimism")]
-        if chain_spec.is_bedrock_active_at_block(self.header.number) &&
-            self.header.is_timestamp_in_past(parent.timestamp)
+        if chain_spec.is_bedrock_active_at_block(self.header.number)
+            && self.header.is_timestamp_in_past(parent.timestamp)
         {
             return Err(HeaderValidationError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,
                 timestamp: self.timestamp,
-            })
+            });
         }
 
         #[cfg(not(feature = "optimism"))]
@@ -746,7 +746,7 @@ impl SealedHeader {
             return Err(HeaderValidationError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,
                 timestamp: self.timestamp,
-            })
+            });
         }
 
         // TODO Check difficulty increment between parent and self
@@ -782,7 +782,7 @@ impl SealedHeader {
                 return Err(HeaderValidationError::BaseFeeDiff(GotExpected {
                     expected: expected_base_fee,
                     got: base_fee,
-                }))
+                }));
             }
         }
 
@@ -812,7 +812,7 @@ impl SealedHeader {
         let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
 
         if self.blob_gas_used.is_none() {
-            return Err(HeaderValidationError::BlobGasUsedMissing)
+            return Err(HeaderValidationError::BlobGasUsedMissing);
         }
         let excess_blob_gas =
             self.excess_blob_gas.ok_or(HeaderValidationError::ExcessBlobGasMissing)?;
@@ -824,7 +824,7 @@ impl SealedHeader {
                 diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
                 parent_excess_blob_gas,
                 parent_blob_gas_used,
-            })
+            });
         }
 
         Ok(())

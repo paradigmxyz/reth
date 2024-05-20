@@ -42,10 +42,10 @@ impl PoolConfig {
     /// Returns whether or not the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
-        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size) ||
-            self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size) ||
-            self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size) ||
-            self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
+        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size)
+            || self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size)
+            || self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size)
+            || self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
     }
 }
 
@@ -109,7 +109,7 @@ impl PriceBumpConfig {
     #[inline]
     pub(crate) const fn price_bump(&self, tx_type: u8) -> u128 {
         if tx_type == EIP4844_TX_TYPE_ID {
-            return self.replace_blob_tx_price_bump
+            return self.replace_blob_tx_price_bump;
         }
         self.default_price_bump
     }
@@ -170,7 +170,7 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
         if self.no_local_exemptions() {
-            return false
+            return false;
         }
         origin.is_local() || self.contains_local_address(sender)
     }

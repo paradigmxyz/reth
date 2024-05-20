@@ -58,20 +58,20 @@ impl ExecutionPayloadValidator {
         if let Some(versioned_hashes) = cancun_fields.versioned_hashes() {
             if num_blob_versioned_hashes != versioned_hashes.len() {
                 // Number of blob versioned hashes does not match
-                return Err(PayloadError::InvalidVersionedHashes)
+                return Err(PayloadError::InvalidVersionedHashes);
             }
             // we can use `zip` safely here because we already compared their length
             for (payload_versioned_hash, block_versioned_hash) in
                 versioned_hashes.iter().zip(sealed_block.blob_versioned_hashes_iter())
             {
                 if payload_versioned_hash != block_versioned_hash {
-                    return Err(PayloadError::InvalidVersionedHashes)
+                    return Err(PayloadError::InvalidVersionedHashes);
                 }
             }
         } else {
             // No Cancun fields, if block includes any blobs, this is an error
             if num_blob_versioned_hashes > 0 {
-                return Err(PayloadError::InvalidVersionedHashes)
+                return Err(PayloadError::InvalidVersionedHashes);
             }
         }
 
@@ -117,38 +117,38 @@ impl ExecutionPayloadValidator {
             return Err(PayloadError::BlockHash {
                 execution: sealed_block.hash(),
                 consensus: expected_hash,
-            })
+            });
         }
 
         if self.is_cancun_active_at_timestamp(sealed_block.timestamp) {
             if sealed_block.header.blob_gas_used.is_none() {
                 // cancun active but blob gas used not present
-                return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
+                return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed);
             }
             if sealed_block.header.excess_blob_gas.is_none() {
                 // cancun active but excess blob gas not present
-                return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
+                return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas);
             }
             if cancun_fields.as_ref().is_none() {
                 // cancun active but cancun fields not present
-                return Err(PayloadError::PostCancunWithoutCancunFields)
+                return Err(PayloadError::PostCancunWithoutCancunFields);
             }
         } else {
             if sealed_block.has_blob_transactions() {
                 // cancun not active but blob transactions present
-                return Err(PayloadError::PreCancunBlockWithBlobTransactions)
+                return Err(PayloadError::PreCancunBlockWithBlobTransactions);
             }
             if sealed_block.header.blob_gas_used.is_some() {
                 // cancun not active but blob gas used present
-                return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
+                return Err(PayloadError::PreCancunBlockWithBlobGasUsed);
             }
             if sealed_block.header.excess_blob_gas.is_some() {
                 // cancun not active but excess blob gas present
-                return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
+                return Err(PayloadError::PreCancunBlockWithExcessBlobGas);
             }
             if cancun_fields.as_ref().is_some() {
                 // cancun not active but cancun fields present
-                return Err(PayloadError::PreCancunWithCancunFields)
+                return Err(PayloadError::PreCancunWithCancunFields);
             }
         }
 

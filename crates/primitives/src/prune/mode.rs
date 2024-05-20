@@ -50,7 +50,7 @@ impl PruneMode {
             Self::Full => true,
             Self::Distance(distance) => {
                 if *distance > tip {
-                    return false
+                    return false;
                 }
                 block < tip - *distance
             }

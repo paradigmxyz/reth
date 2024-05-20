@@ -216,7 +216,7 @@ where
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
         if indices.len() != 1 {
             // The OG impl failed if it gets more than a single index
-            return Ok(None)
+            return Ok(None);
         }
         self.trace_get_index(hash, indices[0]).await
     }
@@ -254,7 +254,7 @@ where
         if distance > 100 {
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
-            ))
+            ));
         }
 
         // fetch all blocks in that range
@@ -290,7 +290,7 @@ where
                     if let Some(idx) = tx_info.index {
                         if !indices.contains(&idx) {
                             // only record traces for relevant transactions
-                            return Ok(None)
+                            return Ok(None);
                         }
                     }
                     let traces = inspector
@@ -381,8 +381,8 @@ where
                                 author: block.header.beneficiary,
                                 reward_type: RewardType::Uncle,
                                 value: U256::from(
-                                    block_reward(base_block_reward, block.ommers.len()) -
-                                        base_block_reward,
+                                    block_reward(base_block_reward, block.ommers.len())
+                                        - base_block_reward,
                                 ),
                             },
                         ));

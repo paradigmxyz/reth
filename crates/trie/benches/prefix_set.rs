@@ -151,12 +151,12 @@ mod implementations {
             for key in self.keys.range::<Nibbles, _>(range) {
                 if key.has_prefix(&prefix) {
                     self.last_checked = Some(prefix);
-                    return true
+                    return true;
                 }
 
                 if key > &prefix {
                     self.last_checked = Some(prefix);
-                    return false
+                    return false;
                 }
             }
 
@@ -220,12 +220,12 @@ mod implementations {
             for (idx, key) in self.keys[self.index..].iter().enumerate() {
                 if key.has_prefix(&prefix) {
                     self.index += idx;
-                    return true
+                    return true;
                 }
 
                 if key > &prefix {
                     self.index += idx;
-                    return false
+                    return false;
                 }
             }
 

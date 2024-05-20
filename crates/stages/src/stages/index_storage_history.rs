@@ -92,7 +92,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         }
 
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()))
+            return Ok(ExecOutput::done(input.checkpoint()));
         }
 
         let mut range = input.next_block_range();
@@ -587,7 +587,7 @@ mod tests {
                 let start_block = input.next_block();
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 assert_eq!(

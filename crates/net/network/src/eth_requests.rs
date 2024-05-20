@@ -84,7 +84,7 @@ where
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
                 let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
-                    return headers
+                    return headers;
                 };
                 hash.into()
             }
@@ -100,7 +100,7 @@ where
                         if let Some(next) = (header.number + 1).checked_add(skip) {
                             block = next.into()
                         } else {
-                            break
+                            break;
                         }
                     }
                     HeadersDirection::Falling => {
@@ -112,7 +112,7 @@ where
                             {
                                 block = next.into()
                             } else {
-                                break
+                                break;
                             }
                         } else {
                             block = header.parent_hash.into()
@@ -124,14 +124,14 @@ where
                 headers.push(header);
 
                 if headers.len() >= MAX_HEADERS_SERVE {
-                    break
+                    break;
                 }
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
 
@@ -172,14 +172,14 @@ where
                 bodies.push(body);
 
                 if bodies.len() >= MAX_BODIES_SERVE {
-                    break
+                    break;
                 }
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
 
@@ -209,14 +209,14 @@ where
                 receipts.push(receipt);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE {
-                    break
+                    break;
                 }
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
 
@@ -261,7 +261,7 @@ where
         if maybe_more_incoming_requests {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
-            return Poll::Pending
+            return Poll::Pending;
         }
 
         Poll::Pending

@@ -106,7 +106,7 @@ impl Block {
             let Some(senders) =
                 TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
             else {
-                return Err(self)
+                return Err(self);
             };
             senders
         };
@@ -386,7 +386,7 @@ impl SealedBlock {
             return Err(GotExpected {
                 got: calculated_root,
                 expected: self.header.transactions_root,
-            })
+            });
         }
 
         Ok(())
@@ -546,11 +546,12 @@ impl BlockBody {
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
     #[inline]
     pub fn size(&self) -> usize {
-        self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals
+        self.transactions.iter().map(TransactionSigned::size).sum::<usize>()
+            + self.transactions.capacity() * std::mem::size_of::<TransactionSigned>()
+            + self.ommers.iter().map(Header::size).sum::<usize>()
+            + self.ommers.capacity() * std::mem::size_of::<Header>()
+            + self
+                .withdrawals
                 .as_ref()
                 .map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }

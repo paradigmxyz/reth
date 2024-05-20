@@ -84,8 +84,8 @@ pub fn calculate_receipt_root_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
+        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -98,7 +98,7 @@ pub fn calculate_receipt_root_optimism(
 
         return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| {
             r.encode_inner(buf, false)
-        })
+        });
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
@@ -127,8 +127,8 @@ pub fn calculate_receipt_root_ref_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp)
+        && !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -141,7 +141,7 @@ pub fn calculate_receipt_root_ref_optimism(
 
         return ordered_trie_root_with_encoder(&receipts, |r, buf| {
             ReceiptWithBloomRef::from(r).encode_inner(buf, false)
-        })
+        });
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| {
@@ -153,7 +153,7 @@ pub fn calculate_receipt_root_ref_optimism(
 pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     // Check if `ommers` list is empty
     if ommers.is_empty() {
-        return EMPTY_OMMER_ROOT_HASH
+        return EMPTY_OMMER_ROOT_HASH;
     }
     // RLP Encode
     let mut ommers_rlp = Vec::new();

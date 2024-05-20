@@ -110,7 +110,7 @@ where
             return Err(P2PStreamError::MessageTooBig {
                 message_size: first_message_bytes.len(),
                 max_size: MAX_PAYLOAD_SIZE,
-            })
+            });
         }
 
         // The first message sent MUST be a hello OR disconnect message
@@ -152,7 +152,7 @@ where
             return Err(P2PStreamError::MismatchedProtocolVersion(GotExpected {
                 got: their_hello.protocol_version,
                 expected: hello.protocol_version,
-            }))
+            }));
         }
 
         // determine shared capabilities (currently returns only one capability)
@@ -394,7 +394,7 @@ where
 
         if this.disconnecting {
             // if disconnecting, stop reading messages
-            return Poll::Ready(None)
+            return Poll::Ready(None);
         }
 
         // we should loop here to ensure we don't return Poll::Pending if we have a message to
@@ -408,7 +408,7 @@ where
 
             if bytes.is_empty() {
                 // empty messages are not allowed
-                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)))
+                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)));
             }
 
             // first decode disconnect reasons, because they can be encoded in a variety of forms
@@ -429,7 +429,7 @@ where
                 // message is snappy compressed. Failure handling in that step is the primary point
                 // where an error is returned if the disconnect reason is malformed.
                 if let Ok(reason) = DisconnectReason::decode(&mut &bytes[1..]) {
-                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
+                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))));
                 }
             }
 
@@ -440,7 +440,7 @@ where
                 return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
                     message_size: decompressed_len,
                     max_size: MAX_PAYLOAD_SIZE,
-                })))
+                })));
             }
 
             // create a buffer to hold the decompressed message, adding a byte to the length for
@@ -471,7 +471,7 @@ where
                     // an error
                     return Poll::Ready(Some(Err(P2PStreamError::HandshakeError(
                         P2PHandshakeError::HelloNotInHandshake,
-                    ))))
+                    ))));
                 }
                 _ if id == P2PMessageID::Pong as u8 => {
                     // if we were waiting for a pong, this will reset the pinger state
@@ -489,11 +489,11 @@ where
                         );
                         err
                     })?;
-                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
+                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))));
                 }
                 _ if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID => {
                     // we have received an unknown reserved message
-                    return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
+                    return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))));
                 }
                 _ => {
                     // we have received a message that is outside the `p2p` reserved message space,
@@ -521,7 +521,7 @@ where
                     //
                     decompress_buf[0] = bytes[0] - MAX_RESERVED_MESSAGE_ID - 1;
 
-                    return Poll::Ready(Some(Ok(decompress_buf)))
+                    return Poll::Ready(Some(Ok(decompress_buf)));
                 }
             }
         }
@@ -550,7 +550,7 @@ where
                 this.start_disconnect(DisconnectReason::PingTimeout)?;
 
                 // End the stream after ping related error
-                return Poll::Ready(Ok(()))
+                return Poll::Ready(Ok(()));
             }
         }
 
@@ -560,7 +560,7 @@ where
             Poll::Ready(Ok(())) => {
                 let flushed = this.poll_flush(cx);
                 if flushed.is_ready() {
-                    return flushed
+                    return flushed;
                 }
             }
         }
@@ -578,17 +578,17 @@ where
             return Err(P2PStreamError::MessageTooBig {
                 message_size: item.len(),
                 max_size: MAX_PAYLOAD_SIZE,
-            })
+            });
         }
 
         if item.is_empty() {
             // empty messages are not allowed
-            return Err(P2PStreamError::EmptyProtocolMessage)
+            return Err(P2PStreamError::EmptyProtocolMessage);
         }
 
         // ensure we have free capacity
         if !self.has_outgoing_capacity() {
-            return Err(P2PStreamError::SendBufferFull)
+            return Err(P2PStreamError::SendBufferFull);
         }
 
         let this = self.project();
@@ -624,10 +624,10 @@ where
                 Err(err) => return Poll::Ready(Err(err.into())),
                 Ok(()) => {
                     let Some(message) = this.outgoing_messages.pop_front() else {
-                        return Poll::Ready(Ok(()))
+                        return Poll::Ready(Ok(()));
                     };
                     if let Err(err) = this.inner.as_mut().start_send(message) {
-                        return Poll::Ready(Err(err.into()))
+                        return Poll::Ready(Err(err.into()));
                     }
                 }
             }
@@ -721,10 +721,10 @@ impl Decodable for P2PMessage {
         /// Removes the snappy prefix from the Ping/Pong buffer
         fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> alloy_rlp::Result<()> {
             if buf.len() < 3 {
-                return Err(RlpError::InputTooShort)
+                return Err(RlpError::InputTooShort);
             }
             if buf[..3] != [0x01, 0x00, EMPTY_LIST_CODE] {
-                return Err(RlpError::Custom("expected snappy payload"))
+                return Err(RlpError::Custom("expected snappy payload"));
             }
             buf.advance(3);
             Ok(())

@@ -46,11 +46,7 @@ pub struct ProviderFactory<DB> {
 
 impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
-    pub fn new(
-        db: DB,
-        chain_spec: Arc<ChainSpec>,
-        static_files_path: PathBuf,
-    ) -> RethResult<Self> {
+    pub fn new(db: DB, chain_spec: Arc<ChainSpec>, static_files_path: PathBuf) -> RethResult<Self> {
         Ok(Self {
             db: Arc::new(db),
             chain_spec,
@@ -195,7 +191,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td))
+            return Ok(Some(td));
         }
 
         self.static_file_provider.get_with_static_file_or_database(

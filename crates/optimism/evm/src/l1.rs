@@ -39,7 +39,7 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecut
     if l1_info_tx_data.len() < 4 {
         return Err(OptimismBlockExecutionError::L1BlockInfoError {
             message: "invalid l1 block info transaction calldata in the L2 block".to_string(),
-        })
+        });
     }
 
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
@@ -67,7 +67,7 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     if data.len() != 256 {
         return Err(OptimismBlockExecutionError::L1BlockInfoError {
             message: "unexpected l1 block info tx calldata length found".to_string(),
-        })
+        });
     }
 
     let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
@@ -113,7 +113,7 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     if data.len() != 160 {
         return Err(OptimismBlockExecutionError::L1BlockInfoError {
             message: "unexpected l1 block info tx calldata length found".to_string(),
-        })
+        });
     }
 
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or(
@@ -187,7 +187,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
         if is_deposit {
-            return Ok(U256::ZERO)
+            return Ok(U256::ZERO);
         }
 
         let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
@@ -200,7 +200,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Err(OptimismBlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
             }
-            .into())
+            .into());
         };
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
@@ -219,7 +219,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Err(OptimismBlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
             }
-            .into())
+            .into());
         };
         Ok(self.data_gas(input, spec_id))
     }
@@ -239,9 +239,9 @@ where
     // If the canyon hardfork is active at the current timestamp, and it was not active at the
     // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
-    if chain_spec.is_optimism() &&
-        chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp.saturating_sub(2))
+    if chain_spec.is_optimism()
+        && chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp)
+        && !chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 
@@ -261,7 +261,7 @@ where
 
         // Commit the create2 deployer account to the database.
         db.commit(HashMap::from([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
-        return Ok(())
+        return Ok(());
     }
 
     Ok(())

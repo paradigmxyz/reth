@@ -411,7 +411,7 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len })
+            return Err(EngineApiError::PayloadRequestTooLarge { len });
         }
 
         let mut result = Vec::with_capacity(hashes.len());
@@ -451,7 +451,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            })
+            });
         }
 
         self.inner.beacon_consensus.transition_configuration_exchanged().await;
@@ -461,7 +461,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            })
+            });
         }
 
         // Attempt to look up terminal block hash
@@ -526,9 +526,9 @@ where
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
+                    return Ok(fcu_res);
                 }
-                return Err(err.into())
+                return Err(err.into());
             }
         }
 
@@ -576,8 +576,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         let start = Instant::now();
         let res =
-            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
-                .await;
+            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
         self.inner.metrics.latency.new_payload_v3.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
         Ok(res?)
@@ -594,8 +593,7 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         let start = Instant::now();
-        let res =
-            Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
+        let res = Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -610,8 +608,7 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         let start = Instant::now();
-        let res =
-            Self::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
+        let res = Self::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -627,8 +624,7 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         let start = Instant::now();
-        let res =
-            Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
+        let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -884,8 +880,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().unseal())),
             );
@@ -914,8 +910,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -941,8 +937,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
-                    U256::from(1),
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap()
+                    + U256::from(1),
                 ..Default::default()
             };
 

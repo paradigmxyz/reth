@@ -44,14 +44,14 @@ pub fn compare_receipts_root_and_logs_bloom(
         return Err(BlockValidationError::ReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
         )
-        .into())
+        .into());
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(BlockValidationError::BloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
         )
-        .into())
+        .into());
     }
 
     Ok(())

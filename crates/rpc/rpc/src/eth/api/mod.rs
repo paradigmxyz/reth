@@ -324,7 +324,7 @@ where
     pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
-            return Ok(pending.origin.into_actual_pending())
+            return Ok(pending.origin.into_actual_pending());
         }
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
@@ -335,11 +335,11 @@ where
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                    pending.origin.header().hash() == pending_block.block.parent_hash &&
-                    now <= pending_block.expires_at
+                if pending.block_env.number.to::<u64>() == pending_block.block.number
+                    && pending.origin.header().hash() == pending_block.block.parent_hash
+                    && now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending_block.block.clone()))
+                    return Ok(Some(pending_block.block.clone()));
                 }
             }
 
@@ -348,7 +348,7 @@ where
                 Ok(block) => block,
                 Err(err) => {
                     tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
+                    return Ok(None);
                 }
             };
 

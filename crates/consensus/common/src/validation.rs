@@ -19,36 +19,36 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
-        })
+        });
     }
 
     // Check if base fee is set.
-    if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
-        header.base_fee_per_gas.is_none()
+    if chain_spec.fork(Hardfork::London).active_at_block(header.number)
+        && header.base_fee_per_gas.is_none()
     {
-        return Err(ConsensusError::BaseFeeMissing)
+        return Err(ConsensusError::BaseFeeMissing);
     }
 
     let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.is_optimism();
 
     // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) && wd_root_missing {
-        return Err(ConsensusError::WithdrawalsRootMissing)
-    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
-        header.withdrawals_root.is_some()
+        return Err(ConsensusError::WithdrawalsRootMissing);
+    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp)
+        && header.withdrawals_root.is_some()
     {
-        return Err(ConsensusError::WithdrawalsRootUnexpected)
+        return Err(ConsensusError::WithdrawalsRootUnexpected);
     }
 
     // Ensures that EIP-4844 fields are valid once cancun is active.
     if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
         validate_4844_header_standalone(header)?;
     } else if header.blob_gas_used.is_some() {
-        return Err(ConsensusError::BlobGasUsedUnexpected)
+        return Err(ConsensusError::BlobGasUsedUnexpected);
     } else if header.excess_blob_gas.is_some() {
-        return Err(ConsensusError::ExcessBlobGasUnexpected)
+        return Err(ConsensusError::ExcessBlobGasUnexpected);
     } else if header.parent_beacon_block_root.is_some() {
-        return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
+        return Err(ConsensusError::ParentBeaconBlockRootUnexpected);
     }
 
     Ok(())
@@ -69,12 +69,12 @@ pub fn validate_block_standalone(
     if block.header.ommers_hash != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
-        ))
+        ));
     }
 
     // Check transaction root
     if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -87,7 +87,7 @@ pub fn validate_block_standalone(
         if withdrawals_root != *header_withdrawals_root {
             return Err(ConsensusError::BodyWithdrawalsRootDiff(
                 GotExpected { got: withdrawals_root, expected: *header_withdrawals_root }.into(),
-            ))
+            ));
         }
     }
 
@@ -101,7 +101,7 @@ pub fn validate_block_standalone(
             return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
                 got: header_blob_gas_used,
                 expected: total_blob_gas,
-            }))
+            }));
         }
     }
 
@@ -121,21 +121,21 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
     let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     if header.parent_beacon_block_root.is_none() {
-        return Err(ConsensusError::ParentBeaconBlockRootMissing)
+        return Err(ConsensusError::ParentBeaconBlockRootMissing);
     }
 
     if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
         return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
             blob_gas_used,
             max_blob_gas_per_block: MAX_DATA_GAS_PER_BLOCK,
-        })
+        });
     }
 
     if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
         return Err(ConsensusError::BlobGasUsedNotMultipleOfBlobGasPerBlob {
             blob_gas_used,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
-        })
+        });
     }
 
     // `excess_blob_gas` must also be a multiple of `DATA_GAS_PER_BLOB`. This will be checked later
@@ -144,7 +144,7 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
         return Err(ConsensusError::ExcessBlobGasNotMultipleOfBlobGasPerBlob {
             excess_blob_gas,
             blob_gas_per_blob: DATA_GAS_PER_BLOB,
-        })
+        });
     }
 
     Ok(())

@@ -130,7 +130,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         // When an offset size is smaller than the initial (8), we are dealing with immutable
         // data.
         if reader.offset_size() != OFFSET_SIZE_BYTES {
-            return Err(NippyJarError::FrozenJar)
+            return Err(NippyJarError::FrozenJar);
         }
 
         let expected_offsets_file_size = 1 + // first byte is the size of one offset
@@ -152,8 +152,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                 self.jar.rows = ((actual_offsets_file_size.
                     saturating_sub(1). // first byte is the size of one offset
                     saturating_sub(OFFSET_SIZE_BYTES) / // expected size of the data file
-                    (self.jar.columns as u64)) /
-                    OFFSET_SIZE_BYTES) as usize;
+                    (self.jar.columns as u64))
+                    / OFFSET_SIZE_BYTES) as usize;
 
                 // Freeze row count changed
                 self.jar.freeze_config()?;
@@ -191,7 +191,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                         // Since we decrease the offset list, we need to check the consistency of
                         // `self.jar.rows` again
                         self.check_consistency_and_heal()?;
-                        break
+                        break;
                     }
                 }
             }
@@ -324,7 +324,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     return Err(NippyJarError::InvalidPruning(
                         num_offsets,
                         remaining_to_prune as u64,
-                    ))
+                    ));
                 }
 
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
@@ -350,7 +350,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     self.data_file.get_mut().set_len(last_offset)?;
                 }
             } else {
-                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
+                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64));
             }
         }
 
@@ -440,7 +440,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         for offset in self.offsets.drain(..) {
             if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
                 if last_offset_ondisk == offset {
-                    continue
+                    continue;
                 }
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;

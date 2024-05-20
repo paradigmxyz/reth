@@ -93,14 +93,14 @@ impl ProtocolMessage {
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData));
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData));
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)
@@ -227,8 +227,9 @@ impl EthMessage {
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             Self::NewBlock(_) => EthMessageID::NewBlock,
             Self::Transactions(_) => EthMessageID::Transactions,
-            Self::NewPooledTransactionHashes66(_) |
-            Self::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
+            Self::NewPooledTransactionHashes66(_) | Self::NewPooledTransactionHashes68(_) => {
+                EthMessageID::NewPooledTransactionHashes
+            }
             Self::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             Self::BlockHeaders(_) => EthMessageID::BlockHeaders,
             Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
@@ -484,7 +485,7 @@ where
         // RequestPair
         let consumed_len = initial_length - buf.len();
         if consumed_len != header.payload_length {
-            return Err(alloy_rlp::Error::UnexpectedLength)
+            return Err(alloy_rlp::Error::UnexpectedLength);
         }
 
         Ok(Self { request_id, message })

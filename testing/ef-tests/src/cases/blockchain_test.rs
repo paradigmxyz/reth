@@ -60,7 +60,7 @@ impl Case for BlockchainTestCase {
     fn run(&self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
-            return Err(Error::Skipped)
+            return Err(Error::Skipped);
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
@@ -69,13 +69,13 @@ impl Case for BlockchainTestCase {
             .filter(|case| {
                 !matches!(
                     case.network,
-                    ForkSpec::ByzantiumToConstantinopleAt5 |
-                        ForkSpec::Constantinople |
-                        ForkSpec::ConstantinopleFix |
-                        ForkSpec::MergeEOF |
-                        ForkSpec::MergeMeterInitCode |
-                        ForkSpec::MergePush0 |
-                        ForkSpec::Unknown
+                    ForkSpec::ByzantiumToConstantinopleAt5
+                        | ForkSpec::Constantinople
+                        | ForkSpec::ConstantinopleFix
+                        | ForkSpec::MergeEOF
+                        | ForkSpec::MergeMeterInitCode
+                        | ForkSpec::MergePush0
+                        | ForkSpec::Unknown
                 )
             })
             .par_bridge()

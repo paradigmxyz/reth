@@ -55,7 +55,7 @@ impl BlobStoreCanonTracker {
             if *entry.key() <= finalized_block {
                 finalized.extend(entry.remove_entry().1);
             } else {
-                break
+                break;
             }
         }
 

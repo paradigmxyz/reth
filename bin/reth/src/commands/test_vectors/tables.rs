@@ -135,7 +135,7 @@ where
         let key: T::Key = strat_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
 
         if !seen_keys.insert(key.clone()) {
-            continue
+            continue;
         }
 
         let mut values: Vec<T::Value> =

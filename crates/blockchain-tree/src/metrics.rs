@@ -97,12 +97,8 @@ impl MakeCanonicalAction {
             Self::MergeAllChains => "merge all chains",
             Self::UpdateCanonicalIndex => "update canonical index",
             Self::RetrieveStateTrieUpdates => "retrieve state trie updates",
-            Self::CommitCanonicalChainToDatabase => {
-                "commit canonical chain to database"
-            }
-            Self::RevertCanonicalChainFromDatabase => {
-                "revert canonical chain from database"
-            }
+            Self::CommitCanonicalChainToDatabase => "commit canonical chain to database",
+            Self::RevertCanonicalChainFromDatabase => "revert canonical chain from database",
             Self::InsertOldCanonicalChain => "insert old canonical chain",
         }
     }
