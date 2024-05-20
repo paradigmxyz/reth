@@ -135,8 +135,14 @@ impl Command {
                 } = self.network.discovery;
 
                 // Use rlpx address if none given
-                let discv5_addr_ipv4 = discv5_addr.or_else(|| ipv4(self.network.addr));
-                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| ipv6(self.network.addr));
+                let discv5_addr_ipv4 = discv5_addr.or_else(|| match self.network.addr {
+                    IpAddr::V4(ip) => Some(ip),
+                    IpAddr::V6(_) => None,
+                });
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| match self.network.addr {
+                    IpAddr::V4(_) => None,
+                    IpAddr::V6(ip) => Some(ip),
+                });
 
                 builder
                     .discv5_config(
@@ -207,19 +213,5 @@ impl Command {
         }
 
         Ok(())
-    }
-}
-
-fn ipv4(ip: IpAddr) -> Option<Ipv4Addr> {
-    match ip {
-        IpAddr::V4(ip) => Some(ip),
-        IpAddr::V6(_) => None,
-    }
-}
-
-fn ipv6(ip: IpAddr) -> Option<Ipv6Addr> {
-    match ip {
-        IpAddr::V4(_) => None,
-        IpAddr::V6(ip) => Some(ip),
     }
 }
