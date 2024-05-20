@@ -12,7 +12,7 @@ pub use checkpoints::{
 };
 
 /// Direction and target block for pipeline operations.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineTarget {
     /// Target for forward synchronization, indicating a block hash to sync to.
     Sync(BlockHash),

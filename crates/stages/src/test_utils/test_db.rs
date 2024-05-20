@@ -314,6 +314,42 @@ impl TestStageDB {
         })
     }
 
+    /// Insert collection of ([TxNumber], [Receipt]) organized by respective block numbers into the
+    /// corresponding table or static file segment.
+    pub fn insert_receipts_by_block<I, J>(
+        &self,
+        receipts: I,
+        storage_kind: StorageKind,
+    ) -> ProviderResult<()>
+    where
+        I: IntoIterator<Item = (BlockNumber, J)>,
+        J: IntoIterator<Item = (TxNumber, Receipt)>,
+    {
+        match storage_kind {
+            StorageKind::Database(_) => self.commit(|tx| {
+                receipts.into_iter().try_for_each(|(_, receipts)| {
+                    for (tx_num, receipt) in receipts {
+                        tx.put::<tables::Receipts>(tx_num, receipt)?;
+                    }
+                    Ok(())
+                })
+            }),
+            StorageKind::Static => {
+                let provider = self.factory.static_file_provider();
+                let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
+                let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
+                    writer.increment_block(StaticFileSegment::Receipts, block_num)?;
+                    for (tx_num, receipt) in receipts {
+                        writer.append_receipt(tx_num, receipt)?;
+                    }
+                    Ok(())
+                });
+                writer.commit_without_sync_all()?;
+                res
+            }
+        }
+    }
+
     pub fn insert_transaction_senders<I>(&self, transaction_senders: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (TxNumber, Address)>,

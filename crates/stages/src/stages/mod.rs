@@ -40,7 +40,7 @@ use utils::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestStageDB;
+    use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_rlp::Decodable;
     use reth_db::{
         cursor::DbCursorRO,
@@ -52,14 +52,21 @@ mod tests {
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
-    use reth_interfaces::test_utils::generators::{self, random_block};
+    use reth_interfaces::{
+        provider::ProviderResult,
+        test_utils::generators::{self, random_block, random_block_range, random_receipt},
+    };
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
-        PruneModes, SealedBlock, StaticFileSegment, U256,
+        address,
+        hex_literal::hex,
+        keccak256,
+        stage::{StageCheckpoint, StageId},
+        Account, BlockNumber, Bytecode, ChainSpecBuilder, PruneMode, PruneModes, Receipt,
+        SealedBlock, StaticFileSegment, TxNumber, B256, U256,
     };
     use reth_provider::{
-        providers::StaticFileWriter, AccountExtReader, ProviderFactory, ReceiptProvider,
-        StorageReader,
+        providers::StaticFileWriter, AccountExtReader, DatabaseProviderFactory, ProviderFactory,
+        ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
     use reth_stages_api::{ExecInput, Stage};
     use std::sync::Arc;
@@ -238,5 +245,57 @@ mod tests {
         prune.storage_history = Some(PruneMode::Distance(64));
         // The one account is the miner
         check_pruning(test_db.factory.clone(), prune.clone(), 0, 1, 0).await;
+    }
+
+    fn seed_data(
+    ) -> ProviderResult<(TestStageDB, Vec<SealedBlock>, Vec<(BlockNumber, Vec<(TxNumber, Receipt)>)>)>
+    {
+        let mut rng = generators::rng();
+        let end_block = 100usize;
+        let take = 10;
+        let genesis_hash = B256::ZERO;
+
+        // generate test data
+        let db = TestStageDB::default();
+        let mut blocks = random_block_range(&mut rng, 0..=(end_block as u64), genesis_hash, 0..2);
+        let mut receipts = Vec::new();
+        let tx_num = 0u64;
+        for block in &blocks {
+            let mut block_receipts = Vec::with_capacity(block.body.len());
+            for transaction in &block.body {
+                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
+            }
+            receipts.push((block.number, block_receipts));
+        }
+
+        // insert data respective to the first `end_block - take` blocks
+        let inserteable_blocks = blocks.drain(..end_block - take).collect::<Vec<_>>();
+        db.insert_blocks(inserteable_blocks.iter(), StorageKind::Static)?;
+
+        let inserteable_receipts = receipts.drain(..end_block - take).collect::<Vec<_>>();
+        db.insert_receipts_by_block(inserteable_receipts, StorageKind::Static)?;
+
+        // simulate pipeline by setting all checkpoints to inserted height.
+        let provider_rw = db.factory.provider_rw()?;
+        for stage in StageId::ALL {
+            provider_rw.save_stage_checkpoint(
+                stage,
+                StageCheckpoint::new((end_block - take - 1) as u64),
+            )?;
+        }
+        provider_rw.commit()?;
+
+        Ok((db, blocks, receipts))
+    }
+
+    #[test]
+    fn test_check_consistency() {
+        let (db, _, _) = seed_data().unwrap();
+        let db_provider = db.factory.database_provider_ro().unwrap();
+
+        assert_eq!(
+            db.factory.static_file_provider().check_consistency(&db_provider, false),
+            Ok(None)
+        );
     }
 }
