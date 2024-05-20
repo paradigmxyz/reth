@@ -130,8 +130,8 @@ pub enum ProviderError {
     ConsistentView(Box<ConsistentViewError>),
 }
 
-impl From<reth_primitives::fs::FsPathError> for ProviderError {
-    fn from(err: reth_primitives::fs::FsPathError) -> Self {
+impl From<reth_fs_util::FsPathError> for ProviderError {
+    fn from(err: reth_fs_util::FsPathError) -> Self {
         Self::FsPathError(err.to_string())
     }
 }

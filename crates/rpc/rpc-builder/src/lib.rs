@@ -1630,7 +1630,7 @@ impl RpcServerConfig {
 
     /// Creates the [AuthLayer] if any
     fn maybe_jwt_layer(&self) -> Option<AuthLayer<JwtAuthValidator>> {
-        self.jwt_secret.clone().map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
+        self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
     }
 
     /// Builds the ws and http server(s).
@@ -1701,7 +1701,7 @@ impl RpcServerConfig {
                 http_local_addr: Some(addr),
                 ws_local_addr: Some(addr),
                 server: WsHttpServers::SamePort(server),
-                jwt_secret: self.jwt_secret.clone(),
+                jwt_secret: self.jwt_secret,
             })
         }
 
@@ -1760,7 +1760,7 @@ impl RpcServerConfig {
             http_local_addr,
             ws_local_addr,
             server: WsHttpServers::DifferentPort { http: http_server, ws: ws_server },
-            jwt_secret: self.jwt_secret.clone(),
+            jwt_secret: self.jwt_secret,
         })
     }
 
@@ -2062,7 +2062,7 @@ impl RpcServer {
     }
     /// Return the JwtSecret of the server
     pub fn jwt(&self) -> Option<JwtSecret> {
-        self.ws_http.jwt_secret.clone()
+        self.ws_http.jwt_secret
     }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
