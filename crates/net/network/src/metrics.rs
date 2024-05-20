@@ -311,16 +311,16 @@ impl DisconnectMetrics {
 #[metrics(scope = "network")]
 pub struct EthRequestHandlerMetrics {
     /// Number of GetBlockHeaders requests received
-    pub(crate) eth_requests_get_block_headers_received_total: Counter,
+    pub(crate) eth_headers_requests_received_total: Counter,
 
     /// Number of GetReceipts requests received
-    pub(crate) eth_requests_get_receipts_received_total: Counter,
+    pub(crate) eth_receipts_requests_received_total: Counter,
 
     /// Number of GetBlockBodies requests received
-    pub(crate) eth_requests_get_block_bodies_received_total: Counter,
+    pub(crate) eth_bodies_requests_received_total: Counter,
 
     /// Number of GetNodeData requests received
-    pub(crate) eth_requests_get_node_data_received_total: Counter,
+    pub(crate) eth_node_data_requests_received_total: Counter,
 }
 
 /// Eth67 announcement metrics, track entries by TxType
