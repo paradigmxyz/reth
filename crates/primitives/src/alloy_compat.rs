@@ -115,7 +115,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                     return Err(ConversionError::Eip2718Error(
                         RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
                             .into(),
-                    ));
+                    ))
                 }
                 Ok(Transaction::Legacy(TxLegacy {
                     chain_id: tx.chain_id,

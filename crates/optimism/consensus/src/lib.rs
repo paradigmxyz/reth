@@ -10,8 +10,10 @@
 #![cfg(feature = "optimism")]
 
 use reth_consensus::{Consensus, ConsensusError};
-use reth_consensus_common::{validation, validation::validate_header_extradata};
-use reth_primitives::{ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256};
+use reth_consensus_common::validation::{self, validate_header_extradata};
+use reth_primitives::{
+    ChainSpec, Header, Receipt, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+};
 use std::{sync::Arc, time::SystemTime};
 
 /// Optimism consensus implementation.
@@ -96,7 +98,15 @@ impl Consensus for OptimismBeaconConsensus {
         Ok(())
     }
 
-    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validation::validate_block_standalone(block, &self.chain_spec)
+    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+        validation::validate_block_pre_execution(block, &self.chain_spec)
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        block: &SealedBlock,
+        receipts: &[Receipt],
+    ) -> Result<(), ConsensusError> {
+        validation::validate_block_post_execution(block, &self.chain_spec, receipts)
     }
 }

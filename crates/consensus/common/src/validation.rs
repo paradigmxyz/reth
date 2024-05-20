@@ -6,7 +6,8 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
+    BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header, Receipt, ReceiptWithBloom,
+    Receipts, SealedBlock, SealedHeader, B256,
 };
 
 /// Validate header standalone
@@ -60,7 +61,7 @@ pub fn validate_header_standalone(
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(
+pub fn validate_block_pre_execution(
     block: &SealedBlock,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -103,6 +104,86 @@ pub fn validate_block_standalone(
                 expected: total_blob_gas,
             }))
         }
+    }
+
+    Ok(())
+}
+
+/// Validate a block with regard to execution results:
+///
+///
+/// - Compares the receipts root in the block header to the block body
+/// - Compares the gas used in the block header to the actual gas usage after execution
+pub fn validate_block_post_execution(
+    block: &BlockWithSenders,
+    chain_spec: &ChainSpec,
+    receipts: &[Receipt],
+) -> Result<(), ConsensusError> {
+    // Before Byzantium, receipts contained state root that would mean that expensive
+    // operation as hashing that is required for state root got calculated in every
+    // transaction This was replaced with is_success flag.
+    // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
+    if chain_spec.is_byzantium_active_at_block(block.header.number) {
+        verify_receipts(block.header.receipts_root, block.header.logs_bloom, receipts.iter())?;
+    }
+
+    // Check if gas used matches the value set in header.
+    let cumulative_gas_used =
+        receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
+    if block.gas_used != cumulative_gas_used {
+        // TODO(alexey): do not clone
+        let receipts = Receipts::from_block_receipt(receipts.to_vec());
+        return Err(ConsensusError::BlockGasUsed {
+            gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+            gas_spent_by_tx: receipts.gas_spent_by_tx().expect("all receipts are present"),
+        })
+    }
+
+    Ok(())
+}
+
+/// Calculate the receipts root, and compare it against against the expected receipts root and logs
+/// bloom.
+fn verify_receipts<'a>(
+    expected_receipts_root: B256,
+    expected_logs_bloom: Bloom,
+    receipts: impl Iterator<Item = &'a Receipt> + Clone,
+) -> Result<(), ConsensusError> {
+    // Calculate receipts root.
+    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
+
+    // Create header log bloom.
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
+
+    compare_receipts_root_and_logs_bloom(
+        receipts_root,
+        logs_bloom,
+        expected_receipts_root,
+        expected_logs_bloom,
+    )?;
+
+    Ok(())
+}
+
+/// Compare the calculated receipts root with the expected receipts root, also compare
+/// the calculated logs bloom with the expected logs bloom.
+fn compare_receipts_root_and_logs_bloom(
+    calculated_receipts_root: B256,
+    calculated_logs_bloom: Bloom,
+    expected_receipts_root: B256,
+    expected_logs_bloom: Bloom,
+) -> Result<(), ConsensusError> {
+    if calculated_receipts_root != expected_receipts_root {
+        return Err(ConsensusError::BodyReceiptRootDiff(
+            GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
+        ))
+    }
+
+    if calculated_logs_bloom != expected_logs_bloom {
+        return Err(ConsensusError::BodyBloomLogDiff(
+            GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
+        ))
     }
 
     Ok(())
@@ -362,13 +443,13 @@ mod tests {
 
         // Single withdrawal
         let block = create_block_with_withdrawals(&[1]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
 
         // Multiple increasing withdrawals
         let block = create_block_with_withdrawals(&[1, 2, 3]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let (_, parent) = mock_block();
 
         // Withdrawal index should be the last withdrawal index + 1
@@ -424,7 +505,7 @@ mod tests {
 
         // validate blob, it should fail blob gas used validation
         assert_eq!(
-            validate_block_standalone(&block, &chain_spec),
+            validate_block_pre_execution(&block, &chain_spec),
             Err(ConsensusError::BlobGasUsedDiff(GotExpected {
                 got: 1,
                 expected: expected_blob_gas_used

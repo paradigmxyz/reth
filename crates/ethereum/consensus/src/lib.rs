@@ -11,7 +11,8 @@
 use reth_consensus::{Consensus, ConsensusError};
 use reth_consensus_common::validation;
 use reth_primitives::{
-    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    BlockWithSenders, Chain, ChainSpec, Hardfork, Header, Receipt, SealedBlock, SealedHeader,
+    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
@@ -118,7 +119,15 @@ impl Consensus for EthBeaconConsensus {
         Ok(())
     }
 
-    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validation::validate_block_standalone(block, &self.chain_spec)
+    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+        validation::validate_block_pre_execution(block, &self.chain_spec)
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        receipts: &[Receipt],
+    ) -> Result<(), ConsensusError> {
+        validation::validate_block_post_execution(block, &self.chain_spec, receipts)
     }
 }

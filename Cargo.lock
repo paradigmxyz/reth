@@ -7012,7 +7012,6 @@ dependencies = [
  "reth-primitives",
  "reth-revm",
  "revm-primitives",
- "tracing",
 ]
 
 [[package]]

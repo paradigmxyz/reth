@@ -240,6 +240,7 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
+            // TODO(alexey): run consensus post block verification?
             executor.execute_one((&block, td).into()).map_err(|error| StageError::Block {
                 block: Box::new(block.header.clone().seal_slow()),
                 error: BlockErrorKind::Execution(error),
