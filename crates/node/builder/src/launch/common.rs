@@ -19,7 +19,9 @@ use reth_node_core::{
     init::{init_genesis, InitDatabaseError},
     node_config::NodeConfig,
 };
-use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, PruneModes, B256};
+use reth_primitives::{
+    stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, PruneModes, B256,
+};
 use reth_provider::{
     providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
@@ -338,6 +340,12 @@ where
             .static_file_provider()
             .check_consistency(&factory.provider()?, has_receipt_pruning)?
         {
+            // Highly unlikely to happen, and given its destructive nature, it's better to panic
+            // instead.
+            if let PipelineTarget::Unwind(0) = unwind_target {
+                panic!("A static file <> database inconsistency was found that would trigger an unwind to block 0.")
+            }
+
             // Builds an unwind-only pipeline
             let pipeline = Pipeline::builder()
                 .add_stages(DefaultStages::new(
