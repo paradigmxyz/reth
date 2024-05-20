@@ -47,11 +47,6 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
         };
     }
 
-    /// Sender cloner.
-    pub fn clone_sender(&self) -> Sender<T> {
-        self.sender.clone()
-    }
-
     /// Adds a new event listener and returns the associated receiver.
     pub fn new_listener(&self) -> BroadcastStream<T> {
         BroadcastStream::new(self.sender.subscribe())

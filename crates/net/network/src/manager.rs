@@ -528,7 +528,9 @@ where
     /// Handler for received messages from a handle
     fn on_handle_message(&mut self, msg: NetworkHandleMessage) {
         match msg {
-            NetworkHandleMessage::EventListener(tx) => self.event_listeners.set_sender(tx),
+            NetworkHandleMessage::EventListener(event_listeners) => {
+                self.event_listeners = event_listeners
+            }
             NetworkHandleMessage::DiscoveryListener(tx) => {
                 self.swarm.state_mut().discovery_mut().add_listener(tx);
             }

@@ -26,7 +26,6 @@ use std::{
     },
 };
 use tokio::sync::{
-    broadcast,
     mpsc::{self, UnboundedSender},
     oneshot,
 };
@@ -75,8 +74,9 @@ impl NetworkHandle {
             discv4,
             event_listeners: Default::default(),
         };
-        let tx = inner.event_listeners.clone_sender();
-        let _ = inner.to_manager_tx.send(NetworkHandleMessage::EventListener(tx));
+        let _ = inner
+            .to_manager_tx
+            .send(NetworkHandleMessage::EventListener(inner.event_listeners.clone()));
 
         Self { inner: Arc::new(inner) }
     }
@@ -440,7 +440,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Adds a new listener for `NetworkEvent`.
-    EventListener(broadcast::Sender<NetworkEvent>),
+    EventListener(EventListeners<NetworkEvent>),
     /// Broadcasts an event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, B256),
     /// Sends a list of transactions to the given peer.
