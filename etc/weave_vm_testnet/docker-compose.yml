@@ -1,0 +1,37 @@
+version: "1"
+
+services:
+  reth:
+    image: ghcr.io/paradigmxyz/reth:latest
+    container_name: reth
+    restart: unless-stopped
+    ports:
+      - "8551:8551"
+      - "8545:8545"
+      - "8546:8546"
+      - "30304:30304/tcp" #p2p
+      - "30304:30304/udp" #p2p
+    volumes:
+      - reth_data:/data
+      - reth_jwt:/jwt:ro
+      - /home/reth_node/code/reth/target/release/reth:/usr/local/bin/reth:ro
+    command:
+      - node
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
+      - --http.corsdomain=*
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
+      - --ws.origins=*
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/jwt/jwt.hex
+      - --chain=/execution/genesis.json
+      - --disable-discovery
+      - --datadir=/data
+
+volumes:
+  reth_data:
+  reth_jwt:
