@@ -479,7 +479,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Whether to allow exemptions for local transaction exemptions.
-    pub fn set_local_transactions_config(
+    pub fn with_local_transactions_config(
         mut self,
         local_transactions_config: LocalTransactionConfig,
     ) -> Self {
