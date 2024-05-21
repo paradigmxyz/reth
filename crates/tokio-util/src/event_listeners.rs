@@ -30,11 +30,6 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
         Self { sender }
     }
 
-    /// Broadcast sender setter.
-    pub fn set_sender(&mut self, sender: Sender<T>) {
-        self.sender = sender;
-    }
-
     /// Broadcasts an event to all listeners.
     pub fn notify(&self, event: T) {
         match self.sender.send(event) {
