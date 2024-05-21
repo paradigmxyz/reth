@@ -10,7 +10,6 @@ use proptest::strategy::Strategy;
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use std::{
-    borrow::Borrow,
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
@@ -189,13 +188,13 @@ impl ReceiptWithBloom {
 }
 
 /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-pub fn gas_spent_by_transactions<T: Borrow<Receipt>>(
+pub fn gas_spent_by_transactions<T: Deref<Target = Receipt>>(
     receipts: impl IntoIterator<Item = T>,
 ) -> Vec<(u64, u64)> {
     receipts
         .into_iter()
         .enumerate()
-        .map(|(id, receipt)| (id as u64, receipt.borrow().cumulative_gas_used))
+        .map(|(id, receipt)| (id as u64, receipt.deref().cumulative_gas_used))
         .collect()
 }
 
