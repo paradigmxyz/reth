@@ -16,8 +16,9 @@ use reth_network::{
 };
 use reth_provider::test_utils::NoopProvider;
 use reth_tracing::{
-    tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
-    Tracer,
+    tracing::{info, trace},
+    tracing_subscriber::filter::LevelFilter,
+    LayerInfo, LogFormat, RethTracer, Tracer,
 };
 use secp256k1::{rand, SecretKey};
 use std::{
@@ -72,9 +73,13 @@ async fn main() {
     while let Some(evt) = events.next().await {
         // For the sake of the example we only print the session established event
         // with the chain specific details
-        if let Ok(NetworkEvent::SessionEstablished { status, client_version, .. }) = evt {
-            let chain = status.chain;
-            info!(?chain, ?client_version, "Session established with a new peer.");
+        match evt {
+            Ok(NetworkEvent::SessionEstablished { status, client_version, .. }) => {
+                let chain = status.chain;
+                info!(?chain, ?client_version, "Session established with a new peer.");
+            }
+            Ok(_) => {}
+            Err(err) => trace!(?err, "Receiving network event"),
         }
         // More events here
     }
