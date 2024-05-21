@@ -20,11 +20,11 @@ pub struct Command {
     /// The table name
     table: Tables,
 
-    /// start of range
+    /// The start of the range to checksum.
     #[arg(long, value_parser = maybe_json_value_parser)]
     start_key: Option<String>,
 
-    /// end of range
+    /// The end of the range to checksum.
     #[arg(long, value_parser = maybe_json_value_parser)]
     end_key: Option<String>,
 
