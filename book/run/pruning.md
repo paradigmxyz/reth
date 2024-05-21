@@ -39,7 +39,7 @@ To run Reth as a full node, follow the steps from the previous chapter on
 [how to run on mainnet or official testnets](./mainnet.md), and add a `--full` flag. For example:
 
 ```bash
-RUST_LOG=info reth node \
+reth node \
     --full \
     --authrpc.jwtsecret /path/to/secret \
     --authrpc.addr 127.0.0.1 \

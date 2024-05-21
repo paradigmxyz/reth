@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BundleStateDataProvider, ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider,
-    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullBundleStateDataProvider,
+    HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
@@ -560,8 +560,8 @@ impl StateProvider for MockEthProvider {
         }))
     }
 
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(AccountProof::default())
+    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+        Ok(AccountProof::new(address))
     }
 }
 
@@ -660,7 +660,7 @@ impl StateProviderFactory for MockEthProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _bundle_state_data: Box<dyn BundleStateDataProvider + 'a>,
+        _bundle_state_data: Box<dyn FullBundleStateDataProvider + 'a>,
     ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }

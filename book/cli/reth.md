@@ -9,6 +9,7 @@ Usage: reth [OPTIONS] <COMMAND>
 Commands:
   node          Start the node
   init          Initialize the database from a genesis file
+  init-state    Initialize the database from a state dump file
   import        This syncs RLP encoded blocks from a file
   dump-genesis  Dumps genesis block JSON configuration to stdout
   db            Database debugging utilities

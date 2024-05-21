@@ -146,8 +146,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // If static files are ahead, then we didn't reach the database commit in a previous
             // stage run. So, our only solution is to unwind the static files and proceed from the
             // database expected height.
-            Ordering::Greater => static_file_producer
-                .prune_transactions(next_static_file_tx_num - next_tx_num, from_block - 1)?,
+            Ordering::Greater => {
+                static_file_producer
+                    .prune_transactions(next_static_file_tx_num - next_tx_num, from_block - 1)?;
+                // Since this is a database <-> static file inconsistency, we commit the change
+                // straight away.
+                static_file_producer.commit()?;
+            }
             // If static files are behind, then there was some corruption or loss of files. This
             // error will trigger an unwind, that will bring the database to the same height as the
             // static files.
@@ -381,6 +386,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     use reth_primitives::stage::StageUnitCheckpoint;
+    use reth_provider::StaticFileProviderFactory;
     use test_utils::*;
 
     use crate::test_utils::{
@@ -575,6 +581,7 @@ mod tests {
             let mut static_file_producer =
                 static_file_provider.latest_writer(StaticFileSegment::Transactions).unwrap();
             static_file_producer.prune_transactions(1, checkpoint.block_number).unwrap();
+            static_file_producer.commit().unwrap();
         }
         // Unwind all of it
         let unwind_to = 1;
@@ -632,7 +639,8 @@ mod tests {
             StaticFileSegment, TxNumber, B256,
         };
         use reth_provider::{
-            providers::StaticFileWriter, HeaderProvider, ProviderFactory, TransactionsProvider,
+            providers::StaticFileWriter, HeaderProvider, ProviderFactory,
+            StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
 

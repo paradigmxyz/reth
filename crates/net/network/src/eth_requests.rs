@@ -11,7 +11,8 @@ use reth_eth_wire::{
     Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     future::Future,
@@ -138,23 +139,23 @@ where
     }
 
     fn on_headers_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     ) {
-        self.metrics.received_headers_requests.increment(1);
+        self.metrics.eth_headers_requests_received_total.increment(1);
         let headers = self.get_headers_response(request);
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
 
     fn on_bodies_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     ) {
-        self.metrics.received_bodies_requests.increment(1);
+        self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();
 
         let mut total_bytes = 0;
@@ -186,11 +187,13 @@ where
     }
 
     fn on_receipts_request(
-        &mut self,
+        &self,
         _peer_id: PeerId,
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,
     ) {
+        self.metrics.eth_receipts_requests_received_total.increment(1);
+
         let mut receipts = Vec::new();
 
         let mut total_bytes = 0;
@@ -248,7 +251,9 @@ where
                     IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
                         this.on_bodies_request(peer_id, request, response)
                     }
-                    IncomingEthRequest::GetNodeData { .. } => {}
+                    IncomingEthRequest::GetNodeData { .. } => {
+                        this.metrics.eth_node_data_requests_received_total.increment(1);
+                    }
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
                     }

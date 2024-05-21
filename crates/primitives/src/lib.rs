@@ -4,6 +4,7 @@
 //!
 //! ## Feature Flags
 //!
+//! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 
@@ -18,6 +19,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod account;
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
 pub mod basefee;
 mod block;
 mod chain;
@@ -27,19 +30,16 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 mod exex;
-pub mod fs;
 pub mod genesis;
 mod header;
 mod integer_list;
 mod log;
 mod net;
-mod peer;
 pub mod proofs;
 mod prune;
 mod receipt;
 /// Helpers for working with revm
 pub mod revm;
-pub mod serde_helper;
 pub mod stage;
 pub mod static_file;
 mod storage;
@@ -47,7 +47,6 @@ mod storage;
 pub mod transaction;
 pub mod trie;
 mod withdrawal;
-
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
@@ -56,9 +55,9 @@ pub use block::{
     ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
 pub use chain::{
-    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainSpec,
-    ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
-    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainKind, ChainSpec,
+    ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, NamedChain, DEV, GOERLI,
+    HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "zstd-codec")]
 pub use compression::*;
@@ -77,7 +76,6 @@ pub use net::{
     NodeRecordParseError, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,
 };
-pub use peer::{id2pk, pk2id, AnyNode, PeerId, WithPeerId};
 pub use prune::{
     PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneModes, PruneProgress,
     PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,
@@ -87,17 +85,18 @@ pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
-#[cfg(feature = "c-kzg")]
 pub use transaction::{
-    BlobTransaction, BlobTransactionSidecar, BlobTransactionValidationError,
-    FromRecoveredPooledTransaction, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered,
+    BlobTransaction, BlobTransactionSidecar, FromRecoveredPooledTransaction,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered,
 };
+
+#[cfg(feature = "c-kzg")]
+pub use transaction::BlobTransactionValidationError;
 
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     AccessList, AccessListItem, IntoRecoveredTransaction, InvalidTransactionError, Signature,
-    Transaction, TransactionKind, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    Transaction, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844,
     TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
@@ -113,10 +112,10 @@ pub use alloy_primitives::{
     eip191_hash_message, hex, hex_literal, keccak256, ruint,
     utils::format_ether,
     Address, BlockHash, BlockNumber, Bloom, BloomInput, Bytes, ChainId, Selector, StorageKey,
-    StorageValue, TxHash, TxIndex, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
+    StorageValue, TxHash, TxIndex, TxKind, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
-pub use revm_primitives::{self, JumpMap};
+pub use revm_primitives::{self, JumpTable};
 
 #[doc(hidden)]
 #[deprecated = "use B64 instead"]
@@ -146,8 +145,8 @@ mod optimism {
     pub use crate::{
         chain::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA},
         net::{
-            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, BASE_BOOTNODES,
-            BASE_TESTNET_BOOTNODES, OP_BOOTNODES, OP_TESTNET_BOOTNODES,
+            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, OP_BOOTNODES,
+            OP_TESTNET_BOOTNODES,
         },
         transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
     };

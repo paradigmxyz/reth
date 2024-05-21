@@ -58,6 +58,7 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "secp256k1-sys" },
     { allow = ["CC0-1.0"], name = "tiny-keccak" },
     { allow = ["CC0-1.0"], name = "more-asserts" },
+    { allow = ["CC0-1.0"], name = "to_method" },
     { allow = ["CC0-1.0"], name = "aurora-engine-modexp" },
     # TODO: decide on MPL-2.0 handling
     # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/6980
@@ -89,6 +90,7 @@ unknown-git = "deny"
 allow-git = [
     # TODO: remove, see ./Cargo.toml
     "https://github.com/alloy-rs/alloy",
+    "https://github.com/foundry-rs/block-explorers",
     "https://github.com/paradigmxyz/evm-inspectors",
     "https://github.com/sigp/discv5",
 ]

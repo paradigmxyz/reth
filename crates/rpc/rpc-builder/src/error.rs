@@ -1,4 +1,4 @@
-use crate::RethRpcModule;
+use crate::{cors::CorsDomainError, RethRpcModule};
 use reth_ipc::server::IpcServerStartError;
 use std::{io, io::ErrorKind, net::SocketAddr};
 
@@ -57,6 +57,9 @@ pub enum RpcError {
         /// IO error.
         error: io::Error,
     },
+    /// Cors parsing error.
+    #[error(transparent)]
+    Cors(#[from] CorsDomainError),
     /// Http and WS server configured on the same port but with conflicting settings.
     #[error(transparent)]
     WsHttpSamePortError(#[from] WsHttpSamePortError),

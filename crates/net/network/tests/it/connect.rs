@@ -1,7 +1,7 @@
 //! Connection tests
 
 use alloy_node_bindings::Geth;
-use alloy_provider::{admin::AdminApi, ProviderBuilder};
+use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
@@ -320,9 +320,8 @@ async fn test_incoming_node_id_blacklist() {
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -375,9 +374,8 @@ async fn test_incoming_connect_with_single_geth() {
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -438,9 +436,8 @@ async fn test_outgoing_connect_with_single_geth() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -485,9 +482,8 @@ async fn test_geth_disconnect() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;

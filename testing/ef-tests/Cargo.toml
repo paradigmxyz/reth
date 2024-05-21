@@ -22,12 +22,12 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-interfaces.workspace = true
 reth-revm.workspace = true
-reth-node-ethereum.workspace = true
+reth-evm-ethereum.workspace = true
 
 alloy-rlp.workspace = true
-tokio = "1.28.1"
+tokio.workspace = true
 walkdir = "2.3.3"
-serde = "1.0.163"
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 rayon.workspace = true

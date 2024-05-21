@@ -9,7 +9,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
-use reth_primitives::{fs, ChainSpec};
+use reth_fs_util as fs;
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
@@ -132,7 +133,7 @@ impl<DB: Database> DbTool<DB> {
 
     /// Drops the database and the static files at the given path.
     pub fn drop(
-        &mut self,
+        &self,
         db_path: impl AsRef<Path>,
         static_files_path: impl AsRef<Path>,
     ) -> Result<()> {
@@ -149,7 +150,7 @@ impl<DB: Database> DbTool<DB> {
     }
 
     /// Drops the provided table from the database.
-    pub fn drop_table<T: Table>(&mut self) -> Result<()> {
+    pub fn drop_table<T: Table>(&self) -> Result<()> {
         self.provider_factory.db_ref().update(|tx| tx.clear::<T>())??;
         Ok(())
     }

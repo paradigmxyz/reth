@@ -36,10 +36,8 @@ revm-primitives.workspace = true
 # async
 async-trait.workspace = true
 hyper.workspace = true
-http.workspace = true
-http-body.workspace = true
-reqwest = { version = "0.11", default-features = false, features = [
-    "rustls-tls",
+reqwest = { workspace = true, default-features = false, features = [
+    "rustls-tls-native-roots",
 ] }
 tracing.workspace = true
 
@@ -66,7 +64,6 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc/optimism",
-    "reth-revm/optimism",
     "reth-evm-optimism/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-beacon-consensus/optimism",

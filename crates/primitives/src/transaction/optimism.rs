@@ -1,4 +1,4 @@
-use crate::{Address, Bytes, TransactionKind, TxType, B256, U256};
+use crate::{Address, Bytes, TxKind, TxType, B256, U256};
 use alloy_rlp::{
     length_of_length, Decodable, Encodable, Error as DecodeError, Header, EMPTY_STRING_CODE,
 };
@@ -16,7 +16,7 @@ pub struct TxDeposit {
     pub from: Address,
     /// The address of the recipient account, or the null (zero-length) address if the deposited
     /// transaction is a contract creation.
-    pub to: TransactionKind,
+    pub to: TxKind,
     /// The ETH value to mint on L2.
     pub mint: Option<u128>,
     ///  The ETH value to send to the recipient account.
@@ -169,7 +169,7 @@ mod tests {
         let original = TxDeposit {
             source_hash: B256::default(),
             from: Address::default(),
-            to: TransactionKind::default(),
+            to: TxKind::default(),
             mint: Some(100),
             value: U256::default(),
             gas_limit: 50000,
@@ -189,7 +189,7 @@ mod tests {
         let tx_deposit = TxDeposit {
             source_hash: B256::default(),
             from: Address::default(),
-            to: TransactionKind::default(),
+            to: TxKind::default(),
             mint: Some(100),
             value: U256::default(),
             gas_limit: 50000,
@@ -211,7 +211,7 @@ mod tests {
         let tx_deposit = TxDeposit {
             source_hash: B256::default(),
             from: Address::default(),
-            to: TransactionKind::default(),
+            to: TxKind::default(),
             mint: Some(100),
             value: U256::default(),
             gas_limit: 50000,

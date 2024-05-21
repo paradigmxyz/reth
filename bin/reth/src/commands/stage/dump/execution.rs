@@ -1,15 +1,12 @@
 use super::setup;
-use crate::utils::DbTool;
-use eyre::Result;
+use crate::{macros::block_executor, utils::DbTool};
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
     DatabaseEnv,
 };
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::stage::StageCheckpoint;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
-use reth_revm::EvmProcessorFactory;
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use tracing::info;
 
@@ -19,8 +16,8 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     to: u64,
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
-) -> Result<()> {
-    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db_path(), db_tool)?;
+) -> eyre::Result<()> {
+    let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     import_tables_with_range(&output_db, db_tool, from, to)?;
 
@@ -28,11 +25,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 
     if should_run {
         dry_run(
-            ProviderFactory::new(
-                output_db,
-                db_tool.chain.clone(),
-                output_datadir.static_files_path(),
-            )?,
+            ProviderFactory::new(output_db, db_tool.chain.clone(), output_datadir.static_files())?,
             to,
             from,
         )
@@ -131,10 +124,8 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(
-        db_tool.chain.clone(),
-        EthEvmConfig::default(),
-    ));
+    let executor = block_executor!(db_tool.chain.clone());
+    let mut exec_stage = ExecutionStage::new_with_executor(executor);
 
     exec_stage.unwind(
         &provider,
@@ -163,10 +154,8 @@ async fn dry_run<DB: Database>(
 ) -> eyre::Result<()> {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let mut exec_stage = ExecutionStage::new_with_factory(EvmProcessorFactory::new(
-        output_provider_factory.chain_spec(),
-        EthEvmConfig::default(),
-    ));
+    let executor = block_executor!(output_provider_factory.chain_spec());
+    let mut exec_stage = ExecutionStage::new_with_executor(executor);
 
     let input =
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };

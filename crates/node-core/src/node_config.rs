@@ -26,7 +26,11 @@ use reth_provider::{
 };
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    path::PathBuf,
+    sync::Arc,
+};
 use tracing::*;
 
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
@@ -234,7 +238,7 @@ impl NodeConfig {
     /// Get the network secret from the given data dir
     pub fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         Ok(secret_key)
@@ -262,15 +266,15 @@ impl NodeConfig {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> eyre::Result<Option<PruneConfig>> {
-        self.pruning.prune_config(Arc::clone(&self.chain))
+    pub fn prune_config(&self) -> Option<PruneConfig> {
+        self.pruning.prune_config(&self.chain)
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
     /// necessary
     pub async fn max_block<Provider, Client>(
         &self,
-        network_client: &Client,
+        network_client: Client,
         provider: Provider,
     ) -> eyre::Result<Option<BlockNumber>>
     where
@@ -299,7 +303,7 @@ impl NodeConfig {
     ) -> eyre::Result<NetworkConfig<C>> {
         info!(target: "reth::cli", "Connecting to P2P network");
         let secret_key = self.network_secret(data_dir)?;
-        let default_peers_path = data_dir.known_peers_path();
+        let default_peers_path = data_dir.known_peers();
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
@@ -425,6 +429,7 @@ impl NodeConfig {
         Client: HeadersClient,
     {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
+        let mut fetch_failures = 0;
         loop {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
@@ -432,7 +437,10 @@ impl NodeConfig {
                     return Ok(tip_header);
                 }
                 Err(error) => {
-                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                    fetch_failures += 1;
+                    if fetch_failures % 20 == 0 {
+                        error!(target: "reth::cli", ?fetch_failures, %error, "Failed to fetch the tip. Retrying...");
+                    }
                 }
             }
         }
@@ -448,8 +456,7 @@ impl NodeConfig {
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<C> {
-        let cfg_builder = self
-            .network
+        self.network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
@@ -458,31 +465,44 @@ impl NodeConfig {
                 // set discovery port based on instance number
                 self.network.port + self.instance - 1,
             ))
+            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 // set discovery port based on instance number
                 self.network.discovery.port + self.instance - 1,
-            ));
+            ))
+            .map_discv5_config_builder(|builder| {
+                let DiscoveryArgs {
+                    discv5_addr,
+                    discv5_addr_ipv6,
+                    discv5_port,
+                    discv5_port_ipv6,
+                    ..
+                } = self.network.discovery;
 
-        let config = cfg_builder.build(client);
+                // Use rlpx address if none given
+                let discv5_addr_ipv4 = discv5_addr.or(match self.network.addr {
+                    IpAddr::V4(ip) => Some(ip),
+                    IpAddr::V6(_) => None,
+                });
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or(match self.network.addr {
+                    IpAddr::V4(_) => None,
+                    IpAddr::V6(ip) => Some(ip),
+                });
 
-        if !self.network.discovery.enable_discv5_discovery {
-            return config
-        }
-        // work around since discv5 config builder can't be integrated into network config builder
-        // due to unsatisfied trait bounds
-        config.discovery_v5_with_config_builder(|builder| {
-            let DiscoveryArgs { discv5_addr, discv5_port, .. } = self.network.discovery;
-            builder
-                .discv5_config(
-                    discv5::ConfigBuilder::new(ListenConfig::from(Into::<SocketAddr>::into((
-                        discv5_addr,
-                        discv5_port + self.instance - 1,
-                    ))))
+                let discv5_port_ipv4 = discv5_port + self.instance - 1;
+                let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
+
+                builder.discv5_config(
+                    discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                        discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
+                        discv5_addr_ipv6
+                            .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                    ))
                     .build(),
                 )
-                .build()
-        })
+            })
+            .build(client)
     }
 
     /// Change rpc port numbers based on the instance number, using the inner

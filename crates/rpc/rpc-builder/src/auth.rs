@@ -13,8 +13,9 @@ use jsonrpsee::{
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+pub use reth_ipc::server::Builder as IpcServerBuilder;
 
+use jsonrpsee::http_client::transport::HttpBackend;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{NetworkInfo, Peers};
@@ -27,17 +28,16 @@ use reth_rpc::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig, FeeHistoryCache,
         FeeHistoryCacheConfig,
     },
-    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
-    JwtAuthValidator, JwtSecret,
+    EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
 };
 use reth_rpc_api::servers::*;
+use reth_rpc_layer::{
+    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
+    JwtSecret,
+};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
-use std::{
-    fmt,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
@@ -133,7 +133,7 @@ where
 
     // Create auth middleware.
     let middleware =
-        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
     // By default, both http and ws are enabled.
     let server = ServerBuilder::new()
@@ -184,8 +184,8 @@ impl AuthServerConfig {
         let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint } = self;
 
         // Create auth middleware.
-        let middleware = tower::ServiceBuilder::new()
-            .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+        let middleware =
+            tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
         // By default, both http and ws are enabled.
         let server = server_config
@@ -205,8 +205,7 @@ impl AuthServerConfig {
             let ipc_endpoint_str = ipc_endpoint
                 .clone()
                 .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
-            let ipc_path = Endpoint::new(ipc_endpoint_str);
-            let ipc_server = ipc_server_config.build(ipc_path.path());
+            let ipc_server = ipc_server_config.build(ipc_endpoint_str);
             let res = ipc_server
                 .start(module.inner)
                 .await
@@ -219,24 +218,13 @@ impl AuthServerConfig {
 }
 
 /// Builder type for configuring an `AuthServerConfig`.
+#[derive(Debug)]
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerBuilder<Identity, Identity>>,
     ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     ipc_endpoint: Option<String>,
-}
-
-impl fmt::Debug for AuthServerConfigBuilder {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AuthServerConfig")
-            .field("socket_addr", &self.socket_addr)
-            .field("secret", &self.secret)
-            .field("server_config", &self.server_config)
-            .field("ipc_server_config", &self.ipc_server_config)
-            .field("ipc_endpoint", &self.ipc_endpoint)
-            .finish()
-    }
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -410,32 +398,27 @@ impl AuthServerHandle {
         format!("ws://{}", self.local_addr)
     }
 
-    fn bearer(&self) -> String {
-        format!(
-            "Bearer {}",
-            self.secret
-                .encode(&Claims {
-                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                        Duration::from_secs(60))
-                    .as_secs(),
-                    exp: None,
-                })
-                .unwrap()
-        )
-    }
-
     /// Returns a http client connected to the server.
-    pub fn http_client(&self) -> jsonrpsee::http_client::HttpClient {
+    pub fn http_client(
+        &self,
+    ) -> jsonrpsee::http_client::HttpClient<AuthClientService<HttpBackend>> {
+        // Create a middleware that adds a new JWT token to every request.
+        let secret_layer = AuthClientLayer::new(self.secret);
+        let middleware = tower::ServiceBuilder::default().layer(secret_layer);
         jsonrpsee::http_client::HttpClientBuilder::default()
-            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .set_http_middleware(middleware)
             .build(self.http_url())
             .expect("Failed to create http client")
     }
 
-    /// Returns a ws client connected to the server.
+    /// Returns a ws client connected to the server. Note that the connection can only be
+    /// be established within 1 minute due to the JWT token expiration.
     pub async fn ws_client(&self) -> jsonrpsee::ws_client::WsClient {
         jsonrpsee::ws_client::WsClientBuilder::default()
-            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .set_headers(HeaderMap::from_iter([(
+                AUTHORIZATION,
+                secret_to_bearer_header(&self.secret),
+            )]))
             .build(self.ws_url())
             .await
             .expect("Failed to create ws client")
@@ -449,7 +432,7 @@ impl AuthServerHandle {
         if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
             return Some(
                 IpcClientBuilder::default()
-                    .build(Endpoint::new(ipc_endpoint).path())
+                    .build(ipc_endpoint)
                     .await
                     .expect("Failed to create ipc client"),
             )
@@ -463,10 +446,7 @@ impl AuthServerHandle {
     }
 
     /// Return an ipc endpoint
-    pub fn ipc_endpoint(&self) -> Option<Endpoint> {
-        if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
-            return Some(Endpoint::new(ipc_endpoint))
-        }
-        None
+    pub fn ipc_endpoint(&self) -> Option<String> {
+        self.ipc_endpoint.clone()
     }
 }

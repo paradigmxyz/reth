@@ -1,0 +1,15 @@
+[package]
+name = "exex-in-memory-state"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-node-ethereum.workspace = true
+reth-tracing.workspace = true
+
+eyre.workspace = true

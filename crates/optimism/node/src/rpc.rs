@@ -3,9 +3,10 @@
 use jsonrpsee::types::ErrorObject;
 use reqwest::Client;
 use reth_rpc::eth::{
-    error::{EthApiError, EthResult, ToRpcError},
+    error::{EthApiError, EthResult},
     traits::RawTransactionForwarder,
 };
+use reth_rpc_types::ToRpcError;
 use std::sync::{atomic::AtomicUsize, Arc};
 
 /// Error type when interacting with the Sequencer
@@ -94,7 +95,7 @@ impl SequencerClient {
 
         self.http_client()
             .post(self.endpoint())
-            .header(http::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
             .await

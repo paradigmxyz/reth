@@ -21,7 +21,7 @@ impl Compact for TxKind {
             0 => (TxKind::Create, buf),
             1 => {
                 let (addr, buf) = Address::from_compact(buf, buf.len());
-                (TxKind::Call(addr), buf)
+                (addr.into(), buf)
             }
             _ => {
                 unreachable!("Junk data in database: unknown TransactionKind variant",)

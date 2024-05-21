@@ -62,14 +62,14 @@ const BLOCK_RLP: [u8; 610] = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd1
 /// Test chain with genesis, blocks, execution results
 /// that have valid changesets.
 #[derive(Debug)]
-pub struct BlockChainTestData {
+pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
     pub blocks: Vec<(SealedBlockWithSenders, BundleStateWithReceipts)>,
 }
 
-impl BlockChainTestData {
+impl BlockchainTestData {
     /// Create test data with two blocks that are connected, specifying their block numbers.
     pub fn default_from_number(first: BlockNumber) -> Self {
         let one = block1(first);
@@ -85,7 +85,7 @@ impl BlockChainTestData {
     }
 }
 
-impl Default for BlockChainTestData {
+impl Default for BlockchainTestData {
     fn default() -> Self {
         let one = block1(1);
         let mut extended_state = one.1.clone();

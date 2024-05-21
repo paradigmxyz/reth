@@ -1,24 +1,27 @@
 *                           @gakonst
 bin/                        @onbjerg
 crates/blockchain-tree      @rakita @rkrasiuk
-crates/consensus/auto-seal  @mattsse
-crates/consensus/beacon     @rkrasiuk @mattsse @Rjected
+crates/cli/                 @onbjerg @mattsse
+crates/consensus            @rkrasiuk @mattsse @Rjected
 crates/exex                 @onbjerg @shekhirin
 crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk
+crates/node/                @mattsse @Rjected @onbjerg
+crates/node-core/           @mattsse @Rjected @onbjerg
+crates/node-ethereum/       @mattsse @Rjected
 crates/payload/             @mattsse @Rjected
 crates/prune                @shekhirin @joshieDo
-crates/revm/src/            @rakita
-crates/revm/                @mattsse
+crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected
-crates/rpc/rpc-types        @mattsse @Rjected @Evalir
-crates/rpc/rpc-types-compat @mattsse @Rjected @Evalir
 crates/stages/              @onbjerg @rkrasiuk @shekhirin
+crates/stages-api/          @onbjerg @rkrasiuk @shekhirin
 crates/static-file          @joshieDo @shekhirin
 crates/storage/             @rakita @joshieDo @shekhirin
 crates/tasks                @mattsse
 crates/tracing              @onbjerg
 crates/transaction-pool/    @mattsse
 crates/trie                 @rkrasiuk
+crates/trie-parallel        @rkrasiuk
+crates/optimism             @mattsse
 .github/                    @onbjerg @gakonst @DaniPopes

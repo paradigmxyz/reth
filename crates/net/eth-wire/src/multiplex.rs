@@ -12,17 +12,18 @@ use std::{
     fmt,
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     task::{ready, Context, Poll},
 };
 
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
+    p2pstream::DisconnectP2P,
     CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
-use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_primitives::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -158,7 +159,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         };
 
         let f = handshake(proxy);
-        pin_mut!(f);
+        let mut f = pin!(f);
 
         // this polls the connection and the primary stream concurrently until the handshake is
         // complete
@@ -238,7 +239,7 @@ impl<St> MultiplexInner<St> {
     }
 
     /// Delegates a message to the matching protocol.
-    fn delegate_message(&mut self, cap: &SharedCapability, msg: BytesMut) -> bool {
+    fn delegate_message(&self, cap: &SharedCapability, msg: BytesMut) -> bool {
         for proto in &self.protocols {
             if proto.shared_cap == *cap {
                 proto.send_raw(msg);
@@ -465,7 +466,7 @@ where
             let mut conn_ready = true;
             loop {
                 match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(_) => {
+                    Poll::Ready(Ok(())) => {
                         if let Some(msg) = this.inner.out_buffer.pop_front() {
                             if let Err(err) = this.inner.conn.start_send_unpin(msg) {
                                 return Poll::Ready(Some(Err(err.into())))
@@ -473,6 +474,14 @@ where
                         } else {
                             break
                         }
+                    }
+                    Poll::Ready(Err(err)) => {
+                        if let Err(disconnect_err) =
+                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+                        {
+                            return Poll::Ready(Some(Err(disconnect_err.into())));
+                        }
+                        return Poll::Ready(Some(Err(err.into())));
                     }
                     Poll::Pending => {
                         conn_ready = false;

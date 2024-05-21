@@ -7,12 +7,13 @@ use crate::{
 };
 use enr::Enr;
 use futures::StreamExt;
-use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config, EnrForkIdEntry};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4Config};
 use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{EnrForkIdEntry, ForkId, NodeRecord};
 use secp256k1::SecretKey;
 use std::{
     collections::VecDeque,
@@ -368,7 +369,7 @@ mod tests {
         let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = reth_discv5::Config::builder(0)
+        let discv5_config = reth_discv5::Config::builder(discv5_addr)
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 

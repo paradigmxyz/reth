@@ -1,48 +1,16 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
-#[cfg(any(test, feature = "arbitrary"))]
 use crate::{
-    constants::eip4844::{FIELD_ELEMENTS_PER_BLOB, MAINNET_KZG_TRUSTED_SETUP},
-    kzg::{KzgCommitment, KzgProof, BYTES_PER_FIELD_ELEMENT},
-};
-use crate::{
-    keccak256,
-    kzg::{
-        self, Blob, Bytes48, KzgSettings, BYTES_PER_BLOB, BYTES_PER_COMMITMENT, BYTES_PER_PROOF,
-    },
-    Signature, Transaction, TransactionSigned, TxEip4844, TxHash, B256, EIP4844_TX_TYPE_ID,
+    keccak256, Signature, Transaction, TransactionSigned, TxEip4844, TxHash, EIP4844_TX_TYPE_ID,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-use bytes::BufMut;
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{
-    arbitrary::{any as proptest_any, ParamsFor},
-    collection::vec as proptest_vec,
-    strategy::{BoxedStrategy, Strategy},
-};
 use serde::{Deserialize, Serialize};
 
-/// An error that can occur when validating a [BlobTransaction].
-#[derive(Debug, thiserror::Error)]
-pub enum BlobTransactionValidationError {
-    /// Proof validation failed.
-    #[error("invalid KZG proof")]
-    InvalidProof,
-    /// An error returned by [`kzg`].
-    #[error("KZG error: {0:?}")]
-    KZGError(#[from] kzg::Error),
-    /// The inner transaction is not a blob transaction.
-    #[error("unable to verify proof for non blob transaction: {0}")]
-    NotBlobTransaction(u8),
-    /// The versioned hash is incorrect.
-    #[error("wrong versioned hash: have {have}, expected {expected}")]
-    WrongVersionedHash {
-        /// The versioned hash we got
-        have: B256,
-        /// The versioned hash we expected
-        expected: B256,
-    },
-}
+#[doc(inline)]
+pub use alloy_eips::eip4844::BlobTransactionSidecar;
+
+#[cfg(feature = "c-kzg")]
+pub use alloy_eips::eip4844::BlobTransactionValidationError;
 
 /// A response to `GetPooledTransactions` that includes blob data, their commitments, and their
 /// corresponding proofs.
@@ -83,9 +51,10 @@ impl BlobTransaction {
     /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
     ///
     /// See also [TxEip4844::validate_blob]
+    #[cfg(feature = "c-kzg")]
     pub fn validate(
         &self,
-        proof_settings: &KzgSettings,
+        proof_settings: &c_kzg::KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         self.transaction.validate_blob(&self.sidecar, proof_settings)
     }
@@ -168,7 +137,7 @@ impl BlobTransaction {
         self.signature.encode(out);
 
         // Encode the blobs, commitments, and proofs
-        self.sidecar.encode_inner(out);
+        self.sidecar.encode(out);
     }
 
     /// Outputs the length of the RLP encoding of the blob transaction, including the tx type byte,
@@ -274,7 +243,7 @@ impl BlobTransaction {
         }
 
         // All that's left are the blobs, commitments, and proofs
-        let sidecar = BlobTransactionSidecar::decode_inner(data)?;
+        let sidecar = BlobTransactionSidecar::decode(data)?;
 
         // # Calculating the hash
         //
@@ -306,204 +275,21 @@ impl BlobTransaction {
     }
 }
 
-/// This represents a set of blobs, and its corresponding commitments and proofs.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[repr(C)]
-pub struct BlobTransactionSidecar {
-    /// The blob data.
-    pub blobs: Vec<Blob>,
-    /// The blob commitments.
-    pub commitments: Vec<Bytes48>,
-    /// The blob proofs.
-    pub proofs: Vec<Bytes48>,
-}
-
-impl BlobTransactionSidecar {
-    /// Creates a new [BlobTransactionSidecar] using the given blobs, commitments, and proofs.
-    pub fn new(blobs: Vec<Blob>, commitments: Vec<Bytes48>, proofs: Vec<Bytes48>) -> Self {
-        Self { blobs, commitments, proofs }
-    }
-
-    /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
-    ///
-    /// This encodes the fields in the following order:
-    /// - `blobs`
-    /// - `commitments`
-    /// - `proofs`
-    #[inline]
-    pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut) {
-        BlobTransactionSidecarRlp::wrap_ref(self).encode(out);
-    }
-
-    /// Outputs the RLP length of the [BlobTransactionSidecar] fields, without a RLP header.
-    pub fn fields_len(&self) -> usize {
-        BlobTransactionSidecarRlp::wrap_ref(self).fields_len()
-    }
-
-    /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
-    ///
-    /// This decodes the fields in the following order:
-    /// - `blobs`
-    /// - `commitments`
-    /// - `proofs`
-    #[inline]
-    pub(crate) fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(BlobTransactionSidecarRlp::decode(buf)?.unwrap())
-    }
-
-    /// Calculates a size heuristic for the in-memory size of the [BlobTransactionSidecar].
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.blobs.len() * BYTES_PER_BLOB + // blobs
-        self.commitments.len() * BYTES_PER_COMMITMENT + // commitments
-        self.proofs.len() * BYTES_PER_PROOF // proofs
-    }
-}
-
-impl From<reth_rpc_types::BlobTransactionSidecar> for BlobTransactionSidecar {
-    fn from(value: reth_rpc_types::BlobTransactionSidecar) -> Self {
-        // SAFETY: Same repr and size
-        unsafe { std::mem::transmute(value) }
-    }
-}
-
-impl From<BlobTransactionSidecar> for reth_rpc_types::BlobTransactionSidecar {
-    fn from(value: BlobTransactionSidecar) -> Self {
-        // SAFETY: Same repr and size
-        unsafe { std::mem::transmute(value) }
-    }
-}
-
-impl Encodable for BlobTransactionSidecar {
-    /// Encodes the inner [BlobTransactionSidecar] fields as RLP bytes, without a RLP header.
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.encode_inner(out)
-    }
-
-    fn length(&self) -> usize {
-        self.fields_len()
-    }
-}
-
-impl Decodable for BlobTransactionSidecar {
-    /// Decodes the inner [BlobTransactionSidecar] fields from RLP bytes, without a RLP header.
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Self::decode_inner(buf)
-    }
-}
-
-// Wrapper for c-kzg rlp
-#[repr(C)]
-struct BlobTransactionSidecarRlp {
-    blobs: Vec<[u8; BYTES_PER_BLOB]>,
-    commitments: Vec<[u8; BYTES_PER_COMMITMENT]>,
-    proofs: Vec<[u8; BYTES_PER_PROOF]>,
-}
-
-const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
-    [(); std::mem::size_of::<BlobTransactionSidecarRlp>()];
-
-const _: [(); std::mem::size_of::<BlobTransactionSidecar>()] =
-    [(); std::mem::size_of::<reth_rpc_types::BlobTransactionSidecar>()];
-
-impl BlobTransactionSidecarRlp {
-    fn wrap_ref(other: &BlobTransactionSidecar) -> &Self {
-        // SAFETY: Same repr and size
-        unsafe { &*(other as *const BlobTransactionSidecar).cast::<Self>() }
-    }
-
-    fn unwrap(self) -> BlobTransactionSidecar {
-        // SAFETY: Same repr and size
-        unsafe { std::mem::transmute(self) }
-    }
-
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        // Encode the blobs, commitments, and proofs
-        self.blobs.encode(out);
-        self.commitments.encode(out);
-        self.proofs.encode(out);
-    }
-
-    fn fields_len(&self) -> usize {
-        self.blobs.length() + self.commitments.length() + self.proofs.length()
-    }
-
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self {
-            blobs: Decodable::decode(buf)?,
-            commitments: Decodable::decode(buf)?,
-            proofs: Decodable::decode(buf)?,
-        })
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for BlobTransactionSidecar {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut arr = [0u8; BYTES_PER_BLOB];
-
-        // Note: the "fix" for this is kinda pointless.
-        #[allow(clippy::large_stack_frames)]
-        let blobs: Vec<Blob> = (0..u.int_in_range(1..=16)?)
-            .map(|_| {
-                arr = arbitrary::Arbitrary::arbitrary(u).unwrap();
-
-                // Ensure that each blob is canonical by ensuring each field element contained in
-                // the blob is < BLS_MODULUS
-                for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
-                    arr[i * BYTES_PER_FIELD_ELEMENT] = 0;
-                }
-
-                Blob::from(arr)
-            })
-            .collect();
-
-        Ok(generate_blob_sidecar(blobs))
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for BlobTransactionSidecar {
-    type Parameters = ParamsFor<String>;
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        proptest_vec(proptest_vec(proptest_any::<u8>(), BYTES_PER_BLOB), 1..=5)
-            .prop_map(move |blobs| {
-                let blobs = blobs
-                    .into_iter()
-                    .map(|mut blob| {
-                        let mut arr = [0u8; BYTES_PER_BLOB];
-
-                        // Ensure that each blob is canonical by ensuring each field element
-                        // contained in the blob is < BLS_MODULUS
-                        for i in 0..(FIELD_ELEMENTS_PER_BLOB as usize) {
-                            blob[i * BYTES_PER_FIELD_ELEMENT] = 0;
-                        }
-
-                        arr.copy_from_slice(blob.as_slice());
-                        arr.into()
-                    })
-                    .collect();
-
-                generate_blob_sidecar(blobs)
-            })
-            .boxed()
-    }
-
-    type Strategy = BoxedStrategy<BlobTransactionSidecar>;
-}
-
 /// Generates a [`BlobTransactionSidecar`] structure containing blobs, commitments, and proofs.
-#[cfg(any(test, feature = "arbitrary"))]
-pub fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
+#[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
+pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar {
+    use crate::constants::eip4844::MAINNET_KZG_TRUSTED_SETUP;
+    use c_kzg::{KzgCommitment, KzgProof};
+
     let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
 
-    let commitments: Vec<Bytes48> = blobs
+    let commitments: Vec<c_kzg::Bytes48> = blobs
         .iter()
         .map(|blob| KzgCommitment::blob_to_kzg_commitment(&blob.clone(), &kzg_settings).unwrap())
         .map(|commitment| commitment.to_bytes())
         .collect();
 
-    let proofs: Vec<Bytes48> = blobs
+    let proofs: Vec<c_kzg::Bytes48> = blobs
         .iter()
         .zip(commitments.iter())
         .map(|(blob, commitment)| {
@@ -512,18 +298,15 @@ pub fn generate_blob_sidecar(blobs: Vec<Blob>) -> BlobTransactionSidecar {
         .map(|proof| proof.to_bytes())
         .collect();
 
-    BlobTransactionSidecar { blobs, commitments, proofs }
+    BlobTransactionSidecar::from_kzg(blobs, commitments, proofs)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "c-kzg"))]
 mod tests {
-    use crate::{
-        hex,
-        kzg::{Blob, Bytes48},
-        transaction::sidecar::generate_blob_sidecar,
-        BlobTransactionSidecar,
-    };
-    use std::{fs, path::PathBuf};
+    use super::*;
+    use crate::{hex, kzg::Blob};
+    use alloy_eips::eip4844::Bytes48;
+    use std::{fs, path::PathBuf, str::FromStr};
 
     #[test]
     fn test_blob_transaction_sidecar_generation() {
@@ -550,7 +333,7 @@ mod tests {
         assert_eq!(
             sidecar.commitments,
             vec![
-                Bytes48::from_hex(json_value.get("commitment").unwrap().as_str().unwrap()).unwrap()
+                Bytes48::from_str(json_value.get("commitment").unwrap().as_str().unwrap()).unwrap()
             ]
         );
     }
@@ -624,7 +407,7 @@ mod tests {
         let mut encoded_rlp = Vec::new();
 
         // Encode the inner data of the BlobTransactionSidecar into RLP
-        sidecar.encode_inner(&mut encoded_rlp);
+        sidecar.encode(&mut encoded_rlp);
 
         // Assert the equality between the expected RLP from the JSON and the encoded RLP
         assert_eq!(json_value.get("rlp").unwrap().as_str().unwrap(), hex::encode(&encoded_rlp));
@@ -655,11 +438,10 @@ mod tests {
         let mut encoded_rlp = Vec::new();
 
         // Encode the inner data of the BlobTransactionSidecar into RLP
-        sidecar.encode_inner(&mut encoded_rlp);
+        sidecar.encode(&mut encoded_rlp);
 
         // Decode the RLP-encoded data back into a BlobTransactionSidecar
-        let decoded_sidecar =
-            BlobTransactionSidecar::decode_inner(&mut encoded_rlp.as_slice()).unwrap();
+        let decoded_sidecar = BlobTransactionSidecar::decode(&mut encoded_rlp.as_slice()).unwrap();
 
         // Assert the equality between the original BlobTransactionSidecar and the decoded one
         assert_eq!(sidecar, decoded_sidecar);

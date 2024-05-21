@@ -10,7 +10,7 @@
 
 use reth_primitives::{ChainSpec, SealedBlock};
 use reth_rpc_types::{engine::MaybeCancunPayloadFields, ExecutionPayload, PayloadError};
-use reth_rpc_types_compat::engine::payload::{try_into_block, validate_block_hash};
+use reth_rpc_types_compat::engine::payload::try_into_block;
 use std::sync::Arc;
 
 /// Execution payload validator.
@@ -36,6 +36,12 @@ impl ExecutionPayloadValidator {
     #[inline]
     fn is_cancun_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.chain_spec().is_cancun_active_at_timestamp(timestamp)
+    }
+
+    /// Returns true if the Shanghai hardfork is active at the given timestamp.
+    #[inline]
+    fn is_shanghai_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.chain_spec().is_shanghai_active_at_timestamp(timestamp)
     }
 
     /// Cancun specific checks for EIP-4844 blob transactions.
@@ -100,20 +106,57 @@ impl ExecutionPayloadValidator {
         payload: ExecutionPayload,
         cancun_fields: MaybeCancunPayloadFields,
     ) -> Result<SealedBlock, PayloadError> {
-        let block_hash = payload.block_hash();
+        let expected_hash = payload.block_hash();
 
         // First parse the block
-        let block = try_into_block(payload, cancun_fields.parent_beacon_block_root())?;
-
-        let cancun_active = self.is_cancun_active_at_timestamp(block.timestamp);
-
-        if !cancun_active && block.has_blob_transactions() {
-            // cancun not active but blob transactions present
-            return Err(PayloadError::PreCancunBlockWithBlobTransactions)
-        }
+        let sealed_block =
+            try_into_block(payload, cancun_fields.parent_beacon_block_root())?.seal_slow();
 
         // Ensure the hash included in the payload matches the block hash
-        let sealed_block = validate_block_hash(block_hash, block)?;
+        if expected_hash != sealed_block.hash() {
+            return Err(PayloadError::BlockHash {
+                execution: sealed_block.hash(),
+                consensus: expected_hash,
+            })
+        }
+
+        if self.is_cancun_active_at_timestamp(sealed_block.timestamp) {
+            if sealed_block.header.blob_gas_used.is_none() {
+                // cancun active but blob gas used not present
+                return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
+            }
+            if sealed_block.header.excess_blob_gas.is_none() {
+                // cancun active but excess blob gas not present
+                return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
+            }
+            if cancun_fields.as_ref().is_none() {
+                // cancun active but cancun fields not present
+                return Err(PayloadError::PostCancunWithoutCancunFields)
+            }
+        } else {
+            if sealed_block.has_blob_transactions() {
+                // cancun not active but blob transactions present
+                return Err(PayloadError::PreCancunBlockWithBlobTransactions)
+            }
+            if sealed_block.header.blob_gas_used.is_some() {
+                // cancun not active but blob gas used present
+                return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
+            }
+            if sealed_block.header.excess_blob_gas.is_some() {
+                // cancun not active but excess blob gas present
+                return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
+            }
+            if cancun_fields.as_ref().is_some() {
+                // cancun not active but cancun fields present
+                return Err(PayloadError::PreCancunWithCancunFields)
+            }
+        }
+
+        let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
+        if !shanghai_active && sealed_block.withdrawals.is_some() {
+            // shanghai not active but withdrawals present
+            return Err(PayloadError::PreShanghaiBlockWithWitdrawals);
+        }
 
         // EIP-4844 checks
         self.ensure_matching_blob_versioned_hashes(&sealed_block, &cancun_fields)?;

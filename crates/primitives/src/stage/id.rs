@@ -53,6 +53,17 @@ impl StageId {
         StageId::Finish,
     ];
 
+    /// Stages that require state.
+    pub const STATE_REQUIRED: [StageId; 7] = [
+        StageId::Execution,
+        StageId::MerkleUnwind,
+        StageId::AccountHashing,
+        StageId::StorageHashing,
+        StageId::MerkleExecute,
+        StageId::IndexStorageHistory,
+        StageId::IndexAccountHistory,
+    ];
+
     /// Return stage id formatted as string.
     pub fn as_str(&self) -> &str {
         match self {
@@ -77,6 +88,11 @@ impl StageId {
     /// Returns true if it's a downloading stage [StageId::Headers] or [StageId::Bodies]
     pub fn is_downloading_stage(&self) -> bool {
         matches!(self, StageId::Headers | StageId::Bodies)
+    }
+
+    /// Returns `true` if it's [TransactionLookup](StageId::TransactionLookup) stage.
+    pub fn is_tx_lookup(&self) -> bool {
+        matches!(self, StageId::TransactionLookup)
     }
 
     /// Returns true indicating if it's the finish stage [StageId::Finish]
