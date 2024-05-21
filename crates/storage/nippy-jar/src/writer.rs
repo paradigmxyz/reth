@@ -177,7 +177,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                 // find the matching one.
                 for index in 0..reader.offsets_count()? {
                     let offset = reader.reverse_offset(index + 1)?;
-                    if offset == data_file_len {
+                    // It would only be equal if the previous row was fully pruned.
+                    if offset <= data_file_len {
                         let new_len = self
                             .offsets_file
                             .get_ref()
