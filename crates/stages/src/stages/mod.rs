@@ -60,16 +60,17 @@ mod tests {
         address,
         hex_literal::hex,
         keccak256,
-        stage::{StageCheckpoint, StageId},
+        stage::{PipelineTarget, StageCheckpoint, StageId},
         Account, BlockNumber, Bytecode, ChainSpecBuilder, PruneMode, PruneModes, Receipt,
         SealedBlock, StaticFileSegment, TxNumber, B256, U256,
     };
     use reth_provider::{
-        providers::StaticFileWriter, AccountExtReader, DatabaseProviderFactory, ProviderFactory,
+        providers::{StaticFileProvider, StaticFileWriter},
+        AccountExtReader, DatabaseProviderFactory, HeaderProvider, ProviderFactory,
         ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
     };
     use reth_stages_api::{ExecInput, Stage};
-    use std::sync::Arc;
+    use std::{io::Write, sync::Arc};
 
     #[tokio::test]
     #[ignore]
@@ -257,7 +258,7 @@ mod tests {
 
         // generate test data
         let db = TestStageDB::default();
-        let mut blocks = random_block_range(&mut rng, 0..=(end_block as u64), genesis_hash, 0..2);
+        let mut blocks = random_block_range(&mut rng, 0..=(end_block as u64), genesis_hash, 2..3);
         let mut receipts = Vec::new();
         let tx_num = 0u64;
         for block in &blocks {
@@ -288,14 +289,50 @@ mod tests {
         Ok((db, blocks, receipts))
     }
 
+    fn simulate_no_commit_prune(
+        num_rows: usize,
+        static_file_provider: &StaticFileProvider,
+        segment: StaticFileSegment,
+    ) {
+        let mut headers_writer = static_file_provider.latest_writer(segment).unwrap();
+        let reader = headers_writer.inner().jar().open_data_reader().unwrap();
+        let columns = headers_writer.inner().columns();
+        let data_file = headers_writer.inner().data_file();
+        let last_offset = reader.reverse_offset(num_rows * columns).unwrap();
+        data_file.get_mut().set_len(last_offset).unwrap();
+        data_file.flush().unwrap();
+        data_file.get_ref().sync_all().unwrap();
+    }
+
     #[test]
-    fn test_check_consistency() {
+    fn test_consistency() {
         let (db, _, _) = seed_data().unwrap();
         let db_provider = db.factory.database_provider_ro().unwrap();
 
         assert_eq!(
-            db.factory.static_file_provider().check_consistency(&db_provider, false),
+            db.factory.static_file_provider().check_consistency(&db_provider, false, false),
             Ok(None)
+        );
+    }
+
+    #[test]
+    fn test_consistency_early_prune() {
+        let (db, _, _) = seed_data().unwrap();
+        let db_provider = db.factory.database_provider_ro().unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+
+        // there are 2 to 3 transactions per block. however, if we lose one tx, we need to unwind to
+        // the previous block.
+        simulate_no_commit_prune(1, &static_file_provider, StaticFileSegment::Transactions);
+        assert_eq!(
+            static_file_provider.check_consistency(&db_provider, false, false),
+            Ok(Some(PipelineTarget::Unwind(88)))
+        );
+
+        simulate_no_commit_prune(3, &static_file_provider, StaticFileSegment::Headers);
+        assert_eq!(
+            static_file_provider.check_consistency(&db_provider, false, false),
+            Ok(Some(PipelineTarget::Unwind(86)))
         );
     }
 }

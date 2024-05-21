@@ -479,4 +479,19 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     pub fn data_path(&self) -> &Path {
         self.jar.data_path()
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn data_file(&mut self) -> &mut BufWriter<File> {
+        &mut self.data_file
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn jar(&mut self) -> &NippyJar<H> {
+        &self.jar
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn columns(&self) -> usize {
+        self.jar.columns()
+    }
 }
