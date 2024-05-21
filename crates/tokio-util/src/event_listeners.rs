@@ -11,7 +11,7 @@ pub struct EventListeners<T> {
     sender: Sender<T>,
 }
 
-impl<T: Clone + Send + Sync + 'static> Default for EventListeners<T> {
+impl<T> Default for EventListeners<T> where T: Clone + Send + Sync + 'static {
     fn default() -> Self {
         Self::new(DEFAULT_SIZE_BROADCAST_CHANNEL)
     }
