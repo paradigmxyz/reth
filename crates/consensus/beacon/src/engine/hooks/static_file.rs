@@ -88,13 +88,13 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
             StaticFileProducerState::Idle(static_file_producer) => {
                 let Some(static_file_producer) = static_file_producer.take() else {
                     trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer is already running but the state is idle");
-                    return Ok(None)
+                    return Ok(None);
                 };
 
                 let Some(mut locked_static_file_producer) = static_file_producer.try_lock_arc()
                 else {
                     trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer lock is already taken");
-                    return Ok(None)
+                    return Ok(None);
                 };
 
                 let targets =
@@ -139,7 +139,7 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     ) -> Poll<RethResult<EngineHookEvent>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
             trace!(target: "consensus::engine::hooks::static_file", ?ctx, "Finalized block number is not available");
-            return Poll::Pending
+            return Poll::Pending;
         };
 
         // Try to spawn a static_file_producer

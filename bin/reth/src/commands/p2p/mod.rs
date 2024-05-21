@@ -141,9 +141,9 @@ impl Command {
             data_dir.static_files(),
         )?));
 
-        if !self.discovery.disable_discovery &&
-            (self.discovery.enable_discv5_discovery ||
-                network_config.chain_spec.chain.is_optimism())
+        if !self.discovery.disable_discovery
+            && (self.discovery.enable_discv5_discovery
+                || network_config.chain_spec.chain.is_optimism())
         {
             network_config = network_config.discovery_v5_with_config_builder(|builder| {
                 let DiscoveryArgs {

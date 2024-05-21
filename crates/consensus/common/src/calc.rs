@@ -24,8 +24,8 @@ pub fn base_block_reward(
     block_difficulty: U256,
     total_difficulty: U256,
 ) -> Option<u128> {
-    if chain_spec.chain == Chain::goerli() ||
-        chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
+    if chain_spec.chain == Chain::goerli()
+        || chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
     {
         None
     } else if chain_spec.fork(Hardfork::Constantinople).active_at_block(block_number) {

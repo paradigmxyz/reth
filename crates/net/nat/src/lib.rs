@@ -90,7 +90,7 @@ impl FromStr for NatResolver {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
                         "Unknown Nat Resolver: {s}"
-                    )))
+                    )));
                 };
                 NatResolver::ExternalIp(ip.parse::<IpAddr>()?)
             }
@@ -220,7 +220,7 @@ impl Future for ResolveAny {
             let ip = ready!(upnp.poll(cx));
             this.upnp.set(None);
             if ip.is_some() {
-                return Poll::Ready(ip)
+                return Poll::Ready(ip);
             }
         }
 
@@ -228,13 +228,13 @@ impl Future for ResolveAny {
             if let Poll::Ready(ip) = upnp.poll(cx) {
                 this.external.set(None);
                 if ip.is_some() {
-                    return Poll::Ready(ip)
+                    return Poll::Ready(ip);
                 }
             }
         }
 
         if this.upnp.is_none() && this.external.is_none() {
-            return Poll::Ready(None)
+            return Poll::Ready(None);
         }
 
         Poll::Pending

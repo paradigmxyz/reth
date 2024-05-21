@@ -86,8 +86,8 @@ impl PartialOrd for ForkFilterKey {
 impl Ord for ForkFilterKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (ForkFilterKey::Block(a), ForkFilterKey::Block(b)) |
-            (ForkFilterKey::Time(a), ForkFilterKey::Time(b)) => a.cmp(b),
+            (ForkFilterKey::Block(a), ForkFilterKey::Block(b))
+            | (ForkFilterKey::Time(a), ForkFilterKey::Time(b)) => a.cmp(b),
             (ForkFilterKey::Block(_), ForkFilterKey::Time(_)) => Ordering::Less,
             _ => Ordering::Greater,
         }
@@ -136,7 +136,7 @@ impl Decodable for EnrForkIdEntry {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -150,7 +150,7 @@ impl Decodable for EnrForkIdEntry {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -310,7 +310,7 @@ impl ForkFilter {
         if self.current().hash == fork_id.hash {
             if fork_id.next == 0 {
                 // 1b) No remotely announced fork, connect.
-                return Ok(())
+                return Ok(());
             }
 
             // We check if this fork is time-based or block number-based
@@ -332,7 +332,7 @@ impl ForkFilter {
             } else {
                 // 1b) Remotely announced fork not yet passed locally, connect.
                 Ok(())
-            }
+            };
         }
 
         // 2) If the remote FORK_HASH is a subset of the local past forks...
@@ -346,10 +346,10 @@ impl ForkFilter {
                         Ok(())
                     } else {
                         Err(ValidationError::RemoteStale { local: self.current(), remote: fork_id })
-                    }
+                    };
                 }
 
-                break
+                break;
             }
         }
 
@@ -357,7 +357,7 @@ impl ForkFilter {
         // with locally known future forks, connect.
         for future_fork_hash in &self.cache.future {
             if *future_fork_hash == fork_id.hash {
-                return Ok(())
+                return Ok(());
             }
         }
 

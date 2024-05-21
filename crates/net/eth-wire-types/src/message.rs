@@ -93,14 +93,14 @@ impl ProtocolMessage {
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData));
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData))
+                    return Err(MessageError::Invalid(version, EthMessageID::GetNodeData));
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)
@@ -227,8 +227,10 @@ impl EthMessage {
             EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             EthMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthMessage::Transactions(_) => EthMessageID::Transactions,
-            EthMessage::NewPooledTransactionHashes66(_) |
-            EthMessage::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
+            EthMessage::NewPooledTransactionHashes66(_)
+            | EthMessage::NewPooledTransactionHashes68(_) => {
+                EthMessageID::NewPooledTransactionHashes
+            }
             EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
             EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
@@ -484,7 +486,7 @@ where
         // RequestPair
         let consumed_len = initial_length - buf.len();
         if consumed_len != header.payload_length {
-            return Err(alloy_rlp::Error::UnexpectedLength)
+            return Err(alloy_rlp::Error::UnexpectedLength);
         }
 
         Ok(Self { request_id, message })

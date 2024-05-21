@@ -38,12 +38,12 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
-                return Ok(PruneOutput::done())
+                return Ok(PruneOutput::done());
             }
         }
         .into_inner();
-        let tx_range = start..=
-            Some(end)
+        let tx_range = start
+            ..=Some(end)
                 .min(input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1))
                 .unwrap();
         let tx_range_end = *tx_range.end();
@@ -60,7 +60,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         if hashes.len() != tx_count {
             return Err(PrunerError::InconsistentData(
                 "Unexpected number of transaction hashes retrieved by transaction number range",
-            ))
+            ));
         }
 
         let mut limiter = input.limiter;
@@ -174,8 +174,8 @@ mod tests {
                 .map(|block| block.body.len())
                 .sum::<usize>()
                 .min(
-                    next_tx_number_to_prune as usize +
-                        input.limiter.deleted_entries_limit().unwrap(),
+                    next_tx_number_to_prune as usize
+                        + input.limiter.deleted_entries_limit().unwrap(),
                 )
                 .sub(1);
 

@@ -111,16 +111,16 @@ impl FromStr for AnyNode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(rem) = s.strip_prefix("enode://") {
             if let Ok(record) = NodeRecord::from_str(s) {
-                return Ok(AnyNode::NodeRecord(record))
+                return Ok(AnyNode::NodeRecord(record));
             }
             // incomplete enode
             if let Ok(peer_id) = PeerId::from_str(rem) {
-                return Ok(AnyNode::PeerId(peer_id))
+                return Ok(AnyNode::PeerId(peer_id));
             }
-            return Err(format!("invalid public key: {rem}"))
+            return Err(format!("invalid public key: {rem}"));
         }
         if s.starts_with("enr:") {
-            return Enr::from_str(s).map(AnyNode::Enr)
+            return Enr::from_str(s).map(AnyNode::Enr);
         }
         Err("missing 'enr:' prefix for base64-encoded record".to_string())
     }

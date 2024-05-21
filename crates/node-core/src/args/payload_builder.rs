@@ -91,7 +91,7 @@ impl TypedValueParser for ExtradataValueParser {
                 format!(
                     "Payload builder extradata size exceeds {MAXIMUM_EXTRA_DATA_SIZE}-byte limit"
                 ),
-            ))
+            ));
         }
         Ok(val.to_string())
     }

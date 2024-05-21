@@ -34,8 +34,8 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                         ))
                     })
                     .collect(),
-                alloy_rpc_types::BlockTransactions::Hashes(_) |
-                alloy_rpc_types::BlockTransactions::Uncle => {
+                alloy_rpc_types::BlockTransactions::Hashes(_)
+                | alloy_rpc_types::BlockTransactions::Uncle => {
                     return Err(ConversionError::MissingFullTransactions)
                 }
             };

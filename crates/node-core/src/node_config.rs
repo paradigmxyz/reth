@@ -475,11 +475,11 @@ impl NodeConfig {
 
         let config = cfg_builder.build(client);
 
-        if self.network.discovery.disable_discovery ||
-            !self.network.discovery.enable_discv5_discovery &&
-                !config.chain_spec.chain.is_optimism()
+        if self.network.discovery.disable_discovery
+            || !self.network.discovery.enable_discv5_discovery
+                && !config.chain_spec.chain.is_optimism()
         {
-            return config
+            return config;
         }
 
         let rlpx_addr = config.listener_addr().ip();

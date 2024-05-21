@@ -10,15 +10,19 @@ use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
+use reth_rpc_types::{
+    engine::{
+        CancunPayloadFields, ExecutionPayload, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
+        ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
+        ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
+    },
+    BlobTransactionId, GetBlobsResponse,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
 use reth_tasks::TaskSpawner;
+use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
@@ -31,11 +35,11 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Provider, EngineT: EngineTypes> {
-    inner: Arc<EngineApiInner<Provider, EngineT>>,
+pub struct EngineApi<Provider, EngineT: EngineTypes, Pool> {
+    inner: Arc<EngineApiInner<Provider, EngineT, Pool>>,
 }
 
-struct EngineApiInner<Provider, EngineT: EngineTypes> {
+struct EngineApiInner<Provider, EngineT: EngineTypes, Pool> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
@@ -48,12 +52,15 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
     task_spawner: Box<dyn TaskSpawner>,
     /// The latency and response type metrics for engine api calls
     metrics: EngineApiMetrics,
+    /// Transaction pool.
+    tx_pool: Pool,
 }
 
-impl<Provider, EngineT> EngineApi<Provider, EngineT>
+impl<Provider, EngineT, Pool> EngineApi<Provider, EngineT, Pool>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes + 'static,
+    Pool: TransactionPool + 'static,
 {
     /// Create new instance of [EngineApi].
     pub fn new(
@@ -61,6 +68,7 @@ where
         chain_spec: Arc<ChainSpec>,
         beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
         payload_store: PayloadStore<EngineT>,
+        tx_pool: Pool,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
@@ -70,6 +78,7 @@ where
             payload_store,
             task_spawner,
             metrics: EngineApiMetrics::default(),
+            tx_pool,
         });
         Self { inner }
     }
@@ -411,7 +420,7 @@ where
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len })
+            return Err(EngineApiError::PayloadRequestTooLarge { len });
         }
 
         let mut result = Vec::with_capacity(hashes.len());
@@ -451,7 +460,7 @@ where
             return Err(EngineApiError::TerminalTD {
                 execution: merge_terminal_td,
                 consensus: terminal_total_difficulty,
-            })
+            });
         }
 
         self.inner.beacon_consensus.transition_configuration_exchanged().await;
@@ -461,7 +470,7 @@ where
             return Ok(TransitionConfiguration {
                 terminal_total_difficulty: merge_terminal_td,
                 ..Default::default()
-            })
+            });
         }
 
         // Attempt to look up terminal block hash
@@ -526,9 +535,9 @@ where
                 // TODO: decide if we want this branch - the FCU INVALID response might be more
                 // useful than the payload attributes INVALID response
                 if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
+                    return Ok(fcu_res);
                 }
-                return Err(err.into())
+                return Err(err.into());
             }
         }
 
@@ -537,10 +546,11 @@ where
 }
 
 #[async_trait]
-impl<Provider, EngineT> EngineApiServer<EngineT> for EngineApi<Provider, EngineT>
+impl<Provider, EngineT, Pool> EngineApiServer<EngineT> for EngineApi<Provider, EngineT, Pool>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes + 'static,
+    Pool: TransactionPool + 'static,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -755,9 +765,27 @@ where
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
         Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())
     }
+
+    async fn get_blobs_v1(
+        &self,
+        transaction_ids: Vec<BlobTransactionId>,
+    ) -> RpcResult<GetBlobsResponse> {
+        let mut results = vec![];
+
+        for transaction_id in transaction_ids {
+            results.push(
+                self.inner
+                    .tx_pool
+                    .get_blob(transaction_id.tx_hash)
+                    .map_err(|e| EngineApiError::Internal(Box::new(e)))?,
+            );
+        }
+
+        Ok(GetBlobsResponse { blobs: results })
+    }
 }
 
-impl<Provider, EngineT> std::fmt::Debug for EngineApi<Provider, EngineT>
+impl<Provider, EngineT, Pool> std::fmt::Debug for EngineApi<Provider, EngineT, Pool>
 where
     EngineT: EngineTypes,
 {
@@ -884,8 +912,8 @@ mod tests {
                 blocks
                     .iter()
                     .filter(|b| {
-                        !first_missing_range.contains(&b.number) &&
-                            !second_missing_range.contains(&b.number)
+                        !first_missing_range.contains(&b.number)
+                            && !second_missing_range.contains(&b.number)
                     })
                     .map(|b| (b.hash(), b.clone().unseal())),
             );
@@ -914,8 +942,8 @@ mod tests {
                 // ensure we still return trailing `None`s here because by-hash will not be aware
                 // of the missing block's number, and cannot compare it to the current best block
                 .map(|b| {
-                    if first_missing_range.contains(&b.number) ||
-                        second_missing_range.contains(&b.number)
+                    if first_missing_range.contains(&b.number)
+                        || second_missing_range.contains(&b.number)
                     {
                         None
                     } else {
@@ -941,8 +969,8 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
-                    U256::from(1),
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap()
+                    + U256::from(1),
                 ..Default::default()
             };
 

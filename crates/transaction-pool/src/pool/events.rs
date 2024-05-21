@@ -82,9 +82,9 @@ impl TransactionEvent {
     pub const fn is_final(&self) -> bool {
         matches!(
             self,
-            TransactionEvent::Replaced(_) |
-                TransactionEvent::Mined(_) |
-                TransactionEvent::Discarded
+            TransactionEvent::Replaced(_)
+                | TransactionEvent::Mined(_)
+                | TransactionEvent::Discarded
         )
     }
 }

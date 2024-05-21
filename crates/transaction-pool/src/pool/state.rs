@@ -126,14 +126,14 @@ impl SubPool {
 impl From<TxState> for SubPool {
     fn from(value: TxState) -> Self {
         if value.is_pending() {
-            return SubPool::Pending
+            return SubPool::Pending;
         }
         if value.is_blob() {
             // all _non-pending_ blob transactions are in the blob sub-pool
-            return SubPool::Blob
+            return SubPool::Blob;
         }
         if value.bits() < TxState::BASE_FEE_POOL_BITS.bits() {
-            return SubPool::Queued
+            return SubPool::Queued;
         }
         SubPool::BaseFee
     }
@@ -165,10 +165,10 @@ mod tests {
         let state = TxState::default();
         assert_eq!(SubPool::Queued, state.into());
 
-        let state = TxState::NO_PARKED_ANCESTORS |
-            TxState::NO_NONCE_GAPS |
-            TxState::NOT_TOO_MUCH_GAS |
-            TxState::ENOUGH_FEE_CAP_BLOCK;
+        let state = TxState::NO_PARKED_ANCESTORS
+            | TxState::NO_NONCE_GAPS
+            | TxState::NOT_TOO_MUCH_GAS
+            | TxState::ENOUGH_FEE_CAP_BLOCK;
         assert_eq!(SubPool::Queued, state.into());
     }
 

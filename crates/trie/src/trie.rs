@@ -290,9 +290,9 @@ where
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // Decide if we need to return intermediate progress.
-                    let total_updates_len = trie_updates.len() +
-                        account_node_iter.walker.updates_len() +
-                        hash_builder.updates_len();
+                    let total_updates_len = trie_updates.len()
+                        + account_node_iter.walker.updates_len()
+                        + hash_builder.updates_len();
                     if retain_updates && total_updates_len as u64 >= self.threshold {
                         let (walker_stack, walker_updates) = account_node_iter.walker.split();
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
@@ -310,7 +310,7 @@ where
                             Box::new(state),
                             hashed_entries_walked,
                             trie_updates,
-                        ))
+                        ));
                     }
                 }
             }
@@ -491,7 +491,7 @@ where
                 EMPTY_ROOT_HASH,
                 0,
                 TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
-            ))
+            ));
         }
 
         let mut tracker = TrieTracker::default();

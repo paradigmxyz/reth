@@ -118,7 +118,7 @@ impl FileClient {
     /// Returns true if all blocks are canonical (no gaps)
     pub fn has_canonical_blocks(&self) -> bool {
         if self.headers.is_empty() {
-            return true
+            return true;
         }
         let mut nums = self.headers.keys().copied().collect::<Vec<_>>();
         nums.sort_unstable();
@@ -126,7 +126,7 @@ impl FileClient {
         let mut lowest = iter.next().expect("not empty");
         for next in iter {
             if next != lowest + 1 {
-                return false
+                return false;
             }
             lowest = next;
         }
@@ -216,7 +216,7 @@ impl FromReader for FileClient {
                             "partial block returned from decoding chunk"
                         );
                         remaining_bytes = bytes;
-                        break
+                        break;
                     }
                     Err(err) => return Err(err),
                 };
@@ -275,7 +275,7 @@ impl HeadersClient for FileClient {
                 Some(num) => *num,
                 None => {
                     warn!(%hash, "Could not find starting block number for requested header hash");
-                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                    return Box::pin(async move { Err(RequestError::BadResponse) });
                 }
             },
             BlockHashOrNumber::Number(num) => num,
@@ -299,7 +299,7 @@ impl HeadersClient for FileClient {
                 Some(header) => headers.push(header),
                 None => {
                     warn!(number=%block_number, "Could not find header");
-                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                    return Box::pin(async move { Err(RequestError::BadResponse) });
                 }
             }
         }
@@ -405,7 +405,7 @@ impl ChunkedFileReader {
     {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
             // eof
-            return Ok(None)
+            return Ok(None);
         }
 
         let chunk_target_len = self.chunk_len();

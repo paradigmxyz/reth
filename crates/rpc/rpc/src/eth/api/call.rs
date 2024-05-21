@@ -88,7 +88,7 @@ where
     ) -> EthResult<Vec<EthCallResponse>> {
         let Bundle { transactions, block_override } = bundle;
         if transactions.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")))
+            return Err(EthApiError::InvalidParams(String::from("transactions are empty.")));
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -230,7 +230,7 @@ where
                         env.tx.gas_limit = MIN_TRANSACTION_GAS;
                         if let Ok((res, _)) = self.transact(&mut db, env) {
                             if res.result.is_success() {
-                                return Ok(U256::from(MIN_TRANSACTION_GAS))
+                                return Ok(U256::from(MIN_TRANSACTION_GAS));
                             }
                         }
                     }
@@ -266,7 +266,7 @@ where
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
-                return Err(self.map_out_of_gas_err(env_gas_limit, env, &mut db))
+                return Err(self.map_out_of_gas_err(env_gas_limit, env, &mut db));
             }
         }
 
@@ -278,7 +278,7 @@ where
             ExecutionResult::Halt { reason, gas_used } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
+                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into());
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -288,7 +288,7 @@ where
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
-                }
+                };
             }
         }
 
@@ -333,10 +333,10 @@ where
             // An estimation error is allowed once the current gas limit range used in the binary
             // search is small enough (less than 1.5% of the highest gas limit)
             // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L152
-            if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64) <
-                ESTIMATE_GAS_ERROR_RATIO
+            if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64)
+                < ESTIMATE_GAS_ERROR_RATIO
             {
-                break
+                break;
             };
 
             env.tx.gas_limit = mid_gas_limit;
@@ -511,7 +511,7 @@ fn update_estimated_gas_range(
                 err => {
                     // these should be unreachable because we know the transaction succeeds,
                     // but we consider these cases an error
-                    return Err(RpcInvalidTransactionError::EvmHalt(err).into())
+                    return Err(RpcInvalidTransactionError::EvmHalt(err).into());
                 }
             }
         }

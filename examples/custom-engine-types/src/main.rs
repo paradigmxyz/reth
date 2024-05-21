@@ -98,7 +98,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
         if self.custom == 0 {
             return Err(EngineObjectValidationError::invalid_params(
                 CustomError::CustomFieldIsNotZero,
-            ))
+            ));
         }
 
         Ok(())

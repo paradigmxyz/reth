@@ -326,7 +326,7 @@ impl RpcServerArgs {
         pool: Pool,
         network: Network,
         executor: Tasks,
-        engine_api: EngineApi<Provider, EngineT>,
+        engine_api: EngineApi<Provider, EngineT, Pool>,
         jwt_secret: JwtSecret,
         evm_config: EvmConfig,
     ) -> Result<AuthServerHandle, RpcError>

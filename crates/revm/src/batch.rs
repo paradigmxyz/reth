@@ -81,8 +81,8 @@ impl BlockBatchRecord {
             !self
                 .prune_modes
                 .account_history
-                .map_or(false, |mode| mode.should_prune(block_number, tip)) &&
-                !self
+                .map_or(false, |mode| mode.should_prune(block_number, tip))
+                && !self
                     .prune_modes
                     .storage_history
                     .map_or(false, |mode| mode.should_prune(block_number, tip))
@@ -121,7 +121,7 @@ impl BlockBatchRecord {
             self.prune_modes.receipts.map_or(false, |mode| mode.should_prune(block_number, tip))
         {
             receipts.clear();
-            return Ok(())
+            return Ok(());
         }
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
@@ -129,7 +129,7 @@ impl BlockBatchRecord {
         let prunable_receipts =
             PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(block_number, tip);
         if !prunable_receipts {
-            return Ok(())
+            return Ok(());
         }
 
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;

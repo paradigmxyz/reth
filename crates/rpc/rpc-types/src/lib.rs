@@ -47,3 +47,16 @@ pub use mev::*;
 pub use net::*;
 pub use peer::*;
 pub use rpc::*;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize, Serialize)]
+pub struct BlobTransactionId {
+    pub tx_hash: alloy_primitives::TxHash,
+    pub versioned_hashes: Vec<alloy_primitives::B256>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct GetBlobsResponse {
+    pub blobs: Vec<Option<BlobTransactionSidecar>>,
+}

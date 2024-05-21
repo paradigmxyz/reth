@@ -18,7 +18,7 @@ pub fn revm_spec_by_timestamp_after_merge(
             revm_primitives::REGOLITH
         } else {
             revm_primitives::BEDROCK
-        }
+        };
     }
 
     if chain_spec.is_cancun_active_at_timestamp(timestamp) {
@@ -35,13 +35,13 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
         if chain_spec.fork(Hardfork::Ecotone).active_at_head(&block) {
-            return revm_primitives::ECOTONE
+            return revm_primitives::ECOTONE;
         } else if chain_spec.fork(Hardfork::Canyon).active_at_head(&block) {
-            return revm_primitives::CANYON
+            return revm_primitives::CANYON;
         } else if chain_spec.fork(Hardfork::Regolith).active_at_head(&block) {
-            return revm_primitives::REGOLITH
+            return revm_primitives::REGOLITH;
         } else if chain_spec.fork(Hardfork::Bedrock).active_at_head(&block) {
-            return revm_primitives::BEDROCK
+            return revm_primitives::BEDROCK;
         }
     }
 

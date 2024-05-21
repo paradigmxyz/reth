@@ -412,6 +412,7 @@ where
             ctx.chain_spec(),
             beacon_engine_handle,
             node_adapter.components.payload_builder().clone().into(),
+            node_adapter.components.pool().clone(),
             Box::new(ctx.task_executor().clone()),
         );
         info!(target: "reth::cli", "Engine API handler initialized");

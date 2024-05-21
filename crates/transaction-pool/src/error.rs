@@ -222,14 +222,14 @@ impl InvalidPoolTransactionError {
                 // depend on dynamic environmental conditions and should not be assumed to have been
                 // intentionally caused by the sender
                 match err {
-                    InvalidTransactionError::InsufficientFunds { .. } |
-                    InvalidTransactionError::NonceNotConsistent => {
+                    InvalidTransactionError::InsufficientFunds { .. }
+                    | InvalidTransactionError::NonceNotConsistent => {
                         // transaction could just have arrived late/early
                         false
                     }
-                    InvalidTransactionError::GasTooLow |
-                    InvalidTransactionError::GasTooHigh |
-                    InvalidTransactionError::TipAboveFeeCap => {
+                    InvalidTransactionError::GasTooLow
+                    | InvalidTransactionError::GasTooHigh
+                    | InvalidTransactionError::TipAboveFeeCap => {
                         // these are technically not invalid
                         false
                     }
@@ -237,9 +237,9 @@ impl InvalidPoolTransactionError {
                         // dynamic, but not used during validation
                         false
                     }
-                    InvalidTransactionError::Eip2930Disabled |
-                    InvalidTransactionError::Eip1559Disabled |
-                    InvalidTransactionError::Eip4844Disabled => {
+                    InvalidTransactionError::Eip2930Disabled
+                    | InvalidTransactionError::Eip1559Disabled
+                    | InvalidTransactionError::Eip4844Disabled => {
                         // settings
                         false
                     }

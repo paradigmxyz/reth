@@ -141,7 +141,7 @@ impl ImportReceiptsCommand {
 
         if total_decoded_receipts == 0 {
             error!(target: "reth::cli", "No receipts were imported, ensure the receipt file is valid and not empty");
-            return Ok(())
+            return Ok(());
         }
 
         // compare the highest static file block to the number of receipts we decoded
