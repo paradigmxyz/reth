@@ -121,7 +121,7 @@ impl ImportOpCommand {
             info!(target: "reth::cli", "Chain file chunk read");
 
             total_decoded_blocks += file_client.headers_len();
-            total_decoded_txns += file_client.bodies_len();
+            total_decoded_txns += file_client.total_transactions();
 
             for (block_number, body) in file_client.bodies_iter_mut() {
                 body.transactions.retain(|tx| {
@@ -172,16 +172,17 @@ impl ImportOpCommand {
 
         let provider = provider_factory.provider()?;
 
-        let total_imported_blocks = provider.tx_ref().entries::<tables::Headers>()?;
+        let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
         let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
         if total_decoded_blocks != total_imported_blocks ||
-            total_decoded_txns != total_imported_txns
+            total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns
         {
             error!(target: "reth::cli",
                 total_decoded_blocks,
                 total_imported_blocks,
                 total_decoded_txns,
+                total_filtered_out_dup_txns,
                 total_imported_txns,
                 "Chain was partially imported"
             );
