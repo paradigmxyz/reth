@@ -1,6 +1,7 @@
 //! Optimism block executor.
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use reth_consensus_common::validation::validate_block_post_execution;
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -396,10 +397,12 @@ where
     type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, _gas_used) =
             self.executor.execute_without_verification(block, total_difficulty)?;
+
+        validate_block_post_execution(block, self.executor.chain_spec(), receipts)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);

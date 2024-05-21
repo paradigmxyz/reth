@@ -17,7 +17,12 @@ pub trait Executor<DB> {
 
     /// Consumes the type and executes the block.
     ///
-    /// Returns the output of the block execution.
+    /// # Note
+    /// Execution happens without any validation of the output. To validate the output, use the
+    /// [BatchExecutor].
+    ///
+    /// # Returns
+    /// The output of the block execution.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
 }
 
@@ -32,15 +37,15 @@ pub trait BatchExecutor<DB> {
     type Error;
 
     /// Executes the next block in the batch and update the state internally.
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 
     /// Executes multiple inputs in the batch and update the state internally.
-    fn execute_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
+    fn execute_and_verify_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Input<'a>>,
     {
         for input in inputs {
-            self.execute_one(input)?;
+            self.execute_and_verify_one(input)?;
         }
         Ok(())
     }
@@ -51,7 +56,7 @@ pub trait BatchExecutor<DB> {
         I: IntoIterator<Item = Self::Input<'a>>,
         Self: Sized,
     {
-        self.execute_many(batch)?;
+        self.execute_and_verify_many(batch)?;
         Ok(self.finalize())
     }
 
@@ -222,7 +227,7 @@ mod tests {
         type Output = BatchBlockExecutionOutput;
         type Error = BlockExecutionError;
 
-        fn execute_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
+        fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
             Ok(())
         }
 

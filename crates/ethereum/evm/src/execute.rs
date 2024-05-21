@@ -4,6 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
+use reth_consensus_common::validation::validate_block_post_execution;
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -376,10 +377,12 @@ where
     type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, _gas_used) =
             self.executor.execute_without_verification(block, total_difficulty)?;
+
+        validate_block_post_execution(&block, &self.executor.chain_spec(), &receipts)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -646,7 +649,7 @@ mod tests {
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block {
@@ -672,7 +675,7 @@ mod tests {
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
         executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
@@ -726,7 +729,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block {

@@ -6957,6 +6957,7 @@ name = "reth-evm-ethereum"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
+ "reth-consensus-common",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
@@ -6968,6 +6969,7 @@ dependencies = [
 name = "reth-evm-optimism"
 version = "0.2.0-beta.7"
 dependencies = [
+ "reth-consensus-common",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
