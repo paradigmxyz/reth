@@ -17,6 +17,7 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord};
 use reth_provider::test_utils::NoopProvider;
+use reth_tracing::tracing::error;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
@@ -216,7 +217,7 @@ async fn test_connect_with_boot_nodes() {
             Ok(ev) => {
                 dbg!(ev);
             }
-            Err(err) => eprintln!("{err}"),
+            Err(err) => error!("{err}"),
         }
     }
 }
@@ -257,7 +258,7 @@ async fn test_connect_with_builder() {
             Ok(ev) => {
                 dbg!(ev);
             }
-            Err(err) => eprintln!("{err}"),
+            Err(err) => error!("{err}"),
         }
     }
 }
@@ -318,7 +319,7 @@ async fn test_connect_to_trusted_peer() {
             Ok(ev) => {
                 dbg!(ev);
             }
-            Err(err) => eprintln!("{err}"),
+            Err(err) => error!("{err}"),
         }
     }
 }
