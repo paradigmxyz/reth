@@ -1,6 +1,4 @@
-//! Helpers for working with Optimism.
-
-/* --------------------- REPLAYED TRANSACTIONS IN BLOCKS BELOW BEDROCK --------------------- */
+//! Helpers for working with replayed OP mainnet OVM transactions (in blocks below Bedrock).
 
 /// Transaction 0x9ed8f713b2cc6439657db52dcd2fdb9cc944915428f3c6e2a7703e242b259cb9 in block 985,
 /// replayed in blocks:
