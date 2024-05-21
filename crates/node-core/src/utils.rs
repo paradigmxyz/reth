@@ -12,7 +12,7 @@ use reth_interfaces::p2p::{
 use reth_network::NetworkManager;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader};
 use reth_provider::BlockReader;
-use reth_rpc_layer::{JwtError, JwtSecret};
+use reth_rpc_types::engine::{JwtError, JwtSecret};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
@@ -33,7 +33,7 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
         JwtSecret::from_file(path)
     } else {
         info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
-        JwtSecret::try_create(path)
+        JwtSecret::try_create_random(path)
     }
 }
 

@@ -250,7 +250,7 @@ impl ConfigBuilder {
 }
 
 /// Config used to bootstrap [`discv5::Discv5`].
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
@@ -296,9 +296,7 @@ impl Config {
             discovered_peer_filter: None,
         }
     }
-}
 
-impl Config {
     /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).
@@ -416,7 +414,7 @@ pub fn discv5_sockets_wrt_rlpx_addr(
 
 /// A boot node can be added either as a string in either 'enode' URL scheme or serialized from
 /// [`Enr`](discv5::Enr) type.
-#[derive(Debug, PartialEq, Eq, Hash, Display)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum BootNode {
     /// An unsigned node record.
     #[display(fmt = "{_0}")]

@@ -6,8 +6,10 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    gas_spent_by_transactions, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
-    Receipt, ReceiptWithBloom, SealedBlock, SealedHeader, B256,
+    gas_spent_by_transactions,
+    op_mainnet::is_dup_tx,
+    BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header, Receipt, ReceiptWithBloom,
+    SealedBlock, SealedHeader, B256,
 };
 
 /// Validate header standalone
@@ -74,8 +76,10 @@ pub fn validate_block_pre_execution(
     }
 
     // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+    if !chain_spec.is_optimism_mainnet() || !is_dup_tx(block.number) {
+        if let Err(error) = block.ensure_transaction_root_valid() {
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+        }
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -363,7 +367,8 @@ mod tests {
             max_priority_fee_per_gas: 0x28f000fff,
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
-            to: Address::default().into(),
+            placeholder: Some(()),
+            to: Address::default(),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

@@ -185,8 +185,6 @@ dependencies = [
  "arbitrary",
  "c-kzg",
  "derive_more",
- "ethereum_ssz",
- "ethereum_ssz_derive",
  "once_cell",
  "proptest",
  "proptest-derive",
@@ -458,8 +456,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
- "ethereum_ssz",
- "ethereum_ssz_derive",
  "jsonrpsee-types",
  "jsonwebtoken 9.3.0",
  "rand 0.8.5",
@@ -2242,16 +2238,6 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a01d95850c592940db9b8194bc39f4bc0e89dee5c4265e4b1807c34a9aba453c"
-dependencies = [
- "darling_core 0.13.4",
- "darling_macro 0.13.4",
-]
-
-[[package]]
-name = "darling"
 version = "0.20.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83b2eb4d90d12bdda5ed17de686c2acb4c57914f8f921b8da7e112b5a36f3fe1"
@@ -2276,20 +2262,6 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "859d65a907b6852c9361e3185c862aae7fafd2887876799fa55f5f99dc40d610"
-dependencies = [
- "fnv",
- "ident_case",
- "proc-macro2",
- "quote",
- "strsim 0.10.0",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "darling_core"
 version = "0.20.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "622687fe0bac72a04e5599029151f5796111b90f1baaa9b544d807a5e31cd120"
@@ -2309,17 +2281,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9b5a2f4ac4969822c62224815d069952656cadc7084fdca9751e6d959189b72"
 dependencies = [
  "darling_core 0.10.2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "darling_macro"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c972679f83bdf9c42bd905396b6c3588a843a17f0f16dfcfa3e2c5d57441835"
-dependencies = [
- "darling_core 0.13.4",
  "quote",
  "syn 1.0.109",
 ]
@@ -2877,18 +2838,6 @@ dependencies = [
  "ethereum-types",
  "itertools 0.10.5",
  "smallvec",
-]
-
-[[package]]
-name = "ethereum_ssz_derive"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6085d7fd3cf84bd2b8fec150d54c8467fb491d8db9c460607c5534f653a0ee38"
-dependencies = [
- "darling 0.13.4",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -6427,6 +6376,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
+ "reth-discv5",
  "reth-downloaders",
  "reth-ethereum-payload-builder",
  "reth-evm",
@@ -7833,19 +7783,14 @@ dependencies = [
 name = "reth-rpc-layer"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-rpc-types-engine",
  "assert_matches",
  "http 0.2.12",
  "http-body 0.4.6",
  "hyper 0.14.28",
  "jsonrpsee",
- "jsonwebtoken 8.3.0",
  "pin-project",
- "rand 0.8.5",
- "reth-fs-util",
- "reth-primitives",
- "serde",
  "tempfile",
- "thiserror",
  "tokio",
  "tower",
  "tracing",
@@ -7863,17 +7808,13 @@ dependencies = [
  "alloy-rpc-types-trace",
  "arbitrary",
  "bytes",
- "ethereum_ssz",
- "ethereum_ssz_derive",
  "jsonrpsee-types",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
  "serde",
  "serde_json",
- "serde_with",
  "similar-asserts",
- "thiserror",
 ]
 
 [[package]]
@@ -8312,7 +8253,6 @@ dependencies = [
  "ark-ff 0.3.0",
  "ark-ff 0.4.2",
  "bytes",
- "ethereum_ssz",
  "fastrlp",
  "num-bigint",
  "num-traits",
@@ -9138,12 +9078,6 @@ name = "strsim"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6446ced80d6c486436db5c078dde11a9f73d42b57fb273121e160b84f63d894c"
-
-[[package]]
-name = "strsim"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "strsim"
