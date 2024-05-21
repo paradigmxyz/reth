@@ -172,7 +172,7 @@ impl FileClient {
 
     /// Returns the current number of transactions in the client.
     pub fn total_transactions(&self) -> usize {
-        self.bodies.iter().flat_map(|(_, body)| &body.transactions).count()
+        self.bodies.iter().fold(0, |acc, (_, body)| acc + body.transactions.len())
     }
 }
 
