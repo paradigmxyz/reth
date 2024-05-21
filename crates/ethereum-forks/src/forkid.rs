@@ -315,7 +315,6 @@ impl ForkFilter {
             }
 
             let is_incompatible = if self.head.number < TIMESTAMP_BEFORE_ETHEREUM_MAINNET {
-                println!("self.head.number < TIMESTAMP_BEFORE_ETHEREUM_MAINNET");
                 // When the block number is less than an old timestamp before Ethereum mainnet,
                 // we check if this fork is time-based or block number-based by estimating that,
                 // if fork_id.next is bigger than the old timestamp, we are dealing with a
@@ -325,7 +324,6 @@ impl ForkFilter {
                     (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET &&
                         self.head.number >= fork_id.next)
             } else {
-                println!("self.head.number >= TIMESTAMP_BEFORE_ETHEREUM_MAINNET");
                 // Extra safety check to future-proof for when Ethereum has over a billion blocks.
                 let head_block_or_time = match self.cache.epoch_start {
                     ForkFilterKey::Block(_) => self.head.number,
