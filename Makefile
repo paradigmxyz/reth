@@ -472,4 +472,5 @@ cfg-check:
 pr:
 	make cfg-check && \
 	make lint && \
+	make update-book-cli && \
 	make test
