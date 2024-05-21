@@ -18,22 +18,13 @@ use tokio_stream::wrappers::BroadcastStream;
 /// engine task.
 ///
 /// See also `BeaconConsensusEngine`
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BeaconConsensusEngineHandle<Engine>
 where
     Engine: EngineTypes,
 {
     pub(crate) to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
     event_listeners: EventListeners<BeaconConsensusEngineEvent>,
-}
-
-impl<Engine> Clone for BeaconConsensusEngineHandle<Engine>
-where
-    Engine: EngineTypes,
-{
-    fn clone(&self) -> Self {
-        Self { to_engine: self.to_engine.clone(), event_listeners: self.event_listeners.clone() }
-    }
 }
 
 // === impl BeaconConsensusEngineHandle ===

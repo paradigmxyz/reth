@@ -5,16 +5,10 @@ use tracing::{error, warn};
 const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 1000;
 
 /// A bounded broadcast channel for a task.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EventListeners<T> {
     /// The sender part of the broadcast channel
     sender: Sender<T>,
-}
-
-impl<T: Clone> Clone for EventListeners<T> {
-    fn clone(&self) -> Self {
-        EventListeners { sender: self.sender.clone() }
-    }
 }
 
 impl<T: Clone + Send + Sync + 'static> Default for EventListeners<T> {
