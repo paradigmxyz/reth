@@ -43,7 +43,7 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_rlp::Decodable;
     use reth_db::{
-        cursor::DbCursorRO,
+        cursor::{DbCursorRO, DbCursorRW},
         mdbx::{cursor::Cursor, RW},
         tables,
         test_utils::TempDatabase,
@@ -61,13 +61,14 @@ mod tests {
         hex_literal::hex,
         keccak256,
         stage::{PipelineTarget, StageCheckpoint, StageId},
-        Account, BlockNumber, Bytecode, ChainSpecBuilder, PruneMode, PruneModes, Receipt,
-        SealedBlock, StaticFileSegment, TxNumber, B256, U256,
+        Account, Bytecode, ChainSpecBuilder, PruneMode, PruneModes,
+        SealedBlock, StaticFileSegment, B256, U256,
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         AccountExtReader, DatabaseProviderFactory, HeaderProvider, ProviderFactory,
         ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
+        TransactionsProvider,
     };
     use reth_stages_api::{ExecInput, Stage};
     use std::{io::Write, sync::Arc};
@@ -248,45 +249,38 @@ mod tests {
         check_pruning(test_db.factory.clone(), prune.clone(), 0, 1, 0).await;
     }
 
-    fn seed_data(
-    ) -> ProviderResult<(TestStageDB, Vec<SealedBlock>, Vec<(BlockNumber, Vec<(TxNumber, Receipt)>)>)>
-    {
-        let mut rng = generators::rng();
-        let end_block = 100usize;
-        let take = 10;
-        let genesis_hash = B256::ZERO;
-
-        // generate test data
+    /// It will generate `num_blocks`, push them to static files and set all stage checkpoints to
+    /// `num_blocks - 1`.
+    fn seed_data(num_blocks: usize) -> ProviderResult<TestStageDB> {
         let db = TestStageDB::default();
-        let mut blocks = random_block_range(&mut rng, 0..=(end_block as u64), genesis_hash, 2..3);
+        let mut rng = generators::rng();
+        let genesis_hash = B256::ZERO;
+        let tip = (num_blocks - 1) as u64;
+
+        let blocks = random_block_range(&mut rng, 0..=tip, genesis_hash, 2..3);
+        db.insert_blocks(blocks.iter(), StorageKind::Static)?;
+
         let mut receipts = Vec::new();
-        let tx_num = 0u64;
+        let mut tx_num = 0u64;
         for block in &blocks {
             let mut block_receipts = Vec::with_capacity(block.body.len());
             for transaction in &block.body {
                 block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
+                tx_num += 1;
             }
             receipts.push((block.number, block_receipts));
         }
-
-        // insert data respective to the first `end_block - take` blocks
-        let inserteable_blocks = blocks.drain(..end_block - take).collect::<Vec<_>>();
-        db.insert_blocks(inserteable_blocks.iter(), StorageKind::Static)?;
-
-        let inserteable_receipts = receipts.drain(..end_block - take).collect::<Vec<_>>();
-        db.insert_receipts_by_block(inserteable_receipts, StorageKind::Static)?;
+        db.insert_receipts_by_block(receipts, StorageKind::Static)?;
 
         // simulate pipeline by setting all checkpoints to inserted height.
         let provider_rw = db.factory.provider_rw()?;
         for stage in StageId::ALL {
-            provider_rw.save_stage_checkpoint(
-                stage,
-                StageCheckpoint::new((end_block - take - 1) as u64),
-            )?;
+            provider_rw
+                .save_stage_checkpoint(stage, StageCheckpoint::new(tip))?;
         }
         provider_rw.commit()?;
 
-        Ok((db, blocks, receipts))
+        Ok(db)
     }
 
     // Simulates a pruning job that was never committed.
@@ -307,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_consistency() {
-        let (db, _, _) = seed_data().unwrap();
+        let db = seed_data(90).unwrap();
         let db_provider = db.factory.database_provider_ro().unwrap();
 
         assert_eq!(
@@ -318,12 +312,13 @@ mod tests {
 
     #[test]
     fn test_consistency_no_commit_prune() {
-        let (db, _, _) = seed_data().unwrap();
+        let db = seed_data(90).unwrap();
         let db_provider = db.factory.database_provider_ro().unwrap();
         let static_file_provider = db.factory.static_file_provider();
         let mut is_full_node = true;
 
-        // Full node does not use receipts, therefore doesn't check for consistency on receipts segment
+        // Full node does not use receipts, therefore doesn't check for consistency on receipts
+        // segment
         simulate_no_commit_prune(1, &static_file_provider, StaticFileSegment::Receipts);
         assert_eq!(
             static_file_provider.check_consistency(&db_provider, is_full_node, false),
@@ -343,6 +338,124 @@ mod tests {
         assert_eq!(
             static_file_provider.check_consistency(&db_provider, is_full_node, false),
             Ok(Some(PipelineTarget::Unwind(86)))
+        );
+    }
+
+    #[test]
+    fn test_consistency_checkpoints() {
+        let db = seed_data(90).unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(91)).unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_eq!(
+            static_file_provider.check_consistency(
+                &db.factory.database_provider_ro().unwrap(),
+                false,
+                false
+            ),
+            Ok(Some(PipelineTarget::Unwind(89)))
+        );
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(87)).unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_eq!(
+            static_file_provider.check_consistency(
+                &db.factory.database_provider_ro().unwrap(),
+                false,
+                false
+            ),
+            Ok(Some(PipelineTarget::Unwind(87)))
+        );
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(50)).unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_eq!(
+            static_file_provider.check_consistency(
+                &db.factory.database_provider_ro().unwrap(),
+                false,
+                false
+            ),
+            Ok(Some(PipelineTarget::Unwind(50)))
+        );
+    }
+
+    #[test]
+    fn test_consistency_headers_gap() {
+        let db = seed_data(90).unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Creates a gap of one block static_file(89) <missing 90> db_(91)
+        {
+            let current = static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap();
+            let provider_rw = db.factory.provider_rw().unwrap();
+            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::Headers>().unwrap();
+            cursor.append(current + 2, Default::default()).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let db_provider = db.factory.database_provider_ro().unwrap();
+        assert!(db_provider.header_by_number(90).unwrap().is_none());
+
+        assert_eq!(
+            static_file_provider.check_consistency(&db_provider, false, false),
+            Ok(Some(PipelineTarget::Unwind(89)))
+        );
+    }
+
+    #[test]
+    fn test_consistency_tx_gap() {
+        let db = seed_data(90).unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+        let current = static_file_provider
+            .get_highest_static_file_tx(StaticFileSegment::Transactions)
+            .unwrap();
+
+        // Creates a gap of one transaction: static_file <missing> db
+        {
+            let provider_rw = db.factory.provider_rw().unwrap();
+            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::Transactions>().unwrap();
+            cursor.append(current + 2, Default::default()).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let db_provider = db.factory.database_provider_ro().unwrap();
+        assert!(db_provider.transaction_by_id(current + 1).unwrap().is_none());
+
+        assert_eq!(
+            static_file_provider.check_consistency(&db_provider, false, false),
+            Ok(Some(PipelineTarget::Unwind(89)))
+        );
+    }
+
+    #[test]
+    fn test_consistency_receipt_gap() {
+        let db = seed_data(90).unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+        let current =
+            static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts).unwrap();
+
+        // Creates a gap of one receipt: static_file <missing> db
+        {
+            let provider_rw = db.factory.provider_rw().unwrap();
+            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::Receipts>().unwrap();
+            cursor.append(current + 2, Default::default()).unwrap();
+            provider_rw.commit().unwrap();
+        }
+        let db_provider = db.factory.database_provider_ro().unwrap();
+        assert!(db_provider.receipt(current + 1).unwrap().is_none());
+
+        assert_eq!(
+            static_file_provider.check_consistency(&db_provider, false, false),
+            Ok(Some(PipelineTarget::Unwind(89)))
         );
     }
 }

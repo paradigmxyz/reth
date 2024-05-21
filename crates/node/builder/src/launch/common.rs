@@ -343,7 +343,7 @@ where
         )? {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            if let PipelineTarget::Unwind(0) = unwind_target {
+            if PipelineTarget::Unwind(0) == unwind_target {
                 panic!("A static file <> database inconsistency was found that would trigger an unwind to block 0.")
             }
 
