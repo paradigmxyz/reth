@@ -6,6 +6,7 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
+    op_mainnet::is_dup_tx,
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
 
@@ -73,8 +74,10 @@ pub fn validate_block_standalone(
     }
 
     // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+    if !chain_spec.is_optimism_mainnet() || !is_dup_tx(block.number) {
+        if let Err(error) = block.ensure_transaction_root_valid() {
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+        }
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations

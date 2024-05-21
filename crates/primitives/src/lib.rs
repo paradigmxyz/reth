@@ -35,6 +35,7 @@ mod header;
 mod integer_list;
 mod log;
 mod net;
+pub mod op_mainnet;
 pub mod proofs;
 mod prune;
 mod receipt;
