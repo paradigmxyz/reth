@@ -1,6 +1,6 @@
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{error, warn};
+use tracing::error;
 
 const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 1000;
 
@@ -26,14 +26,9 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
 
     /// Broadcasts an event to all listeners.
     pub fn notify(&self, event: T) {
-        match self.sender.send(event) {
-            Ok(listener_count) => {
-                if listener_count == 0 {
-                    warn!("notification of network event with 0 listeners");
-                }
-            }
-            Err(_) => error!("channel closed"),
-        };
+        if self.sender.send(event).is_err() {
+            error!("channel closed");
+        }
     }
 
     /// Adds a new event listener and returns the associated receiver.
