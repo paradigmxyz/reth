@@ -67,23 +67,26 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
         let mut cursor = tx.cursor_read::<RawTable<T>>()?;
         let walker = match (self.start_key.as_deref(), self.end_key.as_deref()) {
             (Some(start), Some(end)) => {
-                info!("start={start} \n end={end}");
+                info!("Start computing checksum, range=({start}..={end}), limit={:?}", self.limit);
                 let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
                 let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
                 cursor.walk_range(start_key..=end_key)?
             }
             (None, Some(end)) => {
-                info!("start=.. \n end={end}");
+                info!("Start computing checksum, range=(..={end}), limit={:?}", self.limit);
                 let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
 
                 cursor.walk_range(..=end_key)?
             }
             (Some(start), None) => {
-                info!("start={start} \n end= ");
+                info!("Start computing checksum, range=({start}..), limit={:?}", self.limit);
                 let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
                 cursor.walk_range(start_key..)?
             }
-            (None, None) => cursor.walk_range(..)?,
+            (None, None) => {
+                info!("Start computing checksum, range=(..), limit={:?}", self.limit);
+                cursor.walk_range(..)?
+            }
         };
 
         let start_time = Instant::now();
