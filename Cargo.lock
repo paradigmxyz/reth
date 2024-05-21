@@ -2221,7 +2221,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
- "reth-tracing",
  "tokio",
  "tokio-stream",
 ]
