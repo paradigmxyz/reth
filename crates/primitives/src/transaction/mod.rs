@@ -1248,7 +1248,7 @@ impl TransactionSigned {
 
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
-    /// This should be used _only_ be used internally in general transaction decoding methods,
+    /// This should _only_ be used internally in general transaction decoding methods,
     /// which have already ensured that the input is a typed transaction with the following format:
     /// `tx-type || rlp(tx-data)`
     ///
@@ -1324,18 +1324,27 @@ impl TransactionSigned {
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if data.is_empty() {
+    ///
+    /// Both for legacy and EIP-2718 transactions, an error will be returned if there is an excess
+    /// of bytes in input data.
+    pub fn decode_enveloped(input_data: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        if input_data.is_empty() {
             return Err(RlpError::InputTooShort)
         }
 
         // Check if the tx is a list
-        if data[0] >= EMPTY_LIST_CODE {
+        let output_data = if input_data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            TransactionSigned::decode_rlp_legacy_transaction(data)
+            TransactionSigned::decode_rlp_legacy_transaction(input_data)?
         } else {
-            TransactionSigned::decode_enveloped_typed_transaction(data)
+            TransactionSigned::decode_enveloped_typed_transaction(input_data)?
+        };
+
+        if !input_data.is_empty() {
+            return Err(RlpError::UnexpectedLength);
         }
+
+        Ok(output_data)
     }
 
     /// Returns the length without an RLP header - this is used for eth/68 sizes.
@@ -2166,5 +2175,25 @@ mod tests {
         let res = TransactionSigned::decode_enveloped(&mut &data[..]);
 
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn decode_envelope_fails_on_trailing_bytes_legacy() {
+        let data = [201, 3, 56, 56, 128, 43, 36, 27, 128, 3, 192];
+
+        let result = TransactionSigned::decode_enveloped(&mut data.as_ref());
+
+        assert!(result.is_err());
+        assert_eq!(result, Err(RlpError::UnexpectedLength));
+    }
+
+    #[test]
+    fn decode_envelope_fails_on_trailing_bytes_eip2718() {
+        let data = hex!("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d900");
+
+        let result = TransactionSigned::decode_enveloped(&mut data.as_ref());
+
+        assert!(result.is_err());
+        assert_eq!(result, Err(RlpError::UnexpectedLength));
     }
 }
