@@ -30,7 +30,6 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 mod exex;
-pub mod fs;
 pub mod genesis;
 mod header;
 mod integer_list;

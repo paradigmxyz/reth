@@ -43,7 +43,7 @@ impl FromReader for ReceiptFileClient {
         trace!(target: "downloaders::file",
             target_num_bytes=num_bytes,
             capacity=stream.read_buffer().capacity(),
-            coded=?HackReceiptFileCodec,
+            codec=?HackReceiptFileCodec,
             "init decode stream"
         );
 

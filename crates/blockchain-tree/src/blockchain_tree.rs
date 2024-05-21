@@ -280,7 +280,10 @@ where
     ///     * `BundleState` changes that happened at the asked `block_hash`
     ///     * `BTreeMap<BlockNumber,BlockHash>` list of past pending and canonical hashes, That are
     ///       needed for evm `BLOCKHASH` opcode.
-    /// Return none if block unknown.
+    /// Return none if:
+    ///     * block unknown.
+    ///     * chain_id not present in state.
+    ///     * there are no parent hashes stored.
     pub fn post_state_data(&self, block_hash: BlockHash) -> Option<BundleStateData> {
         trace!(target: "blockchain_tree", ?block_hash, "Searching for post state data");
 
@@ -290,14 +293,22 @@ where
         if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block_hash) {
             trace!(target: "blockchain_tree", ?block_hash, "Constructing post state data based on non-canonical chain");
             // get block state
-            let chain = self.state.chains.get(&chain_id).expect("Chain should be present");
+            let Some(chain) = self.state.chains.get(&chain_id) else {
+                debug!(target: "blockchain_tree", ?chain_id, "Chain with ID not present");
+                return None;
+            };
             let block_number = chain.block_number(block_hash)?;
             let state = chain.state_at_block(block_number)?;
 
             // get parent hashes
             let mut parent_block_hashes = self.all_chain_hashes(chain_id);
             let first_pending_block_number =
-                *parent_block_hashes.first_key_value().expect("There is at least one block hash").0;
+                if let Some(key_value) = parent_block_hashes.first_key_value() {
+                    *key_value.0
+                } else {
+                    debug!(target: "blockchain_tree", ?chain_id, "No blockhashes stored");
+                    return None;
+                };
             let canonical_chain = canonical_chain
                 .iter()
                 .filter(|&(key, _)| key < first_pending_block_number)
@@ -600,13 +611,17 @@ where
 
         while let Some(block) = dependent_block.pop_back() {
             // Get chain of dependent block.
-            let chain_id =
-                self.block_indices().get_blocks_chain_id(&block).expect("Block should be in tree");
+            let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block) else {
+                debug!(target: "blockchain_tree", ?block, "Block not in tree");
+                return Default::default();
+            };
 
             // Find all blocks that fork from this chain.
-            for chain_block in
-                self.state.chains.get(&chain_id).expect("Chain should be in tree").blocks().values()
-            {
+            let Some(chain) = self.state.chains.get(&chain_id) else {
+                debug!(target: "blockchain_tree", ?chain_id, "Chain not in tree");
+                return Default::default();
+            };
+            for chain_block in chain.blocks().values() {
                 if let Some(forks) = self.block_indices().fork_to_child().get(&chain_block.hash()) {
                     // If there are sub forks append them for processing.
                     dependent_block.extend(forks);
@@ -623,6 +638,8 @@ where
     /// This method searches for any chain that depended on this block being part of the canonical
     /// chain. Each dependent chain's state is then updated with state entries removed from the
     /// plain state during the unwind.
+    /// Returns the result of inserting the chain or None if any of the dependent chains is not
+    /// in the tree.
     fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockchainId> {
         // iterate over all blocks in chain and find any fork blocks that are in tree.
         for (number, block) in chain.blocks().iter() {
@@ -637,8 +654,10 @@ where
 
                 // prepend state to all chains that fork from this block.
                 for chain_id in chains_to_bump {
-                    let chain =
-                        self.state.chains.get_mut(&chain_id).expect("Chain should be in tree");
+                    let Some(chain) = self.state.chains.get_mut(&chain_id) else {
+                        debug!(target: "blockchain_tree", ?chain_id, "Chain not in tree");
+                        return None;
+                    };
 
                     debug!(target: "blockchain_tree",
                         unwound_block= ?block.num_hash(),
@@ -723,12 +742,16 @@ where
     ///
     /// if it is canonical or extends the canonical chain, return [BlockAttachment::Canonical]
     /// if it does not extend the canonical chain, return [BlockAttachment::HistoricalFork]
+    /// if the block is not in the tree or its chain id is not valid, return None
     #[track_caller]
     fn is_block_inside_chain(&self, block: &BlockNumHash) -> Option<BlockAttachment> {
         // check if block known and is already in the tree
         if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&block.hash) {
             // find the canonical fork of this chain
-            let canonical_fork = self.canonical_fork(chain_id).expect("Chain id is valid");
+            let Some(canonical_fork) = self.canonical_fork(chain_id) else {
+                debug!(target: "blockchain_tree", chain_id=?chain_id, block=?block.hash, "Chain id not valid");
+                return None;
+            };
             // if the block's chain extends canonical chain
             return if canonical_fork == self.block_indices().canonical_tip() {
                 Some(BlockAttachment::Canonical)
@@ -1050,9 +1073,14 @@ where
         };
 
         // we are splitting chain at the block hash that we want to make canonical
-        let canonical = self
-            .remove_and_split_chain(chain_id, ChainSplitTarget::Hash(block_hash))
-            .expect("to be present");
+        let Some(canonical) =
+            self.remove_and_split_chain(chain_id, ChainSplitTarget::Hash(block_hash))
+        else {
+            debug!(target: "blockchain_tree", ?block_hash, ?chain_id, "Chain not present");
+            return Err(CanonicalError::from(BlockchainTreeError::BlockSideChainIdConsistency {
+                chain_id: chain_id.into(),
+            }));
+        };
         trace!(target: "blockchain_tree", chain = ?canonical, "Found chain to make canonical");
         durations_recorder.record_relative(MakeCanonicalAction::SplitChain);
 
@@ -1062,9 +1090,14 @@ where
         // loop while fork blocks are found in Tree.
         while let Some(chain_id) = self.block_indices().get_blocks_chain_id(&fork_block.hash) {
             // canonical chain is lower part of the chain.
-            let canonical = self
-                .remove_and_split_chain(chain_id, ChainSplitTarget::Number(fork_block.number))
-                .expect("fork is present");
+            let Some(canonical) =
+                self.remove_and_split_chain(chain_id, ChainSplitTarget::Number(fork_block.number))
+            else {
+                debug!(target: "blockchain_tree", ?fork_block, ?chain_id, "Fork not present");
+                return Err(CanonicalError::from(
+                    BlockchainTreeError::BlockSideChainIdConsistency { chain_id: chain_id.into() },
+                ));
+            };
             fork_block = canonical.fork_block();
             chains_to_promote.push(canonical);
         }
@@ -1072,13 +1105,21 @@ where
 
         let old_tip = self.block_indices().canonical_tip();
         // Merge all chains into one chain.
-        let mut new_canon_chain = chains_to_promote.pop().expect("There is at least one block");
+        let Some(mut new_canon_chain) = chains_to_promote.pop() else {
+            debug!(target: "blockchain_tree", "No blocks in the chain to make canonical");
+            return Err(CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain {
+                block_hash: fork_block.hash,
+            }));
+        };
         trace!(target: "blockchain_tree", ?new_canon_chain, "Merging chains");
         let mut chain_appended = false;
         for chain in chains_to_promote.into_iter().rev() {
-            chain_appended = true;
             trace!(target: "blockchain_tree", ?chain, "Appending chain");
-            new_canon_chain.append_chain(chain).expect("We have just build the chain.");
+            let block_hash = chain.fork_block().hash;
+            new_canon_chain.append_chain(chain).map_err(|_| {
+                CanonicalError::from(BlockchainTreeError::BlockHashNotFoundInChain { block_hash })
+            })?;
+            chain_appended = true;
         }
         durations_recorder.record_relative(MakeCanonicalAction::MergeAllChains);
 

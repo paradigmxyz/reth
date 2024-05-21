@@ -155,6 +155,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::JwtAuthValidator;
+    use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
     use http::{header, Method, Request, StatusCode};
     use hyper::{body, Body};
     use jsonrpsee::{
@@ -165,9 +168,6 @@ mod tests {
         net::SocketAddr,
         time::{SystemTime, UNIX_EPOCH},
     };
-
-    use super::AuthLayer;
-    use crate::{jwt_secret::Claims, JwtAuthValidator, JwtError, JwtSecret};
 
     const AUTH_PORT: u32 = 8551;
     const AUTH_ADDR: &str = "0.0.0.0";

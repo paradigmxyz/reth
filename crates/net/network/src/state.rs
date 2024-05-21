@@ -24,7 +24,6 @@ use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
@@ -35,7 +34,7 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace};
 
 /// Cache limit of blocks to keep track of for a single peer.
-const PEER_BLOCK_CACHE_LIMIT: usize = 512;
+const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
@@ -142,7 +141,7 @@ where
                 capabilities,
                 request_tx,
                 pending_response: None,
-                blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
+                blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
             },
         );
     }

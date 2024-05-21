@@ -79,7 +79,7 @@ pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
 /// Minimum length of a rlp-encoded eip1559 transaction.
 pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
 /// Minimum length of a rlp-encoded eip4844 transaction.
-pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
+pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 37;
 /// Minimum length of a rlp-encoded deposit transaction.
 #[cfg(feature = "optimism")]
 pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
@@ -176,14 +176,14 @@ impl Transaction {
 
     /// Gets the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> &TxKind {
+    pub fn kind(&self) -> TxKind {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) |
-            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) => *to,
+            Transaction::Eip4844(TxEip4844 { to, .. }) => TxKind::Call(*to),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { to, .. }) => to,
+            Transaction::Deposit(TxDeposit { to, .. }) => *to,
         }
     }
 
@@ -1250,7 +1250,7 @@ impl TransactionSigned {
 
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
-    /// This should be used _only_ be used internally in general transaction decoding methods,
+    /// This should _only_ be used internally in general transaction decoding methods,
     /// which have already ensured that the input is a typed transaction with the following format:
     /// `tx-type || rlp(tx-data)`
     ///
@@ -1326,18 +1326,27 @@ impl TransactionSigned {
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if data.is_empty() {
+    ///
+    /// Both for legacy and EIP-2718 transactions, an error will be returned if there is an excess
+    /// of bytes in input data.
+    pub fn decode_enveloped(input_data: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        if input_data.is_empty() {
             return Err(RlpError::InputTooShort)
         }
 
         // Check if the tx is a list
-        if data[0] >= EMPTY_LIST_CODE {
+        let output_data = if input_data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            TransactionSigned::decode_rlp_legacy_transaction(data)
+            TransactionSigned::decode_rlp_legacy_transaction(input_data)?
         } else {
-            TransactionSigned::decode_enveloped_typed_transaction(data)
+            TransactionSigned::decode_enveloped_typed_transaction(input_data)?
+        };
+
+        if !input_data.is_empty() {
+            return Err(RlpError::UnexpectedLength);
         }
+
+        Ok(output_data)
     }
 
     /// Returns the length without an RLP header - this is used for eth/68 sizes.
@@ -1463,6 +1472,11 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                     .is_deposit()
                     .then(Signature::optimism_deposit_tx_signature)
                     .unwrap_or(sig);
+
+                if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
+                    tx_eip_4844.placeholder =
+                        if tx_eip_4844.to != Address::default() { Some(()) } else { None };
+                }
 
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
@@ -2037,7 +2051,10 @@ mod tests {
         );
 
         let encoded = alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
+        assert_eq!(
+            hex!("a403e280808080809400000000000000000000000000000000000000008080c080c0808080"),
+            encoded[..]
+        );
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2151,5 +2168,34 @@ mod tests {
         let mut buff: Vec<u8> = Vec::new();
         let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
         from_compact_zstd_unaware(&buff, written_bytes);
+    }
+
+    #[test]
+    fn create_txs_disallowed_for_eip4844() {
+        let data =
+            [3, 208, 128, 128, 123, 128, 120, 128, 129, 129, 128, 192, 129, 129, 192, 128, 128, 9];
+        let res = TransactionSigned::decode_enveloped(&mut &data[..]);
+
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn decode_envelope_fails_on_trailing_bytes_legacy() {
+        let data = [201, 3, 56, 56, 128, 43, 36, 27, 128, 3, 192];
+
+        let result = TransactionSigned::decode_enveloped(&mut data.as_ref());
+
+        assert!(result.is_err());
+        assert_eq!(result, Err(RlpError::UnexpectedLength));
+    }
+
+    #[test]
+    fn decode_envelope_fails_on_trailing_bytes_eip2718() {
+        let data = hex!("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d900");
+
+        let result = TransactionSigned::decode_enveloped(&mut data.as_ref());
+
+        assert!(result.is_err());
+        assert_eq!(result, Err(RlpError::UnexpectedLength));
     }
 }
