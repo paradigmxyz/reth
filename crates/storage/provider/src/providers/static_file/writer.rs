@@ -111,10 +111,24 @@ impl StaticFileProviderRW {
     }
 
     /// Checks the consistency of the file and heals it if necessary.
+    ///
+    /// Healing will update the end range on the [SegmentHeader]. However, for transaction based
+    /// segments, the block end range has to be found and healed externally.
     pub fn ensure_file_consistency(&mut self) -> ProviderResult<()> {
         let err = |err: NippyJarError| ProviderError::NippyJar(err.to_string());
+        let initial_rows = self.writer.rows();
         self.writer.check_consistency_and_heal().map_err(err)?;
+
+        // If we have lost rows, we need to the [SegmentHeader]
+        let pruned_rows = initial_rows - self.writer.rows();
+        if pruned_rows > 0 {
+            self.user_header_mut().prune(pruned_rows as u64);
+        }
+
         self.writer.commit().map_err(err)?;
+
+        // Updates the [SnapshotProvider] manager
+        self.update_index()?;
         Ok(())
     }
 
@@ -621,6 +635,11 @@ impl StaticFileProviderRW {
         provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
     }
 
+    /// Helper function to access a mutable reference to [`SegmentHeader`].
+    pub fn user_header_mut(&mut self) -> &mut SegmentHeader {
+        self.writer.user_header_mut()
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     /// Helper function to override block range for testing.
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
@@ -631,6 +650,12 @@ impl StaticFileProviderRW {
     /// Helper function to access [`SegmentHeader`].
     pub fn user_header(&self) -> &SegmentHeader {
         self.writer.user_header()
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    /// Helper function to override block range for testing.
+    pub fn inner(&mut self) -> &mut NippyJarWriter<SegmentHeader> {
+        &mut self.writer
     }
 }
 
