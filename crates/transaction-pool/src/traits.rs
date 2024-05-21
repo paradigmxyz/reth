@@ -813,12 +813,12 @@ pub trait PoolTransaction:
 
     /// Returns the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> &TxKind;
+    fn kind(&self) -> TxKind;
 
     /// Returns the recipient of the transaction if it is not a [TxKind::Create]
     /// transaction.
     fn to(&self) -> Option<Address> {
-        (*self.kind()).to().copied()
+        self.kind().to().copied()
     }
 
     /// Returns the input data of this transaction.
@@ -1063,7 +1063,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> &TxKind {
+    fn kind(&self) -> TxKind {
         self.transaction.kind()
     }
 

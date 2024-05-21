@@ -145,8 +145,16 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash"]
-                        .contains(&path.ident.to_string().as_str())
+                    if [
+                        "B256",
+                        "Address",
+                        "Address",
+                        "Bloom",
+                        "TxHash",
+                        "BlockHash",
+                        "CompactPlaceholder",
+                    ]
+                    .contains(&path.ident.to_string().as_str())
                     {
                         return true
                     }

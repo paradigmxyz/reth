@@ -77,7 +77,7 @@ pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
 /// Minimum length of a rlp-encoded eip1559 transaction.
 pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
 /// Minimum length of a rlp-encoded eip4844 transaction.
-pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
+pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 37;
 /// Minimum length of a rlp-encoded deposit transaction.
 #[cfg(feature = "optimism")]
 pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
@@ -174,14 +174,14 @@ impl Transaction {
 
     /// Gets the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> &TxKind {
+    pub fn kind(&self) -> TxKind {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) |
-            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) => *to,
+            Transaction::Eip4844(TxEip4844 { to, .. }) => TxKind::Call(*to),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { to, .. }) => to,
+            Transaction::Deposit(TxDeposit { to, .. }) => *to,
         }
     }
 
@@ -1462,6 +1462,11 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                     .then(Signature::optimism_deposit_tx_signature)
                     .unwrap_or(sig);
 
+                if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
+                    tx_eip_4844.placeholder =
+                        if tx_eip_4844.to != Address::default() { Some(()) } else { None };
+                }
+
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
                 tx.hash = tx.recalculate_hash();
@@ -2035,7 +2040,10 @@ mod tests {
         );
 
         let encoded = alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
+        assert_eq!(
+            hex!("a403e280808080809400000000000000000000000000000000000000008080c080c0808080"),
+            encoded[..]
+        );
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2149,5 +2157,14 @@ mod tests {
         let mut buff: Vec<u8> = Vec::new();
         let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
         from_compact_zstd_unaware(&buff, written_bytes);
+    }
+
+    #[test]
+    fn create_txs_disallowed_for_eip4844() {
+        let data =
+            [3, 208, 128, 128, 123, 128, 120, 128, 129, 129, 128, 192, 129, 129, 192, 128, 128, 9];
+        let res = TransactionSigned::decode_enveloped(&mut &data[..]);
+
+        assert!(res.is_err());
     }
 }
