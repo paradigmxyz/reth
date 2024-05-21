@@ -2,7 +2,7 @@ use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::error;
 
-const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 1000;
+const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 2000;
 
 /// A bounded broadcast channel for a task.
 #[derive(Debug, Clone)]
