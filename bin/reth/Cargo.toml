@@ -107,6 +107,7 @@ ahash = "0.8"
 
 # p2p
 discv5.workspace = true
+serde_derive = "1.0.202"
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { version = "0.5.0", optional = true }
