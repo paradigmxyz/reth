@@ -469,6 +469,8 @@ impl StaticFileProvider {
     ///   than the corresponding database table last entry.
     ///
     /// Returns a [`Option`] of [`PipelineTarget::Unwind`] if any healing is required.
+    /// 
+    /// WARNING: No static file writer should be held before calling this function, otherwise it will deadlock.
     pub fn check_consistency<TX: DbTx>(
         &self,
         provider: &DatabaseProvider<TX>,
