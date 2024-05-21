@@ -686,16 +686,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
                 // revert storages
                 for (storage_key, storage_slot) in bundle_account.storage.iter() {
-                    let b256_key: B256 = (*storage_key).into();
-                    let storage_entry = StorageEntry {
-                        key: (*storage_key).into(),
-                        value: storage_slot.original_value(),
-                    };
+                    let storage_key: B256 = (*storage_key).into();
+                    let storage_entry =
+                        StorageEntry { key: storage_key, value: storage_slot.original_value() };
                     // delete previous value
                     // TODO: This does not use dupsort features
                     if plain_storage_cursor
-                        .seek_by_key_subkey(*address, b256_key)?
-                        .filter(|s| s.key == b256_key)
+                        .seek_by_key_subkey(*address, storage_key)?
+                        .filter(|s| s.key == storage_key)
                         .is_some()
                     {
                         plain_storage_cursor.delete_current()?
