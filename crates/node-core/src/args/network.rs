@@ -90,8 +90,8 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
-    /// Experimental, for usage in research. Sets the max accumulated byte size of a transactions
-    /// to pack in one responses.
+    /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
+    /// to pack in one response.
     /// Spec'd at 2MiB.
     #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response: usize,
