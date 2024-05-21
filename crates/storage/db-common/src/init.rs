@@ -6,6 +6,8 @@ use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
+    revm::compat::into_revm_acc,
+    stage::{StageCheckpoint, StageId},
     Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
     StorageEntry, B256, U256,
 };
@@ -18,6 +20,7 @@ use reth_provider::{
     StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_revm::db::states::BundleBuilder;
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -116,7 +119,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     let static_file_provider = factory.static_file_provider();
     insert_genesis_header::<DB>(tx, &static_file_provider, chain.clone())?;
 
-    insert_genesis_state::<DB>(tx, alloc.len(), alloc.iter())?;
+    insert_genesis_state::<DB>(tx, alloc.iter())?;
 
     // insert sync stage
     for stage in StageId::ALL {
@@ -132,28 +135,24 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 /// Inserts the genesis state into the database.
 pub fn insert_genesis_state<'a, 'b, DB: Database>(
     tx: &<DB as Database>::TXMut,
-    capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
-    insert_state::<DB>(tx, capacity, alloc, 0)
+    insert_state::<DB>(tx, alloc, 0)
 }
 
 /// Inserts state at given block into database.
 pub fn insert_state<'a, 'b, DB: Database>(
     tx: &<DB as Database>::TXMut,
-    capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
 ) -> ProviderResult<()> {
-    let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
-    let mut reverts_init = HashMap::with_capacity(capacity);
-    let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
+    let mut bundle_builder = BundleBuilder::default();
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
             let bytecode = Bytecode::new_raw(code.clone());
             let hash = bytecode.hash_slow();
-            contracts.insert(hash, bytecode);
+            bundle_builder = bundle_builder.contract(hash, bytecode.into());
             Some(hash)
         } else {
             None
@@ -167,36 +166,31 @@ pub fn insert_state<'a, 'b, DB: Database>(
                 m.iter()
                     .map(|(key, value)| {
                         let value = U256::from_be_bytes(value.0);
-                        (*key, (U256::ZERO, value))
+                        ((*key).into(), (U256::ZERO, value))
                     })
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
 
-        reverts_init.insert(
-            *address,
-            (Some(None), storage.keys().map(|k| StorageEntry::new(*k, U256::ZERO)).collect()),
-        );
-
-        state_init.insert(
-            *address,
-            (
-                None,
-                Some(Account {
+        bundle_builder = bundle_builder
+            .revert_storage(
+                block,
+                *address,
+                storage.keys().map(|k| (*k, U256::ZERO)).collect::<Vec<(U256, U256)>>(),
+            )
+            .state_present_account_info(
+                *address,
+                into_revm_acc(Account {
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
                     bytecode_hash,
                 }),
-                storage,
-            ),
-        );
+            )
+            .state_storage(*address, storage);
     }
-    let all_reverts_init: RevertsInit = HashMap::from([(block, reverts_init)]);
 
-    let execution_outcome = ExecutionOutcome::new_init(
-        state_init,
-        all_reverts_init,
-        contracts.into_iter().collect(),
+    let execution_outcome = ExecutionOutcome::new(
+        bundle_builder.build(),
         Receipts::default(),
         block,
         Vec::new(),
@@ -437,7 +431,6 @@ fn dump_state<DB: Database>(
             let tx = provider_rw.deref_mut().tx_mut();
             insert_state::<DB>(
                 tx,
-                accounts.len(),
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
             )?;
