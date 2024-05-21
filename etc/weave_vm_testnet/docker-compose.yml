@@ -15,6 +15,7 @@ services:
       - reth_data:/data
       - reth_jwt:/jwt:ro
       - reth_genesis:/genesis:ro
+      - ./../jwttoken:/root/jwt:ro
       # - /home/reth-node/code/wvm-reth/target/release/reth:/usr/local/bin/reth:ro
     command:
       - node
@@ -26,9 +27,11 @@ services:
       - --ws.addr=0.0.0.0
       - --ws.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
       - --ws.origins=*
+      - --auth-ipc
+      - --auth-ipc.path=/data/reth_engine_api.ipc
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
-      - --authrpc.jwtsecret=/jwt/jwt.hex
+      - --authrpc.jwtsecret=/root/jwt/jwt.hex  #- --authrpc.jwtsecret=/jwt/jwtsecret
       - --chain=/genesis/genesis.json
       - --disable-discovery
       - --datadir=/data
