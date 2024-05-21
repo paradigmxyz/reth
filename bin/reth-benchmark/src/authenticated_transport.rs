@@ -28,6 +28,7 @@ pub enum InnerTransport {
     Ipc(PubSubFrontend),
 }
 
+#[derive(Debug)]
 pub struct AuthenticatedTransport {
     /// The inner actual transport used.
     inner: Arc<RwLock<InnerTransport>>,

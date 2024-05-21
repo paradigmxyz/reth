@@ -141,7 +141,28 @@ where
                     Ok(None) => {
                         // this means the stream could not get the next block
                         // TODO: what should we do here?
+                        println!("Block stream returned None");
                         permit.send(Ok(None));
+                        // // fetch the next block
+                        // this.current_block = match this.mode {
+                        //     BenchmarkMode::Continuous => {
+                        //         this.provider.get_block_by_number(next_block.into(), true)
+                        //     }
+                        //     BenchmarkMode::Range(ref mut range) => {
+                        //         match range.next() {
+                        //             Some(block_number) => {
+                        //                 // fetch next block in range
+                        //                 this.provider.get_block_by_number(block_number.into(),
+                        // true)             }
+                        //             None => {
+                        //                 // just finish the future as there is nothing left to do,
+                        //                 // there are no more blocks to fetch and no more blocks
+                        // to                 // send
+                        //                 return Poll::Ready(());
+                        //             }
+                        //         }
+                        //     }
+                        // };
                         return Poll::Ready(());
                     }
                     Err(e) => {
@@ -164,8 +185,8 @@ where
 /// Builds a stream out of the block fetcher and its receiver, closing the stream when the task is
 /// done and nothing is left in the stream.
 pub struct BlockStream<'a, T> {
-    /// The block fetcher
-    block_fetcher: BlockFetcher<'a, T>,
+    /// The block fetcher, if this is None then its future has finished
+    block_fetcher: Option<BlockFetcher<'a, T>>,
     /// The receiver for the block fetcher
     block_receiver: Receiver<TransportResult<Option<Block>>>,
 }
@@ -199,7 +220,7 @@ where
         buffer_size: usize,
     ) -> Result<Self, BlockFetcherError> {
         let (block_fetcher, block_receiver) = BlockFetcher::new(mode, provider, buffer_size)?;
-        Ok(Self { block_fetcher, block_receiver })
+        Ok(Self { block_fetcher: Some(block_fetcher), block_receiver })
     }
 }
 
@@ -212,41 +233,27 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.as_mut();
 
-        // we only stop if neither the block fetcher nor the receiver have anything left to do
-        match this.block_fetcher.poll_unpin(cx) {
-            Poll::Ready(()) => {
+        if let Some(block_fetcher) = this.block_fetcher.as_mut() {
+            // poll the block fetcher
+            if block_fetcher.poll_unpin(cx) == Poll::Ready(()) {
                 // block fetcher is done
-                match this.block_receiver.poll_recv(cx) {
-                    Poll::Ready(None) => {
-                        // receiver is done
-                        Poll::Ready(None)
-                    }
-                    Poll::Ready(Some(block)) => {
-                        // receiver has a block
-                        Poll::Ready(Some(block))
-                    }
-                    Poll::Pending => {
-                        // receiver is pending
-                        Poll::Pending
-                    }
-                }
+                this.block_fetcher = None;
+            }
+        }
+
+        // now we poll the receiver for an item
+        match this.block_receiver.poll_recv(cx) {
+            Poll::Ready(None) => {
+                // receiver is done
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(block)) => {
+                // receiver has a block
+                Poll::Ready(Some(block))
             }
             Poll::Pending => {
-                // block fetcher is pending
-                match this.block_receiver.poll_recv(cx) {
-                    Poll::Ready(None) => {
-                        // receiver is done
-                        Poll::Ready(None)
-                    }
-                    Poll::Ready(Some(block)) => {
-                        // receiver has a block
-                        Poll::Ready(Some(block))
-                    }
-                    Poll::Pending => {
-                        // receiver is pending
-                        Poll::Pending
-                    }
-                }
+                // receiver is pending
+                Poll::Pending
             }
         }
     }
