@@ -6,8 +6,8 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header, Receipt, ReceiptWithBloom,
-    Receipts, SealedBlock, SealedHeader, B256,
+    gas_spent_by_transactions, BlockWithSenders, Bloom, ChainSpec, GotExpected, Hardfork, Header,
+    Receipt, ReceiptWithBloom, SealedBlock, SealedHeader, B256,
 };
 
 /// Validate header standalone
@@ -131,11 +131,9 @@ pub fn validate_block_post_execution(
     let cumulative_gas_used =
         receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
     if block.gas_used != cumulative_gas_used {
-        // TODO(alexey): do not clone
-        let receipts = Receipts::from_block_receipt(receipts.to_vec());
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
-            gas_spent_by_tx: receipts.gas_spent_by_tx().expect("all receipts are present"),
+            gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
     }
 

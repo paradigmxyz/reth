@@ -1,6 +1,6 @@
 #[cfg(feature = "zstd-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::{logs_bloom, Bloom, Bytes, PruneSegmentError, TxType, B256};
+use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
@@ -10,6 +10,7 @@ use proptest::strategy::Strategy;
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use std::{
+    borrow::Borrow,
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
@@ -117,22 +118,6 @@ impl Receipts {
             timestamp,
         ))
     }
-
-    /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
-        let Some(block_r) = self.last() else {
-            return Ok(vec![]);
-        };
-        let mut out = Vec::with_capacity(block_r.len());
-        for (id, tx_r) in block_r.iter().enumerate() {
-            if let Some(receipt) = tx_r.as_ref() {
-                out.push((id as u64, receipt.cumulative_gas_used));
-            } else {
-                return Err(PruneSegmentError::ReceiptsPruned)
-            }
-        }
-        Ok(out)
-    }
 }
 
 impl Deref for Receipts {
@@ -201,6 +186,17 @@ impl ReceiptWithBloom {
     fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
+}
+
+/// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
+pub fn gas_spent_by_transactions<T: Borrow<Receipt>>(
+    receipts: impl IntoIterator<Item = T>,
+) -> Vec<(u64, u64)> {
+    receipts
+        .into_iter()
+        .enumerate()
+        .map(|(id, receipt)| (id as u64, receipt.borrow().cumulative_gas_used))
+        .collect()
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
