@@ -1,23 +1,34 @@
-# reth stage dump execution
+# reth import-receipts
 
-Execution stage
+This imports RLP encoded receipts from a file
 
 ```bash
-$ reth stage dump execution --help
-Usage: reth stage dump execution [OPTIONS] --output-datadir <OUTPUT_PATH> --from <FROM> --to <TO>
+$ reth import-receipts --help
+Usage: reth import-receipts [OPTIONS] <IMPORT_PATH>
 
 Options:
-      --output-datadir <OUTPUT_PATH>
-          The path to the new datadir folder.
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
 
-  -f, --from <FROM>
-          From which block
+          Defaults to the OS-specific data directory:
 
-  -t, --to <TO>
-          To which block
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
 
-  -d, --dry-run
-          If passed, it will dry-run a stage execution from the newly created database right after dumping
+          [default: default]
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, goerli, holesky, dev
+
+          [default: mainnet]
+
+      --chunk-len <CHUNK_LEN>
+          Chunk byte length.
 
       --instance <INSTANCE>
           Add a new instance of a node.
@@ -32,6 +43,31 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+
+          [possible values: true, false]
+
+  <IMPORT_PATH>
+          The path to a receipts file for import. File must use `HackReceiptCodec` (used for
+          exporting OP chain segment below Bedrock block via testinprod/op-geth).
+
+          <https://github.com/testinprod-io/op-geth/pull/1>
 
 Logging:
       --log.stdout.format <FORMAT>
