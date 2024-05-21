@@ -28,8 +28,8 @@ pub struct Command {
     #[arg(long, value_parser = maybe_json_value_parser)]
     end_key: Option<String>,
 
-    /// specify the maximum number of record that are queried and used to computing
-    /// the checksum.
+    /// The maximum number of records that are queried and used to compute the
+    /// checksum.
     #[arg(long)]
     limit: Option<usize>,
 }
