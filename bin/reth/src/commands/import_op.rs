@@ -143,7 +143,7 @@ impl ImportOpCommand {
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
-                false,
+                true,
             )
             .await?;
 
