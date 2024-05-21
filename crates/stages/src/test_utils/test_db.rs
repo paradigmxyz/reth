@@ -224,13 +224,17 @@ impl TestStageDB {
         let blocks = blocks.into_iter().collect::<Vec<_>>();
 
         {
-            let mut headers_writer = provider.latest_writer(StaticFileSegment::Headers)?;
+            let mut headers_writer = storage_kind
+                .is_static()
+                .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, &block.header, U256::ZERO)
             })?;
 
-            headers_writer.commit()?;
+            if let Some(mut writer) = headers_writer {
+                writer.commit()?;
+            }
         }
 
         {
