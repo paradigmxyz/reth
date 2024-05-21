@@ -289,6 +289,7 @@ mod tests {
         Ok((db, blocks, receipts))
     }
 
+    // Simulates a pruning job that was never committed.
     fn simulate_no_commit_prune(
         num_rows: usize,
         static_file_provider: &StaticFileProvider,
@@ -316,22 +317,31 @@ mod tests {
     }
 
     #[test]
-    fn test_consistency_early_prune() {
+    fn test_consistency_no_commit_prune() {
         let (db, _, _) = seed_data().unwrap();
         let db_provider = db.factory.database_provider_ro().unwrap();
         let static_file_provider = db.factory.static_file_provider();
+        let mut is_full_node = true;
 
+        // Full node does not use receipts, therefore doesn't check for consistency on receipts segment
+        simulate_no_commit_prune(1, &static_file_provider, StaticFileSegment::Receipts);
+        assert_eq!(
+            static_file_provider.check_consistency(&db_provider, is_full_node, false),
+            Ok(None)
+        );
+
+        is_full_node = false;
         // there are 2 to 3 transactions per block. however, if we lose one tx, we need to unwind to
         // the previous block.
-        simulate_no_commit_prune(1, &static_file_provider, StaticFileSegment::Transactions);
+        simulate_no_commit_prune(1, &static_file_provider, StaticFileSegment::Receipts);
         assert_eq!(
-            static_file_provider.check_consistency(&db_provider, false, false),
+            static_file_provider.check_consistency(&db_provider, is_full_node, false),
             Ok(Some(PipelineTarget::Unwind(88)))
         );
 
         simulate_no_commit_prune(3, &static_file_provider, StaticFileSegment::Headers);
         assert_eq!(
-            static_file_provider.check_consistency(&db_provider, false, false),
+            static_file_provider.check_consistency(&db_provider, is_full_node, false),
             Ok(Some(PipelineTarget::Unwind(86)))
         );
     }
