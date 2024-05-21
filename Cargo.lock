@@ -2236,10 +2236,9 @@ dependencies = [
  "reth-eth-wire",
  "reth-network",
  "reth-network-api",
+ "reth-node-ethereum",
  "reth-primitives",
- "reth-provider",
  "reth-rpc-types",
- "reth-tracing",
  "tokio",
  "tokio-stream",
 ]

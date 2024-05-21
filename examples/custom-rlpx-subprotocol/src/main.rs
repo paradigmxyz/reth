@@ -1,134 +1,34 @@
-// This example showcase rlpx subprotocols
+//! This example showcase custom rlpx subprotocols
+//!
+//! This installs a custom rlpx subprotocol and negotiates it with peers. If a remote peer also
+//! supports this protocol, it will be used to exchange custom messages.
 
-// Look closely into this crates/imports(use) that the code is importing
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use reth::{builder::NodeHandle, network};
-
-use crate::proto::{CustomRlpxProtoMessage, CustomRlpxProtoMessageKind};
-use futures::{Stream, StreamExt};
-use reth_eth_wire::{
-    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
-};
-use reth_network::{
-    protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
-    NetworkProtocols,
-    test_utils::Testnet,
-};
-use reth_node_ethereum::EthereumNode;
-use reth_network_api::Direction;
-use reth_primitives::BytesMut;
-use reth_provider::test_utils::MockEthProvider;
-use reth_rpc_types::PeerId;
 use std::{
     net::SocketAddr,
     pin::Pin,
     task::{ready, Context, Poll},
 };
+
+use crate::proto::{CustomRlpxProtoMessage, CustomRlpxProtoMessageKind};
+use futures::{Stream, StreamExt};
+use reth::builder::NodeHandle;
+use reth_eth_wire::{
+    capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
+};
+use reth_network::{
+    protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
+    NetworkEvents, NetworkProtocols,
+};
+use reth_network_api::Direction;
+use reth_node_ethereum::EthereumNode;
+use reth_primitives::BytesMut;
+use reth_rpc_types::PeerId;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-// Custom Rlpx Subprotocol
-pub mod proto {
-    use super::*;
-    use reth_eth_wire::capability::Capability;
-    use reth_primitives::{Buf, BufMut};
-
-    #[repr(u8)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum CustomRlpxProtoMessageId {
-        Ping = 0x00,
-        Pong = 0x01,
-        CustomMessage = 0x02,
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum CustomRlpxProtoMessageKind {
-        Ping,
-        Pong,
-        CustomMessage(String),
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct CustomRlpxProtoMessage {
-        pub message_type: CustomRlpxProtoMessageId,
-        pub message: CustomRlpxProtoMessageKind,
-    }
-
-    impl CustomRlpxProtoMessage {
-        /// Returns the capability for the `custom_rlpx` protocol.
-        pub fn capability() -> Capability {
-            Capability::new_static("custom_rlpx", 1)
-        }
-
-        /// Returns the protocol for the `custom_rlpx` protocol.
-        pub fn protocol() -> Protocol {
-            Protocol::new(Self::capability(), 3)
-        }
-
-        /// Creates a ping message
-        pub fn ping() -> Self {
-            Self {
-                message_type: CustomRlpxProtoMessageId::Ping,
-                message: CustomRlpxProtoMessageKind::Ping,
-            }
-        }
-
-        /// Creates a pong message
-        pub fn pong() -> Self {
-            Self {
-                message_type: CustomRlpxProtoMessageId::Pong,
-                message: CustomRlpxProtoMessageKind::Pong,
-            }
-        }
-
-        /// Creates a custom message
-        pub fn custom_message(msg: impl Into<String>) -> Self {
-            Self {
-                message_type: CustomRlpxProtoMessageId::CustomMessage,
-                message: CustomRlpxProtoMessageKind::CustomMessage(msg.into()),
-            }
-        }
-
-        /// Creates a new `CustomRlpxProtoMessage` with the given message ID and payload.
-        pub fn encoded(&self) -> BytesMut {
-            let mut buf = BytesMut::new();
-            buf.put_u8(self.message_type as u8);
-            match &self.message {
-                CustomRlpxProtoMessageKind::Ping => {}
-                CustomRlpxProtoMessageKind::Pong => {}
-                CustomRlpxProtoMessageKind::CustomMessage(msg) => {
-                    buf.put(msg.as_bytes());
-                }
-            }
-            buf
-        }
-
-        /// Decodes a `CustomRlpxProtoMessage` from the given message buffer.
-        pub fn decode_message(buf: &mut &[u8]) -> Option<Self> {
-            if buf.is_empty() {
-                return None;
-            }
-            let id = buf[0];
-            buf.advance(1);
-            let message_type = match id {
-                0x00 => CustomRlpxProtoMessageId::Ping,
-                0x01 => CustomRlpxProtoMessageId::Pong,
-                0x02 => CustomRlpxProtoMessageId::CustomMessage,
-                _ => return None,
-            };
-            let message = match message_type {
-                CustomRlpxProtoMessageId::Ping => CustomRlpxProtoMessageKind::Ping,
-                CustomRlpxProtoMessageId::Pong => CustomRlpxProtoMessageKind::Pong,
-                CustomRlpxProtoMessageId::CustomMessage => {
-                    CustomRlpxProtoMessageKind::CustomMessage(
-                        String::from_utf8_lossy(&buf[..]).into_owned(),
-                    )
-                }
-            };
-            Some(Self { message_type, message })
-        }
-    }
-}
+mod proto;
 
 /// Custom Rlpx Subprotocol Handler
 #[derive(Debug)]
@@ -268,31 +168,19 @@ fn main() -> eyre::Result<()> {
         // launch the node
         let NodeHandle { mut node, node_exit_future } =
             builder.node(EthereumNode::default()).launch().await?;
-        
 
-        
-        // After lauch and after launch we inject a new rlpx protocol handler via the network node.network
-        // the rlpx can be similar to the test example, could even be something like simple string message exchange
-        
-    
+        // After lauch and after launch we inject a new rlpx protocol handler via the network
+        // node.network the rlpx can be similar to the test example, could even be something
+        // like simple string message exchange
 
-        // let custom_rlpx_handler = CustomRlpxProtoHandler{ state: ProtocolState { events: node.network.events.clone()}};
-        // node.network.add_rlpx_sub_protocol(custom_rlpx_handler);
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let custom_rlpx_handler = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
+        // TODO implement traits
+        node.network.add_rlpx_sub_protocol(custom_rlpx_handler);
 
         // Spawn a task to handle incoming messages from the custom RLPx protocol
-        
+
         node_exit_future.await
     })
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_tracing::init_test_tracing;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_custom_rlpx_proto() {
-        
-    }
 }
