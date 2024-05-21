@@ -38,9 +38,6 @@
     "4e59b44847b379578588920ca78fbf26c0b4956c": {
       "code": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3",
       "balance": "0x0"
-    },
-    "fe8664457176d0f87eaabd103aba410855f81010": {
-      "balance": "0x21e19e0c9bab2400000"
     }
   },
   "number": "0x0",

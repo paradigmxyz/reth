@@ -1,8 +1,8 @@
-version: "1"
+version: "3.8"
 
 services:
   reth:
-    image: ghcr.io/paradigmxyz/reth:latest
+    image: reth:local # ghcr.io/paradigmxyz/reth:latest
     container_name: reth
     restart: unless-stopped
     ports:
@@ -14,7 +14,8 @@ services:
     volumes:
       - reth_data:/data
       - reth_jwt:/jwt:ro
-      - /home/reth_node/code/reth/target/release/reth:/usr/local/bin/reth:ro
+      - reth_genesis:/genesis:ro
+      # - /home/reth-node/code/wvm-reth/target/release/reth:/usr/local/bin/reth:ro
     command:
       - node
       - --http
@@ -28,10 +29,11 @@ services:
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
       - --authrpc.jwtsecret=/jwt/jwt.hex
-      - --chain=/execution/genesis.json
+      - --chain=/genesis/genesis.json
       - --disable-discovery
       - --datadir=/data
 
 volumes:
   reth_data:
   reth_jwt:
+  reth_genesis:
