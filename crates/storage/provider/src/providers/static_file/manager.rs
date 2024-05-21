@@ -459,8 +459,9 @@ impl StaticFileProvider {
     /// 1) When a static file fails to commit but the underlying data was changed.
     /// 2) When a static file was committed, but the required database transaction was not.
     ///
-    /// For 1) it can self-heal. Opening a writer to this segment will automatically do that.
-    /// For 2) the invariants below are checked, and if broken, require a pipeline unwind to heal.
+    /// For 1) it can self-heal. Opening a writer to this segment will automatically do that if
+    /// `read_only` is set to `false`. For 2) the invariants below are checked, and if broken,
+    /// require a pipeline unwind to heal.
     ///
     /// For each static file segment:
     /// * the corresponding database table should overlap or have continuity in their keys
@@ -469,12 +470,14 @@ impl StaticFileProvider {
     ///   than the corresponding database table last entry.
     ///
     /// Returns a [`Option`] of [`PipelineTarget::Unwind`] if any healing is required.
-    /// 
-    /// WARNING: No static file writer should be held before calling this function, otherwise it will deadlock.
+    ///
+    /// WARNING: No static file writer should be held before calling this function, otherwise it
+    /// will deadlock.
     pub fn check_consistency<TX: DbTx>(
         &self,
         provider: &DatabaseProvider<TX>,
         has_receipt_pruning: bool,
+        read_only: bool,
     ) -> ProviderResult<Option<PipelineTarget>> {
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: Option<BlockNumber>| {
@@ -502,7 +505,9 @@ impl StaticFileProvider {
             // * pruning data was interrupted before a config commit, then we have deleted data that
             //   we are expected to still have. We need to check the Database and unwind everything
             //   accordingly.
-            self.ensure_file_consistency(segment)?;
+            if !read_only {
+                self.ensure_file_consistency(segment)?;
+            }
 
             // Only applies to block-based static files. (Headers)
             //
