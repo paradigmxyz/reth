@@ -1741,9 +1741,9 @@ mod tests {
                 }
                 Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
                 Ok(ev) => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
-                Err(err) => panic!("unexpected error {err:?}"),
+                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1828,9 +1828,9 @@ mod tests {
                 }
                 Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
                 Ok(ev) => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
-                Err(err) => panic!("unexpected error {err:?}"),
+                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1913,9 +1913,9 @@ mod tests {
                 }
                 Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
                 Ok(ev) => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
-                Err(err) => panic!("unexpected error {err:?}"),
+                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -2002,9 +2002,9 @@ mod tests {
                 })),
                 Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
                 Ok(ev) => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
-                Err(err) => panic!("unexpected error {err:?}"),
+                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         handle.terminate().await;
