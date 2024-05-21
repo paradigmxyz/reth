@@ -599,7 +599,8 @@ mod tests {
             Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
 
-        // Block far in the future (bigger than TIMESTAMP_BEFORE_ETHEREUM_MAINNET), not compatible.
+        // Block far in the future (block number bigger than TIMESTAMP_BEFORE_ETHEREUM_MAINNET), not
+        // compatible.
         filter
             .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 1, ..Default::default() });
         let remote = ForkId {
@@ -611,12 +612,56 @@ mod tests {
             Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
 
-        // Block far in the future (bigger than TIMESTAMP_BEFORE_ETHEREUM_MAINNET), compatible.
+        // Block far in the future (block number bigger than TIMESTAMP_BEFORE_ETHEREUM_MAINNET),
+        // compatible.
         filter
             .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 1, ..Default::default() });
         let remote = ForkId {
             hash: ForkHash(hex!("668db0af")),
             next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 2,
+        };
+        assert_eq!(filter.validate(remote), Ok(()));
+
+        // block number smaller than TIMESTAMP_BEFORE_ETHEREUM_MAINNET and
+        // fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.timestamp >= fork_id.next,
+        // not compatible.
+        filter.set_head(Head {
+            number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 1,
+            timestamp: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 2,
+            ..Default::default()
+        });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 1,
+        };
+        assert_eq!(
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
+        );
+
+        // block number smaller than TIMESTAMP_BEFORE_ETHEREUM_MAINNET and
+        // fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.number >= fork_id.next,
+        // not compatible.
+        filter
+            .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 1, ..Default::default() });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 2,
+        };
+        assert_eq!(
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
+        );
+
+        // block number smaller than TIMESTAMP_BEFORE_ETHEREUM_MAINNET and
+        // !((fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.timestamp >=
+        // fork_id.next) || (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.number
+        // >= fork_id.next)), compatible.
+        filter
+            .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 2, ..Default::default() });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 1,
         };
         assert_eq!(filter.validate(remote), Ok(()));
     }
