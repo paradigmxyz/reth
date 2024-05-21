@@ -63,30 +63,28 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
         let provider =
             self.tool.provider_factory.provider()?.disable_long_read_transaction_safety();
         let tx = provider.tx_ref();
+        info!(
+            "Start computing checksum, start={:?}, end={:?}, limit={:?}",
+            self.start_key, self.end_key, self.limit
+        );
 
         let mut cursor = tx.cursor_read::<RawTable<T>>()?;
         let walker = match (self.start_key.as_deref(), self.end_key.as_deref()) {
             (Some(start), Some(end)) => {
-                info!("Start computing checksum, range=({start}..={end}), limit={:?}", self.limit);
                 let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
                 let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
                 cursor.walk_range(start_key..=end_key)?
             }
             (None, Some(end)) => {
-                info!("Start computing checksum, range=(..={end}), limit={:?}", self.limit);
                 let end_key = table_key::<T>(end).map(RawKey::<T::Key>::new)?;
 
                 cursor.walk_range(..=end_key)?
             }
             (Some(start), None) => {
-                info!("Start computing checksum, range=({start}..), limit={:?}", self.limit);
                 let start_key = table_key::<T>(start).map(RawKey::<T::Key>::new)?;
                 cursor.walk_range(start_key..)?
             }
-            (None, None) => {
-                info!("Start computing checksum, range=(..), limit={:?}", self.limit);
-                cursor.walk_range(..)?
-            }
+            (None, None) => cursor.walk_range(..)?,
         };
 
         let start_time = Instant::now();
