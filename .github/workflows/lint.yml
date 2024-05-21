@@ -107,6 +107,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  book:
+    name: book
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: make update-book-cli
+
   codespell:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -127,7 +136,7 @@ jobs:
     name: lint success
     runs-on: ubuntu-latest
     if: always()
-    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, codespell, grafana]
+    needs: [clippy-binaries, clippy, crate-checks, docs, fmt, book, codespell, grafana]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
