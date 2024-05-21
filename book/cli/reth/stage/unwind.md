@@ -89,10 +89,10 @@ Networking:
           [default: 30303]
 
       --discovery.v5.addr <DISCOVERY_V5_ADDR>
-          The UDP IPv4 address to use for devp2p peer discovery version 5
+          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv4
 
       --discovery.v5.addr.ipv6 <DISCOVERY_V5_ADDR_IPV6>
-          The UDP IPv6 address to use for devp2p peer discovery version 5
+          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
           The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
@@ -171,12 +171,24 @@ Networking:
           Maximum number of inbound requests. default: 30
 
       --pooled-tx-response-soft-limit <BYTES>
-          Sets the soft limit for the byte size of pooled transactions response. Specified at 2 MiB by default. This is a spec'd value that should only be set for experimental purposes on a testnet.
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions
+          to pack in one response.
+          Spec'd at 2MiB.
 
           [default: 2097152]
 
       --pooled-tx-pack-soft-limit <BYTES>
-          Sets the soft limit for the byte size of a single pooled transactions response when packing multiple responses into a single packet for a `GetPooledTransactions` request. Specified at 128 Kib by default.
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions to
+          request in one request.
+
+          Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
+          transaction announcement (see RLPx specs). This allows a node to request a specific size
+          response.
+
+          By default, nodes request only 128 KiB worth of transactions, but should a peer request
+          more, up to 2 MiB, a node will answer with more than 128 KiB.
+
+          Default is 128 KiB.
 
           [default: 131072]
 

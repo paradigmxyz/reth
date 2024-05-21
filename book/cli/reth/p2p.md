@@ -35,11 +35,21 @@ Options:
 
           [default: default]
 
-      --p2p-secret-key <PATH>
-          Secret key to use for this node.
+      --instance <INSTANCE>
+          Add a new instance of a node.
 
-          This also will deterministically set the peer ID.
+          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
 
+          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+
+          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+
+          [default: 1]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Networking:
   -d, --disable-discovery
           Disable the discovery service
 
@@ -63,10 +73,10 @@ Options:
           [default: 30303]
 
       --discovery.v5.addr <DISCOVERY_V5_ADDR>
-          The UDP IPv4 address to use for devp2p peer discovery version 5
+          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv4
 
       --discovery.v5.addr.ipv6 <DISCOVERY_V5_ADDR_IPV6>
-          The UDP IPv6 address to use for devp2p peer discovery version 5
+          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
           The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
@@ -83,17 +93,6 @@ Options:
 
           [default: 60]
 
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
-
-          [default: 1]
-
       --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
           The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
 
@@ -104,22 +103,83 @@ Options:
 
           [default: 100]
 
-      --trusted-peer <TRUSTED_PEER>
-          Target trusted peer
+      --trusted-peers <TRUSTED_PEERS>
+          Comma separated enode URLs of trusted peers for P2P connections.
+
+          --trusted-peers enode://abcd@192.168.0.1:30303
 
       --trusted-only
-          Connect only to trusted peers
+          Connect to or accept from trusted peers only
+
+      --bootnodes <BOOTNODES>
+          Comma separated enode URLs for P2P discovery bootstrap.
+
+          Will fall back to a network-specific default if not specified.
+
+      --peers-file <FILE>
+          The path to the known peers file. Connected peers are dumped to this file on nodes
+          shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
+
+      --identity <IDENTITY>
+          Custom node identity
+
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
+
+      --p2p-secret-key <PATH>
+          Secret key to use for this node.
+
+          This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
+
+      --no-persist-peers
+          Do not persist peers.
+
+      --nat <NAT>
+          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
+
+          [default: any]
+
+      --addr <ADDR>
+          Network listening address
+
+          [default: 0.0.0.0]
+
+      --port <PORT>
+          Network listening port
+
+          [default: 30303]
+
+      --max-outbound-peers <MAX_OUTBOUND_PEERS>
+          Maximum number of outbound requests. default: 100
+
+      --max-inbound-peers <MAX_INBOUND_PEERS>
+          Maximum number of inbound requests. default: 30
+
+      --pooled-tx-response-soft-limit <BYTES>
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions
+          to pack in one response.
+          Spec'd at 2MiB.
+
+          [default: 2097152]
+
+      --pooled-tx-pack-soft-limit <BYTES>
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions to
+          request in one request.
+
+          Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
+          transaction announcement (see RLPx specs). This allows a node to request a specific size
+          response.
+
+          By default, nodes request only 128 KiB worth of transactions, but should a peer request
+          more, up to 2 MiB, a node will answer with more than 128 KiB.
+
+          Default is 128 KiB.
+
+          [default: 131072]
 
       --retries <RETRIES>
           The number of retries per request
 
           [default: 5]
-
-      --nat <NAT>
-          [default: any]
-
-  -h, --help
-          Print help (see a summary with '-h')
 
 Database:
       --db.log-level <LOG_LEVEL>
