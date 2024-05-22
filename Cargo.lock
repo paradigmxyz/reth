@@ -5515,7 +5515,6 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-provider",
- "alloy-signer",
  "alloy-signer-wallet",
  "alloy-sol-types",
  "alloy-transport",
@@ -5526,14 +5525,12 @@ dependencies = [
  "reth",
  "reth-exex",
  "reth-node-api",
- "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-tracing",
  "rusqlite",
  "serde",
- "serde_json",
  "tokio",
 ]
 

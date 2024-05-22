@@ -1,3 +1,7 @@
+//! An example of an ExEx that proposes L2 outputs to L1
+
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use alloy_network::EthereumSigner;
 use alloy_provider::{PendingTransaction, ProviderBuilder};
 use alloy_signer_wallet::LocalWallet;
