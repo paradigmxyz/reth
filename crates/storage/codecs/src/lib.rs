@@ -1,5 +1,9 @@
 //! Compact codec.
 //!
+//! *Warning*: The `Compact` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
+//!
 //! ## Feature Flags
 //!
 //! - `alloy`: [Compact] implementation for various alloy types.

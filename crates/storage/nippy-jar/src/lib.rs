@@ -1,4 +1,8 @@
 //! Immutable data store format.
+//!
+//! *Warning*: The `NippyJar` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
