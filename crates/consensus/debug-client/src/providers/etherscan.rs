@@ -8,25 +8,36 @@ use std::time::Duration;
 use tokio::{sync::mpsc, time::interval};
 
 /// Block provider that fetches new blocks from Etherscan API.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EtherscanBlockProvider {
     http_client: Client,
     base_url: String,
     api_key: String,
+    interval: Duration,
 }
 
 impl EtherscanBlockProvider {
     /// Create a new Etherscan block provider with the given base URL and API key.
     pub fn new(base_url: String, api_key: String) -> Self {
-        EtherscanBlockProvider { http_client: Client::new(), base_url, api_key }
+        EtherscanBlockProvider {
+            http_client: Client::new(),
+            base_url,
+            api_key,
+            interval: Duration::from_secs(3),
+        }
+    }
+
+    /// Sets the interval at which the provider fetches new blocks.
+    pub fn with_interval(mut self, interval: Duration) -> Self {
+        self.interval = interval;
+        self
     }
 }
 
 impl BlockProvider for EtherscanBlockProvider {
-    async fn spawn(&self, tx: mpsc::Sender<RichBlock>) {
+    async fn subscribe_blocks(&self, tx: mpsc::Sender<RichBlock>) {
         let mut last_block_number: Option<u64> = None;
-        // TODO: make interval configurable
-        let mut interval = interval(Duration::from_secs(3));
+        let mut interval = interval(self.interval);
         loop {
             interval.tick().await;
             let block = match load_etherscan_block(
@@ -48,7 +59,11 @@ impl BlockProvider for EtherscanBlockProvider {
                 continue;
             }
 
-            tx.send(block).await.unwrap();
+            if tx.send(block).await.is_err() {
+                // channel closed
+                break;
+            }
+
             last_block_number = Some(block_number);
         }
     }

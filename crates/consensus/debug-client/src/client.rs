@@ -9,14 +9,16 @@ use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_types::ExecutionPayloadV1;
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 use tokio::sync::mpsc;
 
 /// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
 /// by number to fetch past finalized and safe blocks.
 pub trait BlockProvider: Send + Sync + 'static {
-    /// Spawn a block provider to send new blocks to the given sender.
-    fn spawn(&self, tx: mpsc::Sender<RichBlock>) -> impl Future<Output = ()> + Send;
+    /// Runs a block provider to send new blocks to the given sender.
+    ///
+    /// Note: This is expected to be spawned in a separate task.
+    fn subscribe_blocks(&self, tx: mpsc::Sender<RichBlock>) -> impl Future<Output = ()> + Send;
 
     /// Get a past block by number.
     fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<RichBlock>> + Send;
@@ -49,26 +51,28 @@ pub trait BlockProvider: Send + Sync + 'static {
     }
 }
 
-/// Debyg consensus client that sends FCUs and new payloads using recent blocks from an external
+/// Debug consensus client that sends FCUs and new payloads using recent blocks from an external
 /// provider like Etherscan or an RPC endpoint.
 #[derive(Debug)]
 pub struct DebugConsensusClient<P: BlockProvider> {
     /// Handle to execution client.
     auth_server: AuthServerHandle,
     /// Provider to get consensus blocks from.
-    block_provider: Arc<P>,
+    block_provider: P,
 }
 
 impl<P: BlockProvider> DebugConsensusClient<P> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
-    pub fn new(auth_server: AuthServerHandle, block_provider: Arc<P>) -> Self {
+    pub fn new(auth_server: AuthServerHandle, block_provider: P) -> Self {
         Self { auth_server, block_provider }
     }
+}
 
+impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
     /// blocks.
-    pub async fn spawn<T: EngineTypes>(&self) {
+    pub async fn run<T: EngineTypes>(self) {
         let execution_client = self.auth_server.http_client();
         let mut previous_block_hashes = AllocRingBuffer::new(64);
 
@@ -76,7 +80,7 @@ impl<P: BlockProvider> DebugConsensusClient<P> {
             let (tx, rx) = mpsc::channel::<RichBlock>(64);
             let block_provider = self.block_provider.clone();
             tokio::spawn(async move {
-                block_provider.spawn(tx).await;
+                block_provider.subscribe_blocks(tx).await;
             });
             rx
         };
@@ -205,7 +209,7 @@ fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
                     })
                     .collect(),
             },
-            withdrawals: block.withdrawals.clone().unwrap(),
+            withdrawals: block.withdrawals.clone().unwrap_or_default(),
         },
         blob_gas_used: block.header.blob_gas_used.unwrap().try_into().unwrap(),
         excess_blob_gas: block.header.excess_blob_gas.unwrap().try_into().unwrap(),

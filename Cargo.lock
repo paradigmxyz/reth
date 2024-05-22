@@ -6713,7 +6713,6 @@ dependencies = [
  "alloy-provider",
  "eyre",
  "futures",
- "jsonrpsee",
  "reqwest 0.12.4",
  "reth-node-api",
  "reth-node-core",

@@ -7,7 +7,7 @@ use tokio::sync::mpsc::Sender;
 
 /// Block provider that fetches new blocks from an RPC endpoint using a websocket connection.
 /// HTTP provider is used to fetch full blocks by hash and past blocks by number.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RpcBlockProvider {
     http_rpc_url: String,
     ws_rpc_url: String,
@@ -21,7 +21,7 @@ impl RpcBlockProvider {
 }
 
 impl BlockProvider for RpcBlockProvider {
-    async fn spawn(&self, tx: Sender<RichBlock>) {
+    async fn subscribe_blocks(&self, tx: Sender<RichBlock>) {
         let http_provider = ProviderBuilder::new()
             .on_builtin(&self.http_rpc_url)
             .await
@@ -42,7 +42,10 @@ impl BlockProvider for RpcBlockProvider {
                 .await
                 .expect("failed to get block")
                 .expect("block not found");
-            tx.send(full_block.into()).await.unwrap();
+            if tx.send(full_block.into()).await.is_err() {
+                // channel closed
+                break;
+            }
         }
     }
 

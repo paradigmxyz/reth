@@ -460,7 +460,7 @@ where
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.spawn::<T::Engine>().await
+                rpc_consensus_client.run::<T::Engine>().await
             });
         }
         if let (Some(rpc_http_url), Some(rpc_ws_url)) =
@@ -472,7 +472,7 @@ where
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("rpc consensus client", async move {
-                rpc_consensus_client.spawn::<T::Engine>().await
+                rpc_consensus_client.run::<T::Engine>().await
             });
         }
 
