@@ -334,6 +334,8 @@ where
         let has_receipt_pruning =
             self.toml_config().prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
 
+        info!(target: "reth::cli", "Verifying storage consistency.");
+
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
         if let Some(unwind_target) = factory.static_file_provider().check_consistency(
@@ -346,6 +348,8 @@ where
             if PipelineTarget::Unwind(0) == unwind_target {
                 panic!("A static file <> database inconsistency was found that would trigger an unwind to block 0.")
             }
+
+            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
             // Builds an unwind-only pipeline
             let pipeline = Pipeline::builder()

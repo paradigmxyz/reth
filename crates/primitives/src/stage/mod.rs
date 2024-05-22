@@ -53,3 +53,14 @@ impl From<BlockHash> for PipelineTarget {
         Self::Sync(hash)
     }
 }
+
+impl std::fmt::Display for PipelineTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PipelineTarget::Sync(block) => {
+                write!(f, "Sync({block})")
+            }
+            PipelineTarget::Unwind(block) => write!(f, "Unwind({block})"),
+        }
+    }
+}
