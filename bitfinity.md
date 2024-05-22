@@ -59,7 +59,7 @@ docker compose build
 
 Then to start it:
 ```sh
-docker run -d -p 8080:8080 bitfinity/reth node --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://testnet.bitfinity.network -i 30 -b 10
+docker run -d -p 8080:8080 bitfinity/reth node --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://testnet.bitfinity.network -i 15 -b 1000
 ```
 
 Alternatively, you can use the prebuilt Docker image from `ghcr.io`:

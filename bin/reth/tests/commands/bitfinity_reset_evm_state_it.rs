@@ -26,16 +26,18 @@ async fn bitfinity_test_should_reset_evm_state() {
     let _log = init_logs();
     let dfx_port = get_dfx_local_port();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
-    let data_dir  = Some("../../target/reth_19953".into());
-    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
 
-    // Block 19952 -> ok
-    // Block 19953 -> fail
-    let end_block = 19953;
+    // Block 19995 -> ok
+    // Block 19996 -> fail
+    let end_block = 19996;
+    let data_dir  = Some(format!("../../target/reth_{end_block}").into());
+    let (_temp_dir, mut import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
+
     let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
 
     // Import block from block explorer
-    import_blocks(import_data.clone(), end_block, Duration::from_secs(fetch_block_timeout_secs), true).await;
+    import_data.bitfinity_args.end_block = Some(end_block);
+    import_blocks(import_data.clone(), Duration::from_secs(fetch_block_timeout_secs), true).await;
 
     let (evm_client, reset_state_command) = build_bitfinity_reset_evm_command(
         "alice",
@@ -86,16 +88,17 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
 
-    // Block 19952 -> ok
-    // Block 19953 -> fail
-    let end_block = 19953;
+    // Block 19995 -> ok
+    // Block 19996 -> fail
+    let end_block = 19996;
     let data_dir  = Some(format!("../../target/reth_{end_block}").into());
-    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
+    let (_temp_dir, mut import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
 
     let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
 
     // Import block from block explorer
-    import_blocks(import_data.clone(), end_block, Duration::from_secs(fetch_block_timeout_secs), true).await;
+    import_data.bitfinity_args.end_block = Some(end_block);
+    import_blocks(import_data.clone(), Duration::from_secs(fetch_block_timeout_secs), true).await;
 
     let executor = Arc::new(InMemoryResetStateExecutor::default());
     let reset_state_command = BitfinityResetEvmStateCommand::new(import_data.provider_factory.clone(), executor.clone());
@@ -141,8 +144,8 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
                 if let Some(bytecode) = &executor_account.bytecode {
                     accounts_with_code += 1;
-                    println!("Account with code: {executor_account_address}");
-                    println!("Code: {:?}", bytecode);
+                    println!("Account with code: {executor_account_address:?}");
+                    // println!("Code: {:?}", bytecode);
 
                     let code_hash = keccak256(&bytecode.0);
                     println!("Code hash: {:?}", code_hash);

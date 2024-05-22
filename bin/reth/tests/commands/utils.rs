@@ -68,10 +68,10 @@ impl Debug for ImportData {
 /// Imports blocks from the EVM node.
 pub async fn import_blocks(
     import_data: ImportData,
-    end_block: BlockNumber,
     timeout: time::Duration,
     shutdown_when_done: bool,
 ) -> JobExecutor {
+    let end_block = import_data.bitfinity_args.end_block.unwrap();
     let import = BitfinityImportCommand::new(
         None,
         import_data.data_dir,

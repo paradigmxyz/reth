@@ -21,7 +21,7 @@ async fn bitfinity_test_should_import_data_from_evm() {
     import_data.bitfinity_args.batch_size = (end_block as usize) * 10;
 
     // Act
-    import_blocks(import_data.clone(), end_block, Duration::from_secs(20), false).await;
+    import_blocks(import_data.clone(), Duration::from_secs(20), false).await;
 
     // Assert
     {
@@ -53,7 +53,7 @@ async fn bitfinity_test_should_import_with_small_batch_size() {
     import_data.bitfinity_args.batch_size = 10;
 
     // Act
-    import_blocks(import_data.clone(), end_block, Duration::from_secs(20), false).await;
+    import_blocks(import_data.clone(), Duration::from_secs(20), false).await;
 
     // Assert
     {
