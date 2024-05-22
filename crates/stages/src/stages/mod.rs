@@ -288,7 +288,7 @@ mod tests {
         prune_count: usize,
         segment: StaticFileSegment,
         is_full_node: bool,
-        expected_unwind: Option<PipelineTarget>,
+        expected: Option<PipelineTarget>,
     ) {
         let static_file_provider = db.factory.static_file_provider();
 
@@ -311,7 +311,7 @@ mod tests {
                 is_full_node,
                 false
             ),
-            Ok(expect_unwind)
+            Ok(expected)
         );
     }
 
@@ -321,7 +321,7 @@ mod tests {
         db: &TestStageDB, // replace DbType with your actual database type
         stage_id: StageId,
         checkpoint_block_number: BlockNumber,
-        expected_unwind: PipelineTarget,
+        expected: PipelineTarget,
     ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         provider_rw
@@ -335,7 +335,7 @@ mod tests {
                 false,
                 false
             ),
-            Ok(Some(expected_unwind))
+            Ok(Some(expected))
         );
     }
 
@@ -344,7 +344,7 @@ mod tests {
     fn update_db_and_check<T: Table<Key = u64>>(
         db: &TestStageDB,
         key: u64,
-        expect_unwind: Option<PipelineTarget>,
+        expected: Option<PipelineTarget>,
     ) where
         <T as Table>::Value: Default,
     {
@@ -359,7 +359,7 @@ mod tests {
                 false,
                 false
             ),
-            Ok(expect_unwind)
+            Ok(expected)
         );
     }
 
