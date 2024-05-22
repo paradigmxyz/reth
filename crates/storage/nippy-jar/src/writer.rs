@@ -487,12 +487,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     #[cfg(any(test, feature = "test-utils"))]
-    pub fn jar(&mut self) -> &NippyJar<H> {
+    pub fn jar(&self) -> &NippyJar<H> {
         &self.jar
-    }
-
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn columns(&self) -> usize {
-        self.jar.columns()
     }
 }

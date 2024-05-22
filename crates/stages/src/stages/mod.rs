@@ -66,10 +66,8 @@ mod tests {
         StaticFileSegment, B256, U256,
     };
     use reth_provider::{
-        providers::{StaticFileProvider, StaticFileWriter},
-        AccountExtReader, DatabaseProviderFactory, HeaderProvider, ProviderFactory,
+        providers::StaticFileWriter, AccountExtReader, DatabaseProviderFactory, ProviderFactory,
         ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
-        TransactionsProvider,
     };
     use reth_stages_api::{ExecInput, Stage};
     use std::{io::Write, sync::Arc};
@@ -283,7 +281,8 @@ mod tests {
         Ok(db)
     }
 
-    /// Simulates a pruning job that was never committed and compare the check consistency result against the expected one.
+    /// Simulates a pruning job that was never committed and compare the check consistency result
+    /// against the expected one.
     fn simulate_no_commit_prune_and_check(
         db: &TestStageDB,
         prune_count: usize,
@@ -298,7 +297,7 @@ mod tests {
         {
             let mut headers_writer = static_file_provider.latest_writer(segment).unwrap();
             let reader = headers_writer.inner().jar().open_data_reader().unwrap();
-            let columns = headers_writer.inner().columns();
+            let columns = headers_writer.inner().jar().columns();
             let data_file = headers_writer.inner().data_file();
             let last_offset = reader.reverse_offset(prune_count * columns).unwrap();
             data_file.get_mut().set_len(last_offset).unwrap();
@@ -313,7 +312,8 @@ mod tests {
         assert_eq!(consistency_check, Ok(expected_unwind));
     }
 
-    /// Saves a checkpoint with `checkpoint_block_number` and compare the check consistency result against the expected one.
+    /// Saves a checkpoint with `checkpoint_block_number` and compare the check consistency result
+    /// against the expected one.
     fn save_checkpoint_and_check(
         db: &TestStageDB, // replace DbType with your actual database type
         stage_id: StageId,
@@ -336,7 +336,8 @@ mod tests {
         );
     }
 
-    /// Inserts a dummy value at key and compare the check consistency result against the expected one.
+    /// Inserts a dummy value at key and compare the check consistency result against the expected
+    /// one.
     fn update_db_and_check<T: Table<Key = u64>>(
         db: &TestStageDB,
         key: u64,
