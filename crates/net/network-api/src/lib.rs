@@ -1,4 +1,4 @@
-//! Reth network interface definitions.
+//! Reth interface definitions and commonly used types for the reth-network crate.
 //!
 //! Provides abstractions for the reth-network crate.
 //!
