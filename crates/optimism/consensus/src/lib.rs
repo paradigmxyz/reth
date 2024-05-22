@@ -114,7 +114,7 @@ impl Consensus for OptimismBeaconConsensus {
         &self,
         block: &BlockWithSenders,
         receipts: &[Receipt],
-        _input: &Self::PostExecutionInput,
+        _input: Self::PostExecutionInput,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, receipts)
     }
