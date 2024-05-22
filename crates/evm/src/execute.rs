@@ -5,8 +5,10 @@ use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, Receip
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
-/// A general purpose executor trait that executes on an input (e.g. blocks) and produces an output
+/// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
+///
+/// This executor does not validate the output, see [BatchExecutor] for that.
 pub trait Executor<DB> {
     /// The input type for the executor.
     type Input<'a>;
@@ -26,8 +28,8 @@ pub trait Executor<DB> {
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
 }
 
-/// A general purpose executor that can execute multiple inputs in sequence and keep track of the
-/// state over the entire batch.
+/// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
+/// and keep track of the state over the entire batch.
 pub trait BatchExecutor<DB> {
     /// The input type for the executor.
     type Input<'a>;
