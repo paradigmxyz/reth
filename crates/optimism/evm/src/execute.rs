@@ -402,7 +402,7 @@ where
         let (receipts, _gas_used) =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
-        validate_block_post_execution(block, self.executor.chain_spec(), receipts)?;
+        validate_block_post_execution(block, self.executor.chain_spec(), &receipts)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -531,7 +531,7 @@ mod tests {
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block {
@@ -612,7 +612,7 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block {

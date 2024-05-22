@@ -240,20 +240,13 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            // TODO(alexey): run consensus post block verification?
-            executor.execute_and_verify_one((&block, td).into()).map_err(|error| StageError::Block {
-                block: Box::new(block.header.clone().seal_slow()),
-                error: BlockErrorKind::Execution(error),
+            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
+                StageError::Block {
+                    block: Box::new(block.header.clone().seal_slow()),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
             execution_duration += execute_start.elapsed();
-
-            if let Err(error) = self.consensus.validate_block_post_execution(&block, executor.) {
-                // Body is invalid, put the header back and return an error
-                let hash = block.hash();
-                let number = block.number;
-                self.pending_headers.push_front(block.header);
-                return Err(DownloadError::BodyValidation { hash, number, error: Box::new(error) })
-            }
 
             // Gas metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {

@@ -297,7 +297,7 @@ impl InsertBlockErrorKind {
             // other execution errors that are considered internal errors
             InsertBlockErrorKind::Execution(err) => {
                 match err {
-                    BlockExecutionError::Validation(_) => {
+                    BlockExecutionError::Validation(_) | BlockExecutionError::Consensus(_) => {
                         // this is caused by an invalid block
                         true
                     }

@@ -1,4 +1,5 @@
 use crate::{provider::ProviderError, trie::StateRootError};
+use reth_consensus::ConsensusError;
 use reth_primitives::{revm_primitives::EVMError, BlockNumHash, PruneSegmentError, B256};
 use thiserror::Error;
 
@@ -71,6 +72,9 @@ pub enum BlockExecutionError {
     /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
+    /// Consensus error, transparently wrapping `ConsensusError`
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
     /// Transaction error on revert with inner details
     #[error("transaction error on revert: {inner}")]
     CanonicalRevert {
