@@ -1,5 +1,5 @@
+use crate::EventStream;
 use tokio::sync::broadcast::{self, Sender};
-use tokio_stream::wrappers::BroadcastStream;
 use tracing::error;
 
 const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 2000;
@@ -22,8 +22,8 @@ where
 
 impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
     /// Creates a new `EventListeners`.
-    pub fn new(broadcast_channel_size: usize) -> Self {
-        let (sender, _) = broadcast::channel(broadcast_channel_size);
+    pub fn new(events_channel_size: usize) -> Self {
+        let (sender, _) = broadcast::channel(events_channel_size);
         Self { sender }
     }
 
@@ -34,9 +34,9 @@ impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
         }
     }
 
-    /// Creates a new braodcast stream with a subscriber to the sender as the
+    /// Creates a new event stream with a subscriber to the sender as the
     /// receiver.
-    pub fn new_listener(&self) -> BroadcastStream<T> {
-        BroadcastStream::new(self.sender.subscribe())
+    pub fn new_listener(&self) -> EventStream<T> {
+        EventStream::new(self.sender.subscribe())
     }
 }

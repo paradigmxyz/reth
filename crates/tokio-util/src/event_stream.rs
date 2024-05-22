@@ -13,8 +13,12 @@ pub struct EventStream<T> {
     inner: tokio_stream::wrappers::BroadcastStream<T>,
 }
 
-impl<T> EventStream<T> {
-    fn new(inner: tokio_stream::wrappers::BroadcastStream<T>) -> Self {
+impl<T> EventStream<T>
+where
+    T: Clone + Send + 'static,
+{
+    pub fn new(receiver: tokio::sync::broadcast::Receiver<T>) -> Self {
+        let inner = tokio_stream::wrappers::BroadcastStream::new(receiver);
         EventStream { inner }
     }
 }
@@ -49,8 +53,7 @@ mod tests {
     #[tokio::test]
     async fn test_event_stream_yields_items() {
         let (tx, _) = broadcast::channel(16);
-        let my_stream =
-            EventStream::new(tokio_stream::wrappers::BroadcastStream::new(tx.subscribe()));
+        let my_stream = EventStream::new(tx.subscribe());
 
         tx.send(1).unwrap();
         tx.send(2).unwrap();
@@ -67,8 +70,7 @@ mod tests {
     #[tokio::test]
     async fn test_event_stream_skips_lag_errors() {
         let (tx, _) = broadcast::channel(2);
-        let my_stream =
-            EventStream::new(tokio_stream::wrappers::BroadcastStream::new(tx.subscribe()));
+        let my_stream = EventStream::new(tx.subscribe());
 
         let mut _rx2 = tx.subscribe();
         let mut _rx3 = tx.subscribe();
