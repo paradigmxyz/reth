@@ -6,10 +6,14 @@ use std::sync::Arc;
 use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_pubsub::{PubSubConnect, PubSubFrontend};
 use alloy_rpc_types_engine::{Claims, JwtSecret};
-use alloy_transport::{Authorization, TransportError, TransportFut};
+use alloy_transport::{
+    utils::guess_local_url, Authorization, Pbf, Transport, TransportConnect, TransportError,
+    TransportErrorKind, TransportFut,
+};
 use alloy_transport_http::{reqwest::Url, Http, ReqwestTransport};
 use alloy_transport_ipc::IpcConnect;
 use alloy_transport_ws::WsConnect;
+use futures::{FutureExt, TryFutureExt};
 use reqwest::header::HeaderValue;
 use std::task::{Context, Poll};
 use tokio::sync::RwLock;
@@ -160,12 +164,47 @@ impl AuthenticatedTransport {
 }
 
 fn build_auth(secret: JwtSecret) -> eyre::Result<Authorization> {
-    // Decode jwt from hex, then generate claims (iat with current timestamp)
+    // Generate claims (iat with current timestamp), this happens by default using the Default trait
+    // for Claims.
     let claims = Claims::default();
     let token = secret.encode(&claims)?;
     let auth = Authorization::Bearer(token);
 
     Ok(auth)
+}
+
+/// This specifies how to connect to an authenticated transport.
+pub struct AuthenticatedTransportConnect {
+    /// The URL to connect to.
+    url: Url,
+    /// The JWT secret used to authenticate the transport.
+    jwt: JwtSecret,
+}
+
+impl AuthenticatedTransportConnect {
+    /// Create a new builder with the given URL.
+    pub fn new(url: Url, jwt: JwtSecret) -> Self {
+        Self { url, jwt }
+    }
+}
+
+impl TransportConnect for AuthenticatedTransportConnect {
+    type Transport = AuthenticatedTransport;
+
+    fn is_local(&self) -> bool {
+        guess_local_url(&self.url)
+    }
+
+    fn get_transport<'a: 'b, 'b>(&'a self) -> Pbf<'b, Self::Transport, TransportError> {
+        AuthenticatedTransport::connect(self.url.clone(), self.jwt)
+            .map(|res| match res {
+                Ok(transport) => Ok(transport),
+                Err(err) => {
+                    Err(TransportError::Transport(TransportErrorKind::Custom(Box::new(err))))
+                }
+            })
+            .boxed()
+    }
 }
 
 impl tower::Service<RequestPacket> for AuthenticatedTransport {

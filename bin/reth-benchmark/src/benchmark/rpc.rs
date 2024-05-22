@@ -1,13 +1,12 @@
 //! Runs the `reth benchmark` using a remote rpc api.
 
 use crate::{
-    authenticated_transport::AuthenticatedTransport, benchmark_mode::BenchmarkMode,
+    authenticated_transport::AuthenticatedTransportConnect, benchmark_mode::BenchmarkMode,
     block_fetcher::BlockStream, valid_payload::EngineApiValidWaitExt,
 };
 use alloy_provider::{network::AnyNetwork, ProviderBuilder, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{ExecutionPayloadInputV2, JwtSecret};
-use alloy_transport::utils::guess_local_url;
 use clap::Parser;
 use futures::StreamExt;
 use reqwest::Url;
@@ -62,15 +61,11 @@ impl Command {
         // get engine url
         let auth_url = Url::parse(&self.benchmark.engine_rpc_url)?;
 
-        // Use the final URL string to guess if it's a local URL.
-        let is_local = guess_local_url(auth_url.as_str());
-
         // construct the authed transport
         info!("Connecting to Engine RPC at {} for replay", auth_url);
-        let transport = AuthenticatedTransport::connect(auth_url, jwt).await?;
-
-        let client = ClientBuilder::default().transport(transport, is_local);
-        let auth_provider = RootProvider::<AuthenticatedTransport, AnyNetwork>::new(client);
+        let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
+        let client = ClientBuilder::default().connect_boxed(auth_transport).await?;
+        let auth_provider = RootProvider::<_, AnyNetwork>::new(client);
 
         // construct the stream
         let mut block_stream = BlockStream::new(benchmark_mode, &block_provider, 10)?;
