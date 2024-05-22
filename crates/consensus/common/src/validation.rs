@@ -61,7 +61,7 @@ pub fn validate_header_standalone(
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(
+pub fn validate_block_pre_execution(
     block: &SealedBlock,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -366,13 +366,13 @@ mod tests {
 
         // Single withdrawal
         let block = create_block_with_withdrawals(&[1]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
 
         // Multiple increasing withdrawals
         let block = create_block_with_withdrawals(&[1, 2, 3]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let (_, parent) = mock_block();
 
         // Withdrawal index should be the last withdrawal index + 1
@@ -428,7 +428,7 @@ mod tests {
 
         // validate blob, it should fail blob gas used validation
         assert_eq!(
-            validate_block_standalone(&block, &chain_spec),
+            validate_block_pre_execution(&block, &chain_spec),
             Err(ConsensusError::BlobGasUsedDiff(GotExpected {
                 got: 1,
                 expected: expected_blob_gas_used

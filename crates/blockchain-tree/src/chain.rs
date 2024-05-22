@@ -210,8 +210,11 @@ impl AppendableChain {
         let executor = externals.executor_factory.executor(db);
         let block_hash = block.hash();
         let block = block.unseal();
+
         let state = executor.execute((&block, U256::MAX).into())?;
         let BlockExecutionOutput { state, receipts, .. } = state;
+        externals.consensus.validate_block_post_execution(&block, &receipts)?;
+
         let bundle_state = BundleStateWithReceipts::new(
             state,
             Receipts::from_block_receipt(receipts),

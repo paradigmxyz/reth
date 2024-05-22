@@ -82,7 +82,9 @@ pub use prune::{
     PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
 };
-pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
+pub use receipt::{
+    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
+};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 

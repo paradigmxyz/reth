@@ -1,6 +1,6 @@
 #[cfg(feature = "zstd-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::{logs_bloom, Bloom, Bytes, PruneSegmentError, TxType, B256};
+use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
@@ -117,22 +117,6 @@ impl Receipts {
             timestamp,
         ))
     }
-
-    /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
-        let Some(block_r) = self.last() else {
-            return Ok(vec![]);
-        };
-        let mut out = Vec::with_capacity(block_r.len());
-        for (id, tx_r) in block_r.iter().enumerate() {
-            if let Some(receipt) = tx_r.as_ref() {
-                out.push((id as u64, receipt.cumulative_gas_used));
-            } else {
-                return Err(PruneSegmentError::ReceiptsPruned);
-            }
-        }
-        Ok(out)
-    }
 }
 
 impl Deref for Receipts {
@@ -201,6 +185,17 @@ impl ReceiptWithBloom {
     fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
+}
+
+/// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
+pub fn gas_spent_by_transactions<T: Deref<Target = Receipt>>(
+    receipts: impl IntoIterator<Item = T>,
+) -> Vec<(u64, u64)> {
+    receipts
+        .into_iter()
+        .enumerate()
+        .map(|(id, receipt)| (id as u64, receipt.deref().cumulative_gas_used))
+        .collect()
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -312,7 +307,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -357,7 +352,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
         *buf = *b;
         Ok(this)
@@ -510,7 +505,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return;
+            return
         }
 
         let mut payload = Vec::new();
