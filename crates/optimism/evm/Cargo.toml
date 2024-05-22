@@ -39,4 +39,5 @@ optimism = [
     "reth-provider/optimism",
     "reth-interfaces/optimism",
     "revm-primitives/optimism",
+    "reth-optimism-consensus/optimism",
 ]
