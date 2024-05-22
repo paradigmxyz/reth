@@ -30,7 +30,6 @@ thiserror.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 
 [dev-dependencies]
 # reth

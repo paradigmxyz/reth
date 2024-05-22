@@ -6450,6 +6450,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types",
  "reth-stages-api",
+ "reth-tokio-util",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",
@@ -6785,6 +6786,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-layer",
+ "reth-tokio-util",
  "reth-tracing",
  "secp256k1 0.28.2",
  "serde_json",
@@ -7631,7 +7633,6 @@ dependencies = [
  "reth-tracing",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -7758,6 +7759,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",
@@ -7792,6 +7794,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-tokio-util",
  "serde",
  "thiserror",
  "tokio",
@@ -7924,6 +7927,7 @@ dependencies = [
  "reth-stages",
  "reth-tokio-util",
  "tempfile",
+ "tokio",
  "tokio-stream",
  "tracing",
 ]
@@ -7959,6 +7963,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
