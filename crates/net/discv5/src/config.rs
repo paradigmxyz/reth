@@ -129,7 +129,7 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
+    /// Adds boot nodes in the form a list of [`DNSNodeRecord`]s, parsed enodes.
     pub fn add_unsigned_boot_nodes<T: Into<DNSNodeRecord>>(
         mut self,
         enodes: impl Iterator<Item = T>,
