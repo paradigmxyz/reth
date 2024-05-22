@@ -90,6 +90,7 @@ members = [
     "examples/custom-inspector/",
     "examples/exex/*",
     "examples/db-access",
+    "examples/bsc-p2p",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
@@ -292,7 +293,7 @@ alloy-primitives = "0.7.2"
 alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
-alloy-trie = "0.4.0"
+alloy-trie = "0.4"
 alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
 alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
 alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }

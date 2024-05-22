@@ -2,7 +2,7 @@
 //! blocks from the network.
 
 use eyre::Result;
-use reth_consensus_common::validation::validate_block_standalone;
+use reth_consensus_common::validation::validate_block_pre_execution;
 use reth_fs_util as fs;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
@@ -122,7 +122,7 @@ where
         requests: block.requests,
     };
 
-    validate_block_standalone(&block, &chain_spec)?;
+    validate_block_pre_execution(&block, &chain_spec)?;
 
     Ok(block)
 }

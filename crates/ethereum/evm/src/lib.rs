@@ -22,7 +22,6 @@ use revm_primitives::SpecId;
 use std::sync::Arc;
 
 pub mod execute;
-pub mod verify;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;

@@ -634,9 +634,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-trie"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d55bd16fdb7ff4bd74cc4c878eeac7e8a27c0d7ba9df4ab58d9310aaafb62d43"
+checksum = "03704f265cbbb943b117ecb5055fd46e8f41e7dc8a58b1aed20bcd40ace38c15"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -648,6 +648,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "serde",
+ "smallvec",
  "tracing",
 ]
 
@@ -1443,6 +1444,21 @@ checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
 dependencies = [
  "sha2 0.10.8",
  "tinyvec",
+]
+
+[[package]]
+name = "bsc-p2p"
+version = "0.0.0"
+dependencies = [
+ "reth-discv4",
+ "reth-network",
+ "reth-network-api",
+ "reth-primitives",
+ "reth-tracing",
+ "secp256k1 0.28.2",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -4548,7 +4564,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.5",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6962,6 +6978,7 @@ dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-rlp",
  "alloy-sol-types",
+ "reth-ethereum-consensus",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
@@ -6971,15 +6988,16 @@ dependencies = [
  "revm-primitives",
  "secp256k1 0.28.2",
  "serde_json",
- "tracing",
 ]
 
 [[package]]
 name = "reth-evm-optimism"
 version = "0.2.0-beta.7"
 dependencies = [
+ "reth-consensus-common",
  "reth-evm",
  "reth-interfaces",
+ "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

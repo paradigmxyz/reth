@@ -298,7 +298,7 @@ impl Command {
 
                 consensus.validate_header_with_total_difficulty(block, U256::MAX)?;
                 consensus.validate_header(block)?;
-                consensus.validate_block(block)?;
+                consensus.validate_block_pre_execution(block)?;
 
                 let senders = block.senders().expect("sender recovery failed");
                 let block_with_senders =

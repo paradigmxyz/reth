@@ -6,6 +6,7 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
+    op_mainnet::is_dup_tx,
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
 
@@ -68,7 +69,7 @@ pub fn validate_header_standalone(
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(
+pub fn validate_block_pre_execution(
     block: &SealedBlock,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -81,8 +82,10 @@ pub fn validate_block_standalone(
     }
 
     // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+    if !chain_spec.is_optimism_mainnet() || !is_dup_tx(block.number) {
+        if let Err(error) = block.ensure_transaction_root_valid() {
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+        }
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -394,13 +397,13 @@ mod tests {
 
         // Single withdrawal
         let block = create_block_with_withdrawals(&[1]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
 
         // Multiple increasing withdrawals
         let block = create_block_with_withdrawals(&[1, 2, 3]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let (_, parent) = mock_block();
 
         // Withdrawal index should be the last withdrawal index + 1
@@ -457,7 +460,7 @@ mod tests {
 
         // validate blob, it should fail blob gas used validation
         assert_eq!(
-            validate_block_standalone(&block, &chain_spec),
+            validate_block_pre_execution(&block, &chain_spec),
             Err(ConsensusError::BlobGasUsedDiff(GotExpected {
                 got: 1,
                 expected: expected_blob_gas_used
