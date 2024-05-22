@@ -90,6 +90,7 @@ members = [
     "examples/custom-inspector/",
     "examples/exex/*",
     "examples/db-access",
+    "examples/bsc-p2p",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
