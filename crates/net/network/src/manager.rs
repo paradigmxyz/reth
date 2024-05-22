@@ -246,6 +246,8 @@ where
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
+        let event_listeners: EventListeners<NetworkEvent> = Default::default();
+
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
             listener_address,
@@ -258,6 +260,7 @@ where
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
             discv4,
+            event_listeners.clone(),
         );
 
         Ok(Self {
@@ -265,7 +268,7 @@ where
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
-            event_listeners: Default::default(),
+            event_listeners,
             to_transactions_manager: None,
             to_eth_request_handler: None,
             num_active_peers,
@@ -528,9 +531,6 @@ where
     /// Handler for received messages from a handle
     fn on_handle_message(&mut self, msg: NetworkHandleMessage) {
         match msg {
-            NetworkHandleMessage::EventListener(event_listeners) => {
-                self.event_listeners = event_listeners
-            }
             NetworkHandleMessage::DiscoveryListener(tx) => {
                 self.swarm.state_mut().discovery_mut().add_listener(tx);
             }

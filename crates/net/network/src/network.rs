@@ -57,6 +57,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
+        event_listeners: EventListeners<NetworkEvent>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -72,12 +73,8 @@ impl NetworkHandle {
             chain_id,
             tx_gossip_disabled,
             discv4,
-            event_listeners: Default::default(),
+            event_listeners,
         };
-        let _ = inner
-            .to_manager_tx
-            .send(NetworkHandleMessage::EventListener(inner.event_listeners.clone()));
-
         Self { inner: Arc::new(inner) }
     }
 
@@ -439,8 +436,6 @@ pub(crate) enum NetworkHandleMessage {
     RemovePeer(PeerId, PeerKind),
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
-    /// Adds a new listener for `NetworkEvent`.
-    EventListener(EventListeners<NetworkEvent>),
     /// Broadcasts an event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, B256),
     /// Sends a list of transactions to the given peer.
