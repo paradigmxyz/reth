@@ -180,7 +180,7 @@ impl Command {
                     config.peers.trusted_nodes_only = self.network.trusted_only;
                     if !self.network.trusted_peers.is_empty() {
                         for peer in &self.network.trusted_peers {
-                            let peer = resolve_dns_node_record(peer.clone()).await?;
+                            let peer = resolve_dns_node_record(peer.clone(), None).await?;
                             config.peers.trusted_nodes.insert(peer);
                         }
                     }
