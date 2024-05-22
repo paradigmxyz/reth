@@ -1,6 +1,5 @@
 use reth_primitives::{
-    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork, Head,
-    NodeRecord, B256,
+    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork, NodeRecord, B256,
 };
 
 use std::{collections::BTreeMap, sync::Arc};
@@ -15,9 +14,7 @@ pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
         genesis_hash: Some(GENESIS),
         paris_block_and_final_difficulty: None,
-        hardforks: BTreeMap::from([
-            (Hardfork::Shanghai, ForkCondition::Timestamp(SHANGHAI_TIME)),
-        ]),
+        hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Timestamp(SHANGHAI_TIME))]),
         deposit_contract: None,
         base_fee_params: reth_primitives::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
@@ -35,10 +32,6 @@ static BOOTNODES: [&str; 7] = [
     "enode://ad78c64a4ade83692488aa42e4c94084516e555d3f340d9802c2bf106a3df8868bc46eae083d2de4018f40e8d9a9952c32a0943cd68855a9bc9fd07aac982a6d@34.204.214.24:30311",
     "enode://5db798deb67df75d073f8e2953dad283148133acb520625ea804c9c4ad09a35f13592a762d8f89056248f3889f6dcc33490c145774ea4ff2966982294909b37a@107.20.191.97:30311",
 ];
-
-pub(crate) fn head() -> Head {
-    Head::default()
-}
 
 pub(crate) fn boot_nodes() -> Vec<NodeRecord> {
     BOOTNODES[..].iter().map(|s| s.parse().unwrap()).collect()

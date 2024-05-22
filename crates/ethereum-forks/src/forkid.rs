@@ -297,8 +297,12 @@ impl ForkFilter {
         self.cache.fork_id
     }
 
-    /// Set the current fork id
-    pub fn set_fork_id(&mut self, fork_id: ForkId) {
+    /// Manually set the current fork id.
+    ///
+    /// Caution: this disregards all configured fork filters and is reset on the next head update.
+    /// This is useful for testing or to connect to networks over p2p where only the latest forkid
+    /// is known.
+    pub fn set_current_fork_id(&mut self, fork_id: ForkId) {
         self.cache.fork_id = fork_id;
     }
 

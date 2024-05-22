@@ -1358,8 +1358,8 @@ version = "0.0.0"
 dependencies = [
  "reth-discv4",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
- "reth-provider",
  "reth-tracing",
  "secp256k1",
  "serde_json",
