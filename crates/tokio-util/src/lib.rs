@@ -9,4 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod event_listeners;
+mod event_stream;
 pub use event_listeners::EventListeners;
+pub use event_stream::EventStream;
