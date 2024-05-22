@@ -7,7 +7,7 @@ use std::sync::Arc;
 use alloy_rlp::Encodable;
 use clap::Parser;
 use did::evm_reset_state::EvmResetState;
-use did::{AccountInfoMap, RawAccountInfo, H256};
+use did::{AccountInfoMap, RawAccountInfo, H160, H256, U256};
 use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
 use itertools::Itertools;
 use reth_db::cursor::DbCursorRO;
@@ -18,7 +18,7 @@ use reth_node_core::args::BitfinityResetEvmStateArgs;
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
 use reth_primitives::{StorageEntry, B256};
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 /// Builder for the `bitfinity reset evm state` command
 #[derive(Debug, Parser)]
@@ -38,6 +38,8 @@ pub struct BitfinityResetEvmStateCommandBuilder {
     pub bitfinity: BitfinityResetEvmStateArgs,
 }
 
+const MAX_REQUEST_BYTES: usize = 500_000;
+
 impl BitfinityResetEvmStateCommandBuilder {
 
     /// Build the command
@@ -46,33 +48,7 @@ impl BitfinityResetEvmStateCommandBuilder {
         info!(target: "reth::cli", "Fetching chain spec from: {}", evm_datasource_url);
         let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(evm_datasource_url).await?);
 
-        let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
-        let db_path = data_dir.db();
-        let db = Arc::new(init_db(db_path, Default::default())?);
-        let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files())?;
-
-        Ok(BitfinityResetEvmStateCommand::new(provider_factory, self.bitfinity))
-    }
-}
-
-/// Command that initializes the reset of remote EVM node using the current node state
-#[derive(Debug)]
-pub struct BitfinityResetEvmStateCommand {
-    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-    bitfinity: BitfinityResetEvmStateArgs,
-}
-
-impl BitfinityResetEvmStateCommand {
-
-    /// Create a new instance of the command
-    pub fn new(provider_factory: ProviderFactory<Arc<DatabaseEnv>>, bitfinity: BitfinityResetEvmStateArgs) -> Self {
-        Self { provider_factory, bitfinity }
-    }
-
-    /// Execute the command
-    pub async fn execute(&self) -> eyre::Result<()> {
         let principal = candid::Principal::from_text(self.bitfinity.evmc_principal.as_str())?;
-
         let evm_client = EvmCanisterClient::new(
             IcAgentClient::with_identity(
                 principal,
@@ -82,8 +58,39 @@ impl BitfinityResetEvmStateCommand {
             )
             .await?,
         );
+        let executor = Arc::new(EvmCanisterResetStateExecutor { client: evm_client.clone() });
 
-        let provider = self.provider_factory.provider()?;
+        let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
+        let db_path = data_dir.db();
+        let db = Arc::new(init_db(db_path, Default::default())?);
+        let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files())?;
+
+        Ok(BitfinityResetEvmStateCommand::new(provider_factory, self.bitfinity, executor))
+    }
+}
+
+/// Command that initializes the reset of remote EVM node using the current node state
+#[derive(Debug)]
+pub struct BitfinityResetEvmStateCommand {
+    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    bitfinity: BitfinityResetEvmStateArgs,
+    executor: Arc<dyn ResetStateExecutor>,
+}
+
+impl BitfinityResetEvmStateCommand {
+
+    /// Create a new instance of the command
+    pub fn new(provider_factory: ProviderFactory<Arc<DatabaseEnv>>, bitfinity: BitfinityResetEvmStateArgs, executor: Arc<dyn ResetStateExecutor>) -> Self {
+        Self { provider_factory, bitfinity, executor }
+    }
+
+    /// Execute the command
+    pub async fn execute(&self) -> eyre::Result<()> {
+        let principal = candid::Principal::from_text(self.bitfinity.evmc_principal.as_str())?;
+
+
+
+        let mut provider = self.provider_factory.provider()?;
         let last_block_number = provider.last_block_number()?;
         let last_block =
             provider.block_by_number(last_block_number)?.expect("Block should be present");
@@ -92,9 +99,7 @@ impl BitfinityResetEvmStateCommand {
 
         // Step 1: Reset the evm, the EVM must be disabled
         {
-            info!(target: "reth::cli", "Send EvmResetState::Start request...");
-            evm_client.admin_reset_state(EvmResetState::Start).await??;
-            info!(target: "reth::cli", "EvmResetState::Start request sent");
+            self.executor.start().await?;
         }
 
         // Step 2: Send the state to the EVM
@@ -105,7 +110,10 @@ impl BitfinityResetEvmStateCommand {
             // let state_provider = provider.state_provider_by_block_number(block_number)?;
             // let res = state_provider.basic_account(...)?;
 
-            let tx_ref = provider.tx_ref();
+            let tx_ref = provider.tx_mut();
+
+            // We need to disable the long read transaction safety to avoid the transaction being closed
+            tx_ref.disable_long_read_transaction_safety();
 
             let mut plain_account_cursor = tx_ref.cursor_read::<tables::PlainAccountState>()?;
             let mut contract_storage_cursor = tx_ref.cursor_read::<tables::Bytecodes>()?;
@@ -118,6 +126,8 @@ impl BitfinityResetEvmStateCommand {
 
             let mut batch_size = 0;
             let batch_limit = 500;
+
+
 
             while let Some((ref address, ref account)) = plain_account_cursor.next()? {
                 // We need to retrieve the bytecode for the account
@@ -134,9 +144,20 @@ impl BitfinityResetEvmStateCommand {
                     reth_primitives::U256::from_be_bytes(num.0)
                 }
 
-                while let Some((_, entry)) = plain_storage_cursor.seek_exact(*address)? {
-                    debug!("Recovering storage for account {}", address);
+                debug!("Recovering storage for account {}", address);
+
+                let mut storage_walker = plain_storage_cursor.walk_range(*address..=*address)?;
+                while let Some(result) = storage_walker.next() {
+                    let (key, entry) = result?;
+                    trace!("Recovering storage for account {} - found entry: {:?}", address, entry);
+                    if key == *address {
+                        continue;
+                    }
                     let StorageEntry { key, value } = entry;
+
+                    let REMOVE_ME = 0;
+                    info!(target: "reth::cli", "Recovering storage for account {} - found entry: {:?}", address, entry);
+
                     storage.insert(
                         b256_to_u256(key).into(),
                         did::U256::from_little_endian(&value.as_le_bytes_trimmed()),
@@ -155,20 +176,17 @@ impl BitfinityResetEvmStateCommand {
                 accounts.insert((*address).into(), account);
                 debug!(target: "reth::cli", address=%address, "Storage tries recovered");
 
-                debug!(target: "reth::cli", batch_size=%batch_size, "Processing batch of accounts");
                 batch_size += 1;
-
-                if batch_size == batch_limit {
+                if batch_size == batch_limit || estimate_size(&accounts) > MAX_REQUEST_BYTES {
                     let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
-                    info!(target: "reth::cli", "Processing batch of {} accounts", batch_size);
-                    Self::process_account_info(&evm_client, process_accounts).await?;
+                    self.executor.add_accounts(process_accounts).await?;
                     batch_size = 0;
                 }
             }
 
             if !accounts.is_empty() {
                 info!(target: "reth::cli", "Processing last batch of {} accounts", accounts.len());
-                Self::process_account_info(&evm_client, accounts).await?;
+                self.executor.add_accounts(accounts).await?;
             }
 
             info!(target: "reth::cli", "Storage tries recovered successfully");
@@ -176,13 +194,13 @@ impl BitfinityResetEvmStateCommand {
 
         // Step 3: End of the recovery process. Send block data
         {
-            info!(target: "reth::cli", "Preparing to end process by sending block data...");
+            info!(target: "reth::cli", "Preparing to end process by sending block data: {:?}", last_block);
             let mut buff = vec![];
             last_block.encode(&mut buff);
 
             let did_block = rlp::decode::<did::Block<did::Transaction>>(&buff)?;
             let did_block: did::Block<H256> = did_block.into();
-            evm_client.admin_reset_state(EvmResetState::End(did_block)).await??;
+            self.executor.end(did_block).await?;
             info!(target: "reth::cli", "Block data sent successfully");
         }
 
@@ -191,12 +209,83 @@ impl BitfinityResetEvmStateCommand {
         Ok(())
     }
 
-    async fn process_account_info(
-        client: &EvmCanisterClient<impl CanisterClient>,
-        accounts: AccountInfoMap,
-    ) -> eyre::Result<()> {
-        info!(target: "reth::cli", "Processing account info");
-        client.admin_reset_state(EvmResetState::AddAccounts(accounts)).await??;
-        Ok(())
+}
+
+fn estimate_size(map: &AccountInfoMap) -> usize {
+    let mut total_size = 0;
+
+    for (_address, account) in map {
+        // key
+        let address_size = H160::BYTE_SIZE;
+        
+        // value
+        let nonce_size = U256::BYTE_SIZE;
+        let balance_size = U256::BYTE_SIZE;
+        let bytecode_size = account.bytecode.as_ref().map(|b| b.0.len()).unwrap_or(0);
+        let storage_size = U256::BYTE_SIZE * 2 * account.storage.len();
+        
+        total_size += address_size + nonce_size + balance_size + bytecode_size + storage_size;
+
     }
+    
+    total_size
+}
+
+/// Trait for the reset state executor
+pub trait ResetStateExecutor: Send + Debug {
+
+    /// Start the reset state process
+    fn start(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
+
+    /// Add accounts to the reset state process
+    fn add_accounts(&self, accounts: AccountInfoMap) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
+
+    /// End the reset state process
+    fn end(&self, block: did::Block<H256>) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
+    
+}
+
+/// Executor for the reset state process that uses the EVM canister client
+pub struct EvmCanisterResetStateExecutor {
+    client: EvmCanisterClient<IcAgentClient>,
+}
+
+impl Debug for EvmCanisterResetStateExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EvmCanisterResetStateExecutor").finish()
+    }
+}
+
+impl ResetStateExecutor for EvmCanisterResetStateExecutor {
+
+    fn start(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        let client= self.client.clone();
+        Box::pin(async move {
+            info!(target: "reth::cli", "Send EvmResetState::Start request...");
+            let res = client.admin_reset_state(EvmResetState::Start).await??;
+            info!(target: "reth::cli", "EvmResetState::Start request sent");
+            Ok(res)
+        })
+    }
+
+    fn add_accounts(&self, accounts: AccountInfoMap) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        let client= self.client.clone();
+        Box::pin(async move {
+            info!(target: "reth::cli", "Send EvmResetState::AddAccounts request with {} accounts...", accounts.len());
+            let res = client.admin_reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
+            info!(target: "reth::cli", "EvmResetState::AddAccounts request sent");
+            Ok(res)
+        })
+    }
+
+    fn end(&self, block: did::Block<H256>) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        let client= self.client.clone();
+        Box::pin(async move {
+            info!(target: "reth::cli", "Send EvmResetState::End request...");
+            let res = client.admin_reset_state(EvmResetState::End(block)).await??;
+            info!(target: "reth::cli", "EvmResetState::End request sent");
+            Ok(res)
+        })
+    }
+
 }
