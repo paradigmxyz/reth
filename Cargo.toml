@@ -29,6 +29,7 @@ members = [
     "crates/net/nat/",
     "crates/net/network/",
     "crates/net/network-api/",
+    "crates/net/p2p/",
     "crates/net/types/",
     "crates/payload/basic/",
     "crates/payload/builder/",
@@ -252,6 +253,7 @@ reth-net-common = { path = "crates/net/common" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-p2p = { path = "crates/net/p2p" }
 reth-network-types = { path = "crates/net/types" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-payload-builder = { path = "crates/payload/builder" }

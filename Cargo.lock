@@ -7218,6 +7218,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network-p2p"
+version = "0.2.0-beta.7"
+dependencies = [
+ "enr",
+ "reth-discv4",
+ "reth-eth-wire",
+ "reth-network-types",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "reth-network-types"
 version = "0.2.0-beta.7"
 dependencies = [
