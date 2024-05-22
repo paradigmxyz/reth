@@ -20,6 +20,9 @@ reth-provider.workspace = true
 reth-consensus-common.workspace = true
 
 # Optimism
+reth-optimism-consensus.workspace = true
+
+# revm
 revm.workspace = true
 revm-primitives.workspace = true
 

@@ -1,7 +1,6 @@
 //! Optimism block executor.
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
-use reth_consensus_common::validation::validate_block_post_execution;
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
@@ -13,6 +12,7 @@ use reth_interfaces::{
     executor::{BlockExecutionError, BlockValidationError},
     provider::ProviderError,
 };
+use reth_optimism_consensus::validate_block_post_execution;
 use reth_primitives::{
     BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Receipts,
     TxType, Withdrawals, U256,
