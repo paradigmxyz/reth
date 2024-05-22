@@ -36,10 +36,14 @@ pub trait BatchExecutor<DB> {
     /// The error type returned by the executor.
     type Error;
 
-    /// Executes the next block in the batch and update the state internally.
+    /// Executes the next block in the batch, veryfies the output and updates the state internally.
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 
-    /// Executes multiple inputs in the batch and update the state internally.
+    /// Executes multiple inputs in the batch, verifies the output, and updates the state
+    /// internally.
+    ///
+    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_one`]
+    /// for each input.
     fn execute_and_verify_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Input<'a>>,
@@ -50,8 +54,11 @@ pub trait BatchExecutor<DB> {
         Ok(())
     }
 
-    /// Executes the entire batch and return the final state.
-    fn execute_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
+    /// Executes the entire batch, verifies the output, and returns the final state.
+    ///
+    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_many`]
+    /// and [`BatchExecutor::finalize`].
+    fn execute_and_verify_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
     where
         I: IntoIterator<Item = Self::Input<'a>>,
         Self: Sized,
