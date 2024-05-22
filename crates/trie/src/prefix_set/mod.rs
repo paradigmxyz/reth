@@ -161,6 +161,11 @@ impl PrefixSet {
         false
     }
 
+    /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
+    pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
+        self.keys.iter()
+    }
+
     /// Returns the number of elements in the set.
     pub fn len(&self) -> usize {
         self.keys.len()
