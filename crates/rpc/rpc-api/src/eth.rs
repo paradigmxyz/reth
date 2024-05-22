@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64, TransactionSigned, TransactionMeta, Receipt};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
     AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
@@ -7,10 +7,24 @@ use reth_rpc_types::{
     TransactionRequest, Work,
 };
 
+pub trait NetworkEthApi {
+    type Block;
+    type TxReceipt;
+
+    async fn block_by_hash(&self, eth: &EthApiInner,   hash: B256, full: bool) -> RpcResult<Option<Self::Block>>;
+
+    async fn build_transaction_receipt(
+        &self,
+        tx: TransactionSigned,
+        meta: TransactionMeta,
+        receipt: Receipt,
+    ) -> EthResult<Self::TxReceipt>;
+}
+
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi {
+pub trait EthApi<N: NetworkEthApi> {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -37,7 +51,7 @@ pub trait EthApi {
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
-    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>>;
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<N::Block>>;
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]

@@ -76,6 +76,22 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     fn sync_status(&self) -> RethResult<SyncStatus>;
 }
 
+// move to crates/optimism/rpc
+pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
+    /// All nested fields bundled together.
+    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+}
+
+pub struct EthereumApi<Provider, Pool, Network, EvmConfig> {
+    /// All nested fields bundled together.
+    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+}
+
+pub struct L2EthApi<Provider, Pool, Network, EvmConfig> {
+    /// reuse eth server
+    inner: Arc<EthereumApi<Provider, Pool, Network, EvmConfig>>,
+}
+
 /// `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -84,9 +100,10 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-pub struct EthApi<Provider, Pool, Network, EvmConfig> {
+pub struct EthApi<Provider, Pool, Network, EvmConfig, N: NetworkEthApi> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+    network: N,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
