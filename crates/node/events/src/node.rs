@@ -315,7 +315,7 @@ impl<DB> NodeState<DB> {
                     warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
                 }
             }
         }
