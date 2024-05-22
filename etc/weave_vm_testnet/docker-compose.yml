@@ -46,7 +46,7 @@ services:
     depends_on:
       - reth
     ports:
-      - 9090:9090
+      - "9090:9090"
     volumes:
       - ./../prometheus/:/etc/prometheus/
       - prometheusdata:/prometheus
@@ -61,7 +61,7 @@ services:
       - reth
       - prometheus
     ports:
-      - 3000:3000
+      - "3000:3000"
     environment:
       PROMETHEUS_URL: http://prometheus:9090
     volumes:
@@ -75,6 +75,56 @@ services:
       sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
              find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
              /run.sh"
+
+  # Consensus client part
+
+  # Runs a Prysm beacon chain from a specified genesis state
+  beacon-chain:
+    image: "gcr.io/prysmaticlabs/prysm/beacon-chain:stable"
+    ports:
+      - "4000:4000"
+      - "3500:3500"
+      - "8080:8080"
+      - "6060:6060"
+      - "9090:9090"
+    volumes:
+      - prysm_data:/data
+      - ./../jwttoken:/root/jwt:ro
+    command:
+      - --datadir=/data/beacondata
+      - --min-sync-peers=0
+      - --genesis-state=/data/genesis.ssz
+      - --bootstrap-node=
+      - --interop-eth1data-votes
+      - --chain-config-file=/data/config.yml
+      - --contract-deployment-block=0
+      - --chain-id=${CHAIN_ID:-9496}
+      - --execution-endpoint=http://reth:8551
+      - --rpc-host=0.0.0.0
+      - --grpc-gateway-host=0.0.0.0
+      - --accept-terms-of-use
+      - --jwt-secret=/root/jwt/jwt.hex
+      - --suggested-fee-recipient=0x123463a4b065722e99115d6c222f267d9cabb524
+      - --minimum-peers-per-subnet=0
+      - --enable-debug-rpc-endpoints
+
+  # We run a validator client with deterministically-generated keys that match
+  # The validator keys present in the beacon chain genesis state generated a few steps above.
+  validator:
+    image: "gcr.io/prysmaticlabs/prysm/validator:stable"
+    volumes:
+      - prysm_data:/data
+    command:
+      - --beacon-rpc-provider=beacon-chain:4000
+      - --datadir=/data/validatordata
+      - --accept-terms-of-use
+      - --interop-num-validators=1
+      - --interop-start-index=0
+      - --chain-config-file=/consensus/config.yml
+    depends_on:
+      beacon-chain:
+        condition: service_started
+
 volumes:
   reth_data:
   reth_jwt:
@@ -82,3 +132,4 @@ volumes:
   logs:
   prometheusdata:
   grafanadata:
+  prysm_data:
