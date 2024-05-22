@@ -219,7 +219,7 @@ pub async fn build_import_pipeline<DB, C>(
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
     static_file_producer: StaticFileProducer<DB>,
-    should_exec: bool,
+    disable_exec: bool,
 ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
 where
     DB: Database + Clone + Unpin + 'static,
@@ -273,7 +273,7 @@ where
                 PruneModes::default(),
             )
             .builder()
-            .disable_all_if(&StageId::STATE_REQUIRED, || should_exec),
+            .disable_all_if(&StageId::STATE_REQUIRED, || disable_exec),
         )
         .build(provider_factory, static_file_producer);
 

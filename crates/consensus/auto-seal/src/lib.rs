@@ -16,14 +16,15 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header,
-    Receipts, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
+    ChainSpec, Header, Receipts, Requests, SealedBlock, SealedHeader, TransactionSigned,
+    Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
@@ -84,7 +85,15 @@ impl Consensus for AutoSealConsensus {
         Ok(())
     }
 
-    fn validate_block(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+        Ok(())
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        _block: &BlockWithSenders,
+        _input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
         Ok(())
     }
 }
@@ -371,7 +380,7 @@ impl StorageInner {
         );
 
         // todo(onbjerg): when we rewrite this, add support for requests
-        let mut block = Block {
+        let block = Block {
             header,
             body: transactions,
             ommers: ommers.clone(),
@@ -387,27 +396,7 @@ impl StorageInner {
             provider.latest().map_err(BlockExecutionError::LatestBlock)?,
         );
 
-        // TODO(mattsse): At this point we don't know certain fields of the header, so we first
-        // execute it and then update the header this can be improved by changing the executor
-        // input, for now we intercept the errors and retry
-        loop {
-            match executor.executor(&mut db).execute((&block, U256::ZERO).into()) {
-                Err(BlockExecutionError::Validation(BlockValidationError::BlockGasUsed {
-                    gas,
-                    ..
-                })) => {
-                    block.block.header.gas_used = gas.got;
-                }
-                Err(BlockExecutionError::Validation(BlockValidationError::ReceiptRootDiff(
-                    err,
-                ))) => {
-                    block.block.header.receipts_root = err.got;
-                }
-                _ => break,
-            };
-        }
-
-        // now execute the block
+        // execute the block
         let BlockExecutionOutput { state, receipts, .. } =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let bundle_state = BundleStateWithReceipts::new(

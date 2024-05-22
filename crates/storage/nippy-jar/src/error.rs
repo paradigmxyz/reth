@@ -8,7 +8,7 @@ pub enum NippyJarError {
     #[error(transparent)]
     Disconnect(#[from] std::io::Error),
     #[error(transparent)]
-    FileSystem(#[from] reth_primitives::fs::FsPathError),
+    FileSystem(#[from] reth_fs_util::FsPathError),
     #[error("{0}")]
     Custom(String),
     #[error(transparent)]

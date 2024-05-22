@@ -1,10 +1,10 @@
 //! Helper for handling execution of multiple blocks.
 
 use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
-use alloy_consensus::Request;
 use reth_interfaces::executor::BlockExecutionError;
 use reth_primitives::{
-    PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, Requests, MINIMUM_PRUNING_DISTANCE,
+    PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, Request, Requests,
+    MINIMUM_PRUNING_DISTANCE,
 };
 use revm::db::states::bundle_state::BundleRetention;
 use std::time::Duration;

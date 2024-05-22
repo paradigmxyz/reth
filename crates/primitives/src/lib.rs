@@ -30,12 +30,12 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 mod exex;
-pub mod fs;
 pub mod genesis;
 mod header;
 mod integer_list;
 mod log;
 mod net;
+pub mod op_mainnet;
 pub mod proofs;
 mod prune;
 mod receipt;
@@ -82,7 +82,9 @@ pub use prune::{
     PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
 };
-pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
+pub use receipt::{
+    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
+};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 

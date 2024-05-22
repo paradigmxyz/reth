@@ -65,7 +65,7 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
         Ok(())
     }
 

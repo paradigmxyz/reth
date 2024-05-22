@@ -164,15 +164,17 @@ impl FileClient {
     }
 
     /// Returns a mutable iterator over bodies in the client.
-    pub fn bodies_iter_mut(&mut self) -> impl Iterator<Item = (&u64, &mut BlockBody)> {
+    ///
+    /// Panics, if file client headers and bodies are not mapping 1-1.
+    pub fn bodies_iter_mut(&mut self) -> impl Iterator<Item = (u64, &mut BlockBody)> {
         let bodies = &mut self.bodies;
-        let headers = &self.headers;
-        headers.keys().zip(bodies.values_mut())
+        let numbers = &self.hash_to_number;
+        bodies.iter_mut().map(|(hash, body)| (numbers[hash], body))
     }
 
     /// Returns the current number of transactions in the client.
     pub fn total_transactions(&self) -> usize {
-        self.bodies.iter().flat_map(|(_, body)| &body.transactions).count()
+        self.bodies.iter().fold(0, |acc, (_, body)| acc + body.transactions.len())
     }
 }
 

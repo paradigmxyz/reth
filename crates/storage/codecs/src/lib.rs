@@ -1,5 +1,9 @@
 //! Compact codec.
 //!
+//! *Warning*: The `Compact` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
+//!
 //! ## Feature Flags
 //!
 //! - `alloy`: [Compact] implementation for various alloy types.
@@ -67,6 +71,24 @@ pub trait Compact: Sized {
     #[inline]
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         Self::from_compact(buf, len)
+    }
+}
+
+/// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
+pub type CompactPlaceholder = ();
+
+impl Compact for CompactPlaceholder {
+    #[inline]
+    fn to_compact<B>(self, _: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        0
+    }
+
+    #[inline]
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        ((), buf)
     }
 }
 

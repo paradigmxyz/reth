@@ -1,4 +1,3 @@
-use alloy_consensus::Request;
 use alloy_eips::{
     eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
     eip7002::WithdrawalRequest,
@@ -11,7 +10,7 @@ use reth_primitives::{
         fill_tx_env_with_beacon_root_contract_call,
         fill_tx_env_with_withdrawal_requests_contract_call,
     },
-    Address, ChainSpec, Header, Withdrawal, B256, U256,
+    Address, ChainSpec, Header, Request, Withdrawal, B256, U256,
 };
 use revm::{
     self,

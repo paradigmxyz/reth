@@ -5,7 +5,7 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_db::database::Database;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_interfaces::{
@@ -210,8 +210,14 @@ impl AppendableChain {
         let executor = externals.executor_factory.executor(db);
         let block_hash = block.hash();
         let block = block.unseal();
+
         let state = executor.execute((&block, U256::MAX).into())?;
-        let BlockExecutionOutput { state, receipts, .. } = state;
+        let BlockExecutionOutput { state, receipts, requests, .. } = state;
+        externals.consensus.validate_block_post_execution(
+            &block,
+            PostExecutionInput { receipts: &receipts, requests: &requests },
+        )?;
+
         let bundle_state = BundleStateWithReceipts::new(
             state,
             Receipts::from_block_receipt(receipts),
