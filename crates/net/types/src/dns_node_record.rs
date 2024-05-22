@@ -78,7 +78,11 @@ impl FromStr for DNSNodeRecord {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use url::Url;
 
-        let url = Url::parse(s).map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
+        // Parse the URL with enode prefix replaced with http.
+        // The enode prefix causes the parser to use parse_opaque() on
+        // the host str which only handles domains and ipv6, not ipv4.
+        let url = Url::parse(s.replace("enode://", "http://").as_str())
+            .map_err(|e| NodeRecordParseError::InvalidUrl(e.to_string()))?;
 
         let host = url
             .host()
