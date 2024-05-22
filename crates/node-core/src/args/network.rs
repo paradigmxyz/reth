@@ -3,13 +3,10 @@
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
 use reth_config::Config;
-use reth_discv4::{
-    DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT, DEFAULT_DISCOVERY_V5_ADDR,
-    DEFAULT_DISCOVERY_V5_PORT,
-};
+use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
-    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
-    DEFAULT_SECONDS_LOOKUP_INTERVAL,
+    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
+    DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 use reth_net_nat::NatResolver;
 use reth_network::{
@@ -22,7 +19,12 @@ use reth_network::{
 };
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use secp256k1::SecretKey;
-use std::{net::IpAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    ops::Not,
+    path::PathBuf,
+    sync::Arc,
+};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
@@ -38,7 +40,7 @@ pub struct NetworkArgs {
     #[arg(long, value_delimiter = ',')]
     pub trusted_peers: Vec<NodeRecord>,
 
-    /// Connect only to trusted peers
+    /// Connect to or accept from trusted peers only
     #[arg(long)]
     pub trusted_only: bool,
 
@@ -88,19 +90,24 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
-    /// Soft limit for the byte size of a `PooledTransactions` response on assembling a
-    /// `GetPooledTransactions` request. Spec'd at 2 MiB.
-    ///
-    /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, help = "Sets the soft limit for the byte size of pooled transactions response. Specified at 2 MiB by default. This is a spec'd value that should only be set for experimental purposes on a testnet.")]
+    /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
+    /// to pack in one response.
+    /// Spec'd at 2MiB.
+    #[arg(long = "pooled-tx-response-soft-limit", value_name = "BYTES", default_value_t = SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response: usize,
 
-    /// Default soft limit for the byte size of a `PooledTransactions` response on assembling a
-    /// `GetPooledTransactions` request. This defaults to less
-    /// than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when
-    /// assembling a `PooledTransactions` response. Default
-    /// is 128 KiB.
-    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ)]
+    /// Experimental, for usage in research. Sets the max accumulated byte size of transactions to
+    /// request in one request.
+    ///
+    /// Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
+    /// transaction announcement (see RLPx specs). This allows a node to request a specific size
+    /// response.
+    ///
+    /// By default, nodes request only 128 KiB worth of transactions, but should a peer request
+    /// more, up to 2 MiB, a node will answer with more than 128 KiB.
+    ///
+    /// Default is 128 KiB.
+    #[arg(long = "pooled-tx-pack-soft-limit", value_name = "BYTES", default_value_t = DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ, verbatim_doc_comment)]
     pub soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
 }
 
@@ -117,7 +124,10 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
+        let boot_nodes = self
+            .bootnodes
+            .clone()
+            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
@@ -134,7 +144,6 @@ impl NetworkArgs {
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             ),
         };
-
         // Configure basic network stack
         let mut network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
@@ -142,8 +151,8 @@ impl NetworkArgs {
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
-            .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
-            .chain_spec(chain_spec)
+            .boot_nodes(boot_nodes.clone())
+            .chain_spec(chain_spec.clone())
             .transactions_manager_config(transactions_manager_config);
 
         // Configure node identity
@@ -152,16 +161,34 @@ impl NetworkArgs {
             HelloMessageWithProtocols::builder(peer_id).client_version(&self.identity).build(),
         );
 
-        self.discovery.apply_to_builder(network_config_builder)
-    }
+        let rlpx_socket = (self.addr, self.port).into();
+        network_config_builder =
+            self.discovery.apply_to_builder(network_config_builder, rlpx_socket);
 
-    /// If `no_persist_peers` is true then this returns the path to the persistent peers file path.
-    pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
-        if self.no_persist_peers {
-            return None
+        if chain_spec.is_optimism() && !self.discovery.disable_discovery {
+            network_config_builder =
+                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
         }
 
-        Some(peers_file)
+        network_config_builder.map_discv5_config_builder(|builder| {
+            let DiscoveryArgs {
+                discv5_lookup_interval,
+                discv5_bootstrap_lookup_interval,
+                discv5_bootstrap_lookup_countdown,
+                ..
+            } = self.discovery;
+
+            builder
+                .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                .lookup_interval(discv5_lookup_interval)
+                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
+        })
+    }
+
+    /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
+    pub fn persistent_peers_file(&self, peers_file: PathBuf) -> Option<PathBuf> {
+        self.no_persist_peers.not().then_some(peers_file)
     }
 
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
@@ -230,20 +257,31 @@ pub struct DiscoveryArgs {
     #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// The UDP address to use for devp2p peer discovery version 5.
-    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR",
-    default_value_t = DEFAULT_DISCOVERY_V5_ADDR)]
-    pub discv5_addr: IpAddr,
+    /// The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx
+    /// address, if it's also IPv4.
+    #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR", default_value = None)]
+    pub discv5_addr: Option<Ipv4Addr>,
 
-    /// The UDP port to use for devp2p peer discovery version 5.
+    /// The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx
+    /// address, if it's also IPv6.
+    #[arg(id = "discovery.v5.addr.ipv6", long = "discovery.v5.addr.ipv6", value_name = "DISCOVERY_V5_ADDR_IPV6", default_value = None)]
+    pub discv5_addr_ipv6: Option<Ipv6Addr>,
+
+    /// The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
+    /// IPv4, or `--discv5.addr` is set.
     #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
     default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port: u16,
 
+    /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
+    /// IPv6, or `--discv5.addr.ipv6` is set.
+    #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
+    default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
+    pub discv5_port_ipv6: u16,
+
     /// The interval in seconds at which to carry out periodic lookup queries, for the whole
     /// run of the program.
-    #[arg(id = "discovery.v5.lookup-interval", long = "discovery.v5.lookup-interval", value_name = "DISCOVERY_V5_LOOKUP_INTERVAL",
-    default_value_t = DEFAULT_SECONDS_LOOKUP_INTERVAL)]
+    #[arg(id = "discovery.v5.lookup-interval", long = "discovery.v5.lookup-interval", value_name = "DISCOVERY_V5_LOOKUP_INTERVAL", default_value_t = DEFAULT_SECONDS_LOOKUP_INTERVAL)]
     pub discv5_lookup_interval: u64,
 
     /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
@@ -254,7 +292,7 @@ pub struct DiscoveryArgs {
 
     /// The number of times to carry out boost lookup queries at bootstrap.
     #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown",
-                        default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
+        default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
     pub discv5_bootstrap_lookup_countdown: u64,
 }
 
@@ -263,6 +301,7 @@ impl DiscoveryArgs {
     pub fn apply_to_builder(
         &self,
         mut network_config_builder: NetworkConfigBuilder,
+        rlpx_tcp_socket: SocketAddr,
     ) -> NetworkConfigBuilder {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
@@ -272,9 +311,9 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
 
-        if !self.disable_discovery && (self.enable_discv5_discovery || cfg!(feature = "optimism")) {
-            network_config_builder = network_config_builder.disable_discv4_discovery();
-            network_config_builder = network_config_builder.enable_discv5_discovery();
+        if !self.disable_discovery && self.enable_discv5_discovery {
+            network_config_builder =
+                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_tcp_socket));
         }
 
         network_config_builder
@@ -293,12 +332,14 @@ impl Default for DiscoveryArgs {
         Self {
             disable_discovery: false,
             disable_dns_discovery: false,
-            disable_discv4_discovery: cfg!(feature = "optimism"),
-            enable_discv5_discovery: cfg!(feature = "optimism"),
+            disable_discv4_discovery: false,
+            enable_discv5_discovery: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
-            discv5_addr: DEFAULT_DISCOVERY_V5_ADDR,
+            discv5_addr: None,
+            discv5_addr_ipv6: None,
             discv5_port: DEFAULT_DISCOVERY_V5_PORT,
+            discv5_port_ipv6: DEFAULT_DISCOVERY_V5_PORT,
             discv5_lookup_interval: DEFAULT_SECONDS_LOOKUP_INTERVAL,
             discv5_bootstrap_lookup_interval: DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL,
             discv5_bootstrap_lookup_countdown: DEFAULT_COUNT_BOOTSTRAP_LOOKUPS,

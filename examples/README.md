@@ -23,11 +23,12 @@ to make a PR!
 
 ## ExEx
 
-| Example                            | Description                                                                       |
-| ---------------------------------- | --------------------------------------------------------------------------------- |
-| [Minimal ExEx](./exex/minimal)     | Illustrates how to build a simple ExEx                                            |
-| [OP Bridge ExEx](./exex/op-bridge) | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1 |
-| [Rollup](./exex/rollup)            | Illustrates a rollup ExEx that derives the state from L1                          |
+| Example                                   | Description                                                                       |
+|-------------------------------------------|-----------------------------------------------------------------------------------|
+| [Minimal ExEx](./exex/minimal)            | Illustrates how to build a simple ExEx                                            |
+| [OP Bridge ExEx](./exex/op-bridge)        | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1 |
+| [Rollup](./exex/rollup)                   | Illustrates a rollup ExEx that derives the state from L1                          |
+| [In Memory State](./exex/in-memory-state) | Illustrates an ExEx that tracks the plain state in memory                         |
 
 ## RPC
 

@@ -16,7 +16,7 @@ name = "reth_nippy_jar"
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-fs-util.workspace = true
 
 # filter
 ph = "0.8.0"

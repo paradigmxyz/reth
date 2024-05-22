@@ -6,6 +6,8 @@ use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
 use std::ops::RangeInclusive;
 
+use super::StageId;
+
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct MerkleCheckpoint {
@@ -201,6 +203,25 @@ impl StageCheckpoint {
         self
     }
 
+    /// Sets the block range, if checkpoint uses block range.
+    pub fn with_block_range(mut self, stage_id: &StageId, from: u64, to: u64) -> Self {
+        self.stage_checkpoint = Some(match stage_id {
+            StageId::Execution => StageUnitCheckpoint::Execution(ExecutionCheckpoint::default()),
+            StageId::AccountHashing => {
+                StageUnitCheckpoint::Account(AccountHashingCheckpoint::default())
+            }
+            StageId::StorageHashing => {
+                StageUnitCheckpoint::Storage(StorageHashingCheckpoint::default())
+            }
+            StageId::IndexStorageHistory | StageId::IndexAccountHistory => {
+                StageUnitCheckpoint::IndexHistory(IndexHistoryCheckpoint::default())
+            }
+            _ => return self,
+        });
+        _ = self.stage_checkpoint.map(|mut checkpoint| checkpoint.set_block_range(from, to));
+        self
+    }
+
     /// Get the underlying [`EntitiesCheckpoint`], if any, to determine the number of entities
     /// processed, and the number of total entities to process.
     pub fn entities(&self) -> Option<EntitiesCheckpoint> {
@@ -242,6 +263,25 @@ pub enum StageUnitCheckpoint {
     Headers(HeadersCheckpoint),
     /// Saves the progress of Index History stage.
     IndexHistory(IndexHistoryCheckpoint),
+}
+
+impl StageUnitCheckpoint {
+    /// Sets the block range. Returns old block range, or `None` if checkpoint doesn't use block
+    /// range.
+    pub fn set_block_range(&mut self, from: u64, to: u64) -> Option<CheckpointBlockRange> {
+        match self {
+            Self::Account(AccountHashingCheckpoint { ref mut block_range, .. }) |
+            Self::Storage(StorageHashingCheckpoint { ref mut block_range, .. }) |
+            Self::Execution(ExecutionCheckpoint { ref mut block_range, .. }) |
+            Self::IndexHistory(IndexHistoryCheckpoint { ref mut block_range, .. }) => {
+                let old_range = *block_range;
+                *block_range = CheckpointBlockRange { from, to };
+
+                Some(old_range)
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

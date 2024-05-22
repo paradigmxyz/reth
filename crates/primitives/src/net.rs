@@ -1,4 +1,4 @@
-pub use reth_rpc_types::{NodeRecord, NodeRecordParseError};
+pub use reth_network_types::{NodeRecord, NodeRecordParseError};
 
 // Ethereum bootnodes come from <https://github.com/ledgerwatch/erigon/blob/devel/params/bootnodes.go>
 // OP bootnodes come from <https://github.com/ethereum-optimism/op-geth/blob/optimism/params/bootnodes.go>
@@ -120,15 +120,10 @@ pub fn parse_nodes(nodes: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<Node
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::{IpAddr, Ipv4Addr},
-        str::FromStr,
-    };
-
     use super::*;
     use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
-    use reth_rpc_types::PeerId;
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn test_mapped_ipv6() {
@@ -232,7 +227,7 @@ mod tests {
             address: IpAddr::V4([10, 3, 58, 6].into()),
             tcp_port: 30303u16,
             udp_port: 30301u16,
-            id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+            id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
         };
         let ser = serde_json::to_string::<NodeRecord>(&node).expect("couldn't serialize");
         assert_eq!(ser, "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"")
@@ -246,7 +241,7 @@ mod tests {
             address: IpAddr::V4([10, 3, 58, 6].into()),
             tcp_port: 30303u16,
             udp_port: 30301u16,
-            id: PeerId::from_str("6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0").unwrap(),
+            id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
         })
     }
 }

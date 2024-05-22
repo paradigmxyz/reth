@@ -19,7 +19,7 @@ use jsonrpsee::{
 use std::{
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     sync::Arc,
     task::{Context, Poll},
 };
@@ -155,7 +155,7 @@ where
         let connection_guard = ConnectionGuard::new(self.cfg.max_connections as usize);
 
         let stopped = stop_handle.clone().shutdown();
-        tokio::pin!(stopped);
+        let mut stopped = pin!(stopped);
 
         let (drop_on_completion, mut process_connection_awaiter) = mpsc::channel::<()>(1);
 
@@ -223,7 +223,7 @@ where
     S: Future + Unpin,
 {
     let accept = listener.accept();
-    tokio::pin!(accept);
+    let accept = pin!(accept);
 
     match futures_util::future::select(accept, stopped).await {
         Either::Left((res, stop)) => match res {
@@ -506,11 +506,11 @@ async fn to_ipc_service<S, T>(
         pending_calls: Default::default(),
         items: Default::default(),
     };
-    tokio::pin!(conn, rx_item);
-
     let stopped = stop_handle.shutdown();
 
-    tokio::pin!(stopped);
+    let mut conn = pin!(conn);
+    let mut rx_item = pin!(rx_item);
+    let mut stopped = pin!(stopped);
 
     loop {
         tokio::select! {
@@ -522,7 +522,7 @@ async fn to_ipc_service<S, T>(
                     conn.push_back(item);
                 }
             }
-            _ = &mut stopped=> {
+            _ = &mut stopped => {
                 // shutdown
                 break
             }
@@ -844,6 +844,7 @@ mod tests {
         PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
+    use std::pin::pin;
     use tokio::sync::broadcast;
     use tokio_stream::wrappers::BroadcastStream;
 
@@ -854,7 +855,8 @@ mod tests {
         let sink = pending.accept().await.unwrap();
         let closed = sink.closed();
 
-        futures::pin_mut!(closed, stream);
+        let mut closed = pin!(closed);
+        let mut stream = pin!(stream);
 
         loop {
             match select(closed, stream.next()).await {

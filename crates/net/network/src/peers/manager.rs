@@ -1276,7 +1276,7 @@ pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub refill_slots_interval: Duration,
-    /// Trusted nodes to connect to.
+    /// Trusted nodes to connect to or accept from
     pub trusted_nodes: HashSet<NodeRecord>,
     /// Connect to or accept from trusted nodes only?
     #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]

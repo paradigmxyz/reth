@@ -90,6 +90,7 @@ unknown-git = "deny"
 allow-git = [
     # TODO: remove, see ./Cargo.toml
     "https://github.com/alloy-rs/alloy",
+    "https://github.com/foundry-rs/block-explorers",
     "https://github.com/paradigmxyz/evm-inspectors",
     "https://github.com/sigp/discv5",
 ]

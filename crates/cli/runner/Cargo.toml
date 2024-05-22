@@ -15,7 +15,6 @@ workspace = true
 reth-tasks.workspace = true
 
 # async
-futures.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 
 # misc

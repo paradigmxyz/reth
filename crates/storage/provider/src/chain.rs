@@ -289,7 +289,10 @@ impl Chain {
                 block_number
             }
             ChainSplitTarget::Number(block_number) => {
-                if block_number >= chain_tip {
+                if block_number > chain_tip {
+                    return ChainSplit::NoSplitPending(self)
+                }
+                if block_number == chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
@@ -498,7 +501,7 @@ mod tests {
         let chain2 =
             Chain { blocks: BTreeMap::from([(3, block3), (4, block4)]), ..Default::default() };
 
-        assert_eq!(chain1.append_chain(chain2.clone()), Ok(()));
+        assert!(chain1.append_chain(chain2.clone()).is_ok());
 
         // chain1 got changed so this will fail
         assert!(chain1.append_chain(chain2).is_err());
@@ -588,7 +591,7 @@ mod tests {
         // split at higher number
         assert_eq!(
             chain.clone().split(ChainSplitTarget::Number(10)),
-            ChainSplit::NoSplitCanonical(chain.clone())
+            ChainSplit::NoSplitPending(chain.clone())
         );
 
         // split at lower number

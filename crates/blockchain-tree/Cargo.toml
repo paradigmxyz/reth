@@ -15,15 +15,17 @@ workspace = true
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
+reth-evm.workspace = true
+reth-revm.workspace = true
 reth-provider.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-parallel = { workspace = true, features = ["parallel"] }
+reth-network = { workspace = true }
 reth-consensus.workspace = true
 
 # common
 parking_lot.workspace = true
-lru = "0.12"
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 
@@ -40,6 +42,7 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true , features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm.workspace = true
 reth-evm-ethereum.workspace = true
 parking_lot.workspace = true
@@ -47,4 +50,4 @@ assert_matches.workspace = true
 
 [features]
 test-utils = []
-optimism = ["reth-primitives/optimism", "reth-interfaces/optimism", "reth-provider/optimism", "reth-revm/optimism"]
+optimism = ["reth-primitives/optimism", "reth-interfaces/optimism", "reth-provider/optimism"]

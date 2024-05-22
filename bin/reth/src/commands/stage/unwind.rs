@@ -1,46 +1,36 @@
 //! Unwinding a certain block range
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
 use clap::{Parser, Subcommand};
-use reth_beacon_consensus::BeaconConsensus;
-use reth_config::{Config, PruneConfig};
+use reth_beacon_consensus::EthBeaconConsensus;
+use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{database::Database, open_db};
-use reth_downloaders::{
-    bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
-};
+use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_exex::ExExManagerHandle;
-use reth_node_core::{
-    args::{get_secret_key, NetworkArgs},
-    dirs::ChainPath,
-};
-use reth_node_ethereum::EthEvmConfig;
+use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
     StaticFileProviderFactory,
 };
-use reth_prune::PrunerBuilder;
 use reth_stages::{
     sets::DefaultStages,
-    stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
-    },
+    stages::{ExecutionStage, ExecutionStageThresholds},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
 use tracing::info;
+
+use crate::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs,
+    },
+    dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
+};
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -109,18 +99,10 @@ impl Command {
             .filter(|highest_static_file_block| highest_static_file_block >= range.start())
         {
             info!(target: "reth::cli", ?range, ?highest_static_block, "Executing a pipeline unwind.");
-            let mut pipeline =
-                self.build_pipeline(data_dir, config, provider_factory.clone()).await?;
+            let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
 
             // Move all applicable data from database to static files.
-            pipeline.produce_static_files()?;
-
-            // Run the pruner so we don't potentially end up with higher height in the database vs
-            // static files.
-            let mut pruner = PrunerBuilder::new(PruneConfig::default())
-                .prune_delete_limit(usize::MAX)
-                .build(provider_factory);
-            pruner.run(*range.end())?;
+            pipeline.move_to_static_files()?;
 
             pipeline.unwind((*range.start()).saturating_sub(1), None)?;
         } else {
@@ -141,47 +123,16 @@ impl Command {
 
     async fn build_pipeline<DB: Database + 'static>(
         self,
-        data_dir: ChainPath<DataDirPath>,
         config: Config,
         provider_factory: ProviderFactory<Arc<DB>>,
     ) -> Result<Pipeline<Arc<DB>>, eyre::Error> {
-        // Even though we are not planning to download anything, we need to initialize Body and
-        // Header stage with a network client
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
-        let p2p_secret_key = get_secret_key(&network_secret_path)?;
-        let default_peers_path = data_dir.known_peers();
-        let network = self
-            .network
-            .network_config(
-                &config,
-                provider_factory.chain_spec(),
-                p2p_secret_key,
-                default_peers_path,
-            )
-            .build(provider_factory.clone())
-            .start_network()
-            .await?;
-
         let consensus: Arc<dyn Consensus> =
-            Arc::new(BeaconConsensus::new(provider_factory.chain_spec()));
-
-        // building network downloaders using the fetch client
-        let fetch_client = network.fetch_client().await?;
-        let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(fetch_client.clone(), Arc::clone(&consensus));
-        let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies).build(
-            fetch_client,
-            Arc::clone(&consensus),
-            provider_factory.clone(),
-        );
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let stage_conf = &config.stages;
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory = reth_revm::EvmProcessorFactory::new(
-            provider_factory.chain_spec(),
-            EthEvmConfig::default(),
-        );
+        let executor = block_executor!(provider_factory.chain_spec());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
@@ -191,36 +142,24 @@ impl Command {
                     provider_factory.clone(),
                     header_mode,
                     Arc::clone(&consensus),
-                    header_downloader,
-                    body_downloader,
-                    factory.clone(),
-                    stage_conf.etl.clone(),
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
+                    executor.clone(),
+                    stage_conf.clone(),
+                    prune_modes.clone(),
                 )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })
                 .set(ExecutionStage::new(
-                    factory,
+                    executor,
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,
                         max_cumulative_gas: None,
                         max_duration: None,
                     },
-                    stage_conf
-                        .merkle
-                        .clean_threshold
-                        .max(stage_conf.account_hashing.clean_threshold)
-                        .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    stage_conf.execution_external_clean_threshold(),
+                    prune_modes,
                     ExExManagerHandle::empty(),
-                ))
-                .set(AccountHashingStage::default())
-                .set(StorageHashingStage::default())
-                .set(MerkleStage::default_unwind())
-                .set(TransactionLookupStage::default())
-                .set(IndexAccountHistoryStage::default())
-                .set(IndexStorageHistoryStage::default()),
+                )),
             )
             .build(
                 provider_factory.clone(),
