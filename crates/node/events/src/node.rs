@@ -392,6 +392,9 @@ pub enum NodeEvent {
     Pruner(PrunerEvent),
     /// A static_file_producer event
     StaticFileProducer(StaticFileProducerEvent),
+    /// Used to encapsulate various conditions or situations that do not
+    /// naturally fit into the other more specific variants.
+    Other(String),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -574,6 +577,9 @@ where
                 }
                 NodeEvent::StaticFileProducer(event) => {
                     this.state.handle_static_file_producer_event(event);
+                }
+                NodeEvent::Other(event_description) => {
+                    warn!("{event_description}");
                 }
             }
         }
