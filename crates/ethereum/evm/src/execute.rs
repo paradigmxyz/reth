@@ -382,7 +382,7 @@ where
         let (receipts, _gas_used) =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
-        validate_block_post_execution(&block, &self.executor.chain_spec(), &receipts)?;
+        validate_block_post_execution(block, self.executor.chain_spec(), &receipts)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
