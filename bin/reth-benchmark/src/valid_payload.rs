@@ -63,11 +63,11 @@ pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
 }
 
 #[async_trait::async_trait]
-impl<N, T, P> EngineApiValidWaitExt<N, T> for P
+impl<T, N, P> EngineApiValidWaitExt<N, T> for P
 where
     N: Network,
     T: Transport + Clone,
-    P: EngineApi<T, N>,
+    P: EngineApi<N, T>,
 {
     async fn new_payload_v1_wait(
         &self,

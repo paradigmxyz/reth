@@ -56,7 +56,7 @@ pub struct BenchmarkArgs {
         verbatim_doc_comment,
         default_value = "http://localhost:8551"
     )]
-    engine_rpc_url: String,
+    pub engine_rpc_url: String,
 }
 
 #[cfg(test)]
