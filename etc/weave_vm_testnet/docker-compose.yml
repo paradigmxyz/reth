@@ -11,12 +11,13 @@ services:
       - "8546:8546"
       - "30304:30304/tcp" #p2p
       - "30304:30304/udp" #p2p
+      - '9001:9001' # metrics
     volumes:
       - reth_data:/data
       - reth_jwt:/jwt:ro
       - reth_genesis:/genesis:ro
+      - logs:/root/logs
       - ./../jwttoken:/root/jwt:ro
-      # - /home/reth-node/code/wvm-reth/target/release/reth:/usr/local/bin/reth:ro
     command:
       - node
       - --http
@@ -31,12 +32,53 @@ services:
       - --auth-ipc.path=/data/reth_engine_api.ipc
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
-      - --authrpc.jwtsecret=/root/jwt/jwt.hex  #- --authrpc.jwtsecret=/jwt/jwtsecret
+      - --authrpc.jwtsecret=/root/jwt/jwt.hex
       - --chain=/genesis/genesis.json
       - --disable-discovery
       - --datadir=/data
+      - --metrics 0.0.0.0:9001
+      - --log.file.directory /root/logs
 
+  # default prometheus + grafana setup
+  prometheus:
+    restart: unless-stopped
+    image: prom/prometheus
+    depends_on:
+      - reth
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheusdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  grafana:
+    restart: unless-stopped
+    image: grafana/grafana:10.3.3
+    depends_on:
+      - reth
+      - prometheus
+    ports:
+      - 3000:3000
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
+    # 1. Copy dashboards from temp directory to prevent modifying original host files
+    # 2. Replace Prometheus datasource placeholder with the actual name
+    # 3. Run Grafana
+    entrypoint: >
+      sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
+             /run.sh"
 volumes:
   reth_data:
   reth_jwt:
   reth_genesis:
+  logs:
+  prometheusdata:
+  grafanadata:
