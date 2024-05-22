@@ -38,7 +38,7 @@ pub trait BatchExecutor<DB> {
     /// The error type returned by the executor.
     type Error;
 
-    /// Executes the next block in the batch, veryfies the output and updates the state internally.
+    /// Executes the next block in the batch, verifies the output and updates the state internally.
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 
     /// Executes multiple inputs in the batch, verifies the output, and updates the state
