@@ -23,7 +23,7 @@ pub struct TreeExternals<DB, E> {
     /// The provider factory, used to commit the canonical chain, or unwind it.
     pub(crate) provider_factory: ProviderFactory<DB>,
     /// The consensus engine.
-    pub(crate) consensus: Arc<dyn Consensus>,
+    pub(crate) consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
     /// The executor factory to execute blocks with.
     pub(crate) executor_factory: E,
 }
@@ -32,7 +32,7 @@ impl<DB, E> TreeExternals<DB, E> {
     /// Create new tree externals.
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         executor_factory: E,
     ) -> Self {
         Self { provider_factory, consensus, executor_factory }

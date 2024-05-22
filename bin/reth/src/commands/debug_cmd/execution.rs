@@ -91,7 +91,7 @@ impl Command {
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<DB>,
@@ -216,7 +216,7 @@ impl Command {
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(provider_factory.clone())?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         // Configure and build network

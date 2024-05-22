@@ -21,6 +21,8 @@ pub mod test_utils;
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {
+    type PostExecutionInput;
+
     /// Validate if header is correct and follows consensus specification.
     ///
     /// This is called on standalone header to check if all hashes are correct.
@@ -95,6 +97,7 @@ pub trait Consensus: Debug + Send + Sync {
         &self,
         block: &BlockWithSenders,
         receipts: &[Receipt],
+        input: Self::PostExecutionInput,
     ) -> Result<(), ConsensusError>;
 }
 

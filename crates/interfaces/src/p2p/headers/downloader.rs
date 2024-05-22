@@ -72,7 +72,7 @@ impl SyncTarget {
 ///
 /// Returns Ok(false) if the
 pub fn validate_header_download(
-    consensus: &dyn Consensus,
+    consensus: &dyn Consensus<PostExecutionInput = ()>,
     header: &SealedHeader,
     parent: &SealedHeader,
 ) -> DownloadResult<()> {

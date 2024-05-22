@@ -25,12 +25,12 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 pub struct FullBlockClient<Client> {
     client: Client,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
 }
 
 impl<Client> FullBlockClient<Client> {
     /// Creates a new instance of `FullBlockClient`.
-    pub fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
+    pub fn new(client: Client, consensus: Arc<dyn Consensus<PostExecutionInput = ()>>) -> Self {
         Self { client, consensus }
     }
 
@@ -355,7 +355,7 @@ where
     /// The client used to fetch headers and bodies.
     client: Client,
     /// The consensus instance used to validate the blocks.
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
     /// The block hash to start fetching from (inclusive).
     start_hash: B256,
     /// How many blocks to fetch: `len([start_hash, ..]) == count`

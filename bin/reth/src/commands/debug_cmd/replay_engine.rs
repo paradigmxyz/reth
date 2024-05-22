@@ -123,7 +123,7 @@ impl Command {
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         let executor = block_executor!(self.chain.clone());

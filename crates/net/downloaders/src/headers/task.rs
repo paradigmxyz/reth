@@ -46,7 +46,7 @@ impl TaskDownloader {
     /// # use reth_downloaders::headers::task::TaskDownloader;
     /// # use reth_consensus::Consensus;
     /// # use reth_interfaces::p2p::headers::client::HeadersClient;
-    /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
+    /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus<PostExecutionInput = ()>>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
     ///        client,
     ///        consensus

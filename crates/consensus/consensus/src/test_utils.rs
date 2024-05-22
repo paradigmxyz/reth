@@ -28,6 +28,8 @@ impl TestConsensus {
 }
 
 impl Consensus for TestConsensus {
+    type PostExecutionInput = ();
+
     fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
@@ -72,6 +74,7 @@ impl Consensus for TestConsensus {
         &self,
         _block: &BlockWithSenders,
         _receipts: &[Receipt],
+        _input: Self::PostExecutionInput,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)

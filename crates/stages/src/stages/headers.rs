@@ -54,7 +54,7 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     /// The sync mode for the stage.
     mode: HeaderSyncMode,
     /// Consensus client implementation
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap>,
     /// ETL collector with HeaderHash -> BlockNumber
@@ -76,7 +76,7 @@ where
         database: Provider,
         downloader: Downloader,
         mode: HeaderSyncMode,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         etl_config: EtlConfig,
     ) -> Self {
         Self {

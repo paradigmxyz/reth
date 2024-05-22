@@ -44,6 +44,8 @@ impl OptimismBeaconConsensus {
 }
 
 impl Consensus for OptimismBeaconConsensus {
+    type PostExecutionInput = ();
+
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_standalone(header, &self.chain_spec)?;
         Ok(())
@@ -112,6 +114,7 @@ impl Consensus for OptimismBeaconConsensus {
         &self,
         block: &BlockWithSenders,
         receipts: &[Receipt],
+        _input: &Self::PostExecutionInput,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, receipts)
     }

@@ -33,7 +33,7 @@
 //! # use reth_consensus::test_utils::TestConsensus;
 //! #
 //! # let chain_spec = MAINNET.clone();
-//! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
+//! # let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
 //! #    consensus.clone()

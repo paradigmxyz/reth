@@ -112,7 +112,7 @@ where
             });
 
         // setup the consensus instance
-        let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
+        let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> = if ctx.is_dev() {
             Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
         } else {
             Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))

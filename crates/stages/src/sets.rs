@@ -93,7 +93,7 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E> {
     pub fn new(
         provider: Provider,
         header_mode: HeaderSyncMode,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         header_downloader: H,
         body_downloader: B,
         executor_factory: E,
@@ -166,7 +166,7 @@ pub struct OnlineStages<Provider, H, B> {
     /// The sync mode for the headers stage.
     header_mode: HeaderSyncMode,
     /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -180,7 +180,7 @@ impl<Provider, H, B> OnlineStages<Provider, H, B> {
     pub fn new(
         provider: Provider,
         header_mode: HeaderSyncMode,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
@@ -209,7 +209,7 @@ where
         provider: Provider,
         mode: HeaderSyncMode,
         header_downloader: H,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         stages_config: StageConfig,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()

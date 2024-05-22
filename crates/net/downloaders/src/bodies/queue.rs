@@ -56,7 +56,7 @@ where
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         request: Vec<SealedHeader>,
     ) {
         // Set last max requested block number

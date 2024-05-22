@@ -50,7 +50,7 @@ impl TaskDownloader {
     ///
     /// fn t<B: BodiesClient + 'static, Provider: HeaderProvider + Unpin + 'static>(
     ///     client: Arc<B>,
-    ///     consensus: Arc<dyn Consensus>,
+    ///     consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
     ///     provider: Provider,
     /// ) {
     ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);

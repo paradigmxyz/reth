@@ -160,7 +160,7 @@ impl Command {
             data_dir.static_files(),
         )?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         let executor = block_executor!(self.chain.clone());

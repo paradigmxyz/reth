@@ -157,7 +157,7 @@ impl Command {
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
 
         // build the full block client
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 

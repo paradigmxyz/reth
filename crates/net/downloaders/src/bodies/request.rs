@@ -37,7 +37,7 @@ use std::{
 /// and eventually disconnected.
 pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
     metrics: BodyDownloaderMetrics,
     /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
     /// responses change while bodies are being downloaded.
@@ -58,7 +58,7 @@ where
     /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
     pub(crate) fn new(
         client: Arc<B>,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<PostExecutionInput = ()>>,
         metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {

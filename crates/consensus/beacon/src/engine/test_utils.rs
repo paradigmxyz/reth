@@ -320,12 +320,13 @@ where
         let provider_factory =
             create_test_provider_factory_with_chain_spec(self.base_config.chain_spec.clone());
 
-        let consensus: Arc<dyn Consensus> = match self.base_config.consensus {
-            TestConsensusConfig::Real => {
-                Arc::new(EthBeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
-            }
-            TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
-        };
+        let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> =
+            match self.base_config.consensus {
+                TestConsensusConfig::Real => {
+                    Arc::new(EthBeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
+                }
+                TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
+            };
         let payload_builder = spawn_test_payload_service::<EthEngineTypes>();
 
         // use either noop client or a user provided client (for example TestFullBlockClient)

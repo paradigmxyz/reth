@@ -223,7 +223,7 @@ pub async fn build_import_pipeline<DB, C>(
 ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
 where
     DB: Database + Clone + Unpin + 'static,
-    C: Consensus + 'static,
+    C: Consensus<PostExecutionInput = ()> + 'static,
 {
     if !file_client.has_canonical_blocks() {
         eyre::bail!("unable to import non canonical blocks");

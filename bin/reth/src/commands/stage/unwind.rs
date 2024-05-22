@@ -126,7 +126,7 @@ impl Command {
         config: Config,
         provider_factory: ProviderFactory<Arc<DB>>,
     ) -> Result<Pipeline<Arc<DB>>, eyre::Error> {
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<PostExecutionInput = ()>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let stage_conf = &config.stages;
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();

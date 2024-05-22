@@ -65,6 +65,8 @@ impl AutoSealConsensus {
 }
 
 impl Consensus for AutoSealConsensus {
+    type PostExecutionInput = ();
+
     fn validate_header(&self, _header: &SealedHeader) -> Result<(), ConsensusError> {
         Ok(())
     }
@@ -93,6 +95,7 @@ impl Consensus for AutoSealConsensus {
         &self,
         _block: &BlockWithSenders,
         _receipts: &[Receipt],
+        _input: Self::PostExecutionInput,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }
