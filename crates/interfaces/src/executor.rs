@@ -85,9 +85,6 @@ pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// Pruning error, transparently wrapping `PruneSegmentError`
-    #[error(transparent)]
-    Pruning(#[from] PruneSegmentError),
     /// Transaction error on revert with inner details
     #[error("transaction error on revert: {inner}")]
     CanonicalRevert {
@@ -118,7 +115,7 @@ pub enum BlockExecutionError {
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
-    /// Optimism Block Executor Errors
+    /// Any other Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
