@@ -41,6 +41,7 @@ tracing.workspace = true
 # io
 serde.workspace = true
 serde_json.workspace = true
+reqwest.workspace = true
 
 # async
 tokio = { workspace = true, features = [

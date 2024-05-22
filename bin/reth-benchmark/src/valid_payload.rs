@@ -3,7 +3,10 @@
 //! before sending additional calls.
 
 use alloy_provider::{ext::EngineApi, Network};
-use alloy_rpc_types_engine::{ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum,
+};
 use alloy_transport::{Transport, TransportResult};
 use reth_primitives::B256;
 use reth_rpc_types::{ExecutionPayloadV1, ExecutionPayloadV3};
@@ -72,6 +75,7 @@ where
     ) -> TransportResult<PayloadStatus> {
         // TODO: remove clones somehow?
         let mut status = self.new_payload_v1(payload.clone()).await?;
+        // TODO: log invalids
         while status.status != PayloadStatusEnum::Valid {
             status = self.new_payload_v1(payload.clone()).await?;
         }
@@ -113,14 +117,12 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
-        let mut status = self
-            .fork_choice_updated_v1(fork_choice_state, payload_attributes.clone())
-            .await?;
+        let mut status =
+            self.fork_choice_updated_v1(fork_choice_state, payload_attributes.clone()).await?;
 
         while status.payload_status.status != PayloadStatusEnum::Valid {
-            status = self
-                .fork_choice_updated_v1(fork_choice_state, payload_attributes.clone())
-                .await?;
+            status =
+                self.fork_choice_updated_v1(fork_choice_state, payload_attributes.clone()).await?;
         }
 
         Ok(status)
@@ -131,14 +133,12 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
-        let mut status = self
-            .fork_choice_updated_v2(fork_choice_state, payload_attributes.clone())
-            .await?;
+        let mut status =
+            self.fork_choice_updated_v2(fork_choice_state, payload_attributes.clone()).await?;
 
         while status.payload_status.status != PayloadStatusEnum::Valid {
-            status = self
-                .fork_choice_updated_v2(fork_choice_state, payload_attributes.clone())
-                .await?;
+            status =
+                self.fork_choice_updated_v2(fork_choice_state, payload_attributes.clone()).await?;
         }
 
         Ok(status)
@@ -149,14 +149,12 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
-        let mut status = self
-            .fork_choice_updated_v3(fork_choice_state, payload_attributes.clone())
-            .await?;
+        let mut status =
+            self.fork_choice_updated_v3(fork_choice_state, payload_attributes.clone()).await?;
 
         while status.payload_status.status != PayloadStatusEnum::Valid {
-            status = self
-                .fork_choice_updated_v3(fork_choice_state, payload_attributes.clone())
-                .await?;
+            status =
+                self.fork_choice_updated_v3(fork_choice_state, payload_attributes.clone()).await?;
         }
 
         Ok(status)
