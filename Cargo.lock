@@ -1451,7 +1451,7 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-tracing",
- "secp256k1",
+ "secp256k1 0.28.2",
  "serde_json",
  "tokio",
  "tokio-stream",
