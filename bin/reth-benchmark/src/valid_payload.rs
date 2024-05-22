@@ -21,7 +21,7 @@ pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
         payload: ExecutionPayloadV1,
     ) -> TransportResult<PayloadStatus>;
 
-    /// Calls `engine_newPayloadV2` with the given [ExecutionPayloadV2], and waits until the
+    /// Calls `engine_newPayloadV2` with the given [ExecutionPayloadInputV2], and waits until the
     /// response is VALID.
     async fn new_payload_v2_wait(
         &self,

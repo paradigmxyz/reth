@@ -49,7 +49,7 @@ where
     /// }
     /// ```
     #[allow(clippy::type_complexity)]
-    pub(crate) fn new(
+    pub fn new(
         mut mode: BenchmarkMode,
         provider: &'a RootProvider<T>,
         buffer_size: usize,
@@ -209,7 +209,7 @@ where
     ///     }
     /// }
     /// ```
-    pub(crate) fn new(
+    pub fn new(
         mode: BenchmarkMode,
         provider: &'a RootProvider<T>,
         buffer_size: usize,
