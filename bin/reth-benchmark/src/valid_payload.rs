@@ -3,7 +3,7 @@
 //! before sending additional calls.
 
 use alloy_provider::{ext::EngineApi, Network};
-use alloy_rpc_types_engine::{ExecutionPayloadInputV2, PayloadStatus, PayloadStatusEnum};
+use alloy_rpc_types_engine::{ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum};
 use alloy_transport::{Transport, TransportResult};
 use reth_primitives::B256;
 use reth_rpc_types::{ExecutionPayloadV1, ExecutionPayloadV3};
@@ -34,7 +34,29 @@ pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
         parent_beacon_block_root: B256,
     ) -> TransportResult<PayloadStatus>;
 
-    // TODO: add forkchoiceUpdated
+    /// Calls `engine_forkChoiceUpdatedV1` with the given [ForkchoiceState] and optional
+    /// [PayloadAttributes], and waits until the response is VALID.
+    async fn fork_choice_updated_v1_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated>;
+
+    /// Calls `engine_forkChoiceUpdatedV2` with the given [ForkchoiceState] and optional
+    /// [PayloadAttributes], and waits until the response is VALID.
+    async fn fork_choice_updated_v2_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated>;
+
+    /// Calls `engine_forkChoiceUpdatedV3` with the given [ForkchoiceState] and optional
+    /// [PayloadAttributes], and waits until the response is VALID.
+    async fn fork_choice_updated_v3_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated>;
 }
 
 #[async_trait::async_trait]
@@ -83,6 +105,60 @@ where
                 .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
                 .await?;
         }
+        Ok(status)
+    }
+
+    async fn fork_choice_updated_v1_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated> {
+        let mut status = self
+            .fork_choice_updated_v1(fork_choice_state, payload_attributes.clone())
+            .await?;
+
+        while status.payload_status.status != PayloadStatusEnum::Valid {
+            status = self
+                .fork_choice_updated_v1(fork_choice_state, payload_attributes.clone())
+                .await?;
+        }
+
+        Ok(status)
+    }
+
+    async fn fork_choice_updated_v2_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated> {
+        let mut status = self
+            .fork_choice_updated_v2(fork_choice_state, payload_attributes.clone())
+            .await?;
+
+        while status.payload_status.status != PayloadStatusEnum::Valid {
+            status = self
+                .fork_choice_updated_v2(fork_choice_state, payload_attributes.clone())
+                .await?;
+        }
+
+        Ok(status)
+    }
+
+    async fn fork_choice_updated_v3_wait(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> TransportResult<ForkchoiceUpdated> {
+        let mut status = self
+            .fork_choice_updated_v3(fork_choice_state, payload_attributes.clone())
+            .await?;
+
+        while status.payload_status.status != PayloadStatusEnum::Valid {
+            status = self
+                .fork_choice_updated_v3(fork_choice_state, payload_attributes.clone())
+                .await?;
+        }
+
         Ok(status)
     }
 }
