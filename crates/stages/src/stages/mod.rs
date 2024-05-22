@@ -45,6 +45,7 @@ mod tests {
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{cursor::Cursor, RW},
+        table::Table,
         tables,
         test_utils::TempDatabase,
         transaction::{DbTx, DbTxMut},
@@ -61,8 +62,8 @@ mod tests {
         hex_literal::hex,
         keccak256,
         stage::{PipelineTarget, StageCheckpoint, StageId},
-        Account, Bytecode, ChainSpecBuilder, PruneMode, PruneModes,
-        SealedBlock, StaticFileSegment, B256, U256,
+        Account, BlockNumber, Bytecode, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock,
+        StaticFileSegment, B256, U256,
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
@@ -275,28 +276,90 @@ mod tests {
         // simulate pipeline by setting all checkpoints to inserted height.
         let provider_rw = db.factory.provider_rw()?;
         for stage in StageId::ALL {
-            provider_rw
-                .save_stage_checkpoint(stage, StageCheckpoint::new(tip))?;
+            provider_rw.save_stage_checkpoint(stage, StageCheckpoint::new(tip))?;
         }
         provider_rw.commit()?;
 
         Ok(db)
     }
 
-    // Simulates a pruning job that was never committed.
-    fn simulate_no_commit_prune(
-        num_rows: usize,
-        static_file_provider: &StaticFileProvider,
+    /// Simulates a pruning job that was never committed and compare the check consistency result against the expected one.
+    fn simulate_no_commit_prune_and_check(
+        db: &TestStageDB,
+        prune_count: usize,
         segment: StaticFileSegment,
+        is_full_node: bool,
+        expected_unwind: Option<PipelineTarget>,
     ) {
-        let mut headers_writer = static_file_provider.latest_writer(segment).unwrap();
-        let reader = headers_writer.inner().jar().open_data_reader().unwrap();
-        let columns = headers_writer.inner().columns();
-        let data_file = headers_writer.inner().data_file();
-        let last_offset = reader.reverse_offset(num_rows * columns).unwrap();
-        data_file.get_mut().set_len(last_offset).unwrap();
-        data_file.flush().unwrap();
-        data_file.get_ref().sync_all().unwrap();
+        let static_file_provider = db.factory.static_file_provider();
+
+        // Simulate pruning by removing `prune_count` rows from the data file without updating its
+        // offset list and configuration.
+        {
+            let mut headers_writer = static_file_provider.latest_writer(segment).unwrap();
+            let reader = headers_writer.inner().jar().open_data_reader().unwrap();
+            let columns = headers_writer.inner().columns();
+            let data_file = headers_writer.inner().data_file();
+            let last_offset = reader.reverse_offset(prune_count * columns).unwrap();
+            data_file.get_mut().set_len(last_offset).unwrap();
+            data_file.flush().unwrap();
+            data_file.get_ref().sync_all().unwrap();
+        }
+
+        let db_provider = db.factory.database_provider_ro().unwrap();
+        let consistency_check =
+            static_file_provider.check_consistency(&db_provider, is_full_node, false);
+
+        assert_eq!(consistency_check, Ok(expected_unwind));
+    }
+
+    /// Saves a checkpoint with `checkpoint_block_number` and compare the check consistency result against the expected one.
+    fn save_checkpoint_and_check(
+        db: &TestStageDB, // replace DbType with your actual database type
+        stage_id: StageId,
+        checkpoint_block_number: BlockNumber,
+        expected_unwind: PipelineTarget,
+    ) {
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw
+            .save_stage_checkpoint(stage_id, StageCheckpoint::new(checkpoint_block_number))
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        assert_eq!(
+            db.factory.static_file_provider().check_consistency(
+                &db.factory.database_provider_ro().unwrap(),
+                false,
+                false
+            ),
+            Ok(Some(expected_unwind))
+        );
+    }
+
+    /// Inserts a dummy value at key and compare the check consistency result against the expected one.
+    fn update_db_and_check<T: Table<Key = u64>>(
+        db: &TestStageDB,
+        key: u64,
+        expect_unwind: Option<PipelineTarget>,
+    ) where
+        <T as Table>::Value: Default,
+    {
+        {
+            let provider_rw = db.factory.provider_rw().unwrap();
+            let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
+            cursor.insert(key, Default::default()).unwrap();
+            provider_rw.commit().unwrap();
+        }
+
+        let db_provider = db.factory.database_provider_ro().unwrap();
+        let consistency_check =
+            db.factory.static_file_provider().check_consistency(&db_provider, false, false);
+
+        if let Some(target) = expect_unwind {
+            assert_eq!(consistency_check, Ok(Some(target)));
+        } else {
+            assert_eq!(consistency_check, Ok(None));
+        }
     }
 
     #[test]
@@ -313,149 +376,92 @@ mod tests {
     #[test]
     fn test_consistency_no_commit_prune() {
         let db = seed_data(90).unwrap();
-        let db_provider = db.factory.database_provider_ro().unwrap();
-        let static_file_provider = db.factory.static_file_provider();
-        let mut is_full_node = true;
+        let full_node = true;
+        let archive_node = !full_node;
 
         // Full node does not use receipts, therefore doesn't check for consistency on receipts
         // segment
-        simulate_no_commit_prune(1, &static_file_provider, StaticFileSegment::Receipts);
-        assert_eq!(
-            static_file_provider.check_consistency(&db_provider, is_full_node, false),
-            Ok(None)
-        );
+        simulate_no_commit_prune_and_check(&db, 1, StaticFileSegment::Receipts, full_node, None);
 
-        is_full_node = false;
         // there are 2 to 3 transactions per block. however, if we lose one tx, we need to unwind to
         // the previous block.
-        simulate_no_commit_prune(1, &static_file_provider, StaticFileSegment::Receipts);
-        assert_eq!(
-            static_file_provider.check_consistency(&db_provider, is_full_node, false),
-            Ok(Some(PipelineTarget::Unwind(88)))
+        simulate_no_commit_prune_and_check(
+            &db,
+            1,
+            StaticFileSegment::Receipts,
+            archive_node,
+            Some(PipelineTarget::Unwind(88)),
         );
 
-        simulate_no_commit_prune(3, &static_file_provider, StaticFileSegment::Headers);
-        assert_eq!(
-            static_file_provider.check_consistency(&db_provider, is_full_node, false),
-            Ok(Some(PipelineTarget::Unwind(86)))
+        simulate_no_commit_prune_and_check(
+            &db,
+            3,
+            StaticFileSegment::Headers,
+            archive_node,
+            Some(PipelineTarget::Unwind(86)),
         );
     }
 
     #[test]
     fn test_consistency_checkpoints() {
         let db = seed_data(90).unwrap();
-        let static_file_provider = db.factory.static_file_provider();
 
-        let provider_rw = db.factory.provider_rw().unwrap();
-        provider_rw.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(91)).unwrap();
-        provider_rw.commit().unwrap();
+        save_checkpoint_and_check(&db, StageId::Headers, 91, PipelineTarget::Unwind(89));
 
-        assert_eq!(
-            static_file_provider.check_consistency(
-                &db.factory.database_provider_ro().unwrap(),
-                false,
-                false
-            ),
-            Ok(Some(PipelineTarget::Unwind(89)))
-        );
+        save_checkpoint_and_check(&db, StageId::Bodies, 87, PipelineTarget::Unwind(87));
 
-        let provider_rw = db.factory.provider_rw().unwrap();
-        provider_rw.save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(87)).unwrap();
-        provider_rw.commit().unwrap();
-
-        assert_eq!(
-            static_file_provider.check_consistency(
-                &db.factory.database_provider_ro().unwrap(),
-                false,
-                false
-            ),
-            Ok(Some(PipelineTarget::Unwind(87)))
-        );
-
-        let provider_rw = db.factory.provider_rw().unwrap();
-        provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(50)).unwrap();
-        provider_rw.commit().unwrap();
-
-        assert_eq!(
-            static_file_provider.check_consistency(
-                &db.factory.database_provider_ro().unwrap(),
-                false,
-                false
-            ),
-            Ok(Some(PipelineTarget::Unwind(50)))
-        );
+        save_checkpoint_and_check(&db, StageId::Execution, 50, PipelineTarget::Unwind(50));
     }
 
     #[test]
     fn test_consistency_headers_gap() {
         let db = seed_data(90).unwrap();
-        let static_file_provider = db.factory.static_file_provider();
+        let current = db
+            .factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .unwrap();
 
-        // Creates a gap of one block static_file(89) <missing 90> db_(91)
-        {
-            let current = static_file_provider
-                .get_highest_static_file_block(StaticFileSegment::Headers)
-                .unwrap();
-            let provider_rw = db.factory.provider_rw().unwrap();
-            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::Headers>().unwrap();
-            cursor.append(current + 2, Default::default()).unwrap();
-            provider_rw.commit().unwrap();
-        }
+        // Creates a gap of one header: static_file <missing> db
+        update_db_and_check::<tables::Headers>(&db, current + 2, Some(PipelineTarget::Unwind(89)));
 
-        let db_provider = db.factory.database_provider_ro().unwrap();
-        assert!(db_provider.header_by_number(90).unwrap().is_none());
-
-        assert_eq!(
-            static_file_provider.check_consistency(&db_provider, false, false),
-            Ok(Some(PipelineTarget::Unwind(89)))
-        );
+        // Fill the gap, and ensure no unwind is necessary.
+        update_db_and_check::<tables::Headers>(&db, current + 1, None);
     }
 
     #[test]
     fn test_consistency_tx_gap() {
         let db = seed_data(90).unwrap();
-        let static_file_provider = db.factory.static_file_provider();
-        let current = static_file_provider
+        let current = db
+            .factory
+            .static_file_provider()
             .get_highest_static_file_tx(StaticFileSegment::Transactions)
             .unwrap();
 
         // Creates a gap of one transaction: static_file <missing> db
-        {
-            let provider_rw = db.factory.provider_rw().unwrap();
-            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::Transactions>().unwrap();
-            cursor.append(current + 2, Default::default()).unwrap();
-            provider_rw.commit().unwrap();
-        }
-
-        let db_provider = db.factory.database_provider_ro().unwrap();
-        assert!(db_provider.transaction_by_id(current + 1).unwrap().is_none());
-
-        assert_eq!(
-            static_file_provider.check_consistency(&db_provider, false, false),
-            Ok(Some(PipelineTarget::Unwind(89)))
+        update_db_and_check::<tables::Transactions>(
+            &db,
+            current + 2,
+            Some(PipelineTarget::Unwind(89)),
         );
+
+        // Fill the gap, and ensure no unwind is necessary.
+        update_db_and_check::<tables::Transactions>(&db, current + 1, None);
     }
 
     #[test]
     fn test_consistency_receipt_gap() {
         let db = seed_data(90).unwrap();
-        let static_file_provider = db.factory.static_file_provider();
-        let current =
-            static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts).unwrap();
+        let current = db
+            .factory
+            .static_file_provider()
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .unwrap();
 
         // Creates a gap of one receipt: static_file <missing> db
-        {
-            let provider_rw = db.factory.provider_rw().unwrap();
-            let mut cursor = provider_rw.tx_ref().cursor_write::<tables::Receipts>().unwrap();
-            cursor.append(current + 2, Default::default()).unwrap();
-            provider_rw.commit().unwrap();
-        }
-        let db_provider = db.factory.database_provider_ro().unwrap();
-        assert!(db_provider.receipt(current + 1).unwrap().is_none());
+        update_db_and_check::<tables::Receipts>(&db, current + 2, Some(PipelineTarget::Unwind(89)));
 
-        assert_eq!(
-            static_file_provider.check_consistency(&db_provider, false, false),
-            Ok(Some(PipelineTarget::Unwind(89)))
-        );
+        // Fill the gap, and ensure no unwind is necessary.
+        update_db_and_check::<tables::Receipts>(&db, current + 1, None);
     }
 }
