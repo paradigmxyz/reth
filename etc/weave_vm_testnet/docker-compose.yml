@@ -20,6 +20,7 @@ services:
       - ./../jwttoken:/root/jwt:ro
     command:
       - node
+      - --metrics=0.0.0.0:9001
       - --http
       - --http.addr=0.0.0.0
       - --http.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
@@ -36,8 +37,7 @@ services:
       - --chain=/genesis/genesis.json
       - --disable-discovery
       - --datadir=/data
-      - --metrics 0.0.0.0:9001
-      - --log.file.directory /root/logs
+      - --log.file.directory=/root/logs
 
   # default prometheus + grafana setup
   prometheus:
@@ -86,7 +86,7 @@ services:
       - "3500:3500"
       - "8080:8080"
       - "6060:6060"
-      - "9090:9090"
+      - "9090:9091"
     volumes:
       - prysm_data:/data
       - ./../jwttoken:/root/jwt:ro
@@ -120,7 +120,7 @@ services:
       - --accept-terms-of-use
       - --interop-num-validators=1
       - --interop-start-index=0
-      - --chain-config-file=/consensus/config.yml
+      - --chain-config-file=/data/config.yml
     depends_on:
       beacon-chain:
         condition: service_started
