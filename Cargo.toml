@@ -279,8 +279,8 @@ reth-node-events = { path = "crates/node/events" }
 reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
-revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.1.1", features = ["std"], default-features = false }
+revm = { version = "8.0.0", features = ["std", "secp256k1", "taiko"], default-features = false }
+revm-primitives = { version = "3.1.1", features = ["std", "taiko"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "848d568" }
 
 # eth
@@ -411,9 +411,13 @@ alloy-rpc-types = { git = "https://github.com/brechtpd/alloy", branch = "175_4e2
 alloy-rpc-types-trace = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
 
 [patch.crates-io]
-revm = { git = "https://github.com/taikoxyz/revm.git", branch = "feat/zk-op", default-features = false, features = [
+revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v35_taiko_v2", default-features = false, features = [
     "std",
     "serde",
-    "taiko",
+    #"taiko",
 ]}
-revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "feat/zk-op", default-features = false }
+revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v35_taiko_v2", default-features = false, features = [
+    #"std",
+    #"serde",
+    #"taiko",
+]}

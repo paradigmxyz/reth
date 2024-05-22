@@ -2,7 +2,7 @@
 
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::U256;
-use revm::db::BundleState;
+use revm::db::{BundleState, State};
 use revm_primitives::db::Database;
 
 /// A general purpose executor trait that executes on an input (e.g. blocks) and produces an output
@@ -51,13 +51,15 @@ pub struct BatchBlockOutput {
 ///
 /// TODO(mattsse): combine with BundleStateWithReceipts
 #[derive(Debug)]
-pub struct EthBlockOutput<T> {
+pub struct EthBlockOutput<T, DB> {
     /// The changed state of the block after execution.
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
     /// The total gas used by the block.
     pub gas_used: u64,
+    /// The full state.
+    pub db: State<DB>,
 }
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.

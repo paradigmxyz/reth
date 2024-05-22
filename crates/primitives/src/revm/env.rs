@@ -171,6 +171,7 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
             // enveloped tx size.
             enveloped_tx: Some(Bytes::default()),
         },
+        //#[cfg(feature = "taiko")]
         taiko: revm_primitives::TaikoFields { treasury: Address::default(), is_anchor: false },
     };
 

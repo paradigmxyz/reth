@@ -167,7 +167,7 @@ impl TryFrom<reth_rpc_types::Block> for Block {
                                 s: signature.s,
                                 odd_y_parity: signature
                                     .y_parity
-                                    .unwrap_or(reth_rpc_types::Parity(false))
+                                    .unwrap_or_else(|| reth_rpc_types::Parity(!signature.v.bit(0)))
                                     .0,
                             },
                         ))

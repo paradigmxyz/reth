@@ -27,8 +27,7 @@ use reth_revm::{
     Evm, State,
 };
 use revm_primitives::{
-    db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+    db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HashMap, ResultAndState
 };
 use std::sync::Arc;
 use tracing::debug;
@@ -73,7 +72,7 @@ where
     EvmConfig: ConfigureEvm,
     EvmConfig: ConfigureEvmEnv<TxMeta = ()>,
 {
-    fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
+    pub fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
         DB: Database<Error = ProviderError>,
     {
@@ -140,6 +139,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
+        optimistic: bool,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
         DB: Database<Error = ProviderError>,
@@ -161,6 +161,9 @@ where
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
+                if optimistic {
+                    continue;
+                }
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
@@ -171,13 +174,17 @@ where
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, ());
 
             // Execute transaction.
-            let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+            let res = evm.transact().map_err(move |err| {
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
                     error: err.into(),
                 }
-            })?;
+            });
+            if optimistic && res.is_err() {
+                continue;
+            }
+            let ResultAndState { result, state } = res?;
             evm.db_mut().commit(state);
 
             // append gas used
@@ -200,14 +207,16 @@ where
         }
         drop(evm);
 
-        // Check if gas used matches the value set in header.
-        if block.gas_used != cumulative_gas_used {
-            let receipts = Receipts::from_block_receipt(receipts);
-            return Err(BlockValidationError::BlockGasUsed {
-                gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
-                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
+        if !optimistic {
+            // Check if gas used matches the value set in header.
+            if block.gas_used != cumulative_gas_used {
+                let receipts = Receipts::from_block_receipt(receipts);
+                return Err(BlockValidationError::BlockGasUsed {
+                    gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+                    gas_spent_by_tx: receipts.gas_spent_by_tx()?,
+                }
+                .into())
             }
-            .into())
         }
 
         Ok((receipts, cumulative_gas_used))
@@ -227,17 +236,25 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
     state: State<DB>,
     /// Optional inspector stack for debugging
     inspector: Option<InspectorStack>,
+    /// Allows the execution to continue even when a tx is invalid
+    optimistic: bool,
 }
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None }
+        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None, optimistic: false }
     }
 
     /// Sets the inspector stack for debugging.
     pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
         self.inspector = inspector;
+        self
+    }
+
+    /// Optimistic execution
+    pub fn optimistic(mut self, optimistic: bool) -> Self {
+        self.optimistic = optimistic;
         self
     }
 
@@ -248,7 +265,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
     /// Returns mutable reference to the state that wraps the underlying database.
     #[allow(unused)]
-    fn state_mut(&mut self) -> &mut State<DB> {
+    pub fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
     }
 }
@@ -302,11 +319,11 @@ where
                     env,
                     inspector,
                 );
-                self.executor.execute_pre_and_transactions(block, evm)?
+                self.executor.execute_pre_and_transactions(block, evm, self.optimistic)?
             } else {
                 let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
 
-                self.executor.execute_pre_and_transactions(block, evm)?
+                self.executor.execute_pre_and_transactions(block, evm, self.optimistic)?
             }
         };
 
@@ -317,7 +334,7 @@ where
         // operation as hashing that is required for state root got calculated in every
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-        if self.chain_spec().is_byzantium_active_at_block(block.header.number) {
+        if !self.optimistic && self.chain_spec().is_byzantium_active_at_block(block.header.number) {
             if let Err(error) =
                 verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
             {
@@ -367,9 +384,10 @@ where
             // return balance to DAO beneficiary.
             *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
         }
+
         // increment balances
         self.state
-            .increment_balances(balance_increments)
+            .increment_balances(balance_increments.clone())
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
         Ok(())
@@ -383,7 +401,7 @@ where
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = EthBlockExecutionInput<'a, BlockWithSenders>;
-    type Output = EthBlockOutput<Receipt>;
+    type Output = EthBlockOutput<Receipt, DB>;
     type Error = BlockExecutionError;
 
     /// Executes the block and commits the state changes.
@@ -400,7 +418,7 @@ where
         // prepare the state for extraction
         self.state.merge_transitions(BundleRetention::PlainState);
 
-        Ok(EthBlockOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(EthBlockOutput { state: self.state.take_bundle(), receipts, gas_used, db: self.state })
     }
 }
 

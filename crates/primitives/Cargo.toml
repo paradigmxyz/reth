@@ -113,6 +113,10 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]
+taiko = [
+    "revm-primitives/taiko",
+    "revm/taiko",
+]
 test-utils = ["dep:plain_hasher", "dep:hash-db"]
 
 [[bench]]
