@@ -1,0 +1,135 @@
+version: "3.8"
+
+services:
+  reth:
+    image: reth:local # ghcr.io/paradigmxyz/reth:latest
+    container_name: reth
+    restart: unless-stopped
+    ports:
+      - "8551:8551"
+      - "8545:8545"
+      - "8546:8546"
+      - "30304:30304/tcp" #p2p
+      - "30304:30304/udp" #p2p
+      - '9001:9001' # metrics
+    volumes:
+      - reth_data:/data
+      - reth_jwt:/jwt:ro
+      - reth_genesis:/genesis:ro
+      - logs:/root/logs
+      - ./../jwttoken:/root/jwt:ro
+    command:
+      - node
+      - --metrics=0.0.0.0:9001
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
+      - --http.corsdomain=*
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
+      - --ws.origins=*
+      - --auth-ipc
+      - --auth-ipc.path=/data/reth_engine_api.ipc
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/root/jwt/jwt.hex
+      - --chain=/genesis/genesis.json
+      - --disable-discovery
+      - --datadir=/data
+      - --log.file.directory=/root/logs
+
+  # default prometheus + grafana setup
+  prometheus:
+    restart: unless-stopped
+    image: prom/prometheus
+    depends_on:
+      - reth
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./../prometheus/:/etc/prometheus/
+      - prometheusdata:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  grafana:
+    restart: unless-stopped
+    image: grafana/grafana:10.3.3
+    depends_on:
+      - reth
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./../grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./../grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
+    # 1. Copy dashboards from temp directory to prevent modifying original host files
+    # 2. Replace Prometheus datasource placeholder with the actual name
+    # 3. Run Grafana
+    entrypoint: >
+      sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
+             find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
+             /run.sh"
+
+  # Consensus client part
+
+  # Runs a Prysm beacon chain from a specified genesis state
+  beacon-chain:
+    image: "gcr.io/prysmaticlabs/prysm/beacon-chain:stable"
+    ports:
+      - "4000:4000"
+      - "3500:3500"
+      - "8080:8080"
+      - "6060:6060"
+      - "9090:9091"
+    volumes:
+      - prysm_data:/data
+      - ./../jwttoken:/root/jwt:ro
+    command:
+      - --datadir=/data/beacondata
+      - --min-sync-peers=0
+      - --genesis-state=/data/genesis.ssz
+      - --bootstrap-node=
+      - --interop-eth1data-votes
+      - --chain-config-file=/data/config.yml
+      - --contract-deployment-block=0
+      - --chain-id=${CHAIN_ID:-9496}
+      - --execution-endpoint=http://reth:8551
+      - --rpc-host=0.0.0.0
+      - --grpc-gateway-host=0.0.0.0
+      - --accept-terms-of-use
+      - --jwt-secret=/root/jwt/jwt.hex
+      - --suggested-fee-recipient=0x123463a4b065722e99115d6c222f267d9cabb524
+      - --minimum-peers-per-subnet=0
+      - --enable-debug-rpc-endpoints
+
+  # We run a validator client with deterministically-generated keys that match
+  # The validator keys present in the beacon chain genesis state generated a few steps above.
+  validator:
+    image: "gcr.io/prysmaticlabs/prysm/validator:stable"
+    volumes:
+      - prysm_data:/data
+    command:
+      - --beacon-rpc-provider=beacon-chain:4000
+      - --datadir=/data/validatordata
+      - --accept-terms-of-use
+      - --interop-num-validators=1
+      - --interop-start-index=0
+      - --chain-config-file=/data/config.yml
+    depends_on:
+      beacon-chain:
+        condition: service_started
+
+volumes:
+  reth_data:
+  reth_jwt:
+  reth_genesis:
+  logs:
+  prometheusdata:
+  grafanadata:
+  prysm_data:
