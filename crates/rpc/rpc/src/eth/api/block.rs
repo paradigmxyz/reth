@@ -2,14 +2,14 @@
 
 use crate::{
     eth::{
-        api::transactions::build_transaction_receipt_with_block_receipts,
+        api::transactions::ReceiptResponseBuilder,
         error::{EthApiError, EthResult},
     },
     EthApi,
 };
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, TransactionMeta};
+use reth_primitives::{BlockId, Receipt, SealedBlock, TransactionMeta};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
@@ -56,6 +56,25 @@ where
         Ok(uncle)
     }
 
+    /// Loads a bock and its corresponding receipts.
+    pub async fn load_block_and_receipts(
+        &self,
+        block_id: BlockId,
+    ) -> EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>> {
+        if block_id.is_pending() {
+            return Ok(self
+                .provider()
+                .pending_block_and_receipts()?
+                .map(|(sb, receipts)| (sb, Arc::new(receipts))))
+        }
+
+        if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
+            return Ok(self.cache().get_block_and_receipts(block_hash).await?)
+        }
+
+        Ok(None)
+    }
+
     /// Returns all transaction receipts in the block.
     ///
     /// Returns `None` if the block wasn't found.
@@ -63,30 +82,13 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<Vec<AnyTransactionReceipt>>> {
-        let mut block_and_receipts = None;
-
-        if block_id.is_pending() {
-            block_and_receipts = self
-                .provider()
-                .pending_block_and_receipts()?
-                .map(|(sb, receipts)| (sb, Arc::new(receipts)));
-        } else if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
-            block_and_receipts = self.cache().get_block_and_receipts(block_hash).await?;
-        }
-
-        if let Some((block, receipts)) = block_and_receipts {
+        if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
             let block_number = block.number;
             let base_fee = block.base_fee_per_gas;
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas;
             let timestamp = block.timestamp;
             let block = block.unseal();
-
-            #[cfg(feature = "optimism")]
-            let (block_timestamp, l1_block_info) = {
-                let body = reth_evm_optimism::extract_l1_info(&block);
-                (block.timestamp, body.ok())
-            };
 
             let receipts = block
                 .body
@@ -104,18 +106,8 @@ where
                         timestamp,
                     };
 
-                    #[cfg(feature = "optimism")]
-                    let op_tx_meta =
-                        self.build_op_tx_meta(&tx, l1_block_info.clone(), block_timestamp)?;
-
-                    build_transaction_receipt_with_block_receipts(
-                        tx,
-                        meta,
-                        receipt.clone(),
-                        &receipts,
-                        #[cfg(feature = "optimism")]
-                        op_tx_meta,
-                    )
+                    ReceiptResponseBuilder::new(&tx, meta, receipt, &receipts)
+                        .map(|builder| builder.build())
                 })
                 .collect::<EthResult<Vec<_>>>();
             return receipts.map(Some)

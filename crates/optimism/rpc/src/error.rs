@@ -1,12 +1,10 @@
-//! Optimism specific types.
+//! RPC errors specific to OP.
 
 use jsonrpsee::types::ErrorObject;
+use reth_rpc::{eth::error::EthApiError, result::internal_rpc_err};
 use reth_rpc_types::ToRpcError;
 
-use crate::{eth::error::EthApiError, result::internal_rpc_err};
-
 /// Eth Optimism Api Error
-#[cfg(feature = "optimism")]
 #[derive(Debug, thiserror::Error)]
 pub enum OptimismEthApiError {
     /// Thrown when calculating L1 gas fee

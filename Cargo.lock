@@ -7498,6 +7498,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-rpc"
+version = "0.2.0-beta.7"
+dependencies = [
+ "jsonrpsee",
+ "reth-evm",
+ "reth-evm-optimism",
+ "reth-network-api",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc",
+ "reth-rpc-api",
+ "reth-rpc-types",
+ "reth-transaction-pool",
+ "revm",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-payload-builder"
 version = "0.2.0-beta.7"
 dependencies = [
@@ -7672,7 +7690,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-evm-optimism",
  "reth-interfaces",
  "reth-metrics",
  "reth-network-api",

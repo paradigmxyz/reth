@@ -36,18 +36,16 @@ use std::{
 };
 use tokio::sync::{oneshot, Mutex};
 
-mod block;
+pub mod block;
 mod call;
 pub(crate) mod fee_history;
 
 mod fees;
-#[cfg(feature = "optimism")]
-mod optimism;
 mod pending_block;
 mod server;
 mod sign;
 mod state;
-mod transactions;
+pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
 pub use transactions::{EthTransactions, TransactionSource};
@@ -188,7 +186,7 @@ where
     }
 
     /// Returns the state cache frontend
-    pub(crate) fn cache(&self) -> &EthStateCache {
+    pub fn cache(&self) -> &EthStateCache {
         &self.inner.eth_cache
     }
 
@@ -463,7 +461,8 @@ impl From<GasCap> for u64 {
 }
 
 /// Container type `EthApi`
-struct EthApiInner<Provider, Pool, Network, EvmConfig> {
+#[allow(missing_debug_implementations)]
+pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.

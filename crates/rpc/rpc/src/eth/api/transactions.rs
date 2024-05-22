@@ -26,6 +26,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
+    other::OtherFields,
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
@@ -48,8 +49,6 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::future::Future;
 
 use crate::eth::revm_utils::FillableTransaction;
-#[cfg(feature = "optimism")]
-use reth_rpc_types::OptimismTransactionReceiptFields;
 use revm_primitives::db::{Database, DatabaseRef};
 
 /// Helper alias type for the state's [CacheDB]
@@ -1460,7 +1459,6 @@ where
     /// Helper function for `eth_getTransactionReceipt`
     ///
     /// Returns the receipt
-    #[cfg(not(feature = "optimism"))]
     pub(crate) async fn build_transaction_receipt(
         &self,
         tx: TransactionSigned,
@@ -1472,76 +1470,8 @@ where
             Some(recpts) => recpts,
             None => return Err(EthApiError::UnknownBlockNumber),
         };
-        build_transaction_receipt_with_block_receipts(tx, meta, receipt, &all_receipts)
-    }
 
-    /// Helper function for `eth_getTransactionReceipt` (optimism)
-    ///
-    /// Returns the receipt
-    #[cfg(feature = "optimism")]
-    pub(crate) async fn build_transaction_receipt(
-        &self,
-        tx: TransactionSigned,
-        meta: TransactionMeta,
-        receipt: Receipt,
-    ) -> EthResult<AnyTransactionReceipt> {
-        let (block, receipts) = self
-            .cache()
-            .get_block_and_receipts(meta.block_hash)
-            .await?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
-
-        let block = block.unseal();
-        let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();
-        let optimism_tx_meta = self.build_op_tx_meta(&tx, l1_block_info, block.timestamp)?;
-
-        build_transaction_receipt_with_block_receipts(
-            tx,
-            meta,
-            receipt,
-            &receipts,
-            optimism_tx_meta,
-        )
-    }
-
-    /// Builds op metadata object using the provided [TransactionSigned], L1 block info and
-    /// `block_timestamp`. The L1BlockInfo is used to calculate the l1 fee and l1 data gas for the
-    /// transaction. If the L1BlockInfo is not provided, the meta info will be empty.
-    #[cfg(feature = "optimism")]
-    pub(crate) fn build_op_tx_meta(
-        &self,
-        tx: &TransactionSigned,
-        l1_block_info: Option<revm::L1BlockInfo>,
-        block_timestamp: u64,
-    ) -> EthResult<crate::eth::api::optimism::OptimismTxMeta> {
-        use crate::eth::{api::optimism::OptimismTxMeta, optimism::OptimismEthApiError};
-        use reth_evm_optimism::RethL1BlockInfo;
-
-        let Some(l1_block_info) = l1_block_info else { return Ok(OptimismTxMeta::default()) };
-
-        let (l1_fee, l1_data_gas) = if !tx.is_deposit() {
-            let envelope_buf = tx.envelope_encoded();
-
-            let inner_l1_fee = l1_block_info
-                .l1_tx_data_fee(
-                    &self.inner.provider.chain_spec(),
-                    block_timestamp,
-                    &envelope_buf,
-                    tx.is_deposit(),
-                )
-                .map_err(|_| OptimismEthApiError::L1BlockFeeError)?;
-            let inner_l1_data_gas = l1_block_info
-                .l1_data_gas(&self.inner.provider.chain_spec(), block_timestamp, &envelope_buf)
-                .map_err(|_| OptimismEthApiError::L1BlockGasError)?;
-            (
-                Some(inner_l1_fee.saturating_to::<u128>()),
-                Some(inner_l1_data_gas.saturating_to::<u128>()),
-            )
-        } else {
-            (None, None)
-        };
-
-        Ok(OptimismTxMeta::new(Some(l1_block_info), l1_fee, l1_data_gas))
+        Ok(ReceiptResponseBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
     }
 }
 
@@ -1698,119 +1628,120 @@ impl From<TransactionSource> for Transaction {
     }
 }
 
-/// Helper function to construct a transaction receipt
-///
-/// Note: This requires _all_ block receipts because we need to calculate the gas used by the
-/// transaction.
-pub(crate) fn build_transaction_receipt_with_block_receipts(
-    transaction: TransactionSigned,
-    meta: TransactionMeta,
-    receipt: Receipt,
-    all_receipts: &[Receipt],
-    #[cfg(feature = "optimism")] optimism_tx_meta: crate::eth::api::optimism::OptimismTxMeta,
-) -> EthResult<AnyTransactionReceipt> {
-    // Note: we assume this transaction is valid, because it's mined (or part of pending block) and
-    // we don't need to check for pre EIP-2
-    let from =
-        transaction.recover_signer_unchecked().ok_or(EthApiError::InvalidTransactionSignature)?;
+/// Receipt response builder.
+#[derive(Debug)]
+pub struct ReceiptResponseBuilder {
+    /// The base response body, contains L1 fields.
+    base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
+    /// Additional L2 fields.
+    other: OtherFields,
+}
 
-    // get the previous transaction cumulative gas used
-    let gas_used = if meta.index == 0 {
-        receipt.cumulative_gas_used
-    } else {
-        let prev_tx_idx = (meta.index - 1) as usize;
-        all_receipts
-            .get(prev_tx_idx)
-            .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
-            .unwrap_or_default()
-    };
+impl ReceiptResponseBuilder {
+    /// Returns a new builder with the base response body (L1 fields) set.
+    ///
+    /// Note: This requires _all_ block receipts because we need to calculate the gas used by the
+    /// transaction.
+    pub fn new(
+        transaction: &TransactionSigned,
+        meta: TransactionMeta,
+        receipt: &Receipt,
+        all_receipts: &[Receipt],
+    ) -> EthResult<Self> {
+        // Note: we assume this transaction is valid, because it's mined (or part of pending block)
+        // and we don't need to check for pre EIP-2
+        let from = transaction
+            .recover_signer_unchecked()
+            .ok_or(EthApiError::InvalidTransactionSignature)?;
 
-    let blob_gas_used = transaction.transaction.blob_gas_used();
-    // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price = blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
-    let logs_bloom = receipt.bloom_slow();
+        // get the previous transaction cumulative gas used
+        let gas_used = if meta.index == 0 {
+            receipt.cumulative_gas_used
+        } else {
+            let prev_tx_idx = (meta.index - 1) as usize;
+            all_receipts
+                .get(prev_tx_idx)
+                .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
+                .unwrap_or_default()
+        };
 
-    // get number of logs in the block
-    let mut num_logs = 0;
-    for prev_receipt in all_receipts.iter().take(meta.index as usize) {
-        num_logs += prev_receipt.logs.len();
-    }
+        let blob_gas_used = transaction.transaction.blob_gas_used();
+        // Blob gas price should only be present if the transaction is a blob transaction
+        let blob_gas_price =
+            blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
+        let logs_bloom = receipt.bloom_slow();
 
-    let mut logs = Vec::with_capacity(receipt.logs.len());
-    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
-        let rpclog = Log {
-            inner: log,
+        // get number of logs in the block
+        let mut num_logs = 0;
+        for prev_receipt in all_receipts.iter().take(meta.index as usize) {
+            num_logs += prev_receipt.logs.len();
+        }
+
+        let mut logs = Vec::with_capacity(receipt.logs.len());
+        for (tx_log_idx, log) in receipt.logs.iter().enumerate() {
+            let rpclog = Log {
+                inner: log.clone(),
+                block_hash: Some(meta.block_hash),
+                block_number: Some(meta.block_number),
+                block_timestamp: Some(meta.timestamp),
+                transaction_hash: Some(meta.tx_hash),
+                transaction_index: Some(meta.index),
+                log_index: Some((num_logs + tx_log_idx) as u64),
+                removed: false,
+            };
+            logs.push(rpclog);
+        }
+
+        let rpc_receipt = reth_rpc_types::Receipt {
+            status: receipt.success,
+            cumulative_gas_used: receipt.cumulative_gas_used as u128,
+            logs,
+        };
+
+        let (contract_address, to) = match transaction.transaction.kind() {
+            Create => (Some(from.create(transaction.transaction.nonce())), None),
+            Call(addr) => (None, Some(Address(*addr))),
+        };
+
+        #[allow(clippy::needless_update)]
+        let base = TransactionReceipt {
+            inner: AnyReceiptEnvelope {
+                inner: ReceiptWithBloom { receipt: rpc_receipt, logs_bloom },
+                r#type: transaction.transaction.tx_type().into(),
+            },
+            transaction_hash: meta.tx_hash,
+            transaction_index: Some(meta.index),
             block_hash: Some(meta.block_hash),
             block_number: Some(meta.block_number),
-            block_timestamp: Some(meta.timestamp),
-            transaction_hash: Some(meta.tx_hash),
-            transaction_index: Some(meta.index),
-            log_index: Some((num_logs + tx_log_idx) as u64),
-            removed: false,
+            from,
+            to,
+            gas_used: gas_used as u128,
+            contract_address,
+            effective_gas_price: transaction.effective_gas_price(meta.base_fee),
+            // TODO pre-byzantium receipts have a post-transaction state root
+            state_root: None,
+            // EIP-4844 fields
+            blob_gas_price,
+            blob_gas_used: blob_gas_used.map(u128::from),
         };
-        logs.push(rpclog);
+
+        Ok(Self { base, other: Default::default() })
     }
 
-    let rpc_receipt = reth_rpc_types::Receipt {
-        status: receipt.success,
-        cumulative_gas_used: receipt.cumulative_gas_used as u128,
-        logs,
-    };
-
-    #[allow(clippy::needless_update)]
-    let res_receipt = TransactionReceipt {
-        inner: AnyReceiptEnvelope {
-            inner: ReceiptWithBloom { receipt: rpc_receipt, logs_bloom },
-            r#type: transaction.transaction.tx_type().into(),
-        },
-        transaction_hash: meta.tx_hash,
-        transaction_index: Some(meta.index),
-        block_hash: Some(meta.block_hash),
-        block_number: Some(meta.block_number),
-        from,
-        to: None,
-        gas_used: gas_used as u128,
-        contract_address: None,
-        effective_gas_price: transaction.effective_gas_price(meta.base_fee),
-        // TODO pre-byzantium receipts have a post-transaction state root
-        state_root: None,
-        // EIP-4844 fields
-        blob_gas_price,
-        blob_gas_used: blob_gas_used.map(u128::from),
-    };
-    let mut res_receipt = WithOtherFields::new(res_receipt);
-
-    #[cfg(feature = "optimism")]
-    {
-        let mut op_fields = OptimismTransactionReceiptFields::default();
-
-        if transaction.is_deposit() {
-            op_fields.deposit_nonce = receipt.deposit_nonce.map(reth_primitives::U64::from);
-            op_fields.deposit_receipt_version =
-                receipt.deposit_receipt_version.map(reth_primitives::U64::from);
-        } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
-            op_fields.l1_fee = optimism_tx_meta.l1_fee;
-            op_fields.l1_gas_used = optimism_tx_meta.l1_data_gas.map(|dg| {
-                dg + l1_block_info.l1_fee_overhead.unwrap_or_default().saturating_to::<u128>()
-            });
-            op_fields.l1_fee_scalar =
-                Some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
-            op_fields.l1_gas_price = Some(l1_block_info.l1_base_fee.saturating_to());
-        }
-
-        res_receipt.other = op_fields.into();
+    /// Adds fields to response body.
+    pub fn add_other_fields(mut self, mut fields: OtherFields) -> Self {
+        self.other.append(&mut fields);
+        self
     }
 
-    match transaction.transaction.kind() {
-        Create => {
-            res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
-        }
-        Call(addr) => {
-            res_receipt.to = Some(Address(*addr));
-        }
-    }
+    /// Builds a receipt response from the base response body, and any set additional fields.
+    pub fn build(self) -> AnyTransactionReceipt {
+        let Self { base, other } = self;
+        let mut res = WithOtherFields::new(base);
+        res.other = other;
 
-    Ok(res_receipt)
+        res
+    }
 }
 
 #[cfg(test)]
