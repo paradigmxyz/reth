@@ -305,11 +305,14 @@ mod tests {
             data_file.get_ref().sync_all().unwrap();
         }
 
-        let db_provider = db.factory.database_provider_ro().unwrap();
-        let consistency_check =
-            static_file_provider.check_consistency(&db_provider, is_full_node, false);
-
-        assert_eq!(consistency_check, Ok(expected_unwind));
+        assert_eq!(
+            static_file_provider.check_consistency(
+                &db.factory.database_provider_ro().unwrap(),
+                is_full_node,
+                false
+            ),
+            Ok(expect_unwind)
+        );
     }
 
     /// Saves a checkpoint with `checkpoint_block_number` and compare the check consistency result
@@ -345,22 +348,19 @@ mod tests {
     ) where
         <T as Table>::Value: Default,
     {
-        {
-            let provider_rw = db.factory.provider_rw().unwrap();
-            let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
-            cursor.insert(key, Default::default()).unwrap();
-            provider_rw.commit().unwrap();
-        }
+        let provider_rw = db.factory.provider_rw().unwrap();
+        let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
+        cursor.insert(key, Default::default()).unwrap();
+        provider_rw.commit().unwrap();
 
-        let db_provider = db.factory.database_provider_ro().unwrap();
-        let consistency_check =
-            db.factory.static_file_provider().check_consistency(&db_provider, false, false);
-
-        if let Some(target) = expect_unwind {
-            assert_eq!(consistency_check, Ok(Some(target)));
-        } else {
-            assert_eq!(consistency_check, Ok(None));
-        }
+        assert_eq!(
+            db.factory.static_file_provider().check_consistency(
+                &db.factory.database_provider_ro().unwrap(),
+                false,
+                false
+            ),
+            Ok(expect_unwind)
+        );
     }
 
     #[test]
