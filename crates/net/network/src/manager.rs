@@ -49,7 +49,7 @@ use reth_primitives::{ForkId, NodeRecord};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
@@ -84,8 +84,8 @@ pub struct NetworkManager<C> {
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
-    /// All listeners for high level network events.
-    event_listeners: EventListeners<NetworkEvent>,
+    /// Sender for high level network events.
+    event_sender: EventSender<NetworkEvent>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
     to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent>>,
@@ -246,7 +246,7 @@ where
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
-        let event_listeners: EventListeners<NetworkEvent> = Default::default();
+        let event_sender: EventSender<NetworkEvent> = Default::default();
 
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
@@ -260,7 +260,7 @@ where
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
             discv4,
-            event_listeners.clone(),
+            event_sender.clone(),
         );
 
         Ok(Self {
@@ -268,7 +268,7 @@ where
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
-            event_listeners,
+            event_sender,
             to_transactions_manager: None,
             to_eth_request_handler: None,
             num_active_peers,
@@ -690,7 +690,7 @@ where
 
                 self.update_active_connection_metrics();
 
-                self.event_listeners.notify(NetworkEvent::SessionEstablished {
+                self.event_sender.notify(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -702,12 +702,12 @@ where
             }
             SwarmEvent::PeerAdded(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer added");
-                self.event_listeners.notify(NetworkEvent::PeerAdded(peer_id));
+                self.event_sender.notify(NetworkEvent::PeerAdded(peer_id));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::PeerRemoved(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer dropped");
-                self.event_listeners.notify(NetworkEvent::PeerRemoved(peer_id));
+                self.event_sender.notify(NetworkEvent::PeerRemoved(peer_id));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
@@ -750,7 +750,7 @@ where
                             .saturating_sub(1)
                             as f64,
                     );
-                self.event_listeners.notify(NetworkEvent::SessionClosed { peer_id, reason });
+                self.event_sender.notify(NetworkEvent::SessionClosed { peer_id, reason });
             }
             SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 trace!(

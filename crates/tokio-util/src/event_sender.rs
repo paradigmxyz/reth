@@ -6,12 +6,12 @@ const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 2000;
 
 /// A bounded broadcast channel for a task.
 #[derive(Debug, Clone)]
-pub struct EventListeners<T> {
+pub struct EventSender<T> {
     /// The sender part of the broadcast channel
     sender: Sender<T>,
 }
 
-impl<T> Default for EventListeners<T>
+impl<T> Default for EventSender<T>
 where
     T: Clone + Send + Sync + 'static,
 {
@@ -20,8 +20,8 @@ where
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> EventListeners<T> {
-    /// Creates a new `EventListeners`.
+impl<T: Clone + Send + Sync + 'static> EventSender<T> {
+    /// Creates a new `EventSender`.
     pub fn new(events_channel_size: usize) -> Self {
         let (sender, _) = broadcast::channel(events_channel_size);
         Self { sender }

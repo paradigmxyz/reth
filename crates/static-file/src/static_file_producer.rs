@@ -10,7 +10,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     ProviderFactory,
 };
-use reth_tokio_util::{EventListeners, EventStream};
+use reth_tokio_util::{EventSender, EventStream};
 use std::{
     ops::{Deref, RangeInclusive},
     sync::Arc,
@@ -63,7 +63,7 @@ pub struct StaticFileProducerInner<DB> {
     /// needed in [StaticFileProducerInner] to prevent attempting to move prunable data to static
     /// files. See [StaticFileProducerInner::get_static_file_targets].
     prune_modes: PruneModes,
-    listeners: EventListeners<StaticFileProducerEvent>,
+    event_sender: EventSender<StaticFileProducerEvent>,
 }
 
 /// Static File targets, per data part, measured in [`BlockNumber`].
@@ -106,12 +106,17 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { provider_factory, static_file_provider, prune_modes, listeners: Default::default() }
+        Self {
+            provider_factory,
+            static_file_provider,
+            prune_modes,
+            event_sender: Default::default(),
+        }
     }
 
     /// Listen for events on the static_file_producer.
     pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
-        self.listeners.new_listener()
+        self.event_sender.new_listener()
     }
 
     /// Run the static_file_producer.
@@ -132,7 +137,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             self.static_file_provider.get_highest_static_files()
         ));
 
-        self.listeners.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
+        self.event_sender.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
 
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
@@ -172,7 +177,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics
         debug!(target: "static_file", ?targets, ?elapsed, "StaticFileProducer finished");
 
-        self.listeners
+        self.event_sender
             .notify(StaticFileProducerEvent::Finished { targets: targets.clone(), elapsed });
 
         Ok(targets)

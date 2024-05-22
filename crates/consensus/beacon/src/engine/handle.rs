@@ -10,7 +10,7 @@ use reth_interfaces::RethResult;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
-use reth_tokio_util::{EventListeners, EventStream};
+use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// A _shareable_ beacon consensus frontend type. Used to interact with the spawned beacon consensus
@@ -23,7 +23,7 @@ where
     Engine: EngineTypes,
 {
     pub(crate) to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-    event_listeners: EventListeners<BeaconConsensusEngineEvent>,
+    event_sender: EventSender<BeaconConsensusEngineEvent>,
 }
 
 // === impl BeaconConsensusEngineHandle ===
@@ -35,9 +35,9 @@ where
     /// Creates a new beacon consensus engine handle.
     pub fn new(
         to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-        event_listeners: EventListeners<BeaconConsensusEngineEvent>,
+        event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {
-        Self { to_engine, event_listeners }
+        Self { to_engine, event_sender }
     }
 
     /// Sends a new payload message to the beacon consensus engine and waits for a response.
@@ -93,6 +93,6 @@ where
 
     /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
     pub fn event_listener(&self) -> EventStream<BeaconConsensusEngineEvent> {
-        self.event_listeners.new_listener()
+        self.event_sender.new_listener()
     }
 }

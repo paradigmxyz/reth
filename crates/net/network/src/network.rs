@@ -16,7 +16,7 @@ use reth_network_api::{
 use reth_network_types::PeerId;
 use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
-use reth_tokio_util::{EventListeners, EventStream};
+use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
@@ -57,7 +57,7 @@ impl NetworkHandle {
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
-        event_listeners: EventListeners<NetworkEvent>,
+        event_sender: EventSender<NetworkEvent>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -73,7 +73,7 @@ impl NetworkHandle {
             chain_id,
             tx_gossip_disabled,
             discv4,
-            event_listeners,
+            event_sender,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -203,7 +203,7 @@ impl NetworkHandle {
 
 impl NetworkEvents for NetworkHandle {
     fn event_listener(&self) -> EventStream<NetworkEvent> {
-        self.inner.event_listeners.new_listener()
+        self.inner.event_sender.new_listener()
     }
 
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
@@ -405,8 +405,8 @@ struct NetworkInner {
     tx_gossip_disabled: bool,
     /// The instance of the discv4 service
     discv4: Option<Discv4>,
-    /// All listeners for high level network events.
-    event_listeners: EventListeners<NetworkEvent>,
+    /// Sender for high level network events.
+    event_sender: EventSender<NetworkEvent>,
 }
 
 /// Provides event subscription for the network.
