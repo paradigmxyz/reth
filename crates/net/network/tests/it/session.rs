@@ -28,10 +28,10 @@ async fn test_session_established_with_highest_version() {
 
     while let Some(event) = events.next().await {
         match event {
-            Ok(NetworkEvent::PeerAdded(peer_id)) => {
+            NetworkEvent::PeerAdded(peer_id) => {
                 assert_eq!(handle1.peer_id(), &peer_id);
             }
-            Ok(NetworkEvent::SessionEstablished { peer_id, status, .. }) => {
+            NetworkEvent::SessionEstablished { peer_id, status, .. } => {
                 assert_eq!(handle1.peer_id(), &peer_id);
                 assert_eq!(status.version, EthVersion::Eth68 as u8);
             }
@@ -66,10 +66,10 @@ async fn test_session_established_with_different_capability() {
 
     while let Some(event) = events.next().await {
         match event {
-            Ok(NetworkEvent::PeerAdded(peer_id)) => {
+            NetworkEvent::PeerAdded(peer_id) => {
                 assert_eq!(handle1.peer_id(), &peer_id);
             }
-            Ok(NetworkEvent::SessionEstablished { peer_id, status, .. }) => {
+            NetworkEvent::SessionEstablished { peer_id, status, .. } => {
                 assert_eq!(handle1.peer_id(), &peer_id);
                 assert_eq!(status.version, EthVersion::Eth66 as u8);
             }

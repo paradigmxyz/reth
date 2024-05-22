@@ -24,7 +24,6 @@ reth-rpc-types.workspace = true
 
 # async
 tokio.workspace = true
-tokio-stream.workspace = true
 
 # async
 futures.workspace = true

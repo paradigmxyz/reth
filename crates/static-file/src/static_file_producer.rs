@@ -10,13 +10,12 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     ProviderFactory,
 };
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::{EventListeners, EventStream};
 use std::{
     ops::{Deref, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
-use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, trace};
 
 /// Result of [StaticFileProducerInner::run] execution.
@@ -111,7 +110,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     }
 
     /// Listen for events on the static_file_producer.
-    pub fn events(&self) -> BroadcastStream<StaticFileProducerEvent> {
+    pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
         self.listeners.new_listener()
     }
 

@@ -13,13 +13,12 @@ use reth_primitives::{
 use reth_provider::{
     DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::{EventListeners, EventStream};
 use std::{
     collections::BTreeMap,
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
-use tokio_stream::wrappers::BroadcastStream;
 use tracing::debug;
 
 /// Result of [Pruner::run] execution.
@@ -82,7 +81,7 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Listen for events on the pruner.
-    pub fn events(&self) -> BroadcastStream<PrunerEvent> {
+    pub fn events(&self) -> EventStream<PrunerEvent> {
         self.listeners.new_listener()
     }
 

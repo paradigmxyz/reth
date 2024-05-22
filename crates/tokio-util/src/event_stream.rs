@@ -17,6 +17,7 @@ impl<T> EventStream<T>
 where
     T: Clone + Send + 'static,
 {
+    /// Creates a new `EventStream`.
     pub fn new(receiver: tokio::sync::broadcast::Receiver<T>) -> Self {
         let inner = tokio_stream::wrappers::BroadcastStream::new(receiver);
         EventStream { inner }

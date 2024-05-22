@@ -10,9 +10,8 @@ use reth_interfaces::RethResult;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::{EventListeners, EventStream};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
-use tokio_stream::wrappers::BroadcastStream;
 
 /// A _shareable_ beacon consensus frontend type. Used to interact with the spawned beacon consensus
 /// engine task.
@@ -93,7 +92,7 @@ where
     }
 
     /// Creates a new [`BeaconConsensusEngineEvent`] listener stream.
-    pub fn event_listener(&self) -> BroadcastStream<BeaconConsensusEngineEvent> {
+    pub fn event_listener(&self) -> EventStream<BeaconConsensusEngineEvent> {
         self.event_listeners.new_listener()
     }
 }

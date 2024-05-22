@@ -30,6 +30,7 @@ use reth_network_types::PeerId;
 use reth_primitives::{
     FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
@@ -46,10 +47,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, oneshot, oneshot::error::RecvError};
-use tokio_stream::wrappers::{
-    errors::BroadcastStreamRecvError, BroadcastStream, ReceiverStream, UnboundedReceiverStream,
-};
-use tracing::{debug, error, trace};
+use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+use tracing::{debug, trace};
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -199,7 +198,7 @@ pub struct TransactionsManager<Pool> {
     /// Subscriptions to all network related events.
     ///
     /// From which we get all new incoming transaction related messages.
-    network_events: BroadcastStream<NetworkEvent>,
+    network_events: EventStream<NetworkEvent>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
@@ -882,19 +881,15 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event_result: Result<NetworkEvent, BroadcastStreamRecvError>) {
+    fn on_network_event(&mut self, event_result: NetworkEvent) {
         match event_result {
-            Ok(NetworkEvent::SessionClosed { peer_id, .. }) => {
+            NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
-            Ok(NetworkEvent::SessionEstablished {
-                peer_id,
-                client_version,
-                messages,
-                version,
-                ..
-            }) => {
+            NetworkEvent::SessionEstablished {
+                peer_id, client_version, messages, version, ..
+            } => {
                 // Insert a new peer into the peerset.
                 let peer = PeerMetadata::new(messages, version, client_version);
                 let peer = match self.peers.entry(peer_id) {
@@ -929,7 +924,6 @@ where
                 let msg = msg_builder.build();
                 self.network.send_transactions_hashes(peer_id, msg);
             }
-            Err(e) => error!("{e}"),
             _ => {}
         }
     }
@@ -1633,6 +1627,7 @@ mod tests {
     use secp256k1::SecretKey;
     use std::{fmt, future::poll_fn, hash};
     use tests::fetcher::TxFetchMetadata;
+    use tracing::error;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -1719,7 +1714,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                Ok(NetworkEvent::SessionEstablished {
+                NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1727,9 +1722,9 @@ mod tests {
                     messages,
                     status,
                     version,
-                }) => {
+                } => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
+                    transactions.on_network_event(NetworkEvent::SessionEstablished {
                         peer_id,
                         remote_addr,
                         client_version,
@@ -1737,13 +1732,12 @@ mod tests {
                         messages,
                         status,
                         version,
-                    }))
+                    })
                 }
-                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
-                Ok(ev) => {
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                ev => {
                     error!("unexpected event {ev:?}")
                 }
-                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1806,7 +1800,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                Ok(NetworkEvent::SessionEstablished {
+                NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1814,9 +1808,9 @@ mod tests {
                     messages,
                     status,
                     version,
-                }) => {
+                } => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
+                    transactions.on_network_event(NetworkEvent::SessionEstablished {
                         peer_id,
                         remote_addr,
                         client_version,
@@ -1824,13 +1818,12 @@ mod tests {
                         messages,
                         status,
                         version,
-                    }))
+                    })
                 }
-                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
-                Ok(ev) => {
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                ev => {
                     error!("unexpected event {ev:?}")
                 }
-                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1891,7 +1884,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                Ok(NetworkEvent::SessionEstablished {
+                NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1899,9 +1892,9 @@ mod tests {
                     messages,
                     status,
                     version,
-                }) => {
+                } => {
                     // to insert a new peer in transactions peerset
-                    transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
+                    transactions.on_network_event(NetworkEvent::SessionEstablished {
                         peer_id,
                         remote_addr,
                         client_version,
@@ -1909,13 +1902,12 @@ mod tests {
                         messages,
                         status,
                         version,
-                    }))
+                    })
                 }
-                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
-                Ok(ev) => {
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                ev => {
                     error!("unexpected event {ev:?}")
                 }
-                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
@@ -1983,7 +1975,7 @@ mod tests {
         let mut established = listener0.take(2);
         while let Some(ev) = established.next().await {
             match ev {
-                Ok(NetworkEvent::SessionEstablished {
+                NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1991,7 +1983,7 @@ mod tests {
                     messages,
                     status,
                     version,
-                }) => transactions.on_network_event(Ok(NetworkEvent::SessionEstablished {
+                } => transactions.on_network_event(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -1999,12 +1991,11 @@ mod tests {
                     messages,
                     status,
                     version,
-                })),
-                Ok(NetworkEvent::PeerAdded(_peer_id)) => continue,
-                Ok(ev) => {
+                }),
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                ev => {
                     error!("unexpected event {ev:?}")
                 }
-                Err(err) => error!("unexpected error {err:?}"),
             }
         }
         handle.terminate().await;

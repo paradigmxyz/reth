@@ -16,7 +16,7 @@ use reth_network_api::{
 use reth_network_types::PeerId;
 use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::{EventListeners, EventStream};
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
@@ -29,7 +29,7 @@ use tokio::sync::{
     mpsc::{self, UnboundedSender},
     oneshot,
 };
-use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A _shareable_ network frontend. Used to interact with the network.
 ///
@@ -205,7 +205,7 @@ impl NetworkHandle {
 // === API Implementations ===
 
 impl NetworkEvents for NetworkHandle {
-    fn event_listener(&self) -> BroadcastStream<NetworkEvent> {
+    fn event_listener(&self) -> EventStream<NetworkEvent> {
         self.inner.event_listeners.new_listener()
     }
 
@@ -415,7 +415,7 @@ struct NetworkInner {
 /// Provides event subscription for the network.
 pub trait NetworkEvents: Send + Sync {
     /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> BroadcastStream<NetworkEvent>;
+    fn event_listener(&self) -> EventStream<NetworkEvent>;
     /// Returns a new [`DiscoveryEvent`] stream.
     ///
     /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.

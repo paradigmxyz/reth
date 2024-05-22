@@ -27,7 +27,6 @@ metrics.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
 futures-util.workspace = true
 
 # misc
@@ -40,6 +39,7 @@ auto_impl.workspace = true
 assert_matches.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+tokio-stream.workspace = true
 
 [features]
 test-utils = []

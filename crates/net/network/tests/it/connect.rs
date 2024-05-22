@@ -17,7 +17,6 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord};
 use reth_provider::test_utils::NoopProvider;
-use reth_tracing::tracing::error;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
@@ -55,19 +54,18 @@ async fn test_establish_connections() {
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
-                Ok(NetworkEvent::SessionClosed { .. }) => {
+                NetworkEvent::SessionClosed { .. } => {
                     panic!("unexpected event")
                 }
-                Ok(NetworkEvent::SessionEstablished { peer_id, .. }) => {
+                NetworkEvent::SessionEstablished { peer_id, .. } => {
                     assert!(expected_connections.remove(&peer_id))
                 }
-                Ok(NetworkEvent::PeerAdded(peer_id)) => {
+                NetworkEvent::PeerAdded(peer_id) => {
                     assert!(expected_peers.remove(&peer_id))
                 }
-                Ok(NetworkEvent::PeerRemoved(_)) => {
+                NetworkEvent::PeerRemoved(_) => {
                     panic!("unexpected event")
                 }
-                Err(e) => panic!("error: {e}"),
             }
         }
         assert!(expected_connections.is_empty());
@@ -212,13 +210,8 @@ async fn test_connect_with_boot_nodes() {
     let mut events = handle.event_listener();
     tokio::task::spawn(network);
 
-    while let Some(result_ev) = events.next().await {
-        match result_ev {
-            Ok(ev) => {
-                dbg!(ev);
-            }
-            Err(err) => error!("{err}"),
-        }
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
     }
 }
 
@@ -253,13 +246,8 @@ async fn test_connect_with_builder() {
         }
     });
 
-    while let Some(result_ev) = events.next().await {
-        match result_ev {
-            Ok(ev) => {
-                dbg!(ev);
-            }
-            Err(err) => error!("{err}"),
-        }
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
     }
 }
 
@@ -314,13 +302,8 @@ async fn test_connect_to_trusted_peer() {
 
     dbg!(&headers);
 
-    while let Some(result_ev) = events.next().await {
-        match result_ev {
-            Ok(ev) => {
-                dbg!(ev);
-            }
-            Err(err) => error!("{err}"),
-        }
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
     }
 }
 
@@ -510,11 +493,11 @@ async fn test_geth_disconnect() {
         handle.add_peer(geth_peer_id, geth_socket);
 
         match events.next().await {
-            Some(Ok(NetworkEvent::PeerAdded(peer_id))) => assert_eq!(peer_id, geth_peer_id),
+            Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),
             _ => panic!("Expected a peer added event"),
         }
 
-        if let Some(Ok(NetworkEvent::SessionEstablished { peer_id, .. })) = events.next().await {
+        if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
             assert_eq!(peer_id, geth_peer_id);
         } else {
             panic!("Expected a session established event");
@@ -524,7 +507,7 @@ async fn test_geth_disconnect() {
         handle.disconnect_peer(geth_peer_id);
 
         // wait for a disconnect from geth
-        if let Some(Ok(NetworkEvent::SessionClosed { peer_id, .. })) = events.next().await {
+        if let Some(NetworkEvent::SessionClosed { peer_id, .. }) = events.next().await {
             assert_eq!(peer_id, geth_peer_id);
         } else {
             panic!("Expected a session closed event");
