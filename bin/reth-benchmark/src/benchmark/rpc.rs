@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_provider::{network::AnyNetwork, ProviderBuilder, RootProvider};
 use alloy_rpc_client::ClientBuilder;
+use alloy_rpc_types_engine::{ExecutionPayloadInputV2, JwtSecret};
 use alloy_transport::utils::guess_local_url;
 use clap::Parser;
 use futures::StreamExt;
@@ -13,7 +14,7 @@ use reqwest::Url;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::Block;
-use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
+use reth_rpc_types_compat::engine::payload::block_to_payload_v2;
 use tracing::info;
 
 /// `reth benchmark from-rpc` command
@@ -29,7 +30,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `benchmark from-rpc` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         info!("Running benchmark using data from RPC URL: {}", self.rpc_url);
         // TODO: set up alloy client for non engine rpc url
         let block_provider = ProviderBuilder::new().on_http(self.rpc_url.parse()?);
@@ -53,7 +54,10 @@ impl Command {
         })?;
 
         // fetch jwt from file
+        //
+        // the jwt is hex encoded so we will decode it after
         let jwt = std::fs::read_to_string(auth_jwt)?;
+        let jwt = JwtSecret::from_hex(jwt)?;
 
         // get engine url
         let auth_url = Url::parse(&self.benchmark.engine_rpc_url)?;
@@ -67,8 +71,6 @@ impl Command {
 
         let client = ClientBuilder::default().transport(transport, is_local);
         let auth_provider = RootProvider::<AuthenticatedTransport, AnyNetwork>::new(client);
-
-        // let auth_provider = ProviderBuilder::new()on_transport(transport.clone());
 
         // construct the stream
         let mut block_stream = BlockStream::new(benchmark_mode, &block_provider, 10)?;
@@ -86,12 +88,16 @@ impl Command {
                 }
             };
 
-            let payload = block_to_payload_v3(block);
+            let payload = block_to_payload_v2(block);
+            let payload = ExecutionPayloadInputV2 {
+                execution_payload: payload.payload_inner,
+                withdrawals: Some(payload.withdrawals),
+            };
             println!(
                 "number: {:?}, hash: {:?}, parent_hash: {:?}",
-                payload.payload_inner.payload_inner.block_number,
-                payload.payload_inner.payload_inner.block_hash,
-                payload.payload_inner.payload_inner.parent_hash
+                payload.execution_payload.block_number,
+                payload.execution_payload.block_hash,
+                payload.execution_payload.parent_hash
             );
             auth_provider.new_payload_v2_wait(payload).await?;
         }

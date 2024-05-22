@@ -78,6 +78,20 @@ where
     }
 }
 
+impl<T> std::fmt::Debug for BlockFetcher<'_, T>
+where
+    RootProvider<T>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // write every value directly except the future
+        f.debug_struct("BlockFetcher")
+            .field("mode", &self.mode)
+            .field("provider", &self.provider)
+            .field("block_sender", &self.block_sender)
+            .finish()
+    }
+}
+
 /// All error variants for the block stream
 #[derive(Debug, thiserror::Error)]
 pub enum BlockFetcherError {
@@ -143,26 +157,6 @@ where
                         // TODO: what should we do here?
                         println!("Block stream returned None");
                         permit.send(Ok(None));
-                        // // fetch the next block
-                        // this.current_block = match this.mode {
-                        //     BenchmarkMode::Continuous => {
-                        //         this.provider.get_block_by_number(next_block.into(), true)
-                        //     }
-                        //     BenchmarkMode::Range(ref mut range) => {
-                        //         match range.next() {
-                        //             Some(block_number) => {
-                        //                 // fetch next block in range
-                        //                 this.provider.get_block_by_number(block_number.into(),
-                        // true)             }
-                        //             None => {
-                        //                 // just finish the future as there is nothing left to do,
-                        //                 // there are no more blocks to fetch and no more blocks
-                        // to                 // send
-                        //                 return Poll::Ready(());
-                        //             }
-                        //         }
-                        //     }
-                        // };
                         return Poll::Ready(());
                     }
                     Err(e) => {
@@ -184,6 +178,7 @@ where
 
 /// Builds a stream out of the block fetcher and its receiver, closing the stream when the task is
 /// done and nothing is left in the stream.
+#[derive(Debug)]
 pub struct BlockStream<'a, T> {
     /// The block fetcher, if this is None then its future has finished
     block_fetcher: Option<BlockFetcher<'a, T>>,

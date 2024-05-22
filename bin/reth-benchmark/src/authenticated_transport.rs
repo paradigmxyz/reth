@@ -31,10 +31,6 @@ pub enum InnerTransport {
 pub struct AuthenticatedTransport {
     /// The inner actual transport used.
     inner: Arc<RwLock<InnerTransport>>,
-    /// The URL to connect to.
-    url: Url,
-    /// The jwt
-    jwt: String,
 }
 
 /// An error that can occur when creating an authenticated transport.
@@ -62,27 +58,39 @@ pub enum AuthenticatedTransportError {
 
 impl AuthenticatedTransport {
     /// Create a new builder with the given URL.
-    pub async fn connect(url: Url, jwt: String) -> Result<Self, AuthenticatedTransportError> {
+    pub async fn connect(url: Url, jwt: JwtSecret) -> Result<Self, AuthenticatedTransportError> {
         match url.scheme() {
             "http" | "https" => Self::connect_http(url, jwt).await,
             "ws" | "wss" => Self::connect_ws(url, jwt).await,
-            "file" => Self::connect_ipc(url, jwt).await,
+            "file" => Self::connect_ipc(url).await,
             _ => Err(AuthenticatedTransportError::BadScheme(url.scheme().to_string())),
         }
     }
 
     /// Connects to an HTTP [alloy_transport_http::Http] transport.
-    async fn connect_http(url: Url, jwt: String) -> Result<Self, AuthenticatedTransportError> {
+    async fn connect_http(url: Url, jwt: JwtSecret) -> Result<Self, AuthenticatedTransportError> {
         let mut client_builder =
             reqwest::Client::builder().tls_built_in_root_certs(url.scheme() == "https");
         let mut headers = reqwest::header::HeaderMap::new();
 
         // Add the JWT it to the headers if we can decode it.
-        let auth = build_auth(jwt.clone())
-            .map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
+        let auth =
+            build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
+
+        let token_value = match auth {
+            Authorization::Bearer(ref token) => token,
+            Authorization::Basic(_) => {
+                return Err(AuthenticatedTransportError::InvalidJwt(
+                    "Basic auth is not supported for HTTP".to_string(),
+                ))
+            }
+        };
+
+        // we have to format this ourselves because alloy will not print secrets
+        let auth = format!("{} {}", auth, token_value);
 
         let mut auth_value: HeaderValue =
-            HeaderValue::from_str(&auth.to_string()).expect("Header should be valid string");
+            HeaderValue::from_str(&auth).expect("Header should be valid string");
         auth_value.set_sensitive(true);
 
         headers.insert(reqwest::header::AUTHORIZATION, auth_value);
@@ -91,16 +99,16 @@ impl AuthenticatedTransport {
         let client =
             client_builder.build().map_err(AuthenticatedTransportError::HttpConstructionError)?;
 
-        let inner = InnerTransport::Http(Http::with_client(client, url.clone()));
+        let inner = InnerTransport::Http(Http::with_client(client, url));
 
-        Ok(Self { inner: Arc::new(RwLock::new(inner)), url, jwt })
+        Ok(Self { inner: Arc::new(RwLock::new(inner)) })
     }
 
     /// Connects to a WebSocket [alloy_transport_ws::WsConnect] transport.
-    async fn connect_ws(url: Url, jwt: String) -> Result<Self, AuthenticatedTransportError> {
+    async fn connect_ws(url: Url, jwt: JwtSecret) -> Result<Self, AuthenticatedTransportError> {
         // Add the JWT it to the headers if we can decode it.
-        let auth = build_auth(jwt.clone())
-            .map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
+        let auth =
+            build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
 
         let inner = WsConnect { url: url.to_string(), auth: Some(auth) }
             .into_service()
@@ -108,11 +116,11 @@ impl AuthenticatedTransport {
             .map(InnerTransport::Ws)
             .map_err(|e| AuthenticatedTransportError::TransportError(e, url.to_string()))?;
 
-        Ok(Self { inner: Arc::new(RwLock::new(inner)), url, jwt })
+        Ok(Self { inner: Arc::new(RwLock::new(inner)) })
     }
 
     /// Connects to an IPC [alloy_transport_ipc::IpcConnect] transport.
-    async fn connect_ipc(url: Url, jwt: String) -> Result<Self, AuthenticatedTransportError> {
+    async fn connect_ipc(url: Url) -> Result<Self, AuthenticatedTransportError> {
         // IPC, even for engine, typically does not require auth because it's local
         let inner = IpcConnect::new(url.to_string())
             .into_service()
@@ -120,7 +128,7 @@ impl AuthenticatedTransport {
             .map(InnerTransport::Ipc)
             .map_err(|e| AuthenticatedTransportError::TransportError(e, url.to_string()))?;
 
-        Ok(Self { inner: Arc::new(RwLock::new(inner)), url, jwt })
+        Ok(Self { inner: Arc::new(RwLock::new(inner)) })
     }
 
     /// Sends a request using the underlying transport.
@@ -151,12 +159,10 @@ impl AuthenticatedTransport {
     }
 }
 
-fn build_auth(jwt: String) -> eyre::Result<Authorization> {
+fn build_auth(secret: JwtSecret) -> eyre::Result<Authorization> {
     // Decode jwt from hex, then generate claims (iat with current timestamp)
-    let secret = JwtSecret::from_hex(jwt)?;
     let claims = Claims::default();
     let token = secret.encode(&claims)?;
-
     let auth = Authorization::Bearer(token);
 
     Ok(auth)
