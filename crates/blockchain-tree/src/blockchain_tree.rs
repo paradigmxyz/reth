@@ -730,7 +730,7 @@ where
             return Err(e)
         }
 
-        if let Err(e) = self.externals.consensus.validate_block(block) {
+        if let Err(e) = self.externals.consensus.validate_block_pre_execution(block) {
             error!(?block, "Failed to validate block {}: {e}", block.header.hash());
             return Err(e)
         }

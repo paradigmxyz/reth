@@ -197,7 +197,7 @@ impl Command {
                 )),
                 PruneModes::none(),
             );
-            executor.execute_one((&sealed_block.clone().unseal(), td).into())?;
+            executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
             BundleStateWithReceipts::new(bundle, receipts, first_block).write_to_storage(
                 provider_rw.tx_ref(),

@@ -57,7 +57,7 @@ impl Config {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("reth config file extension must be '{EXTENSION}'"),
-            ));
+            ))
         }
         confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
