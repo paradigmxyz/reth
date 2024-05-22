@@ -1,38 +1,27 @@
 //!
 //! Integration tests for the bitfinity import command.
 //! These tests requires a running EVM node or EVM block extractor node at the specified URL.
-//! 
+//!
 
+use super::utils::*;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use reth::commands::bitfinity_import::BitfinityImportCommand;
 use reth_provider::{BlockNumReader, BlockReader};
 use std::time::Duration;
-use super::utils::*;
 
 #[tokio::test]
 async fn bitfinity_test_should_import_data_from_evm() {
     // Arrange
+    let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
-    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
+    let (_temp_dir, mut import_data) =
+        bitfinity_import_config_data(evm_datasource_url, None).await.unwrap();
 
-    let mut bitfinity = import_data.bitfinity_args;
     let end_block = 100;
-    bitfinity.end_block = Some(end_block);
-    bitfinity.batch_size = (end_block as usize) * 10;
+    import_data.bitfinity_args.end_block = Some(end_block);
+    import_data.bitfinity_args.batch_size = (end_block as usize) * 10;
 
     // Act
-    {
-        let import = BitfinityImportCommand::new(
-            None,
-            import_data.data_dir,
-            import_data.chain.clone(),
-            bitfinity,
-            import_data.provider_factory.clone(),
-            import_data.blockchain_db,
-        );
-        let _import_handle = import.schedule_execution().await.unwrap();
-        wait_until_local_block_imported(&import_data.provider_factory, end_block, Duration::from_secs(20)).await;
-    }
+    import_blocks(import_data.clone(), end_block, Duration::from_secs(20), false).await;
 
     // Assert
     {
@@ -51,31 +40,20 @@ async fn bitfinity_test_should_import_data_from_evm() {
     }
 }
 
-
 #[tokio::test]
 async fn bitfinity_test_should_import_with_small_batch_size() {
     // Arrange
+    let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
-    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
+    let (_temp_dir, mut import_data) =
+        bitfinity_import_config_data(evm_datasource_url, None).await.unwrap();
 
-    let mut bitfinity = import_data.bitfinity_args;
     let end_block = 101;
-    bitfinity.end_block = Some(end_block);
-    bitfinity.batch_size = 10;
+    import_data.bitfinity_args.end_block = Some(end_block);
+    import_data.bitfinity_args.batch_size = 10;
 
     // Act
-    {
-        let import = BitfinityImportCommand::new(
-            None,
-            import_data.data_dir,
-            import_data.chain.clone(),
-            bitfinity,
-            import_data.provider_factory.clone(),
-            import_data.blockchain_db,
-        );
-        let _import_handle = import.schedule_execution().await.unwrap();
-        wait_until_local_block_imported(&import_data.provider_factory, end_block, Duration::from_secs(20)).await;
-    }
+    import_blocks(import_data.clone(), end_block, Duration::from_secs(20), false).await;
 
     // Assert
     {

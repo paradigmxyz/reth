@@ -8,7 +8,7 @@ use alloy_rlp::Encodable;
 use clap::Parser;
 use did::evm_reset_state::EvmResetState;
 use did::{AccountInfoMap, RawAccountInfo, H160, H256, U256};
-use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
+use evm_canister_client::{EvmCanisterClient, IcAgentClient};
 use itertools::Itertools;
 use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
@@ -44,7 +44,7 @@ impl BitfinityResetEvmStateCommandBuilder {
 
     /// Build the command
     pub async fn build(self) -> eyre::Result<BitfinityResetEvmStateCommand> {
-        let evm_datasource_url = self.bitfinity.evm_datasource_url.clone();
+        let evm_datasource_url = self.bitfinity.evm_datasource_url;
         info!(target: "reth::cli", "Fetching chain spec from: {}", evm_datasource_url);
         let chain = Arc::new(BitfinityEvmClient::fetch_chain_spec(evm_datasource_url).await?);
 
@@ -52,20 +52,20 @@ impl BitfinityResetEvmStateCommandBuilder {
         let evm_client = EvmCanisterClient::new(
             IcAgentClient::with_identity(
                 principal,
-                self.bitfinity.ic_identity_file_path.clone(),
+                self.bitfinity.ic_identity_file_path,
                 &self.bitfinity.evm_network,
                 None,
             )
             .await?,
         );
-        let executor = Arc::new(EvmCanisterResetStateExecutor { client: evm_client.clone() });
+        let executor = Arc::new(EvmCanisterResetStateExecutor::new(evm_client));
 
         let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
         let db_path = data_dir.db();
         let db = Arc::new(init_db(db_path, Default::default())?);
         let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files())?;
 
-        Ok(BitfinityResetEvmStateCommand::new(provider_factory, self.bitfinity, executor))
+        Ok(BitfinityResetEvmStateCommand::new(provider_factory, executor))
     }
 }
 
@@ -73,22 +73,18 @@ impl BitfinityResetEvmStateCommandBuilder {
 #[derive(Debug)]
 pub struct BitfinityResetEvmStateCommand {
     provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-    bitfinity: BitfinityResetEvmStateArgs,
     executor: Arc<dyn ResetStateExecutor>,
 }
 
 impl BitfinityResetEvmStateCommand {
 
     /// Create a new instance of the command
-    pub fn new(provider_factory: ProviderFactory<Arc<DatabaseEnv>>, bitfinity: BitfinityResetEvmStateArgs, executor: Arc<dyn ResetStateExecutor>) -> Self {
-        Self { provider_factory, bitfinity, executor }
+    pub fn new(provider_factory: ProviderFactory<Arc<DatabaseEnv>>, executor: Arc<dyn ResetStateExecutor>) -> Self {
+        Self { provider_factory, executor }
     }
 
     /// Execute the command
     pub async fn execute(&self) -> eyre::Result<()> {
-        let principal = candid::Principal::from_text(self.bitfinity.evmc_principal.as_str())?;
-
-
 
         let mut provider = self.provider_factory.provider()?;
         let last_block_number = provider.last_block_number()?;
@@ -133,7 +129,7 @@ impl BitfinityResetEvmStateCommand {
                 // We need to retrieve the bytecode for the account
                 let bytecode = if let Some(bytecode_hash) = account.bytecode_hash {
                     debug!(target: "reth::cli", "Recovering bytecode for account {}", address);
-                    contract_storage_cursor.seek_exact(bytecode_hash)?.map(|(_, bytecode)| bytecode)
+                    contract_storage_cursor.seek_exact(bytecode_hash)?.map(|(_, bytecode)| bytecode.original_bytes().into())
                 } else {
                     None
                 };
@@ -167,7 +163,7 @@ impl BitfinityResetEvmStateCommand {
                 let account = RawAccountInfo {
                     nonce: account.nonce.into(),
                     balance: account.balance.into(),
-                    bytecode: bytecode.map(|bytecode| bytecode.bytes().into()),
+                    bytecode,
                     storage: storage.into_iter().collect_vec(),
                 };
 
@@ -253,6 +249,13 @@ pub struct EvmCanisterResetStateExecutor {
 impl Debug for EvmCanisterResetStateExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EvmCanisterResetStateExecutor").finish()
+    }
+}
+
+impl EvmCanisterResetStateExecutor {
+    /// Create a new instance of the executor
+    pub fn new(client: EvmCanisterClient<IcAgentClient>) -> Self {
+        Self { client }
     }
 }
 

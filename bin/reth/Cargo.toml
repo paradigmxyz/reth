@@ -119,6 +119,7 @@ ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
 evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 rlp = { workspace = true }
+serial_test.workspace = true
 
 [dev-dependencies]
 jsonrpsee.workspace = true

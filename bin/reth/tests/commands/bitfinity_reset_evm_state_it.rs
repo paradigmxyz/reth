@@ -1,57 +1,41 @@
 //!
-//! These are integration tests for the BitfinityResetEvmStateCommand.
-//! These tests requires a running EVM node or EVM block extractor node at the specified URL
-//! and a running EVM canister on a local dfx node.
+//! Integration tests for the BitfinityResetEvmStateCommand.
+//! These tests requires a running EVM node or EVM block extractor node at the specified URL.
 //!
 
-use std::{sync::Arc, time::Duration};
+use std::{sync::{Arc, Mutex}, time::Duration};
 
-use did::block::BlockResult;
+use did::{block::BlockResult, AccountInfoMap, H256};
 use evm_canister_client::{EvmCanisterClient, IcAgentClient};
 use reth::{
     args::BitfinityResetEvmStateArgs,
-    commands::{
-        bitfinity_import::BitfinityImportCommand,
-        bitfinity_reset_evm_state::BitfinityResetEvmStateCommand,
-    },
+    commands::bitfinity_reset_evm_state::{BitfinityResetEvmStateCommand, EvmCanisterResetStateExecutor, ResetStateExecutor},
 };
 use reth_db::DatabaseEnv;
-use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
+use reth_provider::{AccountReader, BlockNumReader, BlockReader, ProviderFactory};
+use revm_primitives::keccak256;
+use serial_test::serial;
 
 use super::utils::*;
 
+/// This test requires a running EVM canister on a local dfx node
 #[tokio::test]
+#[serial]
 async fn bitfinity_test_should_reset_evm_state() {
     // Arrange
+    let _log = init_logs();
     let dfx_port = get_dfx_local_port();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
-    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url).await.unwrap();
+    let data_dir  = Some("../../target/reth_19953".into());
+    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
 
-    let end_block = 5;
+    // Block 19952 -> ok
+    // Block 19953 -> fail
+    let end_block = 19953;
+    let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
 
     // Import block from block explorer
-    {
-        let mut bitfinity_import_args = import_data.bitfinity_args.clone();
-        bitfinity_import_args.end_block = Some(end_block);
-        let import = BitfinityImportCommand::new(
-            None,
-            import_data.data_dir.clone(),
-            import_data.chain.clone(),
-            bitfinity_import_args,
-            import_data.provider_factory.clone(),
-            import_data.blockchain_db.clone(),
-        );
-        let (job_executor, _handle) = import.schedule_execution().await.unwrap();
-        wait_until_local_block_imported(
-            &import_data.provider_factory,
-            end_block,
-            Duration::from_secs(20),
-        )
-        .await;
-        println!("Stopping job executor");
-        job_executor.stop(true).await.unwrap();
-        println!("Job executor stopped");
-    }
+    import_blocks(import_data.clone(), end_block, Duration::from_secs(fetch_block_timeout_secs), true).await;
 
     let (evm_client, reset_state_command) = build_bitfinity_reset_evm_command(
         "alice",
@@ -95,12 +79,106 @@ async fn bitfinity_test_should_reset_evm_state() {
     let _ = evm_client.admin_disable_evm(false).await.unwrap();
 }
 
+#[tokio::test]
+#[serial]
+async fn bitfinity_test_reset_should_extract_all_accounts_data() {
+    // Arrange
+    let _log = init_logs();
+    let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
+
+    // Block 19952 -> ok
+    // Block 19953 -> fail
+    let end_block = 19953;
+    let data_dir  = Some(format!("../../target/reth_{end_block}").into());
+    let (_temp_dir, import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
+
+    let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
+
+    // Import block from block explorer
+    import_blocks(import_data.clone(), end_block, Duration::from_secs(fetch_block_timeout_secs), true).await;
+
+    let executor = Arc::new(InMemoryResetStateExecutor::default());
+    let reset_state_command = BitfinityResetEvmStateCommand::new(import_data.provider_factory.clone(), executor.clone());
+
+    // Act
+    {
+        println!("Executing bitfinity reset evm state command");
+        reset_state_command.execute().await.unwrap();
+    }
+
+    // Assert
+    {
+        // Check that executor was started and has some data
+        {
+            assert!(executor.is_started());
+            assert!(executor.get_accounts_count() > 0);
+            assert!(executor.get_block().is_some());
+        }
+
+        let provider = import_data.provider_factory.provider().unwrap();
+
+        // Check that block in the extractor is the same as the last block in the provider
+        {
+            let executor_block = executor.get_block().unwrap();
+            let last_block = {
+                let last_block = provider.last_block_number().unwrap();
+                provider.block_by_number(last_block).unwrap().unwrap()
+            };
+            assert_eq!(end_block, last_block.number);
+            assert_eq!(executor_block.number.0.as_u64(), last_block.number);
+            assert_eq!(executor_block.state_root.0.0, last_block.state_root.0);
+        }
+
+        // Check that all accounts in the provider are in the executor
+        {
+            let executor_accounts = executor.get_accounts();
+
+            let mut accounts_with_code = 0;
+            let mut accounts_with_storage_values = 0;
+            for (executor_account_address, executor_account) in executor_accounts.iter() {
+
+                let account = provider.basic_account(executor_account_address.0.0.into()).unwrap().unwrap();
+
+                if let Some(bytecode) = &executor_account.bytecode {
+                    accounts_with_code += 1;
+                    println!("Account with code: {executor_account_address}");
+                    println!("Code: {:?}", bytecode);
+
+                    let code_hash = keccak256(&bytecode.0);
+                    println!("Code hash: {:?}", code_hash);
+                    assert_eq!(Some(code_hash), account.bytecode_hash);
+                } else {
+                    assert!(account.bytecode_hash.is_none());
+                }
+
+                if executor_account.storage.len() > 0 {
+                    accounts_with_storage_values += 1;
+                }                
+            }
+
+            println!("Executor accounts: {}", executor_accounts.len());
+            println!("Accounts with code: {accounts_with_code}");
+            println!("Accounts with storage values: {accounts_with_storage_values}");
+
+            // let provider_accounts = provider.accounts().unwrap();
+            // assert_eq!(provider_accounts.len(), executor_accounts.len());
+            // for (address, account) in provider_accounts.iter() {
+            //     let executor_account = executor_accounts.get(address).unwrap();
+            //     assert_eq!(account, executor_account);
+            // }
+        }
+
+    }
+
+}
+
 async fn build_bitfinity_reset_evm_command(
     identity_name: &str,
     provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
     dfx_port: u16,
     evm_datasource_url: &str,
 ) -> (EvmCanisterClient<IcAgentClient>, BitfinityResetEvmStateCommand) {
+
     let bitfinity_args = BitfinityResetEvmStateArgs {
         evmc_principal: LOCAL_EVM_CANISTER_ID.to_string(),
         ic_identity_file_path: dirs::home_dir()
@@ -117,7 +195,7 @@ async fn build_bitfinity_reset_evm_command(
     let evm_client = EvmCanisterClient::new(
         IcAgentClient::with_identity(
             principal,
-            bitfinity_args.ic_identity_file_path.clone(),
+            bitfinity_args.ic_identity_file_path,
             &bitfinity_args.evm_network,
             None,
         )
@@ -125,5 +203,59 @@ async fn build_bitfinity_reset_evm_command(
         .unwrap(),
     );
 
-    (evm_client, BitfinityResetEvmStateCommand::new(provider_factory, bitfinity_args))
+    let executor = Arc::new(EvmCanisterResetStateExecutor::new(evm_client.clone()));
+
+    (evm_client, BitfinityResetEvmStateCommand::new(provider_factory, executor))
 }
+
+/// In-memory executor for resetting the EVM canister state.
+#[derive(Debug, Default)]
+struct InMemoryResetStateExecutor {
+    started: Mutex<bool>,
+    accounts: Mutex<AccountInfoMap>,
+    block: Mutex<Option<did::Block<H256>>>,
+}
+
+impl InMemoryResetStateExecutor {
+
+    fn is_started(&self) -> bool {
+        *self.started.lock().unwrap()
+    }
+
+    fn get_accounts(&self) -> AccountInfoMap {
+        self.accounts.lock().unwrap().clone()
+    }
+
+    fn get_accounts_count(&self) -> usize {
+        self.accounts.lock().unwrap().len()
+    }
+
+    fn get_block(&self) -> Option<did::Block<H256>> {
+        self.block.lock().unwrap().clone()
+    }
+
+}
+
+impl ResetStateExecutor for InMemoryResetStateExecutor {
+    fn start(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        *self.started.lock().unwrap() = true;
+        Box::pin(async move {
+            Ok(())
+        })
+    }
+
+    fn add_accounts(&self, mut accounts: AccountInfoMap) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        self.accounts.lock().unwrap().append(&mut accounts);
+        Box::pin(async move {
+            Ok(())
+        })
+    }
+
+    fn end(&self, block: did::Block<H256>) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        *self.block.lock().unwrap() = Some(block);
+        Box::pin(async move {
+            Ok(())
+        })
+    }
+}
+
