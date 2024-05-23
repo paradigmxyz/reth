@@ -13,10 +13,8 @@ use futures_core::ready;
 use futures_util::FutureExt;
 use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_interfaces::RethResult;
-use reth_payload_builder::{
-    database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
-    PayloadJobGenerator,
-};
+use reth_payload_builder::{database::CachedReads, error::PayloadBuilderError, PayloadId};
+use reth_payload_primitives::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
     proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,

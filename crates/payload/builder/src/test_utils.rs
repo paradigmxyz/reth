@@ -1,11 +1,11 @@
 //! Utils for testing purposes.
 
 use crate::{
-    error::PayloadBuilderError, traits::KeepPayloadJobAlive, EthBuiltPayload,
-    EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
-    PayloadJobGenerator,
+    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
+    PayloadBuilderService,
 };
 use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 use reth_primitives::{Block, U256};
 use reth_provider::CanonStateNotification;
 use std::{

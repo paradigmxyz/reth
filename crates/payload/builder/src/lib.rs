@@ -27,7 +27,7 @@
 //! use std::future::Future;
 //! use std::pin::Pin;
 //! use std::task::{Context, Poll};
-//! use reth_payload_builder::{EthBuiltPayload, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
+//! use reth_payload_primitives::{EthBuiltPayload,  EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
 //! use reth_payload_builder::error::PayloadBuilderError;
 //! use reth_primitives::{Block, Header, U256};
 //!
