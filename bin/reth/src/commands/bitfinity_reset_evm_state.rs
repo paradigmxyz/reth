@@ -8,7 +8,7 @@ use alloy_rlp::Encodable;
 use clap::Parser;
 use did::evm_reset_state::EvmResetState;
 use did::{AccountInfoMap, RawAccountInfo, H160, H256, U256};
-use evm_canister_client::{EvmCanisterClient, IcAgentClient};
+use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
 use itertools::Itertools;
 use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
@@ -242,24 +242,24 @@ pub trait ResetStateExecutor: Send + Debug {
 }
 
 /// Executor for the reset state process that uses the EVM canister client
-pub struct EvmCanisterResetStateExecutor {
-    client: EvmCanisterClient<IcAgentClient>,
+pub struct EvmCanisterResetStateExecutor<C: CanisterClient> {
+    client: EvmCanisterClient<C>,
 }
 
-impl Debug for EvmCanisterResetStateExecutor {
+impl <C: CanisterClient> Debug for EvmCanisterResetStateExecutor<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EvmCanisterResetStateExecutor").finish()
     }
 }
 
-impl EvmCanisterResetStateExecutor {
+impl <C: CanisterClient> EvmCanisterResetStateExecutor<C> {
     /// Create a new instance of the executor
-    pub fn new(client: EvmCanisterClient<IcAgentClient>) -> Self {
+    pub fn new(client: EvmCanisterClient<C>) -> Self {
         Self { client }
     }
 }
 
-impl ResetStateExecutor for EvmCanisterResetStateExecutor {
+impl <C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterResetStateExecutor<C> {
 
     fn start(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
         let client= self.client.clone();

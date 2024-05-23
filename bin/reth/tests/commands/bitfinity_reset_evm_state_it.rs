@@ -13,12 +13,14 @@ use reth::{
 };
 use reth_db::DatabaseEnv;
 use reth_provider::{AccountReader, BlockNumReader, BlockReader, ProviderFactory};
-use revm_primitives::keccak256;
+use reth_trie::test_utils::state_root;
+use revm_primitives::{keccak256, B256};
 use serial_test::serial;
 
 use super::utils::*;
 
-/// This test requires a running EVM canister on a local dfx node
+/// This test requires a running EVM canister on a local dfx node.
+/// When the evm canister WASM will be published, this can be moved to pocket-ic.
 #[tokio::test]
 #[serial]
 async fn bitfinity_test_should_reset_evm_state() {
@@ -90,7 +92,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
     // Block 19995 -> ok
     // Block 19996 -> fail
-    let end_block = 19996;
+    let end_block = 19995;
     let data_dir  = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
 
@@ -119,17 +121,32 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
         }
 
         let provider = import_data.provider_factory.provider().unwrap();
+        let last_block = {
+            let last_block = provider.last_block_number().unwrap();
+            provider.block_by_number(last_block).unwrap().unwrap()
+        };
 
         // Check that block in the extractor is the same as the last block in the provider
         {
             let executor_block = executor.get_block().unwrap();
-            let last_block = {
-                let last_block = provider.last_block_number().unwrap();
-                provider.block_by_number(last_block).unwrap().unwrap()
-            };
             assert_eq!(end_block, last_block.number);
             assert_eq!(executor_block.number.0.as_u64(), last_block.number);
             assert_eq!(executor_block.state_root.0.0, last_block.state_root.0);
+        }
+
+        // Calculate the state root hash from the executor accounts
+        {
+            let executor_accounts = executor.get_accounts();
+            let mut provider_accounts = vec![];
+            for (executor_account_address, executor_account) in executor_accounts.iter() {
+
+                let account = provider.basic_account(executor_account_address.0.0.into()).unwrap().unwrap();
+                provider_accounts.push((executor_account_address.0.0.into(), (account, vec![])));
+                              
+            }
+
+            let calculated_root = state_root(provider_accounts.into_iter());
+            assert_eq!(calculated_root, last_block.state_root.0);
         }
 
         // Check that all accounts in the provider are in the executor
@@ -163,12 +180,56 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
             println!("Accounts with code: {accounts_with_code}");
             println!("Accounts with storage values: {accounts_with_storage_values}");
 
+            // Check state root hash of the last block
+            // {
+            //     // Calculate the state root hash from the executor accounts
+            //     let executor_state_root = {
+            //         let mut account_trie = executor_accounts.iter().map(|(address, account)| {
+            //             let address = address.0.0;
+            //             let account = account.clone();
+            //             (address, account)
+            //         });
+            //         let executor_state_root = triehash_trie_root(&mut account_trie);
+            //         executor_state_root
+            //     };
+            // }
+
             // let provider_accounts = provider.accounts().unwrap();
             // assert_eq!(provider_accounts.len(), executor_accounts.len());
             // for (address, account) in provider_accounts.iter() {
             //     let executor_account = executor_accounts.get(address).unwrap();
             //     assert_eq!(account, executor_account);
             // }
+        }
+
+        // Calculate the state root hash from the executor accounts
+        {
+            let executor_accounts = executor.get_accounts();
+            let mut provider_accounts: Vec<(revm_primitives::Address, (reth_primitives::Account, Vec<(B256, revm_primitives::U256)>))> = vec![];
+            for (executor_account_address, executor_account) in executor_accounts.iter() {
+
+                let account = provider.basic_account(executor_account_address.0.0.into()).unwrap().unwrap();
+                provider_accounts.push((executor_account_address.0.0.into(), (account, vec![])));
+                                
+            }
+
+            let calculated_root = state_root(provider_accounts.into_iter());
+            assert_eq!(calculated_root, last_block.state_root.0);
+
+            fn u256_to_b256(num: reth_primitives::U256) -> reth_primitives::B256 {
+                reth_primitives::B256::from_slice(num.as_le_slice())
+            }
+
+            let calculated_root = state_root(executor_accounts.into_iter().map(|(address, raw_account)| {
+                let account = reth_primitives::Account {
+                    nonce: raw_account.nonce.0.as_u64(),
+                    balance: raw_account.balance.into(),
+                    bytecode_hash: raw_account.bytecode.map(|code| keccak256(&code.0)),
+                };
+                let storage = vec![]; //raw_account.storage.iter().map(|(k, v)| (u256_to_b256(k.into()), v.0.0.into())).collect();
+                (address.into(), (account, storage))
+            }));
+            assert_eq!(calculated_root, last_block.state_root.0);
         }
 
     }
@@ -261,4 +322,3 @@ impl ResetStateExecutor for InMemoryResetStateExecutor {
         })
     }
 }
-
