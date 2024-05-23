@@ -145,8 +145,11 @@ impl NetworkArgs {
             ),
         };
         // Configure basic network stack
-        let mut network_config_builder = config
-            .network_config(self.nat, self.persistent_peers_file(peers_file), secret_key)
+        let mut network_config_builder = NetworkConfigBuilder::new(secret_key)
+            .peer_config(config.peers_config_with_basic_nodes_from_file(
+                self.persistent_peers_file(peers_file).as_deref(),
+            ))
+            .external_ip_resolver(self.nat)
             .sessions_config(
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
