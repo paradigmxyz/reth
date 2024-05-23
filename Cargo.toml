@@ -68,7 +68,7 @@ members = [
     "crates/storage/libmdbx-rs/mdbx-sys/",
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
-    "crates/storage/provider-types/",
+    "crates/storage/errors/",
     "crates/tasks/",
     "crates/tokio-util/",
     "crates/tracing/",
@@ -260,7 +260,7 @@ reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
 reth-provider = { path = "crates/storage/provider" }
-reth-provider-types = { path = "crates/storage/provider-types" }
+reth-storage-errors = { path = "crates/storage/errors" }
 reth-prune = { path = "crates/prune" }
 reth-revm = { path = "crates/revm" }
 reth-rpc = { path = "crates/rpc/rpc" }

@@ -12,8 +12,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Provider types
-pub use reth_provider_types::{db, provider};
+/// Storage error types
+pub use reth_storage_errors::{db, provider};
 
 /// Block Execution traits.
 pub mod executor;

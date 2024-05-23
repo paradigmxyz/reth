@@ -1,5 +1,5 @@
 [package]
-name = "reth-provider-types"
+name = "reth-storage-errors"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

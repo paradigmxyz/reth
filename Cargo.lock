@@ -7039,7 +7039,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-types",
  "reth-primitives",
- "reth-provider-types",
+ "reth-storage-errors",
  "secp256k1 0.28.2",
  "thiserror",
  "tokio",
@@ -7610,16 +7610,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-provider-types"
-version = "0.2.0-beta.7"
-dependencies = [
- "clap",
- "reth-fs-util",
- "reth-primitives",
- "thiserror",
-]
-
-[[package]]
 name = "reth-prune"
 version = "0.2.0-beta.7"
 dependencies = [
@@ -7947,6 +7937,16 @@ dependencies = [
  "derive_more",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-storage-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "clap",
+ "reth-fs-util",
+ "reth-primitives",
+ "thiserror",
 ]
 
 [[package]]
