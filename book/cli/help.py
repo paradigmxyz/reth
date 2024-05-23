@@ -279,6 +279,14 @@ def preprocess_help(s: str):
         s,
     )
 
+    # Remove rpc.max-tracing-requests default value
+    s = re.sub(
+        r"(rpc.max-tracing-requests <COUNT>\n.*\n.*\n.*)\[default: \d+\]",
+        r"\1[default: <NUM CPU CORES-2>]",
+        s,
+        flags=re.MULTILINE,
+    )
+
     return s
 
 
