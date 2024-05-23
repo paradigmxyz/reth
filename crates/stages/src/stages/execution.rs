@@ -59,8 +59,7 @@ use tracing::*;
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountsHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StoragesHistory] to remove change set and apply old
-///   values
-/// to [tables::PlainStorageState]
+///   values to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<E> {

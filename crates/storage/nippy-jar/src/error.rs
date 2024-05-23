@@ -40,7 +40,7 @@ pub enum NippyJarError {
     #[error("the size of an offset must be at most 8 bytes, got {offset_size}")]
     OffsetSizeTooBig {
         /// The read offset size in number of bytes.
-        offset_size: u64,
+        offset_size: u8,
     },
     #[error("attempted to read an out of bounds offset: {index}")]
     OffsetOutOfBounds {

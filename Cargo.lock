@@ -6589,11 +6589,8 @@ version = "0.2.0-beta.7"
 dependencies = [
  "confy",
  "humantime-serde",
- "reth-discv4",
- "reth-net-nat",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.28.2",
  "serde",
  "tempfile",
  "toml",
@@ -7140,8 +7137,8 @@ dependencies = [
 name = "reth-net-common"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-primitives",
  "pin-project",
- "reth-network-types",
  "tokio",
 ]
 
@@ -7558,7 +7555,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "c-kzg",
- "clap",
  "criterion",
  "derive_more",
  "hash-db",
@@ -7575,13 +7571,13 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-network-types",
+ "reth-static-file-types",
  "revm",
  "revm-primitives",
  "roaring",
  "secp256k1 0.28.2",
  "serde",
  "serde_json",
- "strum",
  "sucds",
  "tempfile",
  "test-fuzz",
@@ -7942,6 +7938,17 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-static-file-types"
+version = "0.2.0-beta.7"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "derive_more",
+ "serde",
+ "strum",
 ]
 
 [[package]]
