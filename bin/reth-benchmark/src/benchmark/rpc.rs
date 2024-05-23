@@ -1,6 +1,6 @@
 //! Runs the `reth benchmark` using a remote rpc api.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect, benchmark_mode::BenchmarkMode,
@@ -14,9 +14,9 @@ use futures::StreamExt;
 use reqwest::Url;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::Block;
+use reth_primitives::{Block, B256};
 use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
-use tracing::info;
+use tracing::{debug, info};
 
 /// `reth benchmark from-rpc` command
 #[derive(Debug, Parser)]
@@ -71,7 +71,11 @@ impl Command {
         let auth_provider = RootProvider::<_, AnyNetwork>::new(client);
 
         // construct the stream
-        let mut block_stream = BlockStream::new(benchmark_mode, &block_provider, 10)?;
+        let mut block_stream = BlockStream::new(benchmark_mode, &block_provider, 1000)?;
+
+        // put results in a summary vec so they can be printed at the end
+        // TODO: just accumulate on the fly
+        let mut results = Vec::new();
 
         while let Some(block_res) = block_stream.next().await {
             let block = block_res?.ok_or(BlockResponseError::BlockStreamNone)?;
@@ -107,22 +111,23 @@ impl Command {
             // just put gas used here
             let gas_used = block.header.gas_used as f64;
 
-            let versioned_hashes = block.blob_versioned_hashes().into_iter().copied().collect();
+            let versioned_hashes: Vec<B256> = block.blob_versioned_hashes().into_iter().copied().collect();
             let (payload, parent_beacon_block_root) = block_to_payload_v3(block);
 
-            info!(
+            debug!(
                 number=?payload.payload_inner.payload_inner.block_number,
                 hash=?payload.payload_inner.payload_inner.block_hash,
                 parent_hash=?payload.payload_inner.payload_inner.parent_hash,
                 "Sending payload",
             );
 
+            let parent_beacon_block_root = parent_beacon_block_root.expect("this is a valid v3 payload");
             let start = Instant::now();
             auth_provider
                 .new_payload_v3_wait(
                     payload,
                     versioned_hashes,
-                    parent_beacon_block_root.expect("this is a valid v3 payload"),
+                    parent_beacon_block_root,
                 )
                 .await?;
             let new_payload_duration = start.elapsed();
@@ -140,14 +145,27 @@ impl Command {
             // convert gas used to gigagas, then compute gigagas per second
             let gigagas_used = gas_used / 1_000_000_000.0;
             let gigagas_per_second = gigagas_used / new_payload_duration.as_secs_f64();
+            results.push((new_payload_duration, gas_used));
             info!(
+                ?fcu_duration,
                 ?new_payload_duration,
                 "New payload processed at {:.2} Ggas/s, used {} total gas",
                 gigagas_per_second,
                 gas_used
             );
-            info!(?fcu_duration, "fcu duration");
         }
+
+        // accumulate the results and calculate the overall Ggas/s
+        let total_gas_used: f64 = results.iter().map(|(_, gas)| gas).sum();
+        let total_duration: Duration = results.iter().map(|(dur, _)| dur).sum();
+        let total_ggas_used = total_gas_used / 1_000_000_000.0;
+        let total_ggas_per_second = total_ggas_used / total_duration.as_secs_f64();
+        info!(
+            ?total_duration,
+            ?total_gas_used,
+            "Total Ggas/s: {:.2}",
+            total_ggas_per_second
+        );
 
         // TODO: support properly sending versioned fork stuff. like if timestamp > fork, use
         // correct engine method

@@ -137,7 +137,6 @@ where
                                 return Poll::Ready(());
                             }
                         };
-                        tracing::info!("Fetched block number: {}", next_block);
 
                         // send the block
                         permit.send(Ok(Some(block)));
