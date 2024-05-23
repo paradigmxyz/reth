@@ -1,4 +1,4 @@
-use crate::{Consensus, ConsensusError};
+use crate::{Consensus, ConsensusError, PostExecutionInput};
 use reth_primitives::{BlockWithSenders, Header, Receipt, SealedBlock, SealedHeader, U256};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -71,7 +71,7 @@ impl Consensus for TestConsensus {
     fn validate_block_post_execution(
         &self,
         _block: &BlockWithSenders,
-        _receipts: &[Receipt],
+        _input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
