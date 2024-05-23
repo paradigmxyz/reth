@@ -117,15 +117,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Store initial commit SHA
-        id: store_initial_commit
-        run: echo "::set-output name=commit_sha::$(git rev-parse HEAD)"
       - run: make update-book-cli
       - name: Check book changes
-        id: step_diff
-        run: |
-          git diff ${{ steps.store_initial_commit.outputs.commit_sha }} HEAD > diff.txt
-          if [ -s diff.txt ]; then cat diff.txt; exit 1; fi
+        run: git diff --exit-code
 
   codespell:
     runs-on: ubuntu-latest
