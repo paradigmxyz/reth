@@ -7933,6 +7933,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-static-file-types"
+version = "0.2.0-beta.7"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "derive_more",
+ "serde",
+ "strum",
+]
+
+[[package]]
 name = "reth-tasks"
 version = "0.2.0-beta.7"
 dependencies = [
