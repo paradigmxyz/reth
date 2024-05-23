@@ -321,15 +321,7 @@ where
 
         Some(Box::pin(fut))
     }
-}
 
-impl<Gen, St, Engine> PayloadBuilderService<Gen, St, Engine>
-where
-    Engine: EngineTypes,
-    Gen: PayloadJobGenerator,
-    Gen::Job: PayloadJob<PayloadAttributes = Engine::PayloadBuilderAttributes>,
-    <Gen::Job as PayloadJob>::BuiltPayload: Into<Engine::BuiltPayload>,
-{
     /// Returns the payload attributes for the given payload.
     fn payload_attributes(
         &self,
