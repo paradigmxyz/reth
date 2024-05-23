@@ -115,16 +115,12 @@ impl ImportReceiptsCommand {
             // mark these as decoded
             total_decoded_receipts += total_receipts_chunk;
 
-            let mut index = 0;
-            receipts.retain(|_| {
-                let is_dup = is_dup_tx(first_block + index);
-                if is_dup {
+            for (index, receipts_for_block) in receipts.iter_mut().enumerate() {
+                if is_dup_tx(first_block + index as u64) {
+                    receipts_for_block.clear();
                     total_filtered_out_dup_txns += 1;
                 }
-                index += 1;
-
-                !is_dup
-            });
+            }
 
             info!(target: "reth::cli",
                 first_receipts_block=?first_block,
