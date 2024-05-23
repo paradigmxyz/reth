@@ -33,14 +33,16 @@ pub fn validate_block_post_execution(
     }
 
     // Validate that the header requests root matches the calculated requests root
-    let Some(header_requests_root) = block.header.requests_root else {
-        return Err(ConsensusError::RequestsRootMissing)
-    };
-    let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
-    if requests_root != header_requests_root {
-        return Err(ConsensusError::BodyRequestsRootDiff(
-            GotExpected::new(requests_root, header_requests_root).into(),
-        ))
+    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+        let Some(header_requests_root) = block.header.requests_root else {
+            return Err(ConsensusError::RequestsRootMissing)
+        };
+        let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
+        if requests_root != header_requests_root {
+            return Err(ConsensusError::BodyRequestsRootDiff(
+                GotExpected::new(requests_root, header_requests_root).into(),
+            ))
+        }
     }
 
     Ok(())
