@@ -1,4 +1,7 @@
-//! Payload primitives
+//! This crate defines abstractions to create and update payloads (blocks):
+//! - [`PayloadJobGenerator`]: a type that knows how to create new jobs for creating payloads based
+//!   on `reth_rpc_types::engine::PayloadAttributes`.
+//! - [`PayloadJob`]: a type that yields (better) payloads over time.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

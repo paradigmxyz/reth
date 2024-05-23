@@ -1,8 +1,3 @@
-//! This crate defines abstractions to create and update payloads (blocks):
-//! - [`PayloadJobGenerator`]: a type that knows how to create new jobs for creating payloads based
-//!   on [`PayloadAttributes`](reth_rpc_types::engine::PayloadAttributes).
-//! - [`PayloadJob`]: a type that yields (better) payloads over time.
-//!
 //! This crate comes with the generic [`PayloadBuilderService`] responsible for managing payload
 //! jobs.
 //!
@@ -15,13 +10,15 @@
 //!
 //! See also [the engine API docs](https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2)
 //! If the forkchoice update request is `VALID` and contains payload attributes the
-//! [`PayloadBuilderService`] will create a new [`PayloadJob`] via the given [`PayloadJobGenerator`]
-//! and start polling it until the payload is requested by the CL and the payload job is resolved
-//! (see [`PayloadJob::resolve`]).
+//! [`PayloadBuilderService`] will create a new [`reth_payload_primitives::PayloadJob`] via the
+//! given [`reth_payload_primitives::PayloadJobGenerator`] and start polling it until the payload is
+//! requested by the CL and the payload job is resolved
+//! (see [`reth_payload_primitives::PayloadJob::resolve`]).
 //!
 //! ## Example
 //!
-//! A simple example of a [`PayloadJobGenerator`] that creates empty blocks:
+//! A simple example of a [`reth_payload_primitives::PayloadJobGenerator`] that creates empty
+//! blocks:
 //!
 //! ```
 //! use std::future::Future;
