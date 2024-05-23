@@ -8,20 +8,23 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{database::Database, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_db::{database::Database, init_db, tables, transaction::DbTx};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
 };
 use reth_node_core::version::SHORT_VERSION;
-use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, ChainSpec, StaticFileSegment};
+use reth_primitives::{stage::StageId, ChainSpec, Receipts, StaticFileSegment};
 use reth_provider::{
     BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StateWriter, StaticFileProviderFactory, StaticFileWriter,
 };
 use tracing::{debug, error, info, trace};
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -55,7 +58,7 @@ pub struct ImportReceiptsCommand {
     #[command(flatten)]
     db: DatabaseArgs,
 
-    /// The path to a receipts file for import. File must use `HackReceiptCodec` (used for
+    /// The path to a receipts file for import. File must use `HackReceiptFileCodec` (used for
     /// exporting OP chain segment below Bedrock block via testinprod/op-geth).
     ///
     /// <https://github.com/testinprod-io/op-geth/pull/1>
@@ -84,108 +87,120 @@ impl ImportReceiptsCommand {
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
-        let provider = provider_factory.provider_rw()?;
-        let static_file_provider = provider_factory.static_file_provider();
-
-        for stage in StageId::ALL {
-            let checkpoint = provider.get_stage_checkpoint(stage)?;
-            trace!(target: "reth::cli",
-                ?stage,
-                ?checkpoint,
-                "Read stage checkpoints from db"
-            );
-        }
-
-        // prepare the tx for `write_to_storage`
-        let tx = provider.into_tx();
-        let mut total_decoded_receipts = 0;
-        let mut total_filtered_out_dup_txns = 0;
-
-        // open file
-        let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
-
-        while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
-            // create a new file client from chunk read from file
-            let ReceiptFileClient {
-                mut receipts,
-                first_block,
-                total_receipts: total_receipts_chunk,
-            } = file_client;
-
-            // mark these as decoded
-            total_decoded_receipts += total_receipts_chunk;
-
-            for (index, receipts_for_block) in receipts.iter_mut().enumerate() {
-                if is_dup_tx(first_block + index as u64) {
-                    receipts_for_block.clear();
-                    total_filtered_out_dup_txns += 1;
-                }
-            }
-
-            info!(target: "reth::cli",
-                first_receipts_block=?first_block,
-                total_receipts_chunk,
-                "Importing receipt file chunk"
-            );
-
-            // We're reusing receipt writing code internal to
-            // `BundleStateWithReceipts::write_to_storage`, so we just use a default empty
-            // `BundleState`.
-            let bundled_state =
-                BundleStateWithReceipts::new(Default::default(), receipts, first_block);
-
-            let static_file_producer =
-                static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
-
-            // finally, write the receipts
-            bundled_state.write_to_storage::<<DatabaseEnv as Database>::TXMut>(
-                &tx,
-                Some(static_file_producer),
-                OriginalValuesKnown::Yes,
-            )?;
-        }
-
-        tx.commit()?;
-        // as static files works in file ranges, internally it will be committing when creating the
-        // next file range already, so we only need to call explicitly at the end.
-        static_file_provider.commit()?;
-
-        if total_decoded_receipts == 0 {
-            error!(target: "reth::cli", "No receipts were imported, ensure the receipt file is valid and not empty");
-            return Ok(())
-        }
-
-        // compare the highest static file block to the number of receipts we decoded
-        //
-        // `HeaderNumbers` and `TransactionHashNumbers` tables serve as additional indexes, but
-        // nothing like this needs to exist for Receipts. So `tx.entries::<tables::Receipts>` would
-        // return zero here.
-        let total_imported_receipts = static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::Receipts)
-            .expect("static files must exist after ensuring we decoded more than zero");
-
-        if total_imported_receipts + total_filtered_out_dup_txns != total_decoded_receipts as u64 {
-            error!(target: "reth::cli",
-                total_decoded_receipts,
-                total_imported_receipts,
-                total_filtered_out_dup_txns,
-                "Receipts were partially imported"
-            );
-        }
-
-        let provider = provider_factory.provider()?;
-        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
-        if total_imported_receipts != total_imported_txns as u64 {
-            error!(target: "reth::cli",
-                total_decoded_receipts,
-                total_imported_receipts,
-                total_filtered_out_dup_txns,
-                "Receipts inconsistent with transactions"
-            );
-        }
-
-        info!(target: "reth::cli", total_imported_receipts, "Receipt file imported");
-
-        Ok(())
+        import_receipts_from_file(provider_factory, self.path, self.chunk_len, |_, _| 0).await
     }
+}
+
+/// Imports receipts to static files. Takes a filter callback as parameter, that returns the total
+/// number of filtered out receipts.
+///
+/// Caution! Filter callback must replace completely filtered out receipts for a block, with empty
+/// vectors, rather than `vec!(None)`. This is since the code for writing to static files, expects
+/// indices in the [`Receipts`] list, to map to sequential block numbers.
+pub async fn import_receipts_from_file<DB, P, F>(
+    provider_factory: ProviderFactory<DB>,
+    path: P,
+    chunk_len: Option<u64>,
+    mut filter: F,
+) -> eyre::Result<()>
+where
+    DB: Database,
+    P: AsRef<Path>,
+    F: FnMut(u64, &mut Receipts) -> usize,
+{
+    let provider = provider_factory.provider_rw()?;
+    let static_file_provider = provider_factory.static_file_provider();
+
+    for stage in StageId::ALL {
+        let checkpoint = provider.get_stage_checkpoint(stage)?;
+        trace!(target: "reth::cli",
+            ?stage,
+            ?checkpoint,
+            "Read stage checkpoints from db"
+        );
+    }
+
+    // prepare the tx for `write_to_storage`
+    let tx = provider.into_tx();
+    let mut total_decoded_receipts = 0;
+    let mut total_filtered_out_txns = 0;
+
+    // open file
+    let mut reader = ChunkedFileReader::new(path, chunk_len).await?;
+
+    while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
+        // create a new file client from chunk read from file
+        let ReceiptFileClient { mut receipts, first_block, total_receipts: total_receipts_chunk } =
+            file_client;
+
+        // mark these as decoded
+        total_decoded_receipts += total_receipts_chunk;
+
+        total_filtered_out_txns += filter(first_block, &mut receipts);
+
+        info!(target: "reth::cli",
+            first_receipts_block=?first_block,
+            total_receipts_chunk,
+            "Importing receipt file chunk"
+        );
+
+        // We're reusing receipt writing code internal to
+        // `BundleStateWithReceipts::write_to_storage`, so we just use a default empty
+        // `BundleState`.
+        let bundled_state = BundleStateWithReceipts::new(Default::default(), receipts, first_block);
+
+        let static_file_producer =
+            static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
+
+        // finally, write the receipts
+        bundled_state.write_to_storage::<DB::TXMut>(
+            &tx,
+            Some(static_file_producer),
+            OriginalValuesKnown::Yes,
+        )?;
+    }
+
+    tx.commit()?;
+    // as static files works in file ranges, internally it will be committing when creating the
+    // next file range already, so we only need to call explicitly at the end.
+    static_file_provider.commit()?;
+
+    if total_decoded_receipts == 0 {
+        error!(target: "reth::cli", "No receipts were imported, ensure the receipt file is valid and not empty");
+        return Ok(())
+    }
+
+    // compare the highest static file block to the number of receipts we decoded
+    //
+    // `HeaderNumbers` and `TransactionHashNumbers` tables serve as additional indexes, but
+    // nothing like this needs to exist for Receipts. So `tx.entries::<tables::Receipts>` would
+    // return zero here.
+    let total_imported_receipts = static_file_provider
+        .get_highest_static_file_block(StaticFileSegment::Receipts)
+        .expect("static files must exist after ensuring we decoded more than zero");
+
+    if total_imported_receipts + total_filtered_out_txns as u64 != total_decoded_receipts as u64 {
+        error!(target: "reth::cli",
+            total_decoded_receipts,
+            total_imported_receipts,
+            total_filtered_out_txns,
+            "Receipts were partially imported"
+        );
+    }
+
+    let total_imported_txns =
+        provider_factory.provider()?.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+
+    if total_imported_receipts != total_imported_txns as u64 {
+        error!(target: "reth::cli",
+            total_decoded_receipts,
+            total_imported_receipts,
+            total_filtered_out_txns,
+            "Receipts inconsistent with transactions"
+        );
+    }
+
+    info!(target: "reth::cli", total_imported_receipts, "Receipt file imported");
+
+    Ok(())
 }

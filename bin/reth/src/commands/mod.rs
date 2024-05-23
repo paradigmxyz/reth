@@ -7,6 +7,7 @@ pub mod dump_genesis;
 pub mod import;
 pub mod import_op;
 pub mod import_receipts;
+pub mod import_receipts_op;
 
 pub mod init_cmd;
 pub mod init_state;
