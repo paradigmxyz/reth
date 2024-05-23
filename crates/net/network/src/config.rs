@@ -8,7 +8,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
@@ -311,6 +311,19 @@ impl NetworkConfigBuilder {
     /// By default, this is [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn discovery_port(mut self, port: u16) -> Self {
         self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
+        self
+    }
+
+    /// Sets the external ip resolver to use for discovery v4.
+    ///
+    /// If no [Discv4ConfigBuilder] is set via [Self::discovery], this will create a new one.
+    ///
+    /// This is a convenience function for setting the external ip resolver on the default
+    /// [Discv4Config] config.
+    pub fn external_ip_resolver(mut self, resolver: NatResolver) -> Self {
+        self.discovery_v4_builder
+            .get_or_insert_with(Discv4Config::builder)
+            .external_ip_resolver(Some(resolver));
         self
     }
 

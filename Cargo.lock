@@ -6591,11 +6591,8 @@ version = "0.2.0-beta.7"
 dependencies = [
  "confy",
  "humantime-serde",
- "reth-discv4",
- "reth-net-nat",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.28.2",
  "serde",
  "tempfile",
  "toml",
