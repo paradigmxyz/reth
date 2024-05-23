@@ -125,7 +125,7 @@ impl Command {
 }
 
 /// Get an instance of key for given table
-fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
+pub(crate) fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
     serde_json::from_str::<T::Key>(key).map_err(|e| eyre::eyre!(e))
 }
 
@@ -188,7 +188,7 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
 }
 
 /// Map the user input value to json
-fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
+pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
     if serde_json::from_str::<serde::de::IgnoredAny>(value).is_ok() {
         Ok(value.to_string())
     } else {

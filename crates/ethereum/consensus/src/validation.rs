@@ -1,7 +1,6 @@
 use reth_consensus::ConsensusError;
 use reth_primitives::{
-    gas_spent_by_transactions, BlockWithSenders, Bloom, ChainSpec, GotExpected, Receipt,
-    ReceiptWithBloom, B256,
+    gas_spent_by_transactions, BlockWithSenders, Bloom, ChainSpec, GotExpected, Receipt, B256,
 };
 
 /// Validate a block with regard to execution results:
@@ -18,7 +17,7 @@ pub fn validate_block_post_execution(
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
     if chain_spec.is_byzantium_active_at_block(block.header.number) {
-        verify_receipts(block.header.receipts_root, block.header.logs_bloom, receipts.iter())?;
+        verify_receipts(block.header.receipts_root, block.header.logs_bloom, receipts)?;
     }
 
     // Check if gas used matches the value set in header.
@@ -36,16 +35,16 @@ pub fn validate_block_post_execution(
 
 /// Calculate the receipts root, and compare it against against the expected receipts root and logs
 /// bloom.
-fn verify_receipts<'a>(
+fn verify_receipts(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
-    receipts: impl Iterator<Item = &'a Receipt> + Clone,
+    receipts: &[Receipt],
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
-    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
+    let receipts_with_bloom = receipts.iter().map(Receipt::with_bloom_ref).collect::<Vec<_>>();
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root_ref(&receipts_with_bloom);
 
-    // Create header log bloom.
+    // Calculate header logs bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
 
     compare_receipts_root_and_logs_bloom(

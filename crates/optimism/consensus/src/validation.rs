@@ -1,7 +1,7 @@
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     gas_spent_by_transactions, proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom,
-    ChainSpec, GotExpected, Receipt, ReceiptWithBloom, B256,
+    ChainSpec, GotExpected, Receipt, B256,
 };
 
 /// Validate a block with regard to execution results:
@@ -21,7 +21,7 @@ pub fn validate_block_post_execution(
         verify_receipts(
             block.header.receipts_root,
             block.header.logs_bloom,
-            receipts.iter(),
+            receipts,
             chain_spec,
             block.timestamp,
         )?;
@@ -41,19 +41,19 @@ pub fn validate_block_post_execution(
 }
 
 /// Verify the calculated receipts root against the expected receipts root.
-fn verify_receipts<'a>(
+fn verify_receipts(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
-    receipts: impl Iterator<Item = &'a Receipt> + Clone,
+    receipts: &[Receipt],
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
-    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+    let receipts_with_bloom = receipts.iter().cloned().map(Receipt::with_bloom).collect::<Vec<_>>();
     let receipts_root =
         calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
 
-    // Create header log bloom.
+    // Calculate header logs bloom.
     let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
 
     compare_receipts_root_and_logs_bloom(
