@@ -1,12 +1,12 @@
 //! Collection of methods for block validation.
 
 use reth_consensus::ConsensusError;
+use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{
     constants::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    op_mainnet::is_dup_tx,
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
 

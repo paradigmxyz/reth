@@ -6408,6 +6408,7 @@ dependencies = [
  "reth-node-ethereum",
  "reth-node-events",
  "reth-node-optimism",
+ "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
@@ -6614,6 +6615,7 @@ dependencies = [
  "mockall",
  "reth-consensus",
  "reth-interfaces",
+ "reth-optimism-primitives",
  "reth-primitives",
  "reth-provider",
 ]
@@ -7497,6 +7499,10 @@ dependencies = [
  "thiserror",
  "tracing",
 ]
+
+[[package]]
+name = "reth-optimism-primitives"
+version = "0.2.0-beta.7"
 
 [[package]]
 name = "reth-payload-builder"

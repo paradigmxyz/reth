@@ -55,6 +55,7 @@ members = [
     "crates/optimism/evm/",
     "crates/optimism/node/",
     "crates/optimism/payload/",
+    "crates/optimism/primitives/",
     "crates/node-core/",
     "crates/node/api/",
     "crates/stages/",
@@ -282,6 +283,7 @@ reth-trie-parallel = { path = "crates/trie-parallel" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-node-events = { path = "crates/node/events" }
 reth-testing-utils = { path = "testing/testing-utils" }
+reth-optimism-primitives = { path = "crates/optimism/primitives" }
 
 # revm
 revm = { version = "9.0.0", features = [

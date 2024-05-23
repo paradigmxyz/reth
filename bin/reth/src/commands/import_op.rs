@@ -21,7 +21,8 @@ use reth_downloaders::file_client::{
 
 use reth_node_core::init::init_genesis;
 
-use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, PruneModes};
+use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_primitives::{stage::StageId, PruneModes};
 use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};

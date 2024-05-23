@@ -12,7 +12,8 @@ use clap::Parser;
 use reth_db::init_db;
 use reth_downloaders::file_client::DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE;
 use reth_node_core::version::SHORT_VERSION;
-use reth_primitives::{op_mainnet::is_dup_tx, Receipts};
+use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_primitives::Receipts;
 use reth_provider::ProviderFactory;
 use tracing::{debug, info};
 
