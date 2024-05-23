@@ -703,13 +703,13 @@ where
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
-    ///    conditions:
+    ///     conditions:
     ///     - It is fully validated and deemed VALID
     ///     - Any other ancestor of the invalid payload with a higher blockNumber is INVALID
     ///   - 0x0000000000000000000000000000000000000000000000000000000000000000 if the above
-    ///    conditions are satisfied by a PoW block.
+    ///     conditions are satisfied by a PoW block.
     ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
-    ///    the above conditions.
+    ///     the above conditions.
     fn latest_valid_hash_for_invalid_payload(
         &mut self,
         parent_hash: B256,
@@ -1103,8 +1103,8 @@ where
     ///    - invalid extra data
     ///    - invalid transactions
     ///    - incorrect hash
-    ///    - the versioned hashes passed with the payload do not exactly match transaction
-    ///    versioned hashes
+    ///    - the versioned hashes passed with the payload do not exactly match transaction versioned
+    ///      hashes
     ///    - the block does not contain blob transactions if it is pre-cancun
     ///
     /// This validates the following engine API rule:

@@ -106,7 +106,7 @@ rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
-rust.rust_2018_idioms = "deny"
+rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rustdoc.all = "warn"
 
 [workspace.lints.clippy]
