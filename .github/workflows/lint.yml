@@ -114,6 +114,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Store initial commit SHA
         id: store_initial_commit
         run: echo "::set-output name=commit_sha::$(git rev-parse HEAD)"
