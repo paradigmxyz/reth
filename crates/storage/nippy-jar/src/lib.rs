@@ -476,7 +476,7 @@ pub struct DataReader {
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
     /// Number of bytes that represent one offset.
-    offset_size: u64,
+    offset_size: u8,
 }
 
 impl DataReader {
@@ -491,7 +491,7 @@ impl DataReader {
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
         // First byte is the size of one offset in bytes
-        let offset_size = offset_mmap[0] as u64;
+        let offset_size = offset_mmap[0];
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
@@ -525,7 +525,8 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size) as usize)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+            as usize)
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
@@ -542,7 +543,7 @@ impl DataReader {
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u64 {
+    pub fn offset_size(&self) -> u8 {
         self.offset_size
     }
 
