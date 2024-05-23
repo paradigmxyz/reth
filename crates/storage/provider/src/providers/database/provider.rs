@@ -9,8 +9,8 @@ use crate::{
     Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
     HeaderSyncMode, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
     OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    StageCheckpointReader, StateProviderBox, StatsReader, StorageReader, TransactionVariant,
-    TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    StageCheckpointReader, StateProviderBox, StateWriter, StatsReader, StorageReader,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -354,6 +354,11 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             |_| true,
         )
     }
+
+    /// Returns a reference to the [`ChainSpec`].
+    pub fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
 }
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
@@ -370,20 +375,20 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///
     /// If UNWIND is false we will just read the state/blocks and return them.
     ///
-    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
-    /// the transaction ids.
-    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table
-    /// and the [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to
-    /// reconstruct the changesets.
-    ///     - In order to have both the old and new values in the changesets, we also access the
-    ///       plain state tables.
+    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table and the
+    ///    [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to    reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
     /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
-    /// we:
+    ///    we:
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the plain state
     ///     3. Save the old value to the local state
     /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
-    /// have seen before we:
+    ///    have seen before we:
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
@@ -1107,7 +1112,10 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
             Ordering::Greater => {
                 let mut static_file_producer =
                     static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-                static_file_producer.prune_headers(next_static_file_block_num - next_block)?
+                static_file_producer.prune_headers(next_static_file_block_num - next_block)?;
+                // Since this is a database <-> static file inconsistency, we commit the change
+                // straight away.
+                static_file_producer.commit()?
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.

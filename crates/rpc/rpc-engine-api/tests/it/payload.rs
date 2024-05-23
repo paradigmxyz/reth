@@ -13,8 +13,8 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_to_payload_body_v1, try_block_to_payload, try_block_to_payload_v1,
-    try_into_sealed_block, try_payload_v1_to_block,
+    block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
+    try_payload_v1_to_block,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
@@ -23,12 +23,13 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     // Recalculate roots
     transformed.header.transactions_root = proofs::calculate_transaction_root(&transformed.body);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.ommers);
-    try_block_to_payload(SealedBlock {
+    block_to_payload(SealedBlock {
         header: transformed.header.seal_slow(),
         body: transformed.body,
         ommers: transformed.ommers,
         withdrawals: transformed.withdrawals,
     })
+    .0
 }
 
 #[test]
@@ -89,7 +90,7 @@ fn payload_validation() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayloadV1 = try_block_to_payload_v1(block.clone());
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(block.clone());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new().into();

@@ -11,7 +11,7 @@ use reth_rpc_types::engine::{
     PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v3, convert_block_to_payload_field_v2, try_block_to_payload_v1,
+    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
 use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::convert::Infallible;
@@ -91,7 +91,7 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        try_block_to_payload_v1(value.block)
+        block_to_payload_v1(value.block)
     }
 }
 
@@ -112,7 +112,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            execution_payload: block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(block).0,
             block_value: fees,
             // From the engine API spec:
             //
@@ -220,8 +220,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
         // configure evm env based on parent block
-        let mut cfg = CfgEnv::default();
-        cfg.chain_id = chain_spec.chain().id();
+        let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
 
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());

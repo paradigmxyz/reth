@@ -11,27 +11,25 @@ use futures::{future, future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensus, BeaconConsensusEngine,
+    BeaconConsensusEngine, EthBeaconConsensus,
 };
 use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+    noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
+    TreeExternals,
 };
 use reth_consensus::Consensus;
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
-use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
-    engine_api_store::EngineApiStore,
-    engine_skip_fcu::EngineApiSkipFcu,
+    engine::EngineMessageStreamExt,
     exit::NodeExitFuture,
     version::CLIENT_VERSION_V1,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
-use reth_revm::EvmProcessorFactory;
 use reth_rpc_engine_api::EngineApi;
 use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 use reth_tasks::TaskExecutor;
@@ -39,10 +37,10 @@ use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub mod common;
 pub use common::LaunchContext;
-use reth_blockchain_tree::noop::NoopBlockchainTree;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
@@ -119,7 +117,7 @@ where
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
             Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
         } else {
-            Arc::new(BeaconConsensus::new(ctx.chain_spec()))
+            Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
         };
 
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
@@ -159,7 +157,7 @@ where
         let tree_externals = TreeExternals::new(
             ctx.provider_factory().clone(),
             consensus.clone(),
-            EvmProcessorFactory::new(ctx.chain_spec(), components.evm_config().clone()),
+            components.block_executor().clone(),
         );
         let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
             .with_sync_metrics_tx(sync_metrics_tx.clone())
@@ -198,12 +196,10 @@ where
             // create the launch context for the exex
             let context = ExExContext {
                 head,
-                provider: blockchain_db.clone(),
-                task_executor: ctx.task_executor().clone(),
                 data_dir: ctx.data_dir().clone(),
                 config: ctx.node_config().clone(),
                 reth_config: ctx.toml_config().clone(),
-                pool: node_adapter.components.pool().clone(),
+                components: node_adapter.clone(),
                 events,
                 notifications,
             };
@@ -263,29 +259,16 @@ where
 
         // create pipeline
         let network_client = node_adapter.network().fetch_client().await?;
-        let (consensus_engine_tx, mut consensus_engine_rx) = unbounded_channel();
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
-        if let Some(skip_fcu_threshold) = ctx.node_config().debug.skip_fcu {
-            debug!(target: "reth::cli", "spawning skip FCU task");
-            let (skip_fcu_tx, skip_fcu_rx) = unbounded_channel();
-            let engine_skip_fcu = EngineApiSkipFcu::new(skip_fcu_threshold);
-            ctx.task_executor().spawn_critical(
-                "skip FCU interceptor",
-                engine_skip_fcu.intercept(consensus_engine_rx, skip_fcu_tx),
-            );
-            consensus_engine_rx = skip_fcu_rx;
-        }
-
-        if let Some(store_path) = ctx.node_config().debug.engine_api_store.clone() {
-            debug!(target: "reth::cli", "spawning engine API store");
-            let (engine_intercept_tx, engine_intercept_rx) = unbounded_channel();
-            let engine_api_store = EngineApiStore::new(store_path);
-            ctx.task_executor().spawn_critical(
-                "engine api interceptor",
-                engine_api_store.intercept(consensus_engine_rx, engine_intercept_tx),
-            );
-            consensus_engine_rx = engine_intercept_rx;
-        };
+        let node_config = ctx.node_config();
+        let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
+            .maybe_skip_fcu(node_config.debug.skip_fcu)
+            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            // Store messages _after_ skipping so that `replay-engine` command
+            // would replay only the messages that were observed by the engine
+            // during this run.
+            .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
         let max_block = ctx.max_block(network_client.clone()).await?;
         let mut hooks = EngineHooks::new();
@@ -301,12 +284,11 @@ where
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
-        let (mut pipeline, client) = if ctx.is_dev() {
+        let (pipeline, client) = if ctx.is_dev() {
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
             for (idx, (address, alloc)) in ctx.chain_spec().genesis.alloc.iter().enumerate() {
-                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx,
-address.to_string(), format_ether(alloc.balance));
+                info!(target: "reth::cli", "Allocated Genesis Account: {:02}. {} ({} ETH)", idx, address.to_string(), format_ether(alloc.balance));
             }
 
             // install auto-seal
@@ -321,11 +303,11 @@ address.to_string(), format_ether(alloc.balance));
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
                 mining_mode,
-                node_adapter.components.evm_config().clone(),
+                node_adapter.components.block_executor().clone(),
             )
             .build();
 
-            let mut pipeline = crate::setup::build_networked_pipeline(
+            let pipeline = crate::setup::build_networked_pipeline(
                 ctx.node_config(),
                 &ctx.toml_config().stages,
                 client.clone(),
@@ -336,7 +318,7 @@ address.to_string(), format_ether(alloc.balance));
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                node_adapter.components.evm_config().clone(),
+                node_adapter.components.block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
@@ -346,7 +328,7 @@ address.to_string(), format_ether(alloc.balance));
             debug!(target: "reth::cli", "Spawning auto mine task");
             ctx.task_executor().spawn(Box::pin(task));
 
-            (pipeline, EitherDownloader::Left(client))
+            (pipeline, Either::Left(client))
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
                 ctx.node_config(),
@@ -359,12 +341,12 @@ address.to_string(), format_ether(alloc.balance));
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                node_adapter.components.evm_config().clone(),
+                node_adapter.components.block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
 
-            (pipeline, EitherDownloader::Right(network_client.clone()))
+            (pipeline, Either::Right(network_client.clone()))
         };
 
         let pipeline_events = pipeline.events();
@@ -378,7 +360,7 @@ address.to_string(), format_ether(alloc.balance));
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
 
-        let mut pruner = pruner_builder.build(ctx.provider_factory().clone());
+        let pruner = pruner_builder.build(ctx.provider_factory().clone());
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
@@ -397,7 +379,7 @@ address.to_string(), format_ether(alloc.balance));
             initial_target,
             reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
-            consensus_engine_rx,
+            Box::pin(consensus_engine_stream),
             hooks,
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
@@ -415,7 +397,7 @@ address.to_string(), format_ether(alloc.balance));
                 Either::Right(stream::empty())
             },
             pruner_events.map(Into::into),
-            static_file_producer_events.map(Into::into)
+            static_file_producer_events.map(Into::into),
         );
         ctx.task_executor().spawn_critical(
             "events task",

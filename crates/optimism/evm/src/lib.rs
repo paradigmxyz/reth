@@ -13,12 +13,17 @@ use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, Bytes, ChainSpec, Head, Header, Transaction, U256,
+    Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
 mod execute;
 pub use execute::*;
+pub mod l1;
+pub use l1::*;
+
+mod error;
+pub use error::OptimismBlockExecutionError;
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Default, Clone, Copy)]
@@ -26,13 +31,10 @@ pub use execute::*;
 pub struct OptimismEvmConfig;
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
-    type TxMeta = Bytes;
-
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Bytes)
-    where
-        T: AsRef<Transaction>,
-    {
-        fill_op_tx_env(tx_env, transaction, sender, meta);
+    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        let mut buf = Vec::with_capacity(transaction.length_without_header());
+        transaction.encode_enveloped(&mut buf);
+        fill_op_tx_env(tx_env, transaction, sender, buf.into());
     }
 
     fn fill_cfg_env(

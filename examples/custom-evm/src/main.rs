@@ -19,8 +19,8 @@ use reth::{
 };
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEvmConfig, EthereumNode};
-use reth_primitives::{Chain, ChainSpec, Genesis, Header, Transaction};
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
+use reth_primitives::{Chain, ChainSpec, Genesis, Header, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
@@ -61,13 +61,8 @@ impl MyEvmConfig {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    type TxMeta = ();
-
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, meta: Self::TxMeta)
-    where
-        T: AsRef<Transaction>,
-    {
-        EthEvmConfig::fill_tx_env(tx_env, transaction, sender, meta)
+    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        EthEvmConfig::fill_tx_env(tx_env, transaction, sender)
     }
 
     fn fill_cfg_env(
@@ -106,7 +101,7 @@ impl ConfigureEvm for MyEvmConfig {
     }
 }
 
-/// A regular ethereum evm and executor builder.
+/// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct MyExecutorBuilder;
@@ -116,9 +111,16 @@ where
     Node: FullNodeTypes,
 {
     type EVM = MyEvmConfig;
+    type Executor = EthExecutorProvider<Self::EVM>;
 
-    async fn build_evm(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(MyEvmConfig::default())
+    async fn build_evm(
+        self,
+        ctx: &BuilderContext<Node>,
+    ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        Ok((
+            MyEvmConfig::default(),
+            EthExecutorProvider::new(ctx.chain_spec(), MyEvmConfig::default()),
+        ))
     }
 }
 

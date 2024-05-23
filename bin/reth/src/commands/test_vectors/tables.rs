@@ -11,7 +11,7 @@ use reth_db::{
     table::{DupSort, Table, TableRow},
     tables,
 };
-use reth_primitives::fs;
+use reth_fs_util as fs;
 use tracing::error;
 
 const VECTORS_FOLDER: &str = "testdata/micro/db";

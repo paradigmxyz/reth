@@ -428,7 +428,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Update sub-pools size metrics.
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         let stats = self.size();
         self.metrics.pending_pool_transactions.set(stats.pending as f64);
         self.metrics.pending_pool_size_bytes.set(stats.pending_size as f64);
@@ -990,7 +990,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Updates the size metrics
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         self.metrics.all_transactions_by_hash.set(self.by_hash.len() as f64);
         self.metrics.all_transactions_by_id.set(self.txs.len() as f64);
     }
@@ -1002,6 +1002,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// For all transactions:
     ///   - decreased basefee: promotes from `basefee` to `pending` sub-pool.
     ///   - increased basefee: demotes from `pending` to `basefee` sub-pool.
+    ///
     /// Individually:
     ///   - decreased sender allowance: demote from (`basefee`|`pending`) to `queued`.
     ///   - increased sender allowance: promote from `queued` to

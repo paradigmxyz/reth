@@ -117,7 +117,7 @@ impl MerkleStage {
 
     /// Saves the hashing progress
     pub fn save_execution_checkpoint<DB: Database>(
-        &mut self,
+        &self,
         provider: &DatabaseProviderRW<DB>,
         checkpoint: Option<MerkleCheckpoint>,
     ) -> Result<(), StageError> {
@@ -582,6 +582,7 @@ mod tests {
 
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();
+            writer.commit().unwrap();
             writer.append_header(last_header, U256::ZERO, hash).unwrap();
             writer.commit().unwrap();
 

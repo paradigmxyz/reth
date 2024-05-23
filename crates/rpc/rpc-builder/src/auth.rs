@@ -15,6 +15,7 @@ use jsonrpsee::{
 };
 pub use reth_ipc::server::Builder as IpcServerBuilder;
 
+use jsonrpsee::http_client::transport::HttpBackend;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{NetworkInfo, Peers};
@@ -27,16 +28,16 @@ use reth_rpc::{
         cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig, FeeHistoryCache,
         FeeHistoryCacheConfig,
     },
-    AuthLayer, Claims, EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
-    JwtAuthValidator, JwtSecret,
+    EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
 };
 use reth_rpc_api::servers::*;
+use reth_rpc_layer::{
+    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
+    JwtSecret,
+};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
@@ -132,7 +133,7 @@ where
 
     // Create auth middleware.
     let middleware =
-        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
     // By default, both http and ws are enabled.
     let server = ServerBuilder::new()
@@ -183,8 +184,8 @@ impl AuthServerConfig {
         let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint } = self;
 
         // Create auth middleware.
-        let middleware = tower::ServiceBuilder::new()
-            .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+        let middleware =
+            tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
         // By default, both http and ws are enabled.
         let server = server_config
@@ -397,32 +398,27 @@ impl AuthServerHandle {
         format!("ws://{}", self.local_addr)
     }
 
-    fn bearer(&self) -> String {
-        format!(
-            "Bearer {}",
-            self.secret
-                .encode(&Claims {
-                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                        Duration::from_secs(60))
-                    .as_secs(),
-                    exp: None,
-                })
-                .unwrap()
-        )
-    }
-
     /// Returns a http client connected to the server.
-    pub fn http_client(&self) -> jsonrpsee::http_client::HttpClient {
+    pub fn http_client(
+        &self,
+    ) -> jsonrpsee::http_client::HttpClient<AuthClientService<HttpBackend>> {
+        // Create a middleware that adds a new JWT token to every request.
+        let secret_layer = AuthClientLayer::new(self.secret);
+        let middleware = tower::ServiceBuilder::default().layer(secret_layer);
         jsonrpsee::http_client::HttpClientBuilder::default()
-            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .set_http_middleware(middleware)
             .build(self.http_url())
             .expect("Failed to create http client")
     }
 
-    /// Returns a ws client connected to the server.
+    /// Returns a ws client connected to the server. Note that the connection can only be
+    /// be established within 1 minute due to the JWT token expiration.
     pub async fn ws_client(&self) -> jsonrpsee::ws_client::WsClient {
         jsonrpsee::ws_client::WsClientBuilder::default()
-            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .set_headers(HeaderMap::from_iter([(
+                AUTHORIZATION,
+                secret_to_bearer_header(&self.secret),
+            )]))
             .build(self.ws_url())
             .await
             .expect("Failed to create ws client")

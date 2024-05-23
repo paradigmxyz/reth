@@ -7,11 +7,12 @@ use crate::{
         DatabaseArgs, NetworkArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
     utils::get_single_header,
 };
 use clap::Parser;
 use futures::{stream::select as stream_select, StreamExt};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
@@ -21,13 +22,13 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
+use reth_fs_util as fs;
 use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_core::init::init_genesis;
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{
-    fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
 use reth_provider::{
     BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
@@ -35,7 +36,7 @@ use reth_provider::{
 };
 use reth_stages::{
     sets::DefaultStages,
-    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
+    stages::{ExecutionStage, ExecutionStageThresholds},
     Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
@@ -109,10 +110,10 @@ impl Command {
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let factory =
-            reth_revm::EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
+        let executor = block_executor!(self.chain.clone());
 
         let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
@@ -124,26 +125,20 @@ impl Command {
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
-                    factory.clone(),
-                    stage_conf.etl.clone(),
+                    executor.clone(),
+                    stage_conf.clone(),
+                    prune_modes.clone(),
                 )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })
                 .set(ExecutionStage::new(
-                    factory,
+                    executor,
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,
                         max_cumulative_gas: None,
                         max_duration: None,
                     },
-                    stage_conf
-                        .merkle
-                        .clean_threshold
-                        .max(stage_conf.account_hashing.clean_threshold)
-                        .max(stage_conf.storage_hashing.clean_threshold),
-                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                    stage_conf.execution_external_clean_threshold(),
+                    prune_modes,
                     ExExManagerHandle::empty(),
                 )),
             )
@@ -173,7 +168,7 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files_path(),
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
             )?)
             .start_network()
             .await?;
@@ -206,33 +201,34 @@ impl Command {
         let mut config = Config::default();
 
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
-            config.stages.etl.dir = Some(EtlConfig::from_datadir(&data_dir.data_dir_path()));
+            config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
         }
 
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files_path())?;
+            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(provider_factory.clone())?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         // Configure and build network
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret_path());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
         let network = self
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
                 db.clone(),
                 network_secret_path,
-                data_dir.known_peers_path(),
+                data_dir.known_peers(),
             )
             .await?;
 

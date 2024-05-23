@@ -1,3 +1,4 @@
+use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
 use reth_db::{
     cursor::DbCursorRW,
@@ -42,8 +43,8 @@ pub struct SenderRecoveryStage {
 
 impl SenderRecoveryStage {
     /// Create new instance of [SenderRecoveryStage].
-    pub fn new(commit_threshold: u64) -> Self {
-        Self { commit_threshold }
+    pub fn new(config: SenderRecoveryConfig) -> Self {
+        Self { commit_threshold: config.commit_threshold }
     }
 }
 
@@ -506,10 +507,9 @@ mod tests {
         /// # Panics
         ///
         /// 1. If there are any entries in the [tables::TransactionSenders] table above a given
-        /// block number.
-        ///
+        ///    block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        /// [tables::TransactionSenders] is not empty.
+        ///    [tables::TransactionSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db

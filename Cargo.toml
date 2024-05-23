@@ -6,7 +6,7 @@ members = [
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
-    "crates/consensus/beacon-core/",
+    "crates/ethereum/consensus/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
     "crates/ethereum-forks/",
@@ -33,7 +33,6 @@ members = [
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
-    "crates/payload/optimism/",
     "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
@@ -47,18 +46,21 @@ members = [
     "crates/rpc/rpc-testing-util/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc-types-compat/",
+    "crates/rpc/rpc-layer",
     "crates/engine-primitives/",
     "crates/ethereum/engine-primitives/",
-    "crates/node-ethereum/",
+    "crates/ethereum/node",
     "crates/node/builder/",
     "crates/optimism/consensus",
-    "crates/optimism/node/",
     "crates/optimism/evm/",
+    "crates/optimism/node/",
+    "crates/optimism/payload/",
     "crates/node-core/",
     "crates/node/api/",
     "crates/stages/",
     "crates/stages-api",
     "crates/static-file/",
+    "crates/static-file-types/",
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
     "crates/storage/db/",
@@ -87,10 +89,9 @@ members = [
     "examples/txpool-tracing/",
     "examples/polygon-p2p/",
     "examples/custom-inspector/",
-    "examples/exex/minimal/",
-    "examples/exex/op-bridge/",
-    "examples/exex/rollup/",
+    "examples/exex/*",
     "examples/db-access",
+    "examples/bsc-p2p",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
@@ -105,7 +106,7 @@ rust.missing_debug_implementations = "warn"
 rust.missing_docs = "warn"
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
-rust.rust_2018_idioms = "deny"
+rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rustdoc.all = "warn"
 
 [workspace.lints.clippy]
@@ -167,7 +168,7 @@ unnecessary_struct_initialization = "allow"
 use_self = "allow"
 
 [workspace.package]
-version = "0.2.0-beta.6"
+version = "0.2.0-beta.7"
 edition = "2021"
 rust-version = "1.76"
 license = "MIT OR Apache-2.0"
@@ -210,7 +211,7 @@ reth = { path = "bin/reth" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
-reth-beacon-consensus-core = { path = "crates/consensus/beacon-core" }
+reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
@@ -225,7 +226,7 @@ reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-engine-primitives = { path = "crates/engine-primitives" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-node-builder = { path = "crates/node/builder" }
-reth-node-ethereum = { path = "crates/node-ethereum" }
+reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-node-core = { path = "crates/node-core" }
@@ -240,7 +241,8 @@ reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-exex = { path = "crates/exex" }
-reth-optimism-payload-builder = { path = "crates/payload/optimism" }
+reth-fs-util = { path = "crates/fs-util" }
+reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
@@ -266,9 +268,11 @@ reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
+reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-stages = { path = "crates/stages" }
 reth-stages-api = { path = "crates/stages-api" }
 reth-static-file = { path = "crates/static-file" }
+reth-static-file-types = { path = "crates/static-file-types" }
 reth-tasks = { path = "crates/tasks" }
 reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
@@ -280,31 +284,37 @@ reth-node-events = { path = "crates/node/events" }
 reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
-revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "3.1.0", features = ["std"], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "3d2077e" }
+revm = { version = "9.0.0", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { version = "4.0.0", features = [
+    "std",
+], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "5a4fd5e" }
 
 # eth
 alloy-chains = "0.1.15"
-alloy-primitives = "0.7.1"
-alloy-dyn-abi = "0.7.1"
-alloy-sol-types = "0.7.1"
+alloy-primitives = "0.7.2"
+alloy-dyn-abi = "0.7.2"
+alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
-alloy-trie = "0.3.1"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552", default-features = false, features = [
+alloy-trie = "0.4"
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "ca54552" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "ca54552" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "64feb9b" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
 
 # misc
 auto_impl = "1"
@@ -312,6 +322,7 @@ aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+dashmap = "5.5"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"
 eyre = "0.6"
@@ -340,6 +351,7 @@ smallvec = "1"
 dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
+url = "2.3"
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -378,7 +390,10 @@ secp256k1 = { version = "0.28", default-features = false, features = [
     "recovery",
 ] }
 # TODO: Remove `k256` feature: https://github.com/sigp/enr/pull/74
-enr = { version = "0.12.0", default-features = false, features = ["k256", "rust-secp256k1"] }
+enr = { version = "0.12.0", default-features = false, features = [
+    "k256",
+    "rust-secp256k1",
+] }
 
 # for eip-4844
 c-kzg = "1.0.0"

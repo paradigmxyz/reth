@@ -15,6 +15,7 @@ use reth_db::{
     Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders, Transactions,
     VersionHistory,
 };
+use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
@@ -25,11 +26,11 @@ use tracing::info;
 pub struct Command {
     /// Show only the total size for static files.
     #[arg(long, default_value_t = false)]
-    only_total_size: bool,
+    detailed_sizes: bool,
 
-    /// Show only the summary per static file segment.
+    /// Show detailed information per static file segment.
     #[arg(long, default_value_t = false)]
-    summary: bool,
+    detailed_segments: bool,
 
     /// Show a checksum of each table in the database.
     ///
@@ -152,7 +153,7 @@ impl Command {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
 
-        if !self.only_total_size {
+        if self.detailed_sizes {
             table.set_header([
                 "Segment",
                 "Block Range",
@@ -174,8 +175,8 @@ impl Command {
             ]);
         }
 
-        let static_files = iter_static_files(data_dir.static_files_path())?;
-        let static_file_provider = StaticFileProvider::new(data_dir.static_files_path())?;
+        let static_files = iter_static_files(data_dir.static_files())?;
+        let static_file_provider = StaticFileProvider::new(data_dir.static_files())?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;
@@ -203,20 +204,38 @@ impl Command {
                 let columns = jar_provider.columns();
                 let rows = jar_provider.rows();
 
-                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
+                let data_size = fs::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
+                let index_size = fs::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
+                let offsets_size = fs::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
+                let config_size = fs::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
-                if self.summary {
+                if self.detailed_segments {
+                    let mut row = Row::new();
+                    row.add_cell(Cell::new(segment))
+                        .add_cell(Cell::new(format!("{block_range}")))
+                        .add_cell(Cell::new(
+                            tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
+                        ))
+                        .add_cell(Cell::new(format!("{columns} x {rows}")));
+                    if self.detailed_sizes {
+                        row.add_cell(Cell::new(human_bytes(data_size as f64)))
+                            .add_cell(Cell::new(human_bytes(index_size as f64)))
+                            .add_cell(Cell::new(human_bytes(offsets_size as f64)))
+                            .add_cell(Cell::new(human_bytes(config_size as f64)));
+                    }
+                    row.add_cell(Cell::new(human_bytes(
+                        (data_size + index_size + offsets_size + config_size) as f64,
+                    )));
+                    table.add_row(row);
+                } else {
                     if segment_columns > 0 {
                         assert_eq!(segment_columns, columns);
                     } else {
@@ -227,24 +246,6 @@ impl Command {
                     segment_index_size += index_size;
                     segment_offsets_size += offsets_size;
                     segment_config_size += config_size;
-                } else {
-                    let mut row = Row::new();
-                    row.add_cell(Cell::new(segment))
-                        .add_cell(Cell::new(format!("{block_range}")))
-                        .add_cell(Cell::new(
-                            tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
-                        ))
-                        .add_cell(Cell::new(format!("{columns} x {rows}")));
-                    if !self.only_total_size {
-                        row.add_cell(Cell::new(human_bytes(data_size as f64)))
-                            .add_cell(Cell::new(human_bytes(index_size as f64)))
-                            .add_cell(Cell::new(human_bytes(offsets_size as f64)))
-                            .add_cell(Cell::new(human_bytes(config_size as f64)));
-                    }
-                    row.add_cell(Cell::new(human_bytes(
-                        (data_size + index_size + offsets_size + config_size) as f64,
-                    )));
-                    table.add_row(row);
                 }
 
                 total_data_size += data_size;
@@ -253,7 +254,7 @@ impl Command {
                 total_config_size += config_size;
             }
 
-            if self.summary {
+            if !self.detailed_segments {
                 let first_ranges = ranges.first().expect("not empty list of ranges");
                 let last_ranges = ranges.last().expect("not empty list of ranges");
 
@@ -271,7 +272,7 @@ impl Command {
                         tx_range.map_or("N/A".to_string(), |tx_range| format!("{tx_range}")),
                     ))
                     .add_cell(Cell::new(format!("{segment_columns} x {segment_rows}")));
-                if !self.only_total_size {
+                if self.detailed_sizes {
                     row.add_cell(Cell::new(human_bytes(segment_data_size as f64)))
                         .add_cell(Cell::new(human_bytes(segment_index_size as f64)))
                         .add_cell(Cell::new(human_bytes(segment_offsets_size as f64)))
@@ -299,7 +300,7 @@ impl Command {
             .add_cell(Cell::new(""))
             .add_cell(Cell::new(""))
             .add_cell(Cell::new(""));
-        if !self.only_total_size {
+        if self.detailed_sizes {
             row.add_cell(Cell::new(human_bytes(total_data_size as f64)))
                 .add_cell(Cell::new(human_bytes(total_index_size as f64)))
                 .add_cell(Cell::new(human_bytes(total_offsets_size as f64)))
@@ -376,7 +377,7 @@ impl Command {
         let max_widths = table.column_max_content_widths();
         let mut separator = Row::new();
         for width in max_widths {
-            separator.add_cell(Cell::new(&"-".repeat(width as usize)));
+            separator.add_cell(Cell::new("-".repeat(width as usize)));
         }
         table.add_row(separator);
 

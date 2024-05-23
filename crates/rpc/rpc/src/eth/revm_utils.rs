@@ -272,13 +272,19 @@ pub(crate) fn create_txn_env(
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
         optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
+        // TODO(EOF)
+        eof_initcodes: Default::default(),
+        eof_initcodes_hashed: Default::default(),
     };
 
     Ok(env)
 }
 
 /// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
-pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(db: DB, env: &mut TxEnv) -> EthResult<()>
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
+    db: &mut DB,
+    env: &mut TxEnv,
+) -> EthResult<()>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
@@ -296,7 +302,7 @@ where
 ///
 /// Returns an error if the caller has insufficient funds.
 /// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
-pub(crate) fn caller_gas_allowance<DB>(mut db: DB, env: &TxEnv) -> EthResult<U256>
+pub(crate) fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,

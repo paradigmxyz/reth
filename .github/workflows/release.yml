@@ -10,6 +10,7 @@ on:
 
 env:
   REPO_NAME: ${{ github.repository_owner }}/reth
+  OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
   CARGO_TERM_COLOR: always
 
@@ -26,11 +27,11 @@ jobs:
 
   build:
     name: build release
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.configs.os }}
     needs: extract-version
     strategy:
       matrix:
-        include:
+        configs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-20.04
             profile: maxperf
@@ -46,29 +47,34 @@ jobs:
           - target: x86_64-pc-windows-gnu
             os: ubuntu-20.04
             profile: maxperf
+        build:
+          - command: build
+            binary: reth
+          - command: op-build
+            binary: op-reth
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: ${{ matrix.target }}
+          target: ${{ matrix.configs.target }}
       - uses: taiki-e/install-action@cross
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
 
       - name: Apple M1 setup
-        if: matrix.target == 'aarch64-apple-darwin'
+        if: matrix.configs.target == 'aarch64-apple-darwin'
         run: |
           echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
-          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-os-version)" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
 
       - name: Build Reth
-        run: make PROFILE=${{ matrix.profile }} build-${{ matrix.target }}
+        run: make PROFILE=${{ matrix.configs.profile }} ${{ matrix.build.command }}-${{ matrix.configs.target }}
       - name: Move binary
         run: |
           mkdir artifacts
-          [[ "${{ matrix.target }}" == *windows* ]] && ext=".exe"
-          mv "target/${{ matrix.target }}/${{ matrix.profile }}/reth${ext}" ./artifacts
+          [[ "${{ matrix.configs.target }}" == *windows* ]] && ext=".exe"
+          mv "target/${{ matrix.configs.target }}/${{ matrix.configs.profile }}/${{ matrix.build.binary }}${ext}" ./artifacts
 
       - name: Configure GPG and create artifacts
         env:
@@ -78,22 +84,22 @@ jobs:
           export GPG_TTY=$(tty)
           echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
           cd artifacts
-          tar -czf reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz reth*
-          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
+          tar -czf ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz ${{ matrix.build.binary }}*
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
           mv *tar.gz* ..
         shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
-          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
+          name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
+          path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
 
       - name: Upload signature
         uses: actions/upload-artifact@v4
         with:
-          name: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
-          path: reth-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
+          name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
+          path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
 
   draft-release:
     name: draft release
@@ -184,7 +190,7 @@ jobs:
           ENDBODY
           )
           assets=()
-          for asset in ./reth-*.tar.gz*; do
+          for asset in ./*reth-*.tar.gz*; do
               assets+=("$asset/$asset")
           done
           tag_name="${{ env.VERSION }}"

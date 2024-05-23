@@ -19,6 +19,7 @@ reth-interfaces.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
+reth-prune.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -26,7 +27,6 @@ metrics.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
 futures-util.workspace = true
 
 # misc
@@ -39,6 +39,7 @@ auto_impl.workspace = true
 assert_matches.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-interfaces = { workspace = true, features = ["test-utils"] }
+tokio-stream.workspace = true
 
 [features]
 test-utils = []

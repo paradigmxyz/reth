@@ -159,6 +159,30 @@ where
         Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
     }
 
+    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
+    pub async fn new_payload_v4(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload = ExecutionPayload::from(payload);
+        let payload_or_attrs =
+            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
+                &payload,
+                Some(parent_beacon_block_root),
+            );
+        EngineT::validate_version_specific_fields(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V4,
+            payload_or_attrs,
+        )?;
+
+        let cancun_fields = CancunPayloadFields { versioned_hashes, parent_beacon_block_root };
+
+        Ok(self.inner.beacon_consensus.new_payload(payload, Some(cancun_fields)).await?)
+    }
+
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
     /// withdrawals.
     ///
@@ -291,7 +315,42 @@ where
             .map_err(|_| EngineApiError::UnknownPayload)?
             .try_into()
             .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV2");
+                warn!("could not transform built payload into ExecutionPayloadV3");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v4(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadV3> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V4,
+            attributes.timestamp(),
+        )?;
+
+        // Now resolve the payload
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV4");
                 EngineApiError::UnknownPayload
             })
     }
@@ -734,7 +793,7 @@ where
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::BeaconEngineMessage;
+    use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_interfaces::test_utils::generators::random_block;
 
@@ -744,6 +803,7 @@ mod tests {
     use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
+    use reth_tokio_util::EventSender;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
@@ -759,11 +819,12 @@ mod tests {
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
+        let event_sender: EventSender<BeaconConsensusEngineEvent> = Default::default();
         let task_executor = Box::<TokioTaskExecutor>::default();
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
-            BeaconConsensusEngineHandle::new(to_engine),
+            BeaconConsensusEngineHandle::new(to_engine, event_sender),
             payload_store.into(),
             task_executor,
             client,

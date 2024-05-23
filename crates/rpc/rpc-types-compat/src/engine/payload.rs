@@ -8,7 +8,8 @@ use reth_primitives::{
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadError,
+    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadV4, PayloadError,
 };
 
 /// Converts [ExecutionPayloadV1] to [Block]
@@ -41,6 +42,10 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         gas_used: payload.gas_used,
         timestamp: payload.timestamp,
         mix_hash: payload.prev_randao,
+        // WARNING: It’s allowed for a base fee in EIP1559 to increase unbounded. We assume that
+        // it will fit in an u64. This is not always necessarily true, although it is extremelly
+        // unlikely not to be the case, a u64 maximum would have 2^64 which equates to 18 ETH per
+        // gas.
         base_fee_per_gas: Some(
             payload
                 .base_fee_per_gas
@@ -83,22 +88,34 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
     Ok(base_block)
 }
 
-/// Converts [SealedBlock] to [ExecutionPayload]
-pub fn try_block_to_payload(value: SealedBlock) -> ExecutionPayload {
+/// Converts [ExecutionPayloadV4] to [Block]
+pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
+    // this performs the same conversion as the underlying V3 payload.
+    //
+    // the new request lists (`deposit_requests`, `withdrawal_requests`) are EL -> CL only, so we do
+    // not do anything special here to handle them
+    try_payload_v3_to_block(payload.payload_inner)
+}
+
+/// Converts [SealedBlock] to [ExecutionPayload], returning additional data (the parent beacon block
+/// root) if the block is a V3 payload
+pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) {
+    // todo(onbjerg): check for requests_root here and return payload v4
     if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
-        ExecutionPayload::V3(block_to_payload_v3(value))
+        let (payload, beacon_block_root) = block_to_payload_v3(value);
+        (ExecutionPayload::V3(payload), beacon_block_root)
     } else if value.withdrawals.is_some() {
         // block with withdrawals: V2
-        ExecutionPayload::V2(try_block_to_payload_v2(value))
+        (ExecutionPayload::V2(block_to_payload_v2(value)), None)
     } else {
         // otherwise V1
-        ExecutionPayload::V1(try_block_to_payload_v1(value))
+        (ExecutionPayload::V1(block_to_payload_v1(value)), None)
     }
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadV1]
-pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
+pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
     let transactions = value.raw_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
@@ -119,7 +136,7 @@ pub fn try_block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadV2]
-pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
+pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
     let transactions = value.raw_transactions();
 
     ExecutionPayloadV2 {
@@ -143,11 +160,12 @@ pub fn try_block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
     }
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadV3]
-pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
+/// Converts [SealedBlock] to [ExecutionPayloadV3], and returns the parent beacon block root.
+pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B256>) {
     let transactions = value.raw_transactions();
 
-    ExecutionPayloadV3 {
+    let parent_beacon_block_root = value.header.parent_beacon_block_root;
+    let payload = ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
         payload_inner: ExecutionPayloadV2 {
@@ -169,16 +187,18 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
             },
             withdrawals: value.withdrawals.unwrap_or_default().into_inner(),
         },
-    }
+    };
+
+    (payload, parent_beacon_block_root)
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadFieldV2]
 pub fn convert_block_to_payload_field_v2(value: SealedBlock) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
     if value.withdrawals.is_some() {
-        ExecutionPayloadFieldV2::V2(try_block_to_payload_v2(value))
+        ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
     } else {
-        ExecutionPayloadFieldV2::V1(try_block_to_payload_v1(value))
+        ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
     }
 }
 
@@ -205,7 +225,7 @@ pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> Ex
 pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayloadInputV2 {
     ExecutionPayloadInputV2 {
         withdrawals: value.withdrawals.clone().map(Withdrawals::into_inner),
-        execution_payload: try_block_to_payload_v1(value),
+        execution_payload: block_to_payload_v1(value),
     }
 }
 
@@ -224,6 +244,7 @@ pub fn try_into_block(
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
         ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload)?,
         ExecutionPayload::V3(payload) => try_payload_v3_to_block(payload)?,
+        ExecutionPayload::V4(payload) => try_payload_v4_to_block(payload)?,
     };
 
     base_payload.header.parent_beacon_block_root = parent_beacon_block_root;
@@ -358,7 +379,7 @@ mod tests {
         let converted_payload = block_to_payload_v3(block.seal_slow());
 
         // ensure the payloads are the same
-        assert_eq!(new_payload, converted_payload);
+        assert_eq!((new_payload, Some(parent_beacon_block_root.into())), converted_payload);
     }
 
     #[test]

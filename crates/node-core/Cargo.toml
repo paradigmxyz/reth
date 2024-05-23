@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-interfaces = { workspace = true, features = ["clap"] }
 reth-provider.workspace = true
@@ -23,10 +24,12 @@ reth-rpc.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
+reth-rpc-layer.workspace = true
 reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
 reth-config.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-api.workspace = true
 reth-evm.workspace = true
@@ -35,12 +38,16 @@ reth-tasks.workspace = true
 reth-trie.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
+reth-etl.workspace = true
+reth-codecs.workspace = true
 
 # ethereum
 discv5.workspace = true
 
 # async
 tokio.workspace = true
+tokio-util.workspace = true
+pin-project.workspace = true
 
 # metrics
 metrics-exporter-prometheus = "0.12.1"
@@ -102,7 +109,6 @@ optimism = [
     "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
-    "reth-consensus-common/optimism",
     "reth-beacon-consensus/optimism",
 ]
 

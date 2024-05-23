@@ -1,8 +1,10 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
+use reth_config::config::ExecutionConfig;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
+use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
     stage::{
@@ -12,9 +14,11 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, Chain, DatabaseProviderRW, ExecutorFactory, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StatsReader, TransactionVariant,
+    BlockReader, BundleStateWithReceipts, Chain, DatabaseProviderRW, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
+    TransactionVariant,
 };
+use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
     UnwindInput, UnwindOutput,
@@ -55,14 +59,13 @@ use tracing::*;
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountsHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StoragesHistory] to remove change set and apply old
-///   values
-/// to [tables::PlainStorageState]
+///   values to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<EF> {
+pub struct ExecutionStage<E> {
     metrics_tx: Option<MetricEventsSender>,
-    /// The stage's internal executor
-    executor_factory: EF,
+    /// The stage's internal block executor
+    executor_provider: E,
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -76,10 +79,10 @@ pub struct ExecutionStage<EF> {
     exex_manager_handle: ExExManagerHandle,
 }
 
-impl<EF> ExecutionStage<EF> {
+impl<E> ExecutionStage<E> {
     /// Create new execution stage with specified config.
     pub fn new(
-        executor_factory: EF,
+        executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
@@ -88,22 +91,38 @@ impl<EF> ExecutionStage<EF> {
         Self {
             metrics_tx: None,
             external_clean_threshold,
-            executor_factory,
+            executor_provider,
             thresholds,
             prune_modes,
             exex_manager_handle,
         }
     }
 
-    /// Create an execution stage with the provided  executor factory.
+    /// Create an execution stage with the provided executor.
     ///
     /// The commit threshold will be set to 10_000.
-    pub fn new_with_factory(executor_factory: EF) -> Self {
+    pub fn new_with_executor(executor_provider: E) -> Self {
         Self::new(
-            executor_factory,
+            executor_provider,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
+            ExExManagerHandle::empty(),
+        )
+    }
+
+    /// Create new instance of [ExecutionStage] from configuration.
+    pub fn from_config(
+        executor_provider: E,
+        config: ExecutionConfig,
+        external_clean_threshold: u64,
+        prune_modes: PruneModes,
+    ) -> Self {
+        Self::new(
+            executor_provider,
+            config.into(),
+            external_clean_threshold,
+            prune_modes,
             ExExManagerHandle::empty(),
         )
     }
@@ -144,7 +163,10 @@ impl<EF> ExecutionStage<EF> {
     }
 }
 
-impl<EF: ExecutorFactory> ExecutionStage<EF> {
+impl<E> ExecutionStage<E>
+where
+    E: BlockExecutorProvider,
+{
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &mut self,
@@ -164,17 +186,20 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let static_file_producer = if self.prune_modes.receipts.is_none() &&
             self.prune_modes.receipts_log_filter.is_empty()
         {
-            Some(prepare_static_file_producer(provider, start_block)?)
+            let mut producer = prepare_static_file_producer(provider, start_block)?;
+            // Since there might be a database <-> static file inconsistency (read
+            // `prepare_static_file_producer` for context), we commit the change straight away.
+            producer.commit()?;
+            Some(producer)
         } else {
             None
         };
 
-        // Build executor
-        let mut executor = self.executor_factory.with_state(LatestStateProviderRef::new(
+        let db = StateProviderDatabase(LatestStateProviderRef::new(
             provider.tx_ref(),
             provider.static_file_provider().clone(),
         ));
-        executor.set_prune_modes(prune_modes);
+        let mut executor = self.executor_provider.batch_executor(db, prune_modes);
         executor.set_tip(max_block);
 
         // Progress tracking
@@ -213,9 +238,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
             // Execute the block
             let execute_start = Instant::now();
-            executor.execute_and_verify_receipt(&block, td).map_err(|error| StageError::Block {
-                block: Box::new(block.header.clone().seal_slow()),
-                error: BlockErrorKind::Execution(error),
+
+            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
+                StageError::Block {
+                    block: Box::new(block.header.clone().seal_slow()),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
             execution_duration += execute_start.elapsed();
 
@@ -245,7 +273,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
         }
         let time = Instant::now();
-        let state = executor.take_output_state();
+        let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+        let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
         // Check if we should send a [`ExExNotification`] to execution extensions.
@@ -383,7 +412,11 @@ fn calculate_gas_used_from_headers(
     Ok(gas_total)
 }
 
-impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
+impl<E, DB> Stage<DB> for ExecutionStage<E>
+where
+    DB: Database,
+    E: BlockExecutorProvider,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Execution
@@ -525,6 +558,17 @@ impl ExecutionStageThresholds {
     }
 }
 
+impl From<ExecutionConfig> for ExecutionStageThresholds {
+    fn from(config: ExecutionConfig) -> Self {
+        ExecutionStageThresholds {
+            max_blocks: config.max_blocks,
+            max_changes: config.max_changes,
+            max_cumulative_gas: config.max_cumulative_gas,
+            max_duration: config.max_duration,
+        }
+    }
+}
+
 /// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
 /// check.
 ///
@@ -609,7 +653,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_interfaces::executor::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
@@ -620,16 +664,14 @@ mod tests {
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
         StaticFileProviderFactory,
     };
-    use reth_revm::EvmProcessorFactory;
     use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<EvmProcessorFactory<EthEvmConfig>> {
-        let executor_factory = EvmProcessorFactory::new(
-            Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()),
-            EthEvmConfig::default(),
-        );
+    fn stage() -> ExecutionStage<EthExecutorProvider> {
+        let executor_provider = EthExecutorProvider::ethereum(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        ));
         ExecutionStage::new(
-            executor_factory,
+            executor_provider,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
@@ -864,7 +906,7 @@ mod tests {
                 mode.receipts_log_filter = random_filter.clone();
             }
 
-            let mut execution_stage: ExecutionStage<EvmProcessorFactory<EthEvmConfig>> = stage();
+            let mut execution_stage = stage();
             execution_stage.prune_modes = mode.clone().unwrap_or_default();
 
             let output = execution_stage.execute(&provider, input).unwrap();
