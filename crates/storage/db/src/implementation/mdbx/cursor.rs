@@ -191,8 +191,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// - Some(key), Some(subkey): a `key` item whose data is >= than `subkey`
     /// - Some(key), None: first item of a specified `key`
     /// - None, Some(subkey): like first case, but in the first key
-    /// - None, None: first item in the table
-    /// of a DUPSORT table.
+    /// - None, None: first item in the table of a DUPSORT table.
     fn walk_dup(
         &mut self,
         key: Option<T::Key>,

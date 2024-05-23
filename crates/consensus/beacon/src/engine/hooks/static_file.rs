@@ -71,13 +71,13 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     /// 1. Check if producing static files is needed through
     ///    [StaticFileProducer::get_static_file_targets](reth_static_file::StaticFileProducerInner::get_static_file_targets)
     ///    and then [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
-    /// 2.
-    ///     1. If producing static files is needed, pass static file request to the
-    ///     [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and spawn
-    ///     it in a separate task. Set static file producer state to
-    ///     [StaticFileProducerState::Running].
-    ///     2. If producing static files is not needed, set static file producer state back to
-    ///     [StaticFileProducerState::Idle].
+    ///
+    /// 2.1. If producing static files is needed, pass static file request to the
+    ///      [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and
+    ///      spawn it in a separate task. Set static file producer state to
+    ///      [StaticFileProducerState::Running].
+    /// 2.2. If producing static files is not needed, set static file producer state back to
+    ///      [StaticFileProducerState::Idle].
     ///
     /// If static_file_producer is already running, do nothing.
     fn try_spawn_static_file_producer(

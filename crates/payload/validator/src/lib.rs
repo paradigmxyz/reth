@@ -84,8 +84,8 @@ impl ExecutionPayloadValidator {
     ///    - invalid extra data
     ///    - invalid transactions
     ///    - incorrect hash
-    ///    - the versioned hashes passed with the payload do not exactly match transaction
-    ///    versioned hashes
+    ///    - the versioned hashes passed with the payload do not exactly match transaction versioned
+    ///      hashes
     ///    - the block does not contain blob transactions if it is pre-cancun
     ///
     /// The checks are done in the order that conforms with the engine-API specification.

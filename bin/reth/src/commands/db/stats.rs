@@ -378,7 +378,7 @@ impl Command {
         let max_widths = table.column_max_content_widths();
         let mut separator = Row::new();
         for width in max_widths {
-            separator.add_cell(Cell::new(&"-".repeat(width as usize)));
+            separator.add_cell(Cell::new("-".repeat(width as usize)));
         }
         table.add_row(separator);
 
