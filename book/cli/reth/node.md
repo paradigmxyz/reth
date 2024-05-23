@@ -287,7 +287,7 @@ RPC:
       --rpc.max-tracing-requests <COUNT>
           Maximum number of concurrent tracing requests
 
-          [default: 8]
+          [default: <NUM CPU CORES-2>]
 
       --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
