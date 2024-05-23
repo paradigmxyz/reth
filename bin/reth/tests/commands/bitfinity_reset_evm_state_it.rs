@@ -16,6 +16,7 @@ use reth_provider::{AccountReader, BlockNumReader, BlockReader, ProviderFactory}
 use reth_trie::test_utils::state_root;
 use revm_primitives::{keccak256, B256};
 use serial_test::serial;
+use tracing::*;
 
 use super::utils::*;
 
@@ -92,7 +93,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
     // Block 19995 -> ok
     // Block 19996 -> fail
-    let end_block = 19995;
+    let end_block = 19996;
     let data_dir  = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
 
@@ -107,7 +108,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
     // Act
     {
-        println!("Executing bitfinity reset evm state command");
+        info!("Executing bitfinity reset evm state command");
         reset_state_command.execute().await.unwrap();
     }
 
@@ -134,21 +135,6 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
             assert_eq!(executor_block.state_root.0.0, last_block.state_root.0);
         }
 
-        // Calculate the state root hash from the executor accounts
-        {
-            let executor_accounts = executor.get_accounts();
-            let mut provider_accounts = vec![];
-            for (executor_account_address, executor_account) in executor_accounts.iter() {
-
-                let account = provider.basic_account(executor_account_address.0.0.into()).unwrap().unwrap();
-                provider_accounts.push((executor_account_address.0.0.into(), (account, vec![])));
-                              
-            }
-
-            let calculated_root = state_root(provider_accounts.into_iter());
-            assert_eq!(calculated_root, last_block.state_root.0);
-        }
-
         // Check that all accounts in the provider are in the executor
         {
             let executor_accounts = executor.get_accounts();
@@ -161,11 +147,11 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
                 if let Some(bytecode) = &executor_account.bytecode {
                     accounts_with_code += 1;
-                    println!("Account with code: {executor_account_address:?}");
-                    // println!("Code: {:?}", bytecode);
+                    debug!("Account with code: {executor_account_address:?}");
+                    trace!("Code: {:?}", bytecode);
 
                     let code_hash = keccak256(&bytecode.0);
-                    println!("Code hash: {:?}", code_hash);
+                    debug!("Code hash: {:?}", code_hash);
                     assert_eq!(Some(code_hash), account.bytecode_hash);
                 } else {
                     assert!(account.bytecode_hash.is_none());
@@ -176,49 +162,15 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
                 }                
             }
 
-            println!("Executor accounts: {}", executor_accounts.len());
-            println!("Accounts with code: {accounts_with_code}");
-            println!("Accounts with storage values: {accounts_with_storage_values}");
+            info!("Executor accounts: {}", executor_accounts.len());
+            info!("Accounts with code: {accounts_with_code}");
+            info!("Accounts with storage values: {accounts_with_storage_values}");
 
-            // Check state root hash of the last block
-            // {
-            //     // Calculate the state root hash from the executor accounts
-            //     let executor_state_root = {
-            //         let mut account_trie = executor_accounts.iter().map(|(address, account)| {
-            //             let address = address.0.0;
-            //             let account = account.clone();
-            //             (address, account)
-            //         });
-            //         let executor_state_root = triehash_trie_root(&mut account_trie);
-            //         executor_state_root
-            //     };
-            // }
-
-            // let provider_accounts = provider.accounts().unwrap();
-            // assert_eq!(provider_accounts.len(), executor_accounts.len());
-            // for (address, account) in provider_accounts.iter() {
-            //     let executor_account = executor_accounts.get(address).unwrap();
-            //     assert_eq!(account, executor_account);
-            // }
         }
 
         // Calculate the state root hash from the executor accounts
         {
             let executor_accounts = executor.get_accounts();
-            let mut provider_accounts: Vec<(revm_primitives::Address, (reth_primitives::Account, Vec<(B256, revm_primitives::U256)>))> = vec![];
-            for (executor_account_address, executor_account) in executor_accounts.iter() {
-
-                let account = provider.basic_account(executor_account_address.0.0.into()).unwrap().unwrap();
-                provider_accounts.push((executor_account_address.0.0.into(), (account, vec![])));
-                                
-            }
-
-            let calculated_root = state_root(provider_accounts.into_iter());
-            assert_eq!(calculated_root, last_block.state_root.0);
-
-            fn u256_to_b256(num: reth_primitives::U256) -> reth_primitives::B256 {
-                reth_primitives::B256::from_slice(num.as_le_slice())
-            }
 
             let calculated_root = state_root(executor_accounts.into_iter().map(|(address, raw_account)| {
                 let account = reth_primitives::Account {
@@ -226,10 +178,14 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
                     balance: raw_account.balance.into(),
                     bytecode_hash: raw_account.bytecode.map(|code| keccak256(&code.0)),
                 };
-                let storage = vec![]; //raw_account.storage.iter().map(|(k, v)| (u256_to_b256(k.into()), v.0.0.into())).collect();
+                let storage: Vec<(B256, reth_primitives::U256)> = raw_account.storage.into_iter().map(|(k, v)| {
+                    let k: reth_primitives::U256 = k.into();
+                    (k.into(), v.into())
+                }).collect();
+
                 (address.into(), (account, storage))
             }));
-            assert_eq!(calculated_root, last_block.state_root.0);
+            assert_eq!(calculated_root, last_block.state_root);
         }
 
     }

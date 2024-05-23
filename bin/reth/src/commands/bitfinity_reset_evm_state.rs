@@ -16,7 +16,7 @@ use reth_db::{init_db, tables, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
 use reth_node_core::args::BitfinityResetEvmStateArgs;
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
-use reth_primitives::{StorageEntry, B256};
+use reth_primitives::StorageEntry;
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
 use tracing::{debug, info, trace};
 
@@ -113,7 +113,6 @@ impl BitfinityResetEvmStateCommand {
 
             let mut plain_account_cursor = tx_ref.cursor_read::<tables::PlainAccountState>()?;
             let mut contract_storage_cursor = tx_ref.cursor_read::<tables::Bytecodes>()?;
-            let mut plain_storage_cursor = tx_ref.cursor_read::<tables::PlainStorageState>()?;
 
             // We need to iterate through all the accounts and retrieve their storage tries and populate the AccountInfo
             let mut accounts = AccountInfoMap::new();
@@ -136,27 +135,23 @@ impl BitfinityResetEvmStateCommand {
 
                 let mut storage = BTreeMap::new();
 
-                fn b256_to_u256(num: B256) -> reth_primitives::U256 {
-                    reth_primitives::U256::from_be_bytes(num.0)
-                }
-
                 debug!("Recovering storage for account {}", address);
 
+                let mut plain_storage_cursor = tx_ref.cursor_read::<tables::PlainStorageState>()?;
                 let mut storage_walker = plain_storage_cursor.walk_range(*address..=*address)?;
+
                 while let Some(result) = storage_walker.next() {
-                    let (key, entry) = result?;
-                    trace!("Recovering storage for account {} - found entry: {:?}", address, entry);
-                    if key == *address {
-                        continue;
+                    let (storage_address, storage_entry) = result?;
+                    trace!("Recovering storage for account {} - found entry: {:?}", address, storage_entry);
+                    if storage_address != *address {
+                        break;
                     }
-                    let StorageEntry { key, value } = entry;
+                    let StorageEntry { key, value } = storage_entry;
 
-                    let REMOVE_ME = 0;
-                    info!(target: "reth::cli", "Recovering storage for account {} - found entry: {:?}", address, entry);
-
+                    let key: reth_primitives::U256 = key.into();
                     storage.insert(
-                        b256_to_u256(key).into(),
-                        did::U256::from_little_endian(&value.as_le_bytes_trimmed()),
+                        key.into(),
+                        value.into(),
                     );
                 }
 

@@ -129,6 +129,8 @@ assert_matches = "1.5.0"
 dirs.workspace = true
 revm-primitives.workspace = true
 tempfile.workspace = true
+reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-trie = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = ["jemalloc"]
