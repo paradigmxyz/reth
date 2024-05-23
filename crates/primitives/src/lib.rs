@@ -42,7 +42,7 @@ mod receipt;
 /// Helpers for working with revm
 pub mod revm;
 pub mod stage;
-pub mod static_file;
+pub use reth_static_file_types as static_file;
 mod storage;
 /// Helpers for working with transactions
 pub mod transaction;

@@ -1,7 +1,5 @@
-use crate::{
-    static_file::{Compression, Filters, InclusionFilter},
-    BlockNumber, TxNumber,
-};
+use crate::{BlockNumber, Compression, Filters, InclusionFilter};
+use alloy_primitives::TxNumber;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::{ops::RangeInclusive, str::FromStr};
@@ -385,7 +383,7 @@ mod tests {
                     Compression::Lz4,
                     Filters::WithFilters(
                         InclusionFilter::Cuckoo,
-                        crate::static_file::PerfectHashingFunction::Fmph,
+                        crate::PerfectHashingFunction::Fmph,
                     ),
                 )),
             ),
@@ -397,7 +395,7 @@ mod tests {
                     Compression::Zstd,
                     Filters::WithFilters(
                         InclusionFilter::Cuckoo,
-                        crate::static_file::PerfectHashingFunction::Fmph,
+                        crate::PerfectHashingFunction::Fmph,
                     ),
                 )),
             ),
@@ -409,7 +407,7 @@ mod tests {
                     Compression::ZstdWithDictionary,
                     Filters::WithFilters(
                         InclusionFilter::Cuckoo,
-                        crate::static_file::PerfectHashingFunction::Fmph,
+                        crate::PerfectHashingFunction::Fmph,
                     ),
                 )),
             ),
