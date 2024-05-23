@@ -95,6 +95,7 @@ impl Command {
                 .header
                 .hash
                 .expect("safe block has hash");
+
             let finalized_block_hash = block_provider
                 .get_block_by_number((block.number - 64).into(), false)
                 .await?
@@ -103,14 +104,17 @@ impl Command {
                 .hash
                 .expect("finalized block has hash");
 
+            // just put gas used here
+            let gas_used = block.header.gas_used as f64;
+
             let versioned_hashes = block.blob_versioned_hashes().into_iter().copied().collect();
             let (payload, parent_beacon_block_root) = block_to_payload_v3(block);
 
-            println!(
-                "number: {:?}, hash: {:?}, parent_hash: {:?}",
-                payload.payload_inner.payload_inner.block_number,
-                payload.payload_inner.payload_inner.block_hash,
-                payload.payload_inner.payload_inner.parent_hash
+            info!(
+                number=?payload.payload_inner.payload_inner.block_number,
+                hash=?payload.payload_inner.payload_inner.block_hash,
+                parent_hash=?payload.payload_inner.payload_inner.parent_hash,
+                "Sending payload",
             );
 
             let start = Instant::now();
@@ -133,9 +137,16 @@ impl Command {
             auth_provider.fork_choice_updated_v3_wait(forkchoice_state, None).await?;
             let fcu_duration = start.elapsed() - new_payload_duration;
 
-            // print the durations
-            println!("new_payload duration: {:?}", new_payload_duration);
-            println!("fcu duration: {:?}", fcu_duration);
+            // convert gas used to gigagas, then compute gigagas per second
+            let gigagas_used = gas_used / 1_000_000_000.0;
+            let gigagas_per_second = gigagas_used / new_payload_duration.as_secs_f64();
+            info!(
+                ?new_payload_duration,
+                "New payload processed at {:.2} Ggas/s, used {} total gas",
+                gigagas_per_second,
+                gas_used
+            );
+            info!(?fcu_duration, "fcu duration");
         }
 
         // TODO: support properly sending versioned fork stuff. like if timestamp > fork, use

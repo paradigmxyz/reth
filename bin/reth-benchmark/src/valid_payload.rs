@@ -10,6 +10,7 @@ use alloy_rpc_types_engine::{
 use alloy_transport::{Transport, TransportResult};
 use reth_primitives::B256;
 use reth_rpc_types::{ExecutionPayloadV1, ExecutionPayloadV3};
+use tracing::error;
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.
 #[async_trait::async_trait]
@@ -105,6 +106,16 @@ where
             .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
             .await?;
         while status.status != PayloadStatusEnum::Valid {
+            if status.status.is_invalid() {
+                error!(
+                    ?status,
+                    ?payload,
+                    ?versioned_hashes,
+                    ?parent_beacon_block_root,
+                    "Invalid payload",
+                );
+                panic!("Invalid payload");
+            }
             status = self
                 .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
                 .await?;
@@ -153,6 +164,10 @@ where
             self.fork_choice_updated_v3(fork_choice_state, payload_attributes.clone()).await?;
 
         while status.payload_status.status != PayloadStatusEnum::Valid {
+            if status.payload_status.status.is_invalid() {
+                error!(?status, ?fork_choice_state, ?payload_attributes, "Invalid FCU",);
+                panic!("Invalid FCU");
+            }
             status =
                 self.fork_choice_updated_v3(fork_choice_state, payload_attributes.clone()).await?;
         }

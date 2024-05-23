@@ -8,6 +8,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tracing::error;
 
 /// This implements a stream of blocks for the benchmark mode
 pub(crate) struct BlockFetcher<'a, T> {
@@ -136,6 +137,7 @@ where
                                 return Poll::Ready(());
                             }
                         };
+                        tracing::info!("Fetched block number: {}", next_block);
 
                         // send the block
                         permit.send(Ok(Some(block)));
@@ -164,7 +166,7 @@ where
                     Ok(None) => {
                         // this means the stream could not get the next block
                         // TODO: what should we do here?
-                        println!("Block stream returned None");
+                        error!("Block stream returned None");
                         permit.send(Ok(None));
                         return Poll::Ready(());
                     }
@@ -180,6 +182,7 @@ where
             }
         }
 
+        // tracing::info!("BlockFetcher Returning Poll::Pending!!");
         // nothing to do
         Poll::Pending
     }
@@ -242,6 +245,8 @@ where
             if block_fetcher.poll_unpin(cx) == Poll::Ready(()) {
                 // block fetcher is done
                 this.block_fetcher = None;
+            } else {
+                cx.waker().wake_by_ref();
             }
         }
 
@@ -256,6 +261,7 @@ where
                 Poll::Ready(Some(block))
             }
             Poll::Pending => {
+                // tracing::info!("Returning Poll::Pending!!");
                 // receiver is pending
                 Poll::Pending
             }
