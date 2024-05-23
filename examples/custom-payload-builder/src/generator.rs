@@ -6,7 +6,7 @@ use reth::{
 };
 use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
 use reth_node_api::PayloadBuilderAttributes;
-use reth_payload_builder::{error::PayloadBuilderError, PayloadJobGenerator};
+use reth_payload_primitives::{error::PayloadBuilderError, PayloadJobGenerator};
 use reth_primitives::{BlockNumberOrTag, Bytes, ChainSpec};
 use std::sync::Arc;
 

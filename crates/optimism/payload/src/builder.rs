@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_basic_payload_builder::*;
 use reth_evm::ConfigureEvm;
-use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_primitives::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,

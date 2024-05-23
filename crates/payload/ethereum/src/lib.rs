@@ -13,9 +13,9 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
     BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
-use reth_payload_builder::{
-    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
-};
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
+
+use reth_payload_primitives::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,

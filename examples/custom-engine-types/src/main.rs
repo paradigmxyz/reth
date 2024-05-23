@@ -41,9 +41,9 @@ use reth_node_ethereum::node::{
     EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
 };
 use reth_payload_builder::{
-    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
-    PayloadBuilderService,
+    EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
 };
+use reth_payload_primitives::error::PayloadBuilderError;
 use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{

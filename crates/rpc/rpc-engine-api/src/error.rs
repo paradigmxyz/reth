@@ -3,7 +3,7 @@ use jsonrpsee_types::error::{
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
 use reth_engine_primitives::EngineObjectValidationError;
-use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_primitives::error::PayloadBuilderError;
 use reth_primitives::{B256, U256};
 use reth_rpc_types::ToRpcError;
 use thiserror::Error;
