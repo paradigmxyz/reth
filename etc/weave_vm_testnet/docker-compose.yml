@@ -86,7 +86,7 @@ services:
       - "3500:3500"
       - "8080:8080"
       - "6060:6060"
-      - "9090:9091"
+      # - "9090:9091"
     volumes:
       - prysm_data:/data
       - ./../jwttoken:/root/jwt:ro
@@ -104,7 +104,7 @@ services:
       - --grpc-gateway-host=0.0.0.0
       - --accept-terms-of-use
       - --jwt-secret=/root/jwt/jwt.hex
-      - --suggested-fee-recipient=0x123463a4b065722e99115d6c222f267d9cabb524
+      - --suggested-fee-recipient=0xa2A0D977847805fE224B789D8C4d3D711ab251e7
       - --minimum-peers-per-subnet=0
       - --enable-debug-rpc-endpoints
 
