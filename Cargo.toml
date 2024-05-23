@@ -95,6 +95,7 @@ members = [
     "examples/txpool-tracing/",
     "testing/ef-tests/",
     "testing/testing-utils",
+    "crates/db-common",
 ]
 default-members = ["bin/reth"]
 
@@ -284,6 +285,7 @@ reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 reth-trie-parallel = { path = "crates/trie-parallel" }
+reth-db-common = { path = "crates/db-common" }
 
 # revm
 revm = { version = "9.0.0", features = [
