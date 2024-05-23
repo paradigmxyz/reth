@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod error;
+pub mod error;
 mod traits;
 
 pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};

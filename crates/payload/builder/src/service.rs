@@ -4,14 +4,14 @@
 //! Once a new payload is created, it is continuously updated.
 
 use crate::{
-    error::PayloadBuilderError,
     events::{Events, PayloadEvents},
     metrics::PayloadBuilderServiceMetrics,
-    traits::PayloadJobGenerator,
-    KeepPayloadJobAlive, PayloadJob,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_engine_primitives::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
+use reth_payload_primitives::{
+    error::PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator,
+};
 use reth_provider::CanonStateNotification;
 use reth_rpc_types::engine::PayloadId;
 use std::{
