@@ -8,7 +8,7 @@ use crate::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
-use reth_db::{database::Database, init_db, transaction::DbTx, DatabaseEnv};
+use reth_db::{database::Database, init_db, tables, transaction::DbTx, DatabaseEnv};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
@@ -174,6 +174,17 @@ impl ImportReceiptsCommand {
                 total_imported_receipts,
                 total_filtered_out_dup_txns,
                 "Receipts were partially imported"
+            );
+        }
+
+        let provider = provider_factory.provider()?;
+        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+        if total_imported_receipts != total_imported_txns as u64 {
+            error!(target: "reth::cli",
+                total_decoded_receipts,
+                total_imported_receipts,
+                total_filtered_out_dup_txns,
+                "Receipts inconsistent with transactions"
             );
         }
 
