@@ -7030,7 +7030,6 @@ name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
  "auto_impl",
- "clap",
  "futures",
  "parking_lot 0.12.2",
  "rand 0.8.5",
@@ -7040,6 +7039,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-types",
  "reth-primitives",
+ "reth-storage-errors",
  "secp256k1 0.28.2",
  "thiserror",
  "tokio",
@@ -7937,6 +7937,16 @@ dependencies = [
  "derive_more",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-storage-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "clap",
+ "reth-fs-util",
+ "reth-primitives",
+ "thiserror",
 ]
 
 [[package]]

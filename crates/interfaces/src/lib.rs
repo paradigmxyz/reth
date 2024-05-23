@@ -12,8 +12,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Database error
-pub mod db;
+/// Storage error types
+pub use reth_storage_errors::{db, provider};
 
 /// Block Execution traits.
 pub mod executor;
@@ -27,9 +27,6 @@ pub mod p2p;
 
 /// Trie error
 pub mod trie;
-
-/// Provider error
-pub mod provider;
 
 /// Syncing related traits.
 pub mod sync;
