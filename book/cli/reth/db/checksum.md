@@ -22,6 +22,9 @@ Options:
 
           [default: default]
 
+      --start-key <START_KEY>
+          The start of the range to checksum
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -30,6 +33,12 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
 
           [default: mainnet]
+
+      --end-key <END_KEY>
+          The end of the range to checksum
+
+      --limit <LIMIT>
+          The maximum number of records that are queried and used to compute the checksum
 
       --instance <INSTANCE>
           Add a new instance of a node.
