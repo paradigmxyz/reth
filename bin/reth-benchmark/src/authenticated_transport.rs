@@ -7,13 +7,13 @@ use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_pubsub::{PubSubConnect, PubSubFrontend};
 use alloy_rpc_types_engine::{Claims, JwtSecret};
 use alloy_transport::{
-    utils::guess_local_url, Authorization, Pbf, Transport, TransportConnect, TransportError,
+    utils::guess_local_url, Authorization, Pbf, TransportConnect, TransportError,
     TransportErrorKind, TransportFut,
 };
 use alloy_transport_http::{reqwest::Url, Http, ReqwestTransport};
 use alloy_transport_ipc::IpcConnect;
 use alloy_transport_ws::WsConnect;
-use futures::{FutureExt, TryFutureExt};
+use futures::FutureExt;
 use reqwest::header::HeaderValue;
 use std::task::{Context, Poll};
 use tokio::sync::RwLock;
@@ -174,6 +174,7 @@ fn build_auth(secret: JwtSecret) -> eyre::Result<Authorization> {
 }
 
 /// This specifies how to connect to an authenticated transport.
+#[derive(Clone, Debug)]
 pub struct AuthenticatedTransportConnect {
     /// The URL to connect to.
     url: Url,

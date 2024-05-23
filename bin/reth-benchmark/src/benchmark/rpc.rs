@@ -1,19 +1,21 @@
 //! Runs the `reth benchmark` using a remote rpc api.
 
+use std::time::Instant;
+
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect, benchmark_mode::BenchmarkMode,
     block_fetcher::BlockStream, valid_payload::EngineApiValidWaitExt,
 };
-use alloy_provider::{network::AnyNetwork, ProviderBuilder, RootProvider};
+use alloy_provider::{network::AnyNetwork, Provider, ProviderBuilder, RootProvider};
 use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{ExecutionPayloadInputV2, JwtSecret};
+use alloy_rpc_types_engine::{ForkchoiceState, JwtSecret};
 use clap::Parser;
 use futures::StreamExt;
 use reqwest::Url;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::Block;
-use reth_rpc_types_compat::engine::payload::block_to_payload_v2;
+use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
 use tracing::info;
 
 /// `reth benchmark from-rpc` command
@@ -31,7 +33,8 @@ impl Command {
     /// Execute `benchmark from-rpc` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         info!("Running benchmark using data from RPC URL: {}", self.rpc_url);
-        // TODO: set up alloy client for non engine rpc url
+
+        // set up alloy client for blocks
         let block_provider = ProviderBuilder::new().on_http(self.rpc_url.parse()?);
 
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
@@ -83,21 +86,57 @@ impl Command {
                 }
             };
 
-            let payload = block_to_payload_v2(block);
-            let payload = ExecutionPayloadInputV2 {
-                execution_payload: payload.payload_inner,
-                withdrawals: Some(payload.withdrawals),
-            };
+            // see the todo in the block fetcher for ways this can be improved
+            let head_block_hash = block.hash();
+            let safe_block_hash = block_provider
+                .get_block_by_number((block.number - 32).into(), false)
+                .await?
+                .expect("safe block exists")
+                .header
+                .hash
+                .expect("safe block has hash");
+            let finalized_block_hash = block_provider
+                .get_block_by_number((block.number - 64).into(), false)
+                .await?
+                .expect("finalized block exists")
+                .header
+                .hash
+                .expect("finalized block has hash");
+
+            let versioned_hashes = block.blob_versioned_hashes().into_iter().copied().collect();
+            let (payload, parent_beacon_block_root) = block_to_payload_v3(block);
+
             println!(
                 "number: {:?}, hash: {:?}, parent_hash: {:?}",
-                payload.execution_payload.block_number,
-                payload.execution_payload.block_hash,
-                payload.execution_payload.parent_hash
+                payload.payload_inner.payload_inner.block_number,
+                payload.payload_inner.payload_inner.block_hash,
+                payload.payload_inner.payload_inner.parent_hash
             );
-            auth_provider.new_payload_v2_wait(payload).await?;
-        }
 
-        // TODO: make `Continuous` work properly, or remove it
+            let start = Instant::now();
+            auth_provider
+                .new_payload_v3_wait(
+                    payload,
+                    versioned_hashes,
+                    parent_beacon_block_root.expect("this is a valid v3 payload"),
+                )
+                .await?;
+            let new_payload_duration = start.elapsed();
+
+            // construct fcu to call
+            let forkchoice_state =
+                ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash };
+
+            // TODO: allow the user to configure what to do when they get the output of the stream,
+            // ie, the block inside of this while loop should be configurable, along with the stream
+            // itself
+            auth_provider.fork_choice_updated_v3_wait(forkchoice_state, None).await?;
+            let fcu_duration = start.elapsed() - new_payload_duration;
+
+            // print the durations
+            println!("new_payload duration: {:?}", new_payload_duration);
+            println!("fcu duration: {:?}", fcu_duration);
+        }
 
         // TODO: support properly sending versioned fork stuff. like if timestamp > fork, use
         // correct engine method

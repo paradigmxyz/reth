@@ -19,6 +19,15 @@ pub(crate) struct BlockFetcher<'a, T> {
     block_sender: Sender<TransportResult<Option<Block>>>,
     /// The current block future in flight
     current_block: BoxFuture<'a, TransportResult<Option<Block>>>,
+    // TODO: make this include a fn, with generic output, instead of just
+    // TransportResult<Option<Block>>.
+    //
+    // Then the fn can be used to create not only a stream of blocks, but return for example the
+    // corresponding FCU hashes as well.
+    //
+    // i.e. the output can be (Block, head, safe, finalized) or something like that.
+    //
+    // And this could be configured by the user
 }
 
 impl<'a, T> BlockFetcher<'a, T>
@@ -49,7 +58,7 @@ where
     /// }
     /// ```
     #[allow(clippy::type_complexity)]
-    pub fn new(
+    pub(crate) fn new(
         mut mode: BenchmarkMode,
         provider: &'a RootProvider<T>,
         buffer_size: usize,
