@@ -73,8 +73,8 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     ///    and then [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
     /// 2.
     ///     1. If producing static files is needed, pass static file request to the
-    ///           [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and spawn           
-    ///           it in a separate task. Set static file producer state to
+    ///           [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and
+    ///           spawn it in a separate task. Set static file producer state to
     ///           [StaticFileProducerState::Running].
     ///     2. If producing static files is not needed, set static file producer state back to
     ///           [StaticFileProducerState::Idle].
