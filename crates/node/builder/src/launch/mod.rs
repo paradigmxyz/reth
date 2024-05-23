@@ -25,13 +25,13 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     engine::EngineMessageStreamExt,
     exit::NodeExitFuture,
-    version::CLIENT_VERSION_V1,
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
 use reth_rpc_engine_api::EngineApi;
-use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
+use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -410,10 +410,10 @@ where
         );
 
         let client = ClientVersionV1 {
-            code: ClientCode::RH,
-            name: CLIENT_VERSION_V1.name.to_string(),
-            version: CLIENT_VERSION_V1.version.to_string(),
-            commit: CLIENT_VERSION_V1.commit.to_string(),
+            code: CLIENT_CODE,
+            name: NAME_CLIENT.to_string(),
+            version: CARGO_PKG_VERSION.to_string(),
+            commit: VERGEN_GIT_SHA.to_string(),
         };
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
