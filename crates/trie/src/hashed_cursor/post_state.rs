@@ -25,9 +25,12 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
         Ok(HashedPostStateAccountCursor::new(cursor, self.post_state))
     }
 
-    fn hashed_storage_cursor(&self) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
-        let cursor = self.cursor_factory.hashed_storage_cursor()?;
-        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state))
+    fn hashed_storage_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
+        let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
+        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state, hashed_address))
     }
 }
 
@@ -179,10 +182,10 @@ pub struct HashedPostStateStorageCursor<'b, C> {
     cursor: C,
     /// The reference to the post state.
     post_state: &'b HashedPostStateSorted,
+    /// The current hashed account key.
+    hashed_address: B256,
     /// The post state index where the cursor is currently at.
     post_state_storage_index: usize,
-    /// The current hashed account key.
-    account: Option<B256>,
     /// The last slot that has been returned by the cursor.
     /// De facto, this is the cursor's position for the given account key.
     last_slot: Option<B256>,
@@ -190,14 +193,14 @@ pub struct HashedPostStateStorageCursor<'b, C> {
 
 impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     /// Create new instance of [HashedPostStateStorageCursor].
-    pub fn new(cursor: C, post_state: &'b HashedPostStateSorted) -> Self {
-        Self { cursor, post_state, account: None, last_slot: None, post_state_storage_index: 0 }
+    pub fn new(cursor: C, post_state: &'b HashedPostStateSorted, hashed_address: B256) -> Self {
+        Self { cursor, post_state, hashed_address, last_slot: None, post_state_storage_index: 0 }
     }
 
     /// Returns `true` if the storage for the given
     /// The database is not checked since it already has no wiped storage entries.
-    fn is_db_storage_wiped(&self, account: &B256) -> bool {
-        match self.post_state.storages.get(account) {
+    fn is_db_storage_wiped(&self) -> bool {
+        match self.post_state.storages.get(&self.hashed_address) {
             Some(storage) => storage.wiped,
             None => false,
         }
@@ -205,10 +208,10 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
 
     /// Check if the slot was zeroed out in the post state.
     /// The database is not checked since it already has no zero-valued slots.
-    fn is_slot_zero_valued(&self, account: &B256, slot: &B256) -> bool {
+    fn is_slot_zero_valued(&self, slot: &B256) -> bool {
         self.post_state
             .storages
-            .get(account)
+            .get(&self.hashed_address)
             .map(|storage| storage.zero_valued_slots.contains(slot))
             .unwrap_or_default()
     }
@@ -247,34 +250,24 @@ where
     ///
     /// This function should be called before attempting to call [HashedStorageCursor::seek] or
     /// [HashedStorageCursor::next].
-    fn is_storage_empty(&mut self, key: B256) -> Result<bool, reth_db::DatabaseError> {
-        let is_empty = match self.post_state.storages.get(&key) {
+    fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError> {
+        let is_empty = match self.post_state.storages.get(&self.hashed_address) {
             Some(storage) => {
                 // If the storage has been wiped at any point
                 storage.wiped &&
                     // and the current storage does not contain any non-zero values
                     storage.non_zero_valued_slots.is_empty()
             }
-            None => self.cursor.is_storage_empty(key)?,
+            None => self.cursor.is_storage_empty()?,
         };
         Ok(is_empty)
     }
 
     /// Seek the next account storage entry for a given hashed key pair.
-    fn seek(
-        &mut self,
-        account: B256,
-        subkey: B256,
-    ) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
-        if self.account.map_or(true, |acc| acc != account) {
-            self.account = Some(account);
-            self.last_slot = None;
-            self.post_state_storage_index = 0;
-        }
-
+    fn seek(&mut self, subkey: B256) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
-        if let Some(storage) = self.post_state.storages.get(&account) {
+        if let Some(storage) = self.post_state.storages.get(&self.hashed_address) {
             post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
 
             while post_state_entry.map(|(slot, _)| slot < &subkey).unwrap_or_default() {
@@ -293,14 +286,14 @@ where
         }
 
         // It's not an exact match, reposition to the first greater or equal account.
-        let db_entry = if self.is_db_storage_wiped(&account) {
+        let db_entry = if self.is_db_storage_wiped() {
             None
         } else {
-            let mut db_entry = self.cursor.seek(account, subkey)?;
+            let mut db_entry = self.cursor.seek(subkey)?;
 
             while db_entry
                 .as_ref()
-                .map(|entry| self.is_slot_zero_valued(&account, &entry.key))
+                .map(|entry| self.is_slot_zero_valued(&entry.key))
                 .unwrap_or_default()
             {
                 db_entry = self.cursor.next()?;
@@ -322,25 +315,21 @@ where
     /// If the account key is not set. [HashedStorageCursor::seek] must be called first in order to
     /// position the cursor.
     fn next(&mut self) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
-        let account = self.account.expect("`seek` must be called first");
-
         let last_slot = match self.last_slot.as_ref() {
             Some(slot) => slot,
             None => return Ok(None), // no previous entry was found
         };
 
-        let db_entry = if self.is_db_storage_wiped(&account) {
+        let db_entry = if self.is_db_storage_wiped() {
             None
         } else {
             // If post state was given precedence, move the cursor forward.
-            let mut db_entry = self.cursor.seek(account, *last_slot)?;
+            let mut db_entry = self.cursor.seek(*last_slot)?;
 
             // If the entry was already returned or is zero-values, move to the next.
             while db_entry
                 .as_ref()
-                .map(|entry| {
-                    &entry.key == last_slot || self.is_slot_zero_valued(&account, &entry.key)
-                })
+                .map(|entry| &entry.key == last_slot || self.is_slot_zero_valued(&entry.key))
                 .unwrap_or_default()
             {
                 db_entry = self.cursor.next()?;
@@ -351,7 +340,7 @@ where
 
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
-        if let Some(storage) = self.post_state.storages.get(&account) {
+        if let Some(storage) = self.post_state.storages.get(&self.hashed_address) {
             post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             while post_state_entry.map(|(slot, _)| slot <= last_slot).unwrap_or_default() {
                 self.post_state_storage_index += 1;
@@ -397,12 +386,11 @@ mod tests {
         factory: &impl HashedCursorFactory,
         expected: impl Iterator<Item = (B256, BTreeMap<B256, U256>)>,
     ) {
-        let mut cursor = factory.hashed_storage_cursor().unwrap();
-
         for (account, storage) in expected {
+            let mut cursor = factory.hashed_storage_cursor(account).unwrap();
             let mut expected_storage = storage.into_iter();
 
-            let first_storage = cursor.seek(account, B256::default()).unwrap();
+            let first_storage = cursor.seek(B256::default()).unwrap();
             assert_eq!(first_storage.map(|e| (e.key, e.value)), expected_storage.next());
 
             for expected_entry in expected_storage {
@@ -577,8 +565,8 @@ mod tests {
             let sorted = HashedPostState::default().into_sorted();
             let tx = db.tx().unwrap();
             let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-            let mut cursor = factory.hashed_storage_cursor().unwrap();
-            assert!(cursor.is_storage_empty(address).unwrap());
+            let mut cursor = factory.hashed_storage_cursor(address).unwrap();
+            assert!(cursor.is_storage_empty().unwrap());
         }
 
         let db_storage =
@@ -600,8 +588,8 @@ mod tests {
             let sorted = HashedPostState::default().into_sorted();
             let tx = db.tx().unwrap();
             let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-            let mut cursor = factory.hashed_storage_cursor().unwrap();
-            assert!(!cursor.is_storage_empty(address).unwrap());
+            let mut cursor = factory.hashed_storage_cursor(address).unwrap();
+            assert!(!cursor.is_storage_empty().unwrap());
         }
 
         // wiped storage, must be empty
@@ -615,8 +603,8 @@ mod tests {
             let sorted = hashed_post_state.into_sorted();
             let tx = db.tx().unwrap();
             let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-            let mut cursor = factory.hashed_storage_cursor().unwrap();
-            assert!(cursor.is_storage_empty(address).unwrap());
+            let mut cursor = factory.hashed_storage_cursor(address).unwrap();
+            assert!(cursor.is_storage_empty().unwrap());
         }
 
         // wiped storage, but post state has zero-value entries
@@ -631,8 +619,8 @@ mod tests {
             let sorted = hashed_post_state.into_sorted();
             let tx = db.tx().unwrap();
             let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-            let mut cursor = factory.hashed_storage_cursor().unwrap();
-            assert!(cursor.is_storage_empty(address).unwrap());
+            let mut cursor = factory.hashed_storage_cursor(address).unwrap();
+            assert!(cursor.is_storage_empty().unwrap());
         }
 
         // wiped storage, but post state has non-zero entries
@@ -647,8 +635,8 @@ mod tests {
             let sorted = hashed_post_state.into_sorted();
             let tx = db.tx().unwrap();
             let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-            let mut cursor = factory.hashed_storage_cursor().unwrap();
-            assert!(!cursor.is_storage_empty(address).unwrap());
+            let mut cursor = factory.hashed_storage_cursor(address).unwrap();
+            assert!(!cursor.is_storage_empty().unwrap());
         }
     }
 
