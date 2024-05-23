@@ -41,7 +41,6 @@ pub struct BitfinityResetEvmStateCommandBuilder {
 const MAX_REQUEST_BYTES: usize = 500_000;
 
 impl BitfinityResetEvmStateCommandBuilder {
-
     /// Build the command
     pub async fn build(self) -> eyre::Result<BitfinityResetEvmStateCommand> {
         let evm_datasource_url = self.bitfinity.evm_datasource_url;
@@ -77,15 +76,16 @@ pub struct BitfinityResetEvmStateCommand {
 }
 
 impl BitfinityResetEvmStateCommand {
-
     /// Create a new instance of the command
-    pub fn new(provider_factory: ProviderFactory<Arc<DatabaseEnv>>, executor: Arc<dyn ResetStateExecutor>) -> Self {
+    pub fn new(
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        executor: Arc<dyn ResetStateExecutor>,
+    ) -> Self {
         Self { provider_factory, executor }
     }
 
     /// Execute the command
     pub async fn execute(&self) -> eyre::Result<()> {
-
         let mut provider = self.provider_factory.provider()?;
         let last_block_number = provider.last_block_number()?;
         let last_block =
@@ -122,13 +122,13 @@ impl BitfinityResetEvmStateCommand {
             let mut batch_size = 0;
             let batch_limit = 500;
 
-
-
             while let Some((ref address, ref account)) = plain_account_cursor.next()? {
                 // We need to retrieve the bytecode for the account
                 let bytecode = if let Some(bytecode_hash) = account.bytecode_hash {
                     debug!(target: "reth::cli", "Recovering bytecode for account {}", address);
-                    contract_storage_cursor.seek_exact(bytecode_hash)?.map(|(_, bytecode)| bytecode.original_bytes().into())
+                    contract_storage_cursor
+                        .seek_exact(bytecode_hash)?
+                        .map(|(_, bytecode)| bytecode.original_bytes().into())
                 } else {
                     None
                 };
@@ -142,17 +142,18 @@ impl BitfinityResetEvmStateCommand {
 
                 while let Some(result) = storage_walker.next() {
                     let (storage_address, storage_entry) = result?;
-                    trace!("Recovering storage for account {} - found entry: {:?}", address, storage_entry);
+                    trace!(
+                        "Recovering storage for account {} - found entry: {:?}",
+                        address,
+                        storage_entry
+                    );
                     if storage_address != *address {
                         break;
                     }
                     let StorageEntry { key, value } = storage_entry;
 
                     let key: reth_primitives::U256 = key.into();
-                    storage.insert(
-                        key.into(),
-                        value.into(),
-                    );
+                    storage.insert(key.into(), value.into());
                 }
 
                 let account = RawAccountInfo {
@@ -199,7 +200,6 @@ impl BitfinityResetEvmStateCommand {
 
         Ok(())
     }
-
 }
 
 fn estimate_size(map: &AccountInfoMap) -> usize {
@@ -208,32 +208,37 @@ fn estimate_size(map: &AccountInfoMap) -> usize {
     for (_address, account) in map {
         // key
         let address_size = H160::BYTE_SIZE;
-        
+
         // value
         let nonce_size = U256::BYTE_SIZE;
         let balance_size = U256::BYTE_SIZE;
         let bytecode_size = account.bytecode.as_ref().map(|b| b.0.len()).unwrap_or(0);
         let storage_size = U256::BYTE_SIZE * 2 * account.storage.len();
-        
-        total_size += address_size + nonce_size + balance_size + bytecode_size + storage_size;
 
+        total_size += address_size + nonce_size + balance_size + bytecode_size + storage_size;
     }
-    
+
     total_size
 }
 
 /// Trait for the reset state executor
 pub trait ResetStateExecutor: Send + Debug {
-
     /// Start the reset state process
-    fn start(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
+    fn start(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
 
     /// Add accounts to the reset state process
-    fn add_accounts(&self, accounts: AccountInfoMap) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
+    fn add_accounts(
+        &self,
+        accounts: AccountInfoMap,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
 
     /// End the reset state process
-    fn end(&self, block: did::Block<H256>) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
-    
+    fn end(
+        &self,
+        block: did::Block<H256>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>>;
 }
 
 /// Executor for the reset state process that uses the EVM canister client
@@ -241,23 +246,24 @@ pub struct EvmCanisterResetStateExecutor<C: CanisterClient> {
     client: EvmCanisterClient<C>,
 }
 
-impl <C: CanisterClient> Debug for EvmCanisterResetStateExecutor<C> {
+impl<C: CanisterClient> Debug for EvmCanisterResetStateExecutor<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EvmCanisterResetStateExecutor").finish()
     }
 }
 
-impl <C: CanisterClient> EvmCanisterResetStateExecutor<C> {
+impl<C: CanisterClient> EvmCanisterResetStateExecutor<C> {
     /// Create a new instance of the executor
     pub fn new(client: EvmCanisterClient<C>) -> Self {
         Self { client }
     }
 }
 
-impl <C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterResetStateExecutor<C> {
-
-    fn start(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
-        let client= self.client.clone();
+impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterResetStateExecutor<C> {
+    fn start(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::Start request...");
             let res = client.admin_reset_state(EvmResetState::Start).await??;
@@ -266,18 +272,25 @@ impl <C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterRese
         })
     }
 
-    fn add_accounts(&self, accounts: AccountInfoMap) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
-        let client= self.client.clone();
+    fn add_accounts(
+        &self,
+        accounts: AccountInfoMap,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::AddAccounts request with {} accounts...", accounts.len());
-            let res = client.admin_reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
+            let res =
+                client.admin_reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
             info!(target: "reth::cli", "EvmResetState::AddAccounts request sent");
             Ok(res)
         })
     }
 
-    fn end(&self, block: did::Block<H256>) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
-        let client= self.client.clone();
+    fn end(
+        &self,
+        block: did::Block<H256>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+        let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::End request...");
             let res = client.admin_reset_state(EvmResetState::End(block)).await??;
@@ -285,5 +298,4 @@ impl <C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterRese
             Ok(res)
         })
     }
-
 }

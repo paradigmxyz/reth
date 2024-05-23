@@ -3,13 +3,18 @@
 //! These tests requires a running EVM node or EVM block extractor node at the specified URL.
 //!
 
-use std::{sync::{Arc, Mutex}, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use did::{block::BlockResult, AccountInfoMap, H256};
 use evm_canister_client::{EvmCanisterClient, IcAgentClient};
 use reth::{
     args::BitfinityResetEvmStateArgs,
-    commands::bitfinity_reset_evm_state::{BitfinityResetEvmStateCommand, EvmCanisterResetStateExecutor, ResetStateExecutor},
+    commands::bitfinity_reset_evm_state::{
+        BitfinityResetEvmStateCommand, EvmCanisterResetStateExecutor, ResetStateExecutor,
+    },
 };
 use reth_db::DatabaseEnv;
 use reth_provider::{AccountReader, BlockNumReader, BlockReader, ProviderFactory};
@@ -30,11 +35,12 @@ async fn bitfinity_test_should_reset_evm_state() {
     let dfx_port = get_dfx_local_port();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
 
-    // Block 19995 -> ok
-    // Block 19996 -> fail
-    let end_block = 19996;
-    let data_dir  = Some(format!("../../target/reth_{end_block}").into());
-    let (_temp_dir, mut import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
+    // Block 100_000 -> ok
+    // Block ? -> fail
+    let end_block = 20_000;
+    let data_dir = Some(format!("../../target/reth_{end_block}").into());
+    let (_temp_dir, mut import_data) =
+        bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
 
     let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
 
@@ -91,11 +97,12 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
 
-    // Block 19995 -> ok
-    // Block 19996 -> fail
-    let end_block = 19996;
-    let data_dir  = Some(format!("../../target/reth_{end_block}").into());
-    let (_temp_dir, mut import_data) = bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
+    // Block 100_000 -> ok
+    // Block ? -> fail
+    let end_block = 20_000;
+    let data_dir = Some(format!("../../target/reth_{end_block}").into());
+    let (_temp_dir, mut import_data) =
+        bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
 
     let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
 
@@ -104,7 +111,8 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     import_blocks(import_data.clone(), Duration::from_secs(fetch_block_timeout_secs), true).await;
 
     let executor = Arc::new(InMemoryResetStateExecutor::default());
-    let reset_state_command = BitfinityResetEvmStateCommand::new(import_data.provider_factory.clone(), executor.clone());
+    let reset_state_command =
+        BitfinityResetEvmStateCommand::new(import_data.provider_factory.clone(), executor.clone());
 
     // Act
     {
@@ -132,7 +140,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
             let executor_block = executor.get_block().unwrap();
             assert_eq!(end_block, last_block.number);
             assert_eq!(executor_block.number.0.as_u64(), last_block.number);
-            assert_eq!(executor_block.state_root.0.0, last_block.state_root.0);
+            assert_eq!(executor_block.state_root.0 .0, last_block.state_root.0);
         }
 
         // Check that all accounts in the provider are in the executor
@@ -142,8 +150,8 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
             let mut accounts_with_code = 0;
             let mut accounts_with_storage_values = 0;
             for (executor_account_address, executor_account) in executor_accounts.iter() {
-
-                let account = provider.basic_account(executor_account_address.0.0.into()).unwrap().unwrap();
+                let account =
+                    provider.basic_account(executor_account_address.0 .0.into()).unwrap().unwrap();
 
                 if let Some(bytecode) = &executor_account.bytecode {
                     accounts_with_code += 1;
@@ -159,37 +167,39 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
                 if executor_account.storage.len() > 0 {
                     accounts_with_storage_values += 1;
-                }                
+                }
             }
 
             info!("Executor accounts: {}", executor_accounts.len());
             info!("Accounts with code: {accounts_with_code}");
             info!("Accounts with storage values: {accounts_with_storage_values}");
-
         }
 
         // Calculate the state root hash from the executor accounts
         {
             let executor_accounts = executor.get_accounts();
 
-            let calculated_root = state_root(executor_accounts.into_iter().map(|(address, raw_account)| {
-                let account = reth_primitives::Account {
-                    nonce: raw_account.nonce.0.as_u64(),
-                    balance: raw_account.balance.into(),
-                    bytecode_hash: raw_account.bytecode.map(|code| keccak256(&code.0)),
-                };
-                let storage: Vec<(B256, reth_primitives::U256)> = raw_account.storage.into_iter().map(|(k, v)| {
-                    let k: reth_primitives::U256 = k.into();
-                    (k.into(), v.into())
-                }).collect();
+            let calculated_root =
+                state_root(executor_accounts.into_iter().map(|(address, raw_account)| {
+                    let account = reth_primitives::Account {
+                        nonce: raw_account.nonce.0.as_u64(),
+                        balance: raw_account.balance.into(),
+                        bytecode_hash: raw_account.bytecode.map(|code| keccak256(&code.0)),
+                    };
+                    let storage: Vec<(B256, reth_primitives::U256)> = raw_account
+                        .storage
+                        .into_iter()
+                        .map(|(k, v)| {
+                            let k: reth_primitives::U256 = k.into();
+                            (k.into(), v.into())
+                        })
+                        .collect();
 
-                (address.into(), (account, storage))
-            }));
+                    (address.into(), (account, storage))
+                }));
             assert_eq!(calculated_root, last_block.state_root);
         }
-
     }
-
 }
 
 async fn build_bitfinity_reset_evm_command(
@@ -198,7 +208,6 @@ async fn build_bitfinity_reset_evm_command(
     dfx_port: u16,
     evm_datasource_url: &str,
 ) -> (EvmCanisterClient<IcAgentClient>, BitfinityResetEvmStateCommand) {
-
     let bitfinity_args = BitfinityResetEvmStateArgs {
         evmc_principal: LOCAL_EVM_CANISTER_ID.to_string(),
         ic_identity_file_path: dirs::home_dir()
@@ -237,7 +246,6 @@ struct InMemoryResetStateExecutor {
 }
 
 impl InMemoryResetStateExecutor {
-
     fn is_started(&self) -> bool {
         *self.started.lock().unwrap()
     }
@@ -253,28 +261,29 @@ impl InMemoryResetStateExecutor {
     fn get_block(&self) -> Option<did::Block<H256>> {
         self.block.lock().unwrap().clone()
     }
-
 }
 
 impl ResetStateExecutor for InMemoryResetStateExecutor {
-    fn start(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+    fn start(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
         *self.started.lock().unwrap() = true;
-        Box::pin(async move {
-            Ok(())
-        })
+        Box::pin(async move { Ok(()) })
     }
 
-    fn add_accounts(&self, mut accounts: AccountInfoMap) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+    fn add_accounts(
+        &self,
+        mut accounts: AccountInfoMap,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
         self.accounts.lock().unwrap().append(&mut accounts);
-        Box::pin(async move {
-            Ok(())
-        })
+        Box::pin(async move { Ok(()) })
     }
 
-    fn end(&self, block: did::Block<H256>) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
+    fn end(
+        &self,
+        block: did::Block<H256>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
         *self.block.lock().unwrap() = Some(block);
-        Box::pin(async move {
-            Ok(())
-        })
+        Box::pin(async move { Ok(()) })
     }
 }
