@@ -30,6 +30,7 @@ use reth_network_types::PeerId;
 use reth_primitives::{
     FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
@@ -197,7 +198,7 @@ pub struct TransactionsManager<Pool> {
     /// Subscriptions to all network related events.
     ///
     /// From which we get all new incoming transaction related messages.
-    network_events: UnboundedReceiverStream<NetworkEvent>,
+    network_events: EventStream<NetworkEvent>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
@@ -880,8 +881,8 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event: NetworkEvent) {
-        match event {
+    fn on_network_event(&mut self, event_result: NetworkEvent) {
+        match event_result {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
@@ -1626,6 +1627,7 @@ mod tests {
     use secp256k1::SecretKey;
     use std::{fmt, future::poll_fn, hash};
     use tests::fetcher::TxFetchMetadata;
+    use tracing::error;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -1734,7 +1736,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1820,7 +1822,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1904,7 +1906,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1992,7 +1994,7 @@ mod tests {
                 }),
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }

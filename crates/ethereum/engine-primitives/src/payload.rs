@@ -113,7 +113,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
         ExecutionPayloadEnvelopeV3 {
-            execution_payload: block_to_payload_v3(block),
+            execution_payload: block_to_payload_v3(block).0,
             block_value: fees,
             // From the engine API spec:
             //

@@ -6447,6 +6447,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types",
  "reth-stages-api",
+ "reth-tokio-util",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",
@@ -6588,11 +6589,8 @@ version = "0.2.0-beta.7"
 dependencies = [
  "confy",
  "humantime-serde",
- "reth-discv4",
- "reth-net-nat",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.28.2",
  "serde",
  "tempfile",
  "toml",
@@ -6783,6 +6781,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-layer",
+ "reth-tokio-util",
  "reth-tracing",
  "secp256k1 0.28.2",
  "serde_json",
@@ -7136,8 +7135,8 @@ dependencies = [
 name = "reth-net-common"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-primitives",
  "pin-project",
- "reth-network-types",
  "tokio",
 ]
 
@@ -7554,7 +7553,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "c-kzg",
- "clap",
  "criterion",
  "derive_more",
  "hash-db",
@@ -7571,13 +7569,13 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-network-types",
+ "reth-static-file-types",
  "revm",
  "revm-primitives",
  "roaring",
  "secp256k1 0.28.2",
  "serde",
  "serde_json",
- "strum",
  "sucds",
  "tempfile",
  "test-fuzz",
@@ -7639,7 +7637,6 @@ dependencies = [
  "reth-tracing",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -7767,6 +7764,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",
@@ -7801,6 +7799,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-tokio-util",
  "serde",
  "thiserror",
  "tokio",
@@ -7933,8 +7932,20 @@ dependencies = [
  "reth-stages",
  "reth-tokio-util",
  "tempfile",
+ "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-static-file-types"
+version = "0.2.0-beta.7"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "derive_more",
+ "serde",
+ "strum",
 ]
 
 [[package]]
@@ -7968,6 +7979,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

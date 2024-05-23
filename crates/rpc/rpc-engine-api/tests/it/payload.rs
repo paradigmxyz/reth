@@ -30,6 +30,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
         withdrawals: transformed.withdrawals,
         requests: transformed.requests,
     })
+    .0
 }
 
 #[test]

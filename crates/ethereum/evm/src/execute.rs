@@ -213,9 +213,7 @@ where
             )?;
 
             // Requests are ordered by Request Type ID
-            let requests = [deposit_requests, withdrawal_requests].concat();
-
-            requests
+            [deposit_requests, withdrawal_requests].concat()
         } else {
             vec![]
         };

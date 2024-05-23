@@ -257,6 +257,7 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
 ///  * mainnet: `<DIR>/mainnet`
 ///  * goerli: `<DIR>/goerli`
 ///  * sepolia: `<DIR>/sepolia`
+///
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -20,6 +20,7 @@ use reth_provider::{
     test_utils::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
 use reth_tasks::TokioTaskExecutor;
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
     test_utils::{TestPool, TestPoolBuilder},
@@ -40,7 +41,6 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A test network consisting of multiple peers.
 pub struct Testnet<C, Pool> {
@@ -503,7 +503,7 @@ impl<Pool> PeerHandle<Pool> {
     }
 
     /// Creates a new [`NetworkEvent`] listener channel.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
+    pub fn event_listener(&self) -> EventStream<NetworkEvent> {
         self.network.event_listener()
     }
 
@@ -591,14 +591,14 @@ impl Default for PeerConfig {
 /// This makes it easier to await established connections
 #[derive(Debug)]
 pub struct NetworkEventStream {
-    inner: UnboundedReceiverStream<NetworkEvent>,
+    inner: EventStream<NetworkEvent>,
 }
 
 // === impl NetworkEventStream ===
 
 impl NetworkEventStream {
     /// Create a new [`NetworkEventStream`] from the given network event receiver stream.
-    pub fn new(inner: UnboundedReceiverStream<NetworkEvent>) -> Self {
+    pub fn new(inner: EventStream<NetworkEvent>) -> Self {
         Self { inner }
     }
 

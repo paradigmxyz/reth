@@ -1,5 +1,5 @@
 use crate::{Consensus, ConsensusError, PostExecutionInput};
-use reth_primitives::{BlockWithSenders, Header, Receipt, SealedBlock, SealedHeader, U256};
+use reth_primitives::{BlockWithSenders, Header, SealedBlock, SealedHeader, U256};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Consensus engine implementation for testing

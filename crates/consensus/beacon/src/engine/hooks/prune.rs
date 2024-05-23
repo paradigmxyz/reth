@@ -78,10 +78,10 @@ impl<DB: Database + 'static> PruneHook<DB> {
 
     /// This will try to spawn the pruner if it is idle:
     /// 1. Check if pruning is needed through [Pruner::is_pruning_needed].
-    /// 2.
-    ///     1. If pruning is needed, pass tip block number to the [Pruner::run] and spawn it in a
-    /// separate task. Set pruner state to [PrunerState::Running].
-    ///     2. If pruning is not needed, set pruner state back to [PrunerState::Idle].
+    ///
+    /// 2.1. If pruning is needed, pass tip block number to the [Pruner::run] and spawn it in a
+    ///      separate task. Set pruner state to [PrunerState::Running].
+    /// 2.2. If pruning is not needed, set pruner state back to [PrunerState::Idle].
     ///
     /// If pruner is already running, do nothing.
     fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<EngineHookEvent> {

@@ -56,6 +56,12 @@ impl Receipt {
     pub fn with_bloom(self) -> ReceiptWithBloom {
         self.into()
     }
+
+    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloomRef] container
+    /// type.
+    pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
+        self.into()
+    }
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
@@ -98,7 +104,7 @@ impl Receipts {
 
     /// Retrieves the receipt root for all recorded receipts from index.
     pub fn root_slow(&self, index: usize) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_ref(
+        Some(crate::proofs::calculate_receipt_root_no_memo(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
         ))
     }
@@ -111,7 +117,7 @@ impl Receipts {
         chain_spec: &crate::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_ref_optimism(
+        Some(crate::proofs::calculate_receipt_root_no_memo_optimism(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
             chain_spec,
             timestamp,

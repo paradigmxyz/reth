@@ -160,7 +160,7 @@ pub struct ExExManagerMetrics {
 /// The manager is responsible for:
 ///
 /// - Receiving relevant events from the rest of the node, and sending these to the execution
-/// extensions
+///   extensions
 /// - Backpressure
 /// - Error handling
 /// - Monitoring
