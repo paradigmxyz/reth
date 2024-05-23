@@ -10,10 +10,10 @@
 //! This launch the regular reth node and also print:
 //!
 //! > "All components initialized"
-//! once all components have been initialized and
+//! > once all components have been initialized and
 //!
 //! > "Node started"
-//! once the node has been started.
+//! > once the node has been started.
 
 use reth::cli::Cli;
 use reth_node_ethereum::EthereumNode;
