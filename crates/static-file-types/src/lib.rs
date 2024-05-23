@@ -1,12 +1,4 @@
-//! Commonly used types in reth.
-//!
-//! This crate contains Ethereum primitive types and helper functions.
-//!
-//! ## Feature Flags
-//!
-//! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
-//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
-//! - `test-utils`: Export utilities for testing
+//! Commonly used types for static file usage.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -14,10 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-//! StaticFile primitives.
 
 mod compression;
 mod filters;
