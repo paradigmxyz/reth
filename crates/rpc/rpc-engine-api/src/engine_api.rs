@@ -21,12 +21,14 @@ use reth_rpc_types::engine::{
     ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
     TransitionConfiguration,
+    BlobTransactionId, GetBlobsResponse,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
 };
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use reth_transaction_pool::TransactionPool;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
@@ -39,11 +41,11 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-pub struct EngineApi<Provider, EngineT: EngineTypes> {
-    inner: Arc<EngineApiInner<Provider, EngineT>>,
+pub struct EngineApi<Provider, EngineT: EngineTypes, Pool> {
+    inner: Arc<EngineApiInner<Provider, EngineT, Pool>>,
 }
 
-struct EngineApiInner<Provider, EngineT: EngineTypes> {
+struct EngineApiInner<Provider, EngineT: EngineTypes, Pool> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
@@ -60,12 +62,15 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
     client: ClientVersionV1,
     /// The list of all supported Engine capabilities available over the engine endpoint.
     capabilities: EngineCapabilities,
+    /// Transaction pool.
+    tx_pool: Pool,
 }
 
-impl<Provider, EngineT> EngineApi<Provider, EngineT>
+impl<Provider, EngineT, Pool> EngineApi<Provider, EngineT, Pool>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes + 'static,
+    Pool: TransactionPool + 'static,
 {
     /// Create new instance of [`EngineApi`].
     pub fn new(
@@ -73,6 +78,7 @@ where
         chain_spec: Arc<ChainSpec>,
         beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
         payload_store: PayloadStore<EngineT>,
+        tx_pool: Pool,
         task_spawner: Box<dyn TaskSpawner>,
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
@@ -86,6 +92,7 @@ where
             metrics: EngineApiMetrics::default(),
             client,
             capabilities,
+            tx_pool,
         });
         Self { inner }
     }
@@ -609,10 +616,11 @@ where
 }
 
 #[async_trait]
-impl<Provider, EngineT> EngineApiServer<EngineT> for EngineApi<Provider, EngineT>
+impl<Provider, EngineT, Pool> EngineApiServer<EngineT> for EngineApi<Provider, EngineT, Pool>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes + 'static,
+    Pool: TransactionPool + 'static,
 {
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
@@ -904,9 +912,27 @@ where
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
         Ok(self.inner.capabilities.list())
     }
+
+    async fn get_blobs_v1(
+        &self,
+        transaction_ids: Vec<BlobTransactionId>,
+    ) -> RpcResult<GetBlobsResponse> {
+        let mut results = vec![];
+
+        for transaction_id in transaction_ids {
+            results.push(
+                self.inner
+                    .tx_pool
+                    .get_blob(transaction_id.tx_hash)
+                    .map_err(|e| EngineApiError::Internal(Box::new(e)))?,
+            );
+        }
+
+        Ok(GetBlobsResponse { blobs: results })
+    }
 }
 
-impl<Provider, EngineT> std::fmt::Debug for EngineApi<Provider, EngineT>
+impl<Provider, EngineT, Pool> std::fmt::Debug for EngineApi<Provider, EngineT, Pool>
 where
     EngineT: EngineTypes,
 {
