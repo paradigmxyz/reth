@@ -25,7 +25,7 @@ use reth_interfaces::p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_core::init::init_genesis;
+use reth_db_common::init::init_genesis;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{

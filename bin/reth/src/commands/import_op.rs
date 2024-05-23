@@ -19,7 +19,7 @@ use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
 
-use reth_node_core::init::init_genesis;
+use reth_db_common::init::init_genesis;
 
 use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, PruneModes};
 use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
