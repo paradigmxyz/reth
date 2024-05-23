@@ -8,11 +8,11 @@ use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
     RpcModuleBuilder, RpcModuleSelection, RpcServerConfig, RpcServerHandle,
-    TransportRpcModuleCo
+    TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApi;
-use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 use reth_rpc_layer::JwtSecret;
+use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -27,7 +27,8 @@ pub fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
+    let beacon_engine_handle =
+        BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx, Default::default());
     let client = ClientVersionV1 {
         code: ClientCode::RH,
         name: "Reth".to_string(),
