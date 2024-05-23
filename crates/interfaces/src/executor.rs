@@ -1,8 +1,6 @@
 use crate::{provider::ProviderError, trie::StateRootError};
-use reth_primitives::{
-    revm_primitives::EVMError, BlockNumHash, Bloom, GotExpected, GotExpectedBoxed,
-    PruneSegmentError, B256,
-};
+use reth_consensus::ConsensusError;
+use reth_primitives::{revm_primitives::EVMError, BlockNumHash, PruneSegmentError, B256};
 use thiserror::Error;
 
 /// Transaction validation errors
@@ -23,12 +21,6 @@ pub enum BlockValidationError {
     /// Error when incrementing balance in post execution
     #[error("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
-    /// Error when receipt root doesn't match expected value
-    #[error("receipt root mismatch: {0}")]
-    ReceiptRootDiff(GotExpectedBoxed<B256>),
-    /// Error when header bloom filter doesn't match expected value
-    #[error("header bloom filter mismatch: {0}")]
-    BloomLogDiff(GotExpectedBoxed<Bloom>),
     /// Error when the state root does not match the expected value.
     #[error(transparent)]
     StateRoot(#[from] StateRootError),
@@ -39,14 +31,6 @@ pub enum BlockValidationError {
         transaction_gas_limit: u64,
         /// The available block gas
         block_available_gas: u64,
-    },
-    /// Error when block gas used doesn't match expected value
-    #[error("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")]
-    BlockGasUsed {
-        /// The gas diff.
-        gas: GotExpected<u64>,
-        /// Gas spent by each transaction
-        gas_spent_by_tx: Vec<(u64, u64)>,
     },
     /// Error for pre-merge block
     #[error("block {hash} is pre merge")]
@@ -88,6 +72,9 @@ pub enum BlockExecutionError {
     /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
+    /// Consensus error, transparently wrapping `ConsensusError`
+    #[error(transparent)]
+    Consensus(#[from] ConsensusError),
     /// Transaction error on revert with inner details
     #[error("transaction error on revert: {inner}")]
     CanonicalRevert {

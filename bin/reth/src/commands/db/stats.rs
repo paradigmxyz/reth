@@ -15,6 +15,7 @@ use reth_db::{
     Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders, Transactions,
     VersionHistory,
 };
+use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
@@ -203,16 +204,16 @@ impl Command {
                 let columns = jar_provider.columns();
                 let rows = jar_provider.rows();
 
-                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
+                let data_size = fs::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
+                let index_size = fs::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
+                let offsets_size = fs::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
+                let config_size = fs::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
@@ -376,7 +377,7 @@ impl Command {
         let max_widths = table.column_max_content_widths();
         let mut separator = Row::new();
         for width in max_widths {
-            separator.add_cell(Cell::new(&"-".repeat(width as usize)));
+            separator.add_cell(Cell::new("-".repeat(width as usize)));
         }
         table.add_row(separator);
 

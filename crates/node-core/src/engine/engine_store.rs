@@ -3,7 +3,7 @@
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
-use reth_primitives::fs;
+use reth_fs_util as fs;
 use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState},
     ExecutionPayload,
@@ -89,8 +89,7 @@ impl EngineMessageStore {
                 )?;
             }
             // noop
-            BeaconEngineMessage::TransitionConfigurationExchanged |
-            BeaconEngineMessage::EventListener(_) => (),
+            BeaconEngineMessage::TransitionConfigurationExchanged => (),
         };
         Ok(())
     }

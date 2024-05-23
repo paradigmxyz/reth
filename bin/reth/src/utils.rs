@@ -9,7 +9,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
-use reth_primitives::{fs, ChainSpec};
+use reth_fs_util as fs;
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
@@ -35,6 +36,9 @@ pub struct DbTool<DB: Database> {
 impl<DB: Database> DbTool<DB> {
     /// Takes a DB where the tables have already been created.
     pub fn new(provider_factory: ProviderFactory<DB>, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
+        // Disable timeout because we are entering a TUI which might read for a long time. We
+        // disable on the [`DbTool`] level since it's only used in the CLI.
+        provider_factory.provider()?.disable_long_read_transaction_safety();
         Ok(Self { provider_factory, chain })
     }
 

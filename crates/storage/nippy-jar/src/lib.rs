@@ -1,4 +1,8 @@
 //! Immutable data store format.
+//!
+//! *Warning*: The `NippyJar` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -245,7 +249,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
         // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
-            .map_err(|err| reth_primitives::fs::FsPathError::open(err, config_path))?;
+            .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
         let mut obj: Self = bincode::deserialize_from(&config_file)?;
         obj.path = path.to_path_buf();
@@ -290,7 +294,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
             [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
         {
             if path.exists() {
-                reth_primitives::fs::remove_file(path)?;
+                reth_fs_util::remove_file(path)?;
             }
         }
 
@@ -472,7 +476,7 @@ pub struct DataReader {
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
     /// Number of bytes that represent one offset.
-    offset_size: u64,
+    offset_size: u8,
 }
 
 impl DataReader {
@@ -487,7 +491,7 @@ impl DataReader {
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
         // First byte is the size of one offset in bytes
-        let offset_size = offset_mmap[0] as u64;
+        let offset_size = offset_mmap[0];
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
@@ -521,7 +525,8 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size) as usize)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+            as usize)
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
@@ -530,7 +535,7 @@ impl DataReader {
 
         let offset_end = index + self.offset_size as usize;
         if offset_end > self.offset_mmap.len() {
-            return Err(NippyJarError::OffsetOutOfBounds { index });
+            return Err(NippyJarError::OffsetOutOfBounds { index })
         }
 
         buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
@@ -538,7 +543,7 @@ impl DataReader {
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u64 {
+    pub fn offset_size(&self) -> u8 {
         self.offset_size
     }
 

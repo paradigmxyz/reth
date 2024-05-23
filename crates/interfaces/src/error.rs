@@ -5,8 +5,8 @@ use crate::{
     provider::ProviderError,
 };
 use reth_consensus::ConsensusError;
+use reth_fs_util::FsPathError;
 use reth_network_api::NetworkError;
-use reth_primitives::fs::FsPathError;
 
 /// Result alias for [`RethError`].
 pub type RethResult<T> = Result<T, RethError>;

@@ -18,10 +18,11 @@ use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
+use reth_fs_util as fs;
 use reth_interfaces::p2p::full_block::FullBlockClient;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, PruneModes};
+use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, PruneModes};
 use reth_provider::{
     BlockNumReader, BlockWriter, BundleStateWithReceipts, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
@@ -196,7 +197,7 @@ impl Command {
                 )),
                 PruneModes::none(),
             );
-            executor.execute_one((&sealed_block.clone().unseal(), td).into())?;
+            executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
             BundleStateWithReceipts::new(bundle, receipts, first_block).write_to_storage(
                 provider_rw.tx_ref(),

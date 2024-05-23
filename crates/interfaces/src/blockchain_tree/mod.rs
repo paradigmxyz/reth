@@ -210,6 +210,7 @@ pub enum BlockStatus {
 /// This is required to:
 /// - differentiate whether trie state updates should be cached.
 /// - inform other
+///
 /// This is required because the state root check can only be performed if the targeted block can be
 /// traced back to the canonical __head__.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

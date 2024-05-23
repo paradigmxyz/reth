@@ -493,7 +493,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_secret_key(&self) -> Option<JwtSecret> {
-        self.rpc_jwtsecret.clone()
+        self.rpc_jwtsecret
     }
 }
 

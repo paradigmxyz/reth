@@ -89,10 +89,10 @@ where
     type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         match self {
-            Either::Left(a) => a.execute_one(input),
-            Either::Right(b) => b.execute_one(input),
+            Either::Left(a) => a.execute_and_verify_one(input),
+            Either::Right(b) => b.execute_and_verify_one(input),
         }
     }
 
