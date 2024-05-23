@@ -113,11 +113,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.76" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: make update-book-cli
+      - run: cargo build --bin reth --workspace --features ethereum
+        env:
+          RUSTFLAGS: -D warnings
+      - run: ./book/cli/update.sh target/debug/reth
       - name: Check book changes
         run: git diff --exit-code
 
