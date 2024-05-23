@@ -12,8 +12,9 @@ use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFa
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
+    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
+    CAPABILITIES,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
@@ -77,14 +78,14 @@ where
         });
         Self { inner }
     }
-    
+
     /// Fetches the client version.
     async fn get_client_version_v1(
         &self,
-        client: ClientVersionV1,
+        _client: ClientVersionV1,
     ) -> EngineApiResult<Vec<ClientVersionV1>> {
         Ok(vec![self.inner.client.clone()])
-    } 
+    }
     /// Fetches the attributes for the payload with the given id.
     async fn get_payload_attributes(
         &self,
@@ -762,7 +763,7 @@ where
     }
     /// Handler for `engine_getClientVersionV1`
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md>
+    /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md>
     async fn get_client_version_v1(
         &self,
         client: ClientVersionV1,
@@ -845,7 +846,7 @@ mod tests {
         let res = api.get_client_version_v1(client.clone()).await;
         assert_eq!(res.unwrap(), vec![client]);
     }
-    
+
     struct EngineApiTestHandle {
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,

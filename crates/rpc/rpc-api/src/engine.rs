@@ -156,7 +156,9 @@ pub trait EngineApi<Engine: EngineTypes> {
     ) -> RpcResult<TransitionConfiguration>;
 
     /// This function will return the ClientVersionV1 object.
-    /// <https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1>  See also
+    /// See also:
+    /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
+    ///
     ///
     /// - When connected to a single execution client, the consensus client **MUST** receive an
     ///   array with a single `ClientVersionV1` object.

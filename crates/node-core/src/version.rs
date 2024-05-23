@@ -1,11 +1,11 @@
 //! Version information for reth.
 use reth_db::models::client_version::ClientVersion;
-use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
+use reth_rpc_types::engine::ClientCode;
 
-// The client code for Reth
+/// The client code for Reth
 pub const CLIENT_CODE: ClientCode = ClientCode::RH;
 
-// The human readable name of the client
+/// The human readable name of the client
 pub const NAME_CLIENT: &str = "Reth";
 
 /// The latest version from Cargo.toml.
@@ -33,12 +33,12 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 //   commit: "defa64b2"
 // }
 ///  ```
-pub const CLIENT_VERSION_V1: ClientVersionV1 = ClientVersionV1 {
-    code: CLIENT_CODE,
-    name: NAME_CLIENT.to_string(),
-    version: concat!(env!("CARGO_PKG_VERSION"), env!("RETH_VERSION_SUFFIX")).to_string(),
-    commit: env!("VERGEN_GIT_SHA").to_string(),
-};
+// pub const CLIENT_VERSION_V1: ClientVersionV1 = ClientVersionV1 {
+//     code: CLIENT_CODE,
+//     name: NAME_CLIENT.to_string(),
+//     version: concat!(env!("CARGO_PKG_VERSION"), env!("RETH_VERSION_SUFFIX")).to_string(),
+//     commit: env!("VERGEN_GIT_SHA").to_string(),
+// };
 /// The short version information for reth.
 ///
 /// - The latest version from Cargo.toml
