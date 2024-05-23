@@ -262,9 +262,13 @@ def preprocess_help(s: str):
         "default: <CACHE_DIR>",
         s,
     )
-    # Remove the commit SHA and target architecture triple
+    # Remove the commit SHA and target architecture triple or fourth
+    # rustup available targets:
+    #   aarch64-apple-darwin
+    #   x86_64-unknown-linux-gnu
+    #   x86_64-pc-windows-gnu
     s = re.sub(
-        r"default: reth/.*-[0-9A-Fa-f]{6,10}/\w+-\w*-\w+",
+        r"default: reth/.*-[0-9A-Fa-f]{6,10}/([_\w]+)-(\w+)-(\w+)(-\w+)?",
         "default: reth/<VERSION>-<SHA>/<ARCH>",
         s,
     )
