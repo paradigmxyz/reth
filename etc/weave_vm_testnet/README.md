@@ -158,7 +158,7 @@ sudo /home/reth-node/code/wvm-reth/target/release/reth init  --chain=/var/lib/do
       --execution-endpoint http://0.0.0.0:8551 \
       --accept-terms-of-use \
       --jwt-secret /home/reth-node/code/wvm-reth/etc/jwttoken/jwt.hex \
-      --suggested-fee-recipient 0xa2A0D977847805fE224B789D8C4d3D711ab251e7 \
+      --suggested-fee-recipient a2A0D977847805fE224B789D8C4d3D711ab251e7 \
       --minimum-peers-per-subnet 0 \
       --enable-debug-rpc-endpoints
 ```
@@ -175,7 +175,7 @@ sudo ./beacon-chain --datadir beacondata \
         --execution-endpoint /var/lib/docker/volumes/weave_vm_testnet_reth_data/_data/reth_engine_api.ipc \
         --accept-terms-of-use \
         --jwt-secret /home/reth-node/code/wvm-reth/etc/jwttoken/jwt.hex \
-        --suggested-fee-recipient 0xa2A0D977847805fE224B789D8C4d3D711ab251e7 \
+        --suggested-fee-recipient a2A0D977847805fE224B789D8C4d3D711ab251e7 \
         --minimum-peers-per-subnet 0 \
         --enable-debug-rpc-endpoints
 ```
