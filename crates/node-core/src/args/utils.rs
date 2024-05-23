@@ -141,7 +141,7 @@ pub enum SocketAddressParsingError {
 /// The following formats are checked:
 ///
 /// - If the value can be parsed as a `u16` or starts with `:` it is considered a port, and the
-/// hostname is set to `localhost`.
+///   hostname is set to `localhost`.
 /// - If the value contains `:` it is assumed to be the format `<host>:<port>`
 /// - Otherwise it is assumed to be a hostname
 ///

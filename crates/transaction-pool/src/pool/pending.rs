@@ -90,9 +90,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
-    /// an unsatisfied dependency and only returns them if dependency transaction were yielded
-    /// previously. In other words: The nonces of transactions with the same sender will _always_
-    /// increase by exactly 1.
+    ///    an unsatisfied dependency and only returns them if dependency transaction were yielded
+    ///    previously. In other words: The nonces of transactions with the same sender will _always_
+    ///    increase by exactly 1.
     ///
     /// The order of transactions which satisfy (1.) is determent by their computed priority: A
     /// transaction with a higher priority is returned before a transaction with a lower priority.
