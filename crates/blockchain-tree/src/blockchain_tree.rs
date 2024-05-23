@@ -1196,7 +1196,7 @@ where
         );
 
         // reset trie updates for other childs
-        let children_chain_id: Vec<_> = self
+        let chain_ids: Vec<_> = self
             .block_indices()
             .fork_to_child()
             .get(&old_tip.hash)
@@ -1204,15 +1204,11 @@ where
             .unwrap_or_default()
             .into_iter()
             .filter(|child| child != &block_hash)
-            .filter_map(|child| {
-                self.block_indices().get_blocks_chain_id(&child).map(|chain_id| (child, chain_id))
-            })
+            .filter_map(|child| self.block_indices().get_blocks_chain_id(&child))
             .collect();
 
-        for (child, chain_id) in children_chain_id {
-            if let Some(mut chain) =
-                self.remove_and_split_chain(chain_id, ChainSplitTarget::Hash(child))
-            {
+        for chain_id in chain_ids {
+            if let Some(chain) = self.state.chains.get_mut(&chain_id) {
                 chain.reset_trie_updates();
             }
         }
