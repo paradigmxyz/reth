@@ -379,7 +379,7 @@ mod tests {
         let converted_payload = block_to_payload_v3(block.seal_slow());
 
         // ensure the payloads are the same
-        assert_eq!(new_payload, converted_payload.0);
+        assert_eq!((new_payload, Some(parent_beacon_block_root.into())), converted_payload);
     }
 
     #[test]
