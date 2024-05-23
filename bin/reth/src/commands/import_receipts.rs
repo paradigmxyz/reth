@@ -14,7 +14,7 @@ use reth_downloaders::{
     receipt_file_client::ReceiptFileClient,
 };
 use reth_node_core::version::SHORT_VERSION;
-use reth_primitives::{stage::StageId, ChainSpec, StaticFileSegment};
+use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, ChainSpec, StaticFileSegment};
 use reth_provider::{
     BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StateWriter, StaticFileProviderFactory, StaticFileWriter,
@@ -99,17 +99,32 @@ impl ImportReceiptsCommand {
         // prepare the tx for `write_to_storage`
         let tx = provider.into_tx();
         let mut total_decoded_receipts = 0;
+        let mut total_filtered_out_dup_txns = 0;
 
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
 
         while let Some(file_client) = reader.next_chunk::<ReceiptFileClient>().await? {
             // create a new file client from chunk read from file
-            let ReceiptFileClient { receipts, first_block, total_receipts: total_receipts_chunk } =
-                file_client;
+            let ReceiptFileClient {
+                mut receipts,
+                first_block,
+                total_receipts: total_receipts_chunk,
+            } = file_client;
 
             // mark these as decoded
             total_decoded_receipts += total_receipts_chunk;
+
+            let mut index = 0;
+            receipts.retain(|_| {
+                let is_dup = is_dup_tx(first_block + index);
+                if is_dup {
+                    total_filtered_out_dup_txns += 1;
+                }
+                index += 1;
+
+                !is_dup
+            });
 
             info!(target: "reth::cli",
                 first_receipts_block=?first_block,
@@ -153,10 +168,11 @@ impl ImportReceiptsCommand {
             .get_highest_static_file_block(StaticFileSegment::Receipts)
             .expect("static files must exist after ensuring we decoded more than zero");
 
-        if total_imported_receipts != total_decoded_receipts as u64 {
+        if total_imported_receipts + total_filtered_out_dup_txns != total_decoded_receipts as u64 {
             error!(target: "reth::cli",
                 total_decoded_receipts,
                 total_imported_receipts,
+                total_filtered_out_dup_txns,
                 "Receipts were partially imported"
             );
         }
