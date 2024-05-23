@@ -17,6 +17,7 @@ reth-network-api.workspace = true
 reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
 reth-network-types.workspace = true
+reth-storage-errors.workspace = true
 
 # async
 futures.workspace = true
@@ -31,7 +32,6 @@ secp256k1 = { workspace = true, default-features = false, features = [
     "recovery",
     "rand",
 ], optional = true }
-clap = { workspace = true, features = ["derive"], optional = true }
 parking_lot = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
@@ -45,5 +45,5 @@ secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
 test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
-cli = ["clap"]
+clap = ["reth-storage-errors/clap"]
 optimism = ["reth-eth-wire-types/optimism"]
