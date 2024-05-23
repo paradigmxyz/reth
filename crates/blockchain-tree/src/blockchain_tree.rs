@@ -307,7 +307,7 @@ where
                     *key_value.0
                 } else {
                     debug!(target: "blockchain_tree", ?chain_id, "No blockhashes stored");
-                    return None;
+                    return None
                 };
             let canonical_chain = canonical_chain
                 .iter()
