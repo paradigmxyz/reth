@@ -1346,7 +1346,7 @@ impl TransactionSigned {
         };
 
         if !input_data.is_empty() {
-            return Err(RlpError::UnexpectedLength);
+            return Err(RlpError::UnexpectedLength)
         }
 
         Ok(output_data)

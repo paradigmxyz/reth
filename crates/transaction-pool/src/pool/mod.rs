@@ -34,16 +34,16 @@
 //!
 //! In essence the transaction pool is made of three separate sub-pools:
 //!
-//!  - Pending Pool: Contains all transactions that are valid on the current state and satisfy
-//! (3. a)(1): _No_ nonce gaps. A _pending_ transaction is considered _ready_ when it has the lowest
-//! nonce of all transactions from the same sender. Once a _ready_ transaction with nonce `n` has
-//! been executed, the next highest transaction from the same sender `n + 1` becomes ready.
+//!  - Pending Pool: Contains all transactions that are valid on the current state and satisfy (3.
+//!    a)(1): _No_ nonce gaps. A _pending_ transaction is considered _ready_ when it has the lowest
+//!    nonce of all transactions from the same sender. Once a _ready_ transaction with nonce `n` has
+//!    been executed, the next highest transaction from the same sender `n + 1` becomes ready.
 //!
-//!  - Queued Pool: Contains all transactions that are currently blocked by missing
-//! transactions: (3. a)(2): _With_ nonce gaps or due to lack of funds.
+//!  - Queued Pool: Contains all transactions that are currently blocked by missing transactions:
+//!    (3. a)(2): _With_ nonce gaps or due to lack of funds.
 //!
-//!  - Basefee Pool: To account for the dynamic base fee requirement (3. b) which could render
-//! an EIP-1559 and all subsequent transactions of the sender currently invalid.
+//!  - Basefee Pool: To account for the dynamic base fee requirement (3. b) which could render an
+//!    EIP-1559 and all subsequent transactions of the sender currently invalid.
 //!
 //! The classification of transactions is always dependent on the current state that is changed as
 //! soon as a new block is mined. Once a new block is mined, the account changeset must be applied
