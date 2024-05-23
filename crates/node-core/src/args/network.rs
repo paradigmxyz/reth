@@ -124,7 +124,7 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec
+        let chain_bootnodes: Vec<DNSNodeRecord> = chain_spec
             .bootnodes()
             .unwrap_or_else(mainnet_nodes)
             .into_iter()
@@ -156,7 +156,7 @@ impl NetworkArgs {
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
-            .boot_nodes(boot_nodes.clone())
+            .boot_nodes(chain_bootnodes.clone())
             .chain_spec(chain_spec.clone())
             .transactions_manager_config(transactions_manager_config);
 
@@ -184,7 +184,7 @@ impl NetworkArgs {
             } = self.discovery;
 
             builder
-                .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                .add_unsigned_boot_nodes(chain_bootnodes.into_iter())
                 .lookup_interval(discv5_lookup_interval)
                 .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
                 .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
