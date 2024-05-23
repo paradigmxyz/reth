@@ -347,9 +347,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::{Config, EXTENSION};
+    use std::time::Duration;
 
     fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
         let temp_dir = tempfile::tempdir().unwrap();
