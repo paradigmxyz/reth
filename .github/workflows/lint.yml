@@ -119,10 +119,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: |
-          if [ ! -f target/debug/reth ]; then
-            cargo build --bin "reth" --workspace --features "ethereum"
-          fi
+      - run: cargo build --bin reth --workspace --features ethereum
         env:
           RUSTFLAGS: -D warnings
       - run: ./book/cli/update.sh target/debug/reth
