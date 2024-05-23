@@ -71,10 +71,10 @@ impl Default for AccountHashingStage {
 /// In order to check the "full hashing" mode of the stage you want to generate more
 /// transitions than `AccountHashingStage.clean_threshold`. This requires:
 /// 1. Creating enough blocks so there's enough transactions to generate
-/// the required transition keys in the `BlockTransitionIndex` (which depends on the
-/// `TxTransitionIndex` internally)
+///    the required transition keys in the `BlockTransitionIndex` (which depends on the
+///    `TxTransitionIndex` internally)
 /// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually
-/// take the 2nd codepath
+///    take the 2nd codepath
 #[derive(Clone, Debug)]
 pub struct SeedOpts {
     /// The range of blocks to be generated
