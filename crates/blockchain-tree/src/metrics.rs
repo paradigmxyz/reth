@@ -85,8 +85,8 @@ pub(crate) enum MakeCanonicalAction {
     RevertCanonicalChainFromDatabase,
     /// Inserting an old canonical chain.
     InsertOldCanonicalChain,
-    /// Resetting trie updates of other childs chains after fork choice update.
-    ResetTrieUpdatesForOtherChilds,
+    /// Clearing trie updates of other childs chains after fork choice update.
+    ClearTrieUpdatesForOtherChilds,
 }
 
 impl MakeCanonicalAction {
@@ -106,8 +106,8 @@ impl MakeCanonicalAction {
                 "revert canonical chain from database"
             }
             MakeCanonicalAction::InsertOldCanonicalChain => "insert old canonical chain",
-            MakeCanonicalAction::ResetTrieUpdatesForOtherChilds => {
-                "reset trie updates of other childs chains after fork choice update"
+            MakeCanonicalAction::ClearTrieUpdatesForOtherChilds => {
+                "clear trie updates of other childs chains after fork choice update"
             }
         }
     }

@@ -1211,7 +1211,7 @@ where
                 chain.clear_trie_updates();
             }
         }
-        durations_recorder.record_relative(MakeCanonicalAction::ResetTrieUpdatesForOtherChilds);
+        durations_recorder.record_relative(MakeCanonicalAction::ClearTrieUpdatesForOtherChilds);
 
         // Send notification about new canonical chain and return outcome of canonicalization.
         let outcome = CanonicalOutcome::Committed { head: chain_notification.tip().header.clone() };
