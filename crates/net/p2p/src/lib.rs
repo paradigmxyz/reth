@@ -1,3 +1,16 @@
+//! Provides abstractions and commonly used types for p2p.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 /// Shared abstractions for downloader implementations.
 pub mod download;
 
@@ -15,7 +28,7 @@ pub mod full_block;
 /// [`HeadersClient`].
 ///
 /// [`Consensus`]: reth_consensus::Consensus
-/// [`HeadersClient`]: crate::p2p::headers::client::HeadersClient
+/// [`HeadersClient`]: crate::headers::client::HeadersClient
 pub mod headers;
 
 /// Error types broadly used by p2p interfaces for any operation which may produce an error when
@@ -24,3 +37,7 @@ pub mod error;
 
 /// Priority enum for BlockHeader and BlockBody requests
 pub mod priority;
+
+/// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;

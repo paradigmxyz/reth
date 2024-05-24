@@ -14,9 +14,6 @@ use std::{
     ops::{Range, RangeInclusive},
 };
 
-// TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
-// relevant crates?
-
 /// Returns a random number generator that can be seeded using the `SEED` environment variable.
 ///
 /// If `SEED` is not set, a random seed is used.
@@ -353,6 +350,7 @@ pub fn random_receipt<R: Rng>(
 ) -> Receipt {
     let success = rng.gen::<bool>();
     let logs_count = logs_count.unwrap_or_else(|| rng.gen::<u8>());
+    #[allow(clippy::needless_update)] // side-effect of optimism fields
     Receipt {
         tx_type: transaction.tx_type(),
         success,
@@ -362,10 +360,7 @@ pub fn random_receipt<R: Rng>(
         } else {
             vec![]
         },
-        #[cfg(feature = "optimism")]
-        deposit_nonce: None,
-        #[cfg(feature = "optimism")]
-        deposit_receipt_version: None,
+        ..Default::default()
     }
 }
 

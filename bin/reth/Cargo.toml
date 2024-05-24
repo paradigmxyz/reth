@@ -134,7 +134,6 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
     "reth-primitives/optimism",
-    "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
