@@ -419,20 +419,21 @@ mod tests {
 
     #[test]
     fn parse_retry_strategy_args() {
-        let args = CommandParser::<NetworkArgs>::parse_from([
-            "reth",
-            "--dns-retry-strategy",
+        let tests = vec![(
             "interval=500,attempts=3",
-        ])
-        .args;
-
-        assert_eq!(
-            args.dns_retry_strategy,
             Some(reth_network_types::RetryStrategy {
                 interval: core::time::Duration::from_millis(500),
-                attempts: 3
+                attempts: 3,
             }),
-        );
+        )];
+
+        for (input, expected) in tests {
+            let args =
+                CommandParser::<NetworkArgs>::parse_from(["reth", "--dns-retry-strategy", input])
+                    .args;
+
+            assert_eq!(args.dns_retry_strategy, expected);
+        }
     }
 
     #[cfg(not(feature = "optimism"))]

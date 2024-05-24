@@ -48,18 +48,23 @@ impl FromStr for RetryStrategy {
     type Err = eyre::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Parse the comma-separated key-value pairs
         let mut interval = None;
         let mut attempts = None;
-
         for pair in s.split(',') {
             let mut parts = pair.split('=');
-            let key = parts.next().unwrap();
-            let value = parts.next().unwrap();
+            let key = parts.next().ok_or(eyre::eyre!("no key found before '=' delim"))?;
+            let value = parts.next().ok_or(eyre::eyre!("no value found after '=' delim"))?;
 
             match key {
                 "interval" => interval = Some(Duration::from_millis(value.parse()?)),
                 "attempts" => attempts = Some(value.parse()?),
-                _ => return Err(eyre::eyre!("Invalid key: {}", key)),
+                _ => {
+                    return Err(eyre::eyre!(
+                        "Invalid key: {}. Valid keys are 'interval' and 'attempts'",
+                        key
+                    ))
+                }
             }
         }
 
