@@ -351,10 +351,13 @@ mod tests {
 
             // Resolve domain and validate
             let rec = rec.resolve(retry_strategy).await.unwrap();
-            if let std::net::IpAddr::V4(addr) = rec.address {
-                assert_eq!(addr, std::net::Ipv4Addr::new(127, 0, 0, 1))
-            } else {
-                panic!("Expected IPv4 address");
+            match rec.address {
+                std::net::IpAddr::V4(addr) => {
+                    assert_eq!(addr, std::net::Ipv4Addr::new(127, 0, 0, 1))
+                }
+                std::net::IpAddr::V6(addr) => {
+                    assert_eq!(addr, std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+                }
             }
         }
     }
