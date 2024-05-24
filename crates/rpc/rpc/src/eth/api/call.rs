@@ -18,7 +18,7 @@ use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, TxKind, 
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
-use reth_revm::{access_list::AccessListInspector, database::StateProviderDatabase};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, Bundle, EthCallResponse, StateContext,
     TransactionRequest,
@@ -31,6 +31,7 @@ use revm::{
     },
     DatabaseCommit,
 };
+use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
 
 // Gas per transaction not creating a contract.
@@ -466,7 +467,7 @@ where
             ExecutionResult::Success { .. } => {
                 // transaction succeeded by manually increasing the gas limit to
                 // highest, which means the caller lacks funds to pay for the tx
-                RpcInvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into()
+                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into()
             }
             ExecutionResult::Revert { output, .. } => {
                 // reverted again after bumping the limit

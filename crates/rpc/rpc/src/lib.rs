@@ -25,11 +25,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use http as _;
+use http_body as _;
+use hyper as _;
+use jsonwebtoken as _;
+use pin_project as _;
+use tower as _;
+
 mod admin;
 mod debug;
 mod engine;
 pub mod eth;
-mod layers;
 mod net;
 mod otterscan;
 mod reth;
@@ -41,10 +47,6 @@ pub use admin::AdminApi;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
-pub use layers::{
-    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, AuthValidator, Claims,
-    JwtAuthValidator, JwtError, JwtSecret,
-};
 pub use net::NetApi;
 pub use otterscan::OtterscanApi;
 pub use reth::RethApi;

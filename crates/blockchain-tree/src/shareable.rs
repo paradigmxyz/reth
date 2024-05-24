@@ -17,7 +17,7 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
     ProviderError,
 };
 use std::{
@@ -80,7 +80,16 @@ where
         let res =
             tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block);
         tree.update_chains_metrics();
-        res
+        Ok(res?)
+    }
+
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+        let mut tree = self.tree.write();
+        let res = tree.update_block_hashes_and_clear_buffered();
+        tree.update_chains_metrics();
+        Ok(res?)
     }
 
     fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
@@ -88,7 +97,7 @@ where
         let mut tree = self.tree.write();
         let res = tree.connect_buffered_blocks_to_canonical_hashes();
         tree.update_chains_metrics();
-        res
+        Ok(res?)
     }
 
     fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
@@ -190,7 +199,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
         trace!(target: "blockchain_tree", ?block_hash, "Finding pending state provider");
         let provider = self.tree.read().post_state_data(block_hash)?;
         Some(Box::new(provider))

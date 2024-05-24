@@ -1,12 +1,10 @@
 //! Error handling for the blockchain tree
 
-use crate::{
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
-    RethError,
-};
+use crate::RethError;
 use reth_consensus::ConsensusError;
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
+use reth_storage_errors::provider::ProviderError;
 
 /// Various error cases that can occur when a block violates tree assumptions.
 #[derive(Debug, Clone, Copy, thiserror::Error, Eq, PartialEq)]
@@ -47,6 +45,9 @@ pub enum BlockchainTreeError {
         /// The block hash of the block that failed to buffer.
         block_hash: BlockHash,
     },
+    /// Thrown when trying to access genesis parent.
+    #[error("genesis block has no parent")]
+    GenesisBlockHasNoParent,
 }
 
 /// Canonical Errors
@@ -67,6 +68,9 @@ pub enum CanonicalError {
     /// Error indicating a transaction failed to commit during execution.
     #[error("transaction error on commit: {0}")]
     CanonicalCommit(String),
+    /// Error indicating that a previous optimistic sync target was re-orged
+    #[error("transaction error on revert: {0}")]
+    OptimisticTargetRevert(BlockNumber),
 }
 
 impl CanonicalError {
@@ -82,6 +86,15 @@ impl CanonicalError {
             self,
             CanonicalError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. })
         )
+    }
+
+    /// Returns `Some(BlockNumber)` if the underlying error matches
+    /// [CanonicalError::OptimisticTargetRevert].
+    pub fn optimistic_revert_block_number(&self) -> Option<BlockNumber> {
+        match self {
+            CanonicalError::OptimisticTargetRevert(block_number) => Some(*block_number),
+            _ => None,
+        }
     }
 }
 
@@ -282,7 +295,7 @@ impl InsertBlockErrorKind {
             // other execution errors that are considered internal errors
             InsertBlockErrorKind::Execution(err) => {
                 match err {
-                    BlockExecutionError::Validation(_) => {
+                    BlockExecutionError::Validation(_) | BlockExecutionError::Consensus(_) => {
                         // this is caused by an invalid block
                         true
                     }
@@ -306,7 +319,8 @@ impl InsertBlockErrorKind {
                     BlockchainTreeError::CanonicalChain { .. } |
                     BlockchainTreeError::BlockNumberNotFoundInChain { .. } |
                     BlockchainTreeError::BlockHashNotFoundInChain { .. } |
-                    BlockchainTreeError::BlockBufferingFailed { .. } => false,
+                    BlockchainTreeError::BlockBufferingFailed { .. } |
+                    BlockchainTreeError::GenesisBlockHasNoParent => false,
                 }
             }
             InsertBlockErrorKind::Provider(_) | InsertBlockErrorKind::Internal(_) => {
@@ -316,7 +330,8 @@ impl InsertBlockErrorKind {
             InsertBlockErrorKind::Canonical(err) => match err {
                 CanonicalError::BlockchainTree(_) |
                 CanonicalError::CanonicalCommit(_) |
-                CanonicalError::CanonicalRevert(_) => false,
+                CanonicalError::CanonicalRevert(_) |
+                CanonicalError::OptimisticTargetRevert(_) => false,
                 CanonicalError::Validation(_) => true,
                 CanonicalError::Provider(_) => false,
             },

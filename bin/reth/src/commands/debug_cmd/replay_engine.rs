@@ -10,7 +10,7 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensus, BeaconConsensusEngine};
+use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeaconConsensus};
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
@@ -18,11 +18,12 @@ use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
+use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_core::engine::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{fs, ChainSpec, PruneModes};
+use reth_primitives::{ChainSpec, PruneModes};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory,
     StaticFileProviderFactory,
@@ -122,7 +123,8 @@ impl Command {
         let provider_factory =
             ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         let executor = block_executor!(self.chain.clone());
 

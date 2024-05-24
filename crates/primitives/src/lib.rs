@@ -4,6 +4,7 @@
 //!
 //! ## Feature Flags
 //!
+//! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
 
@@ -18,6 +19,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod account;
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
 pub mod basefee;
 mod block;
 mod chain;
@@ -27,26 +30,24 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 mod exex;
-pub mod fs;
 pub mod genesis;
 mod header;
 mod integer_list;
 mod log;
 mod net;
+pub mod op_mainnet;
 pub mod proofs;
 mod prune;
 mod receipt;
 /// Helpers for working with revm
 pub mod revm;
-pub mod serde_helper;
 pub mod stage;
-pub mod static_file;
+pub use reth_static_file_types as static_file;
 mod storage;
 /// Helpers for working with transactions
 pub mod transaction;
 pub mod trie;
 mod withdrawal;
-
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
@@ -81,7 +82,9 @@ pub use prune::{
     PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
 };
-pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts};
+pub use receipt::{
+    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
+};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -115,7 +118,7 @@ pub use alloy_primitives::{
     StorageValue, TxHash, TxIndex, TxKind, TxNumber, B128, B256, B512, B64, U128, U256, U64, U8,
 };
 pub use reth_ethereum_forks::*;
-pub use revm_primitives::{self, JumpMap};
+pub use revm_primitives::{self, JumpTable};
 
 #[doc(hidden)]
 #[deprecated = "use B64 instead"]

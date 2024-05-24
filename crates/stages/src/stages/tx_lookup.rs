@@ -1,5 +1,5 @@
 use num_traits::Zero;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -45,14 +45,12 @@ impl Default for TransactionLookupStage {
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(chunk_size: u64, etl_config: EtlConfig, prune_mode: Option<PruneMode>) -> Self {
-        Self { chunk_size, etl_config, prune_mode }
-    }
-
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
+    pub fn new(
+        config: TransactionLookupConfig,
+        etl_config: EtlConfig,
+        prune_mode: Option<PruneMode>,
+    ) -> Self {
+        Self { chunk_size: config.chunk_size, etl_config, prune_mode }
     }
 }
 
@@ -430,10 +428,9 @@ mod tests {
         /// # Panics
         ///
         /// 1. If there are any entries in the [tables::TransactionHashNumbers] table above a given
-        /// block    number.
-        ///
+        ///    block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        /// [tables::TransactionHashNumbers] is    not empty.
+        ///    [tables::TransactionHashNumbers] is    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db

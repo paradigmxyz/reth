@@ -16,14 +16,15 @@ use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::{init_db, DatabaseEnv};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_fs_util as fs;
 use reth_interfaces::executor::BlockValidationError;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec, Receipts};
+use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Receipts};
 use reth_provider::{
     AccountExtReader, BundleStateWithReceipts, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory, StorageReader,
+    StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::TaskExecutor;

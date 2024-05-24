@@ -1,4 +1,5 @@
 use super::file_codec::BlockFileCodec;
+use futures::Future;
 use itertools::Either;
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -12,7 +13,7 @@ use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
     SealedHeader, B256,
 };
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
@@ -57,6 +58,16 @@ pub enum FileClientError {
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
     #[error("{0}")]
     Rlp(alloy_rlp::Error, Vec<u8>),
+
+    /// Custom error message.
+    #[error("{0}")]
+    Custom(&'static str),
+}
+
+impl From<&'static str> for FileClientError {
+    fn from(value: &'static str) -> Self {
+        Self::Custom(value)
+    }
 }
 
 impl FileClient {
@@ -76,82 +87,6 @@ impl FileClient {
         file.read_to_end(&mut reader).await?;
 
         Ok(Self::from_reader(&reader[..], file_len).await?.0)
-    }
-
-    /// Initialize the [`FileClient`] from bytes that have been read from file.
-    pub(crate) async fn from_reader<B>(
-        reader: B,
-        num_bytes: u64,
-    ) -> Result<(Self, Vec<u8>), FileClientError>
-    where
-        B: AsyncReadExt + Unpin,
-    {
-        let mut headers = HashMap::new();
-        let mut hash_to_number = HashMap::new();
-        let mut bodies = HashMap::new();
-
-        // use with_capacity to make sure the internal buffer contains the entire chunk
-        let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
-
-        trace!(target: "downloaders::file",
-            target_num_bytes=num_bytes,
-            capacity=stream.read_buffer().capacity(),
-            "init decode stream"
-        );
-
-        let mut remaining_bytes = vec![];
-
-        let mut log_interval = 0;
-        let mut log_interval_start_block = 0;
-
-        while let Some(block_res) = stream.next().await {
-            let block = match block_res {
-                Ok(block) => block,
-                Err(FileClientError::Rlp(err, bytes)) => {
-                    trace!(target: "downloaders::file",
-                        %err,
-                        bytes_len=bytes.len(),
-                        "partial block returned from decoding chunk"
-                    );
-                    remaining_bytes = bytes;
-                    break
-                }
-                Err(err) => return Err(err),
-            };
-            let block_number = block.header.number;
-            let block_hash = block.header.hash_slow();
-
-            // add to the internal maps
-            headers.insert(block.header.number, block.header.clone());
-            hash_to_number.insert(block_hash, block.header.number);
-            bodies.insert(
-                block_hash,
-                BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers,
-                    withdrawals: block.withdrawals,
-                },
-            );
-
-            if log_interval == 0 {
-                trace!(target: "downloaders::file",
-                    block_number,
-                    "read first block"
-                );
-                log_interval_start_block = block_number;
-            } else if log_interval % 100_000 == 0 {
-                trace!(target: "downloaders::file",
-                    blocks=?log_interval_start_block..=block_number,
-                    "read blocks from file"
-                );
-                log_interval_start_block = block_number + 1;
-            }
-            log_interval += 1;
-        }
-
-        trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
-
-        Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
     }
 
     /// Get the tip hash of the chain.
@@ -229,15 +164,99 @@ impl FileClient {
     }
 
     /// Returns a mutable iterator over bodies in the client.
-    pub fn bodies_iter_mut(&mut self) -> impl Iterator<Item = (&u64, &mut BlockBody)> {
+    ///
+    /// Panics, if file client headers and bodies are not mapping 1-1.
+    pub fn bodies_iter_mut(&mut self) -> impl Iterator<Item = (u64, &mut BlockBody)> {
         let bodies = &mut self.bodies;
-        let headers = &self.headers;
-        headers.keys().zip(bodies.values_mut())
+        let numbers = &self.hash_to_number;
+        bodies.iter_mut().map(|(hash, body)| (numbers[hash], body))
     }
 
     /// Returns the current number of transactions in the client.
     pub fn total_transactions(&self) -> usize {
-        self.bodies.iter().flat_map(|(_, body)| &body.transactions).count()
+        self.bodies.iter().fold(0, |acc, (_, body)| acc + body.transactions.len())
+    }
+}
+
+impl FromReader for FileClient {
+    type Error = FileClientError;
+
+    /// Initialize the [`FileClient`] from bytes that have been read from file.
+    fn from_reader<B>(
+        reader: B,
+        num_bytes: u64,
+    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
+    where
+        B: AsyncReadExt + Unpin,
+    {
+        let mut headers = HashMap::new();
+        let mut hash_to_number = HashMap::new();
+        let mut bodies = HashMap::new();
+
+        // use with_capacity to make sure the internal buffer contains the entire chunk
+        let mut stream = FramedRead::with_capacity(reader, BlockFileCodec, num_bytes as usize);
+
+        trace!(target: "downloaders::file",
+            target_num_bytes=num_bytes,
+            capacity=stream.read_buffer().capacity(),
+            "init decode stream"
+        );
+
+        let mut remaining_bytes = vec![];
+
+        let mut log_interval = 0;
+        let mut log_interval_start_block = 0;
+
+        async move {
+            while let Some(block_res) = stream.next().await {
+                let block = match block_res {
+                    Ok(block) => block,
+                    Err(FileClientError::Rlp(err, bytes)) => {
+                        trace!(target: "downloaders::file",
+                            %err,
+                            bytes_len=bytes.len(),
+                            "partial block returned from decoding chunk"
+                        );
+                        remaining_bytes = bytes;
+                        break
+                    }
+                    Err(err) => return Err(err),
+                };
+                let block_number = block.header.number;
+                let block_hash = block.header.hash_slow();
+
+                // add to the internal maps
+                headers.insert(block.header.number, block.header.clone());
+                hash_to_number.insert(block_hash, block.header.number);
+                bodies.insert(
+                    block_hash,
+                    BlockBody {
+                        transactions: block.body,
+                        ommers: block.ommers,
+                        withdrawals: block.withdrawals,
+                    },
+                );
+
+                if log_interval == 0 {
+                    trace!(target: "downloaders::file",
+                        block_number,
+                        "read first block"
+                    );
+                    log_interval_start_block = block_number;
+                } else if log_interval % 100_000 == 0 {
+                    trace!(target: "downloaders::file",
+                        blocks=?log_interval_start_block..=block_number,
+                        "read blocks from file"
+                    );
+                    log_interval_start_block = block_number + 1;
+                }
+                log_interval += 1;
+            }
+
+            trace!(target: "downloaders::file", blocks = headers.len(), "Initialized file client");
+
+            Ok((Self { headers, hash_to_number, bodies }, remaining_bytes))
+        }
     }
 }
 
@@ -341,6 +360,11 @@ pub struct ChunkedFileReader {
 }
 
 impl ChunkedFileReader {
+    /// Returns the remaining file length.
+    pub fn file_len(&self) -> u64 {
+        self.file_byte_len
+    }
+
     /// Opens the file to import from given path. Returns a new instance. If no chunk byte length
     /// is passed, chunks have [`DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE`] (one static file).
     pub async fn new<P: AsRef<Path>>(
@@ -377,7 +401,10 @@ impl ChunkedFileReader {
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    pub async fn next_chunk(&mut self) -> Result<Option<FileClient>, FileClientError> {
+    pub async fn next_chunk<T>(&mut self) -> Result<Option<T>, T::Error>
+    where
+        T: FromReader,
+    {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
             // eof
             return Ok(None)
@@ -391,6 +418,7 @@ impl ChunkedFileReader {
 
         // read new bytes from file
         let mut reader = BytesMut::zeroed(new_read_bytes_target_len as usize);
+
         // actual bytes that have been read
         let new_read_bytes_len = self.file.read_exact(&mut reader).await? as u64;
 
@@ -416,20 +444,27 @@ impl ChunkedFileReader {
 
         // make new file client from chunk
         let (file_client, bytes) =
-            FileClient::from_reader(&self.chunk[..], next_chunk_byte_len as u64).await?;
-
-        debug!(target: "downloaders::file",
-            headers_len=file_client.headers.len(),
-            bodies_len=file_client.bodies.len(),
-            remaining_bytes_len=bytes.len(),
-            "parsed blocks that were read from file"
-        );
+            T::from_reader(&self.chunk[..], next_chunk_byte_len as u64).await?;
 
         // save left over bytes
         self.chunk = bytes;
 
         Ok(Some(file_client))
     }
+}
+
+/// Constructs a file client from a reader.
+pub trait FromReader {
+    /// Error returned by file client type.
+    type Error: From<io::Error>;
+    /// Returns a file client
+    fn from_reader<B>(
+        reader: B,
+        num_bytes: u64,
+    ) -> impl Future<Output = Result<(Self, Vec<u8>), Self::Error>>
+    where
+        Self: Sized,
+        B: AsyncReadExt + Unpin;
 }
 
 #[cfg(test)]
@@ -594,7 +629,7 @@ mod tests {
 
         // test
 
-        while let Some(client) = reader.next_chunk().await.unwrap() {
+        while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
             let sync_target = client.tip_header().unwrap();
             let sync_target_hash = sync_target.hash();
 

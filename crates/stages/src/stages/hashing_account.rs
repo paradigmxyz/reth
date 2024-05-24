@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -44,14 +44,12 @@ pub struct AccountHashingStage {
 
 impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
-    pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
-        Self { clean_threshold, commit_threshold, etl_config }
-    }
-
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
+    pub fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
+        Self {
+            clean_threshold: config.clean_threshold,
+            commit_threshold: config.commit_threshold,
+            etl_config,
+        }
     }
 }
 
@@ -72,11 +70,10 @@ impl Default for AccountHashingStage {
 ///
 /// In order to check the "full hashing" mode of the stage you want to generate more
 /// transitions than `AccountHashingStage.clean_threshold`. This requires:
-/// 1. Creating enough blocks so there's enough transactions to generate
-/// the required transition keys in the `BlockTransitionIndex` (which depends on the
-/// `TxTransitionIndex` internally)
-/// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually
-/// take the 2nd codepath
+/// 1. Creating enough blocks so there's enough transactions to generate the required transition
+///    keys in the `BlockTransitionIndex` (which depends on the `TxTransitionIndex` internally)
+/// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually take the
+///    2nd codepath
 #[derive(Clone, Debug)]
 pub struct SeedOpts {
     /// The range of blocks to be generated

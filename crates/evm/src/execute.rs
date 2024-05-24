@@ -1,12 +1,16 @@
 //! Traits for execution.
 
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
 use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, U256};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
-/// A general purpose executor trait that executes on an input (e.g. blocks) and produces an output
+pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+pub use reth_storage_errors::provider::ProviderError;
+
+/// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
+///
+/// This executor does not validate the output, see [BatchExecutor] for that.
 pub trait Executor<DB> {
     /// The input type for the executor.
     type Input<'a>;
@@ -17,12 +21,17 @@ pub trait Executor<DB> {
 
     /// Consumes the type and executes the block.
     ///
-    /// Returns the output of the block execution.
+    /// # Note
+    /// Execution happens without any validation of the output. To validate the output, use the
+    /// [BatchExecutor].
+    ///
+    /// # Returns
+    /// The output of the block execution.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
 }
 
-/// A general purpose executor that can execute multiple inputs in sequence and keep track of the
-/// state over the entire batch.
+/// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
+/// and keep track of the state over the entire batch.
 pub trait BatchExecutor<DB> {
     /// The input type for the executor.
     type Input<'a>;
@@ -31,27 +40,34 @@ pub trait BatchExecutor<DB> {
     /// The error type returned by the executor.
     type Error;
 
-    /// Executes the next block in the batch and update the state internally.
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
+    /// Executes the next block in the batch, verifies the output and updates the state internally.
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 
-    /// Executes multiple inputs in the batch and update the state internally.
-    fn execute_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
+    /// Executes multiple inputs in the batch, verifies the output, and updates the state
+    /// internally.
+    ///
+    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_one`]
+    /// for each input.
+    fn execute_and_verify_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Input<'a>>,
     {
         for input in inputs {
-            self.execute_one(input)?;
+            self.execute_and_verify_one(input)?;
         }
         Ok(())
     }
 
-    /// Executes the entire batch and return the final state.
-    fn execute_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
+    /// Executes the entire batch, verifies the output, and returns the final state.
+    ///
+    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_many`]
+    /// and [`BatchExecutor::finalize`].
+    fn execute_and_verify_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
     where
         I: IntoIterator<Item = Self::Input<'a>>,
         Self: Sized,
     {
-        self.execute_many(batch)?;
+        self.execute_and_verify_many(batch)?;
         Ok(self.finalize())
     }
 
@@ -222,7 +238,7 @@ mod tests {
         type Output = BatchBlockExecutionOutput;
         type Error = BlockExecutionError;
 
-        fn execute_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
+        fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
             Ok(())
         }
 

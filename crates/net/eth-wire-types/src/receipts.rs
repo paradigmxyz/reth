@@ -1,7 +1,7 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
-use reth_codecs::derive_arbitrary;
+use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{ReceiptWithBloom, B256};
 
 #[cfg(feature = "serde")]
@@ -41,16 +41,7 @@ mod tests {
     #[test]
     fn roundtrip_eip1559() {
         let receipts = Receipts(vec![vec![ReceiptWithBloom {
-            receipt: Receipt {
-                tx_type: TxType::Eip1559,
-                success: false,
-                cumulative_gas_used: 0,
-                logs: vec![],
-                #[cfg(feature = "optimism")]
-                deposit_nonce: None,
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: None,
-            },
+            receipt: Receipt { tx_type: TxType::Eip1559, ..Default::default() },
             bloom: Default::default(),
         }]]);
 
@@ -119,10 +110,7 @@ mod tests {
                             ),
                         ],
                         success: false,
-                        #[cfg(feature = "optimism")]
-                        deposit_nonce: None,
-                        #[cfg(feature = "optimism")]
-                        deposit_receipt_version: None,
+                        ..Default::default()
                     },
                     bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                 },
@@ -158,10 +146,7 @@ mod tests {
                                     ),
                                 ],
                                 success: false,
-                                #[cfg(feature = "optimism")]
-                                deposit_nonce: None,
-                                #[cfg(feature = "optimism")]
-                                deposit_receipt_version: None,
+                                ..Default::default()
                             },
                             bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
                         },

@@ -24,10 +24,7 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
 };
-use reth_revm::{
-    database::StateProviderDatabase,
-    tracing::{TracingInspector, TracingInspectorConfig},
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
@@ -47,6 +44,7 @@ use revm::{
     },
     GetInspector, Inspector,
 };
+use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::future::Future;
 
 use crate::eth::revm_utils::FillableTransaction;
@@ -981,7 +979,11 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
+                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
+                    to: match to {
+                        Some(RpcTransactionKind::Call(to)) => to,
+                        _ => Address::default(),
+                    },
                     access_list: access_list.unwrap_or_default(),
 
                     // eip-4844 specific.
@@ -1804,7 +1806,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
         }
         Call(addr) => {
-            res_receipt.to = Some(*addr);
+            res_receipt.to = Some(Address(*addr));
         }
     }
 

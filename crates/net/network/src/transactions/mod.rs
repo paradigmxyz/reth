@@ -30,6 +30,7 @@ use reth_network_types::PeerId;
 use reth_primitives::{
     FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
@@ -37,7 +38,6 @@ use reth_transaction_pool::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    num::NonZeroUsize,
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -198,7 +198,7 @@ pub struct TransactionsManager<Pool> {
     /// Subscriptions to all network related events.
     ///
     /// From which we get all new incoming transaction related messages.
-    network_events: UnboundedReceiverStream<NetworkEvent>,
+    network_events: EventStream<NetworkEvent>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
@@ -285,9 +285,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
             pending_pool_imports_info: PendingPoolImportsInfo::new(
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             ),
-            bad_imports: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS).unwrap(),
-            ),
+            bad_imports: LruCache::new(DEFAULT_CAPACITY_CACHE_BAD_IMPORTS),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -883,8 +881,8 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event: NetworkEvent) {
-        match event {
+    fn on_network_event(&mut self, event_result: NetworkEvent) {
+        match event_result {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
@@ -1513,9 +1511,7 @@ impl PeerMetadata {
     /// Returns a new instance of [`PeerMetadata`].
     fn new(request_tx: PeerRequestSender, version: EthVersion, client_version: Arc<str>) -> Self {
         Self {
-            seen_transactions: LruCache::new(
-                NonZeroUsize::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER).unwrap(),
-            ),
+            seen_transactions: LruCache::new(DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER),
             request_tx,
             version,
             client_version,
@@ -1629,8 +1625,9 @@ mod tests {
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
-    use std::{future::poll_fn, hash};
+    use std::{fmt, future::poll_fn, hash};
     use tests::fetcher::TxFetchMetadata;
+    use tracing::error;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -1655,9 +1652,8 @@ mod tests {
         transactions
     }
 
-    pub(super) fn default_cache<T: hash::Hash + Eq>() -> LruCache<T> {
-        let limit = NonZeroUsize::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS.into()).unwrap();
-        LruCache::new(limit)
+    pub(super) fn default_cache<T: hash::Hash + Eq + fmt::Debug>() -> LruCache<T> {
+        LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32)
     }
 
     // Returns (peer, channel-to-send-get-pooled-tx-response-on).
@@ -1740,7 +1736,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1826,7 +1822,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1910,7 +1906,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1998,7 +1994,7 @@ mod tests {
                 }),
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -2054,12 +2050,15 @@ mod tests {
         let retries = 1;
         let mut backups = default_cache();
         backups.insert(peer_id_1);
+
+        let mut backups1 = default_cache();
+        backups1.insert(peer_id_1);
         tx_fetcher
             .hashes_fetch_inflight_and_pending_fetch
-            .insert(seen_hashes[1], TxFetchMetadata::new(retries, backups.clone(), None));
+            .insert(seen_hashes[1], TxFetchMetadata::new(retries, backups, None));
         tx_fetcher
             .hashes_fetch_inflight_and_pending_fetch
-            .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups, None));
+            .insert(seen_hashes[0], TxFetchMetadata::new(retries, backups1, None));
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[1]);
         tx_fetcher.hashes_pending_fetch.insert(seen_hashes[0]);
 

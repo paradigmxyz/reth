@@ -18,15 +18,7 @@ use reth_node_core::{
     primitives::{BlockNumber, B256},
 };
 use reth_provider::{HeaderSyncMode, ProviderFactory};
-use reth_stages::{
-    prelude::DefaultStages,
-    stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
-    },
-    Pipeline, StageSet,
-};
+use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;
@@ -131,56 +123,19 @@ where
                 header_downloader,
                 body_downloader,
                 executor.clone(),
-                stage_config.etl.clone(),
+                stage_config.clone(),
+                prune_modes.clone(),
             )
-            .set(SenderRecoveryStage {
-                commit_threshold: stage_config.sender_recovery.commit_threshold,
-            })
             .set(
                 ExecutionStage::new(
                     executor,
-                    ExecutionStageThresholds {
-                        max_blocks: stage_config.execution.max_blocks,
-                        max_changes: stage_config.execution.max_changes,
-                        max_cumulative_gas: stage_config.execution.max_cumulative_gas,
-                        max_duration: stage_config.execution.max_duration,
-                    },
-                    stage_config
-                        .merkle
-                        .clean_threshold
-                        .max(stage_config.account_hashing.clean_threshold)
-                        .max(stage_config.storage_hashing.clean_threshold),
-                    prune_modes.clone(),
+                    stage_config.execution.into(),
+                    stage_config.execution_external_clean_threshold(),
+                    prune_modes,
                     exex_manager_handle,
                 )
                 .with_metrics_tx(metrics_tx),
-            )
-            .set(AccountHashingStage::new(
-                stage_config.account_hashing.clean_threshold,
-                stage_config.account_hashing.commit_threshold,
-                stage_config.etl.clone(),
-            ))
-            .set(StorageHashingStage::new(
-                stage_config.storage_hashing.clean_threshold,
-                stage_config.storage_hashing.commit_threshold,
-                stage_config.etl.clone(),
-            ))
-            .set(MerkleStage::new_execution(stage_config.merkle.clean_threshold))
-            .set(TransactionLookupStage::new(
-                stage_config.transaction_lookup.chunk_size,
-                stage_config.etl.clone(),
-                prune_modes.transaction_lookup,
-            ))
-            .set(IndexAccountHistoryStage::new(
-                stage_config.index_account_history.commit_threshold,
-                prune_modes.account_history,
-                stage_config.etl.clone(),
-            ))
-            .set(IndexStorageHistoryStage::new(
-                stage_config.index_storage_history.commit_threshold,
-                prune_modes.storage_history,
-                stage_config.etl.clone(),
-            )),
+            ),
         )
         .build(provider_factory, static_file_producer);
 

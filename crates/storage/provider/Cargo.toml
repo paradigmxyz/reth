@@ -14,13 +14,16 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
+reth-fs-util.workspace = true
 reth-interfaces.workspace = true
-reth-rpc-types.workspace = true
 reth-db.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
+
+# ethereum
+alloy-rpc-types-engine.workspace = true
 revm.workspace = true
 
 # async
@@ -39,7 +42,7 @@ auto_impl.workspace = true
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true
-dashmap = { version = "5.5", features = ["inline"] }
+dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 
 # test-utils
@@ -62,4 +65,4 @@ rand.workspace = true
 
 [features]
 test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils"]
-optimism = ["reth-primitives/optimism", "reth-interfaces/optimism"]
+optimism = ["reth-primitives/optimism"]

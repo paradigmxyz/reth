@@ -7,7 +7,7 @@ use reth_db::database::Database;
 use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
-    stage::{StageCheckpoint, StageId},
+    stage::{PipelineTarget, StageCheckpoint, StageId},
     static_file::HighestStaticFiles,
     BlockNumber, B256,
 };
@@ -15,11 +15,11 @@ use reth_provider::{
     providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
     StaticFileProviderFactory,
 };
+use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::{EventSender, EventStream};
 use std::pin::Pin;
 use tokio::sync::watch;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod builder;
@@ -74,8 +74,8 @@ pub struct Pipeline<DB: Database> {
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<DB>,
-    /// All listeners for events the pipeline emits.
-    listeners: EventListeners<PipelineEvent>,
+    /// Sender for events the pipeline emits.
+    event_sender: EventSender<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
     /// A receiver for the current chain tip to sync to.
@@ -107,8 +107,8 @@ where
     }
 
     /// Listen for events on the pipeline.
-    pub fn events(&mut self) -> UnboundedReceiverStream<PipelineEvent> {
-        self.listeners.new_listener()
+    pub fn events(&self) -> EventStream<PipelineEvent> {
+        self.event_sender.new_listener()
     }
 
     /// Registers progress metrics for each registered stage
@@ -130,17 +130,31 @@ where
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, tip: Option<B256>) -> PipelineFut<DB> {
+    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<DB> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         let _ = self.register_metrics(); // ignore error
         Box::pin(async move {
             // NOTE: the tip should only be None if we are in continuous sync mode.
-            if let Some(tip) = tip {
-                self.set_tip(tip);
+            if let Some(target) = target {
+                match target {
+                    PipelineTarget::Sync(tip) => self.set_tip(tip),
+                    PipelineTarget::Unwind(target) => {
+                        if let Err(err) = self.move_to_static_files() {
+                            return (self, Err(err.into()))
+                        }
+                        if let Err(err) = self.unwind(target, None) {
+                            return (self, Err(err))
+                        }
+                        self.progress.update(target);
+
+                        return (self, Ok(ControlFlow::Continue { block_number: target }))
+                    }
+                }
             }
+
             let result = self.run_loop().await;
-            trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
+            trace!(target: "sync::pipeline", ?target, ?result, "Pipeline finished");
             (self, result)
         })
     }
@@ -185,7 +199,7 @@ where
     /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
     /// the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
-        self.produce_static_files()?;
+        self.move_to_static_files()?;
 
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
@@ -222,9 +236,10 @@ where
         Ok(self.progress.next_ctrl())
     }
 
-    /// Run [static file producer](StaticFileProducer) and move all data from the database to static
-    /// files for corresponding [segments](reth_primitives::static_file::StaticFileSegment),
-    /// according to their [stage checkpoints](StageCheckpoint):
+    /// Run [static file producer](StaticFileProducer) and [pruner](reth_prune::Pruner) to **move**
+    /// all data from the database to static files for corresponding
+    /// [segments](reth_primitives::static_file::StaticFileSegment), according to their [stage
+    /// checkpoints](StageCheckpoint):
     /// - [StaticFileSegment::Headers](reth_primitives::static_file::StaticFileSegment::Headers) ->
     ///   [StageId::Headers]
     /// - [StaticFileSegment::Receipts](reth_primitives::static_file::StaticFileSegment::Receipts)
@@ -234,22 +249,38 @@ where
     ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
-    pub fn produce_static_files(&self) -> RethResult<()> {
-        let mut static_file_producer = self.static_file_producer.lock();
+    pub fn move_to_static_files(&self) -> RethResult<()> {
+        let static_file_producer = self.static_file_producer.lock();
 
-        let provider = self.provider_factory.provider()?;
-        let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
-            headers: provider
-                .get_stage_checkpoint(StageId::Headers)?
-                .map(|checkpoint| checkpoint.block_number),
-            receipts: provider
-                .get_stage_checkpoint(StageId::Execution)?
-                .map(|checkpoint| checkpoint.block_number),
-            transactions: provider
-                .get_stage_checkpoint(StageId::Bodies)?
-                .map(|checkpoint| checkpoint.block_number),
-        })?;
-        static_file_producer.run(targets)?;
+        // Copies data from database to static files
+        let lowest_static_file_height = {
+            let provider = self.provider_factory.provider()?;
+            let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
+                .into_iter()
+                .map(|stage| {
+                    provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
+                headers: stages_checkpoints[0],
+                receipts: stages_checkpoints[1],
+                transactions: stages_checkpoints[2],
+            })?;
+            static_file_producer.run(targets)?;
+            stages_checkpoints.into_iter().min().expect("exists")
+        };
+
+        // Deletes data which has been copied to static files.
+        if let Some(prune_tip) = lowest_static_file_height {
+            // Run the pruner so we don't potentially end up with higher height in the database vs
+            // static files during a pipeline unwind
+            let mut pruner = PrunerBuilder::new(Default::default())
+                .prune_delete_limit(usize::MAX)
+                .build(self.provider_factory.clone());
+
+            pruner.run(prune_tip)?;
+        }
 
         Ok(())
     }
@@ -280,7 +311,8 @@ where
                     %to,
                     "Unwind point too far for stage"
                 );
-                self.listeners.notify(PipelineEvent::Skipped { stage_id });
+                self.event_sender.notify(PipelineEvent::Skipped { stage_id });
+
                 continue
             }
 
@@ -293,7 +325,7 @@ where
             );
             while checkpoint.block_number > to {
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
-                self.listeners.notify(PipelineEvent::Unwind { stage_id, input });
+                self.event_sender.notify(PipelineEvent::Unwind { stage_id, input });
 
                 let output = stage.unwind(&provider_rw, input);
                 match output {
@@ -318,7 +350,7 @@ where
                         }
                         provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
-                        self.listeners
+                        self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         self.provider_factory.static_file_provider().commit()?;
@@ -327,7 +359,8 @@ where
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
-                        self.listeners.notify(PipelineEvent::Error { stage_id });
+                        self.event_sender.notify(PipelineEvent::Error { stage_id });
+
                         return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
                     }
                 }
@@ -363,7 +396,7 @@ where
                     prev_block = prev_checkpoint.map(|progress| progress.block_number),
                     "Stage reached target block, skipping."
                 );
-                self.listeners.notify(PipelineEvent::Skipped { stage_id });
+                self.event_sender.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
@@ -373,7 +406,7 @@ where
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
 
-            self.listeners.notify(PipelineEvent::Prepare {
+            self.event_sender.notify(PipelineEvent::Prepare {
                 pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
                     total: total_stages,
@@ -384,14 +417,15 @@ where
             });
 
             if let Err(err) = stage.execute_ready(exec_input).await {
-                self.listeners.notify(PipelineEvent::Error { stage_id });
+                self.event_sender.notify(PipelineEvent::Error { stage_id });
+
                 match on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)? {
                     Some(ctrl) => return Ok(ctrl),
                     None => continue,
                 };
             }
 
-            self.listeners.notify(PipelineEvent::Run {
+            self.event_sender.notify(PipelineEvent::Run {
                 pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
                     total: total_stages,
@@ -416,7 +450,7 @@ where
                     }
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
-                    self.listeners.notify(PipelineEvent::Ran {
+                    self.event_sender.notify(PipelineEvent::Ran {
                         pipeline_stages_progress: PipelineStagesProgress {
                             current: stage_index + 1,
                             total: total_stages,
@@ -439,7 +473,8 @@ where
                 }
                 Err(err) => {
                     drop(provider_rw);
-                    self.listeners.notify(PipelineEvent::Error { stage_id });
+                    self.event_sender.notify(PipelineEvent::Error { stage_id });
+
                     if let Some(ctrl) =
                         on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)?
                     {
@@ -543,7 +578,7 @@ impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
-            .field("listeners", &self.listeners)
+            .field("event_sender", &self.event_sender)
             .finish()
     }
 }

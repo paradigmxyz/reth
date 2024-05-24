@@ -20,9 +20,8 @@ use reth_provider::{
     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
-use reth_rpc::{
-    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP},
-    JwtError, JwtSecret,
+use reth_rpc::eth::{
+    cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_builder::{
     auth::{AuthServerConfig, AuthServerHandle},
@@ -32,6 +31,7 @@ use reth_rpc_builder::{
     RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApi;
+use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -493,7 +493,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_secret_key(&self) -> Option<JwtSecret> {
-        self.rpc_jwtsecret.clone()
+        self.rpc_jwtsecret
     }
 }
 

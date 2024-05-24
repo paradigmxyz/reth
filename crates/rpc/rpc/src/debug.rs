@@ -17,7 +17,7 @@ use reth_primitives::{
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
 };
-use reth_revm::database::{StateProviderDatabase, SubState};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -517,7 +517,7 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
-        db: &mut SubState<StateProviderBox>,
+        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::State)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;

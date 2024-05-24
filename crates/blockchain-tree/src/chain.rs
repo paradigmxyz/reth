@@ -8,12 +8,10 @@ use crate::BundleStateDataRef;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, InsertBlockErrorKind},
-        BlockAttachment, BlockValidationKind,
-    },
-    RethResult,
+use reth_execution_errors::BlockExecutionError;
+use reth_interfaces::blockchain_tree::{
+    error::{BlockchainTreeError, InsertBlockErrorKind},
+    BlockAttachment, BlockValidationKind,
 };
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, Receipts, SealedBlockWithSenders, SealedHeader,
@@ -21,7 +19,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    BundleStateDataProvider, BundleStateWithReceipts, Chain, ProviderError, StateRootProvider,
+    BundleStateWithReceipts, Chain, FullBundleStateDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
@@ -119,7 +117,8 @@ impl AppendableChain {
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
-        let parent_number = block.number - 1;
+        let parent_number =
+            block.number.checked_sub(1).ok_or(BlockchainTreeError::GenesisBlockHasNoParent)?;
         let parent = self.blocks().get(&parent_number).ok_or(
             BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
         )?;
@@ -175,9 +174,9 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
-    ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
+    ) -> Result<(BundleStateWithReceipts, Option<TrieUpdates>), BlockExecutionError>
     where
-        BSDP: BundleStateDataProvider,
+        BSDP: FullBundleStateDataProvider,
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
@@ -209,8 +208,11 @@ impl AppendableChain {
         let executor = externals.executor_factory.executor(db);
         let block_hash = block.hash();
         let block = block.unseal();
+
         let state = executor.execute((&block, U256::MAX).into())?;
         let BlockExecutionOutput { state, receipts, .. } = state;
+        externals.consensus.validate_block_post_execution(&block, &receipts)?;
+
         let bundle_state = BundleStateWithReceipts::new(
             state,
             Receipts::from_block_receipt(receipts),

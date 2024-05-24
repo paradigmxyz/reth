@@ -14,7 +14,7 @@ use eyre::Context;
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
@@ -22,12 +22,12 @@ use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_fs_util as fs;
 use reth_interfaces::RethResult;
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    fs,
     revm_primitives::KzgSettings,
     stage::StageId,
     Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
@@ -160,7 +160,8 @@ impl Command {
             data_dir.static_files(),
         )?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
 
         let executor = block_executor!(self.chain.clone());
 
@@ -297,7 +298,7 @@ impl Command {
 
                 consensus.validate_header_with_total_difficulty(block, U256::MAX)?;
                 consensus.validate_header(block)?;
-                consensus.validate_block(block)?;
+                consensus.validate_block_pre_execution(block)?;
 
                 let senders = block.senders().expect("sender recovery failed");
                 let block_with_senders =
