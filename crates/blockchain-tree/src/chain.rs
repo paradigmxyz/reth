@@ -8,12 +8,10 @@ use crate::BundleStateDataRef;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, InsertBlockErrorKind},
-        BlockAttachment, BlockValidationKind,
-    },
-    RethResult,
+use reth_execution_errors::BlockExecutionError;
+use reth_interfaces::blockchain_tree::{
+    error::{BlockchainTreeError, InsertBlockErrorKind},
+    BlockAttachment, BlockValidationKind,
 };
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, Receipts, SealedBlockWithSenders, SealedHeader,
@@ -176,7 +174,7 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
-    ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
+    ) -> Result<(BundleStateWithReceipts, Option<TrieUpdates>), BlockExecutionError>
     where
         BSDP: FullBundleStateDataProvider,
         DB: Database + Clone,
