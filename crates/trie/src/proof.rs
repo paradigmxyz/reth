@@ -109,12 +109,13 @@ where
         hashed_address: B256,
         slots: &[B256],
     ) -> Result<(B256, Vec<StorageProof>), StorageRootError> {
-        let mut hashed_storage_cursor = self.hashed_cursor_factory.hashed_storage_cursor()?;
+        let mut hashed_storage_cursor =
+            self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
 
         let mut proofs = slots.iter().copied().map(StorageProof::new).collect::<Vec<_>>();
 
         // short circuit on empty storage
-        if hashed_storage_cursor.is_storage_empty(hashed_address)? {
+        if hashed_storage_cursor.is_storage_empty()? {
             return Ok((EMPTY_ROOT_HASH, proofs))
         }
 
@@ -128,8 +129,7 @@ where
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        let mut storage_node_iter =
-            StorageNodeIter::new(walker, hashed_storage_cursor, hashed_address);
+        let mut storage_node_iter = StorageNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 StorageNode::Branch(node) => {

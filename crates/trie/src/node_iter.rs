@@ -166,8 +166,6 @@ pub struct StorageNodeIter<C, H> {
     pub walker: TrieWalker<C>,
     /// The cursor for the hashed storage entries.
     pub hashed_storage_cursor: H,
-    /// The hashed address this storage trie belongs to.
-    hashed_address: B256,
 
     /// Current hashed storage entry.
     current_hashed_entry: Option<StorageEntry>,
@@ -177,11 +175,10 @@ pub struct StorageNodeIter<C, H> {
 
 impl<C, H> StorageNodeIter<C, H> {
     /// Creates a new instance of StorageNodeIter.
-    pub fn new(walker: TrieWalker<C>, hashed_storage_cursor: H, hashed_address: B256) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_storage_cursor: H) -> Self {
         Self {
             walker,
             hashed_storage_cursor,
-            hashed_address,
             current_walker_key_checked: false,
             current_hashed_entry: None,
         }
@@ -238,8 +235,7 @@ where
             // Attempt to get the next unprocessed key from the walker.
             if let Some(seek_key) = self.walker.next_unprocessed_key() {
                 // Seek and update the current hashed entry based on the new seek key.
-                self.current_hashed_entry =
-                    self.hashed_storage_cursor.seek(self.hashed_address, seek_key)?;
+                self.current_hashed_entry = self.hashed_storage_cursor.seek(seek_key)?;
                 self.walker.advance()?;
             } else {
                 // No more keys to process, break the loop.
