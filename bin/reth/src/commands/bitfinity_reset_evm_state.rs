@@ -7,7 +7,7 @@ use std::sync::Arc;
 use alloy_rlp::Encodable;
 use clap::Parser;
 use did::evm_reset_state::EvmResetState;
-use did::{AccountInfoMap, RawAccountInfo, H160, H256, U256};
+use did::{AccountInfoMap, RawAccountInfo, H160, H256};
 use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
 use itertools::Itertools;
 use reth_db::cursor::DbCursorRO;
@@ -18,7 +18,7 @@ use reth_node_core::args::BitfinityResetEvmStateArgs;
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
 use reth_primitives::StorageEntry;
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 /// Builder for the `bitfinity reset evm state` command
 #[derive(Debug, Parser)]
@@ -39,6 +39,7 @@ pub struct BitfinityResetEvmStateCommandBuilder {
 }
 
 const MAX_REQUEST_BYTES: usize = 500_000;
+const SPLIT_ADD_ACCOUNTS_REQUEST_BYTES: usize = 1_000_000;
 
 impl BitfinityResetEvmStateCommandBuilder {
     /// Build the command
@@ -119,9 +120,6 @@ impl BitfinityResetEvmStateCommand {
 
             info!(target: "reth::cli", "Start recovering storage tries");
 
-            let mut batch_size = 0;
-            let batch_limit = 500;
-
             while let Some((ref address, ref account)) = plain_account_cursor.next()? {
                 // We need to retrieve the bytecode for the account
                 let bytecode = if let Some(bytecode_hash) = account.bytecode_hash {
@@ -165,20 +163,18 @@ impl BitfinityResetEvmStateCommand {
 
                 debug!(target: "reth::cli", "Account Address: {} Info: {:?}", address, account);
 
-                accounts.insert((*address).into(), account);
+                accounts.data.insert((*address).into(), account);
                 debug!(target: "reth::cli", address=%address, "Storage tries recovered");
 
-                batch_size += 1;
-                if batch_size == batch_limit || estimate_size(&accounts) > MAX_REQUEST_BYTES {
+                if accounts.estimate_byte_size() > MAX_REQUEST_BYTES {
                     let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
-                    self.executor.add_accounts(process_accounts).await?;
-                    batch_size = 0;
+                    split_and_send_add_accout_request(&self.executor, process_accounts).await?;
                 }
             }
 
-            if !accounts.is_empty() {
-                info!(target: "reth::cli", "Processing last batch of {} accounts", accounts.len());
-                self.executor.add_accounts(accounts).await?;
+            if !accounts.data.is_empty() {
+                info!(target: "reth::cli", "Processing last batch of {} accounts", accounts.data.len());
+                split_and_send_add_accout_request(&self.executor, accounts).await?;
             }
 
             info!(target: "reth::cli", "Storage tries recovered successfully");
@@ -202,23 +198,14 @@ impl BitfinityResetEvmStateCommand {
     }
 }
 
-fn estimate_size(map: &AccountInfoMap) -> usize {
-    let mut total_size = 0;
-
-    for (_address, account) in map {
-        // key
-        let address_size = H160::BYTE_SIZE;
-
-        // value
-        let nonce_size = U256::BYTE_SIZE;
-        let balance_size = U256::BYTE_SIZE;
-        let bytecode_size = account.bytecode.as_ref().map(|b| b.0.len()).unwrap_or(0);
-        let storage_size = U256::BYTE_SIZE * 2 * account.storage.len();
-
-        total_size += address_size + nonce_size + balance_size + bytecode_size + storage_size;
+async fn split_and_send_add_accout_request(
+    executor: &Arc<dyn ResetStateExecutor>,
+    accounts: AccountInfoMap,
+) -> eyre::Result<()> {
+    for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
+        executor.add_accounts(account).await?;
     }
-
-    total_size
+    Ok(())
 }
 
 /// Trait for the reset state executor
@@ -266,9 +253,9 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
         let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::Start request...");
-            let res = client.admin_reset_state(EvmResetState::Start).await??;
+            client.admin_reset_state(EvmResetState::Start).await??;
             info!(target: "reth::cli", "EvmResetState::Start request sent");
-            Ok(res)
+            Ok(())
         })
     }
 
@@ -278,11 +265,10 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
         let client = self.client.clone();
         Box::pin(async move {
-            info!(target: "reth::cli", "Send EvmResetState::AddAccounts request with {} accounts...", accounts.len());
-            let res =
-                client.admin_reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
+            info!(target: "reth::cli", "Send EvmResetState::AddAccounts request with {} accounts...", accounts.data.len());
+            client.admin_reset_state(EvmResetState::AddAccounts(accounts)).await??;
             info!(target: "reth::cli", "EvmResetState::AddAccounts request sent");
-            Ok(res)
+            Ok(())
         })
     }
 
@@ -293,9 +279,107 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
         let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::End request...");
-            let res = client.admin_reset_state(EvmResetState::End(block)).await??;
+            client.admin_reset_state(EvmResetState::End(block)).await??;
             info!(target: "reth::cli", "EvmResetState::End request sent");
-            Ok(res)
+            Ok(())
         })
+    }
+}
+
+/// Split the account request data into multiple requests
+fn split_add_account_request_data(
+    max_byte_size: usize,
+    data: AccountInfoMap,
+) -> Vec<AccountInfoMap> {
+    if data.estimate_byte_size() <= max_byte_size {
+        return vec![data];
+    }
+
+    warn!(target: "reth::cli", "Data size exceeds max byte size, splitting data into multiple requests");
+
+    let mut result = vec![];
+    let mut current_map = AccountInfoMap::new();
+
+    for (address, account) in data.data {
+        let current_size = current_map.estimate_byte_size();
+        let address_size = H160::BYTE_SIZE;
+        let account_size = account.estimate_byte_size();
+
+        if current_size + address_size + account_size > max_byte_size {
+            result.push(std::mem::replace(&mut current_map, AccountInfoMap::new()));
+        }
+
+        current_map.data.insert(address, account);
+    }
+
+    if !current_map.data.is_empty() {
+        result.push(current_map);
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod test {
+    use did::U256;
+    use revm_primitives::Address;
+
+    use super::*;
+
+    #[test]
+    fn bitfinity_test_split_add_account_request_data() {
+        let mut data = AccountInfoMap::new();
+        for i in 0u64..100 {
+            let address = Address::random().into();
+            let account = RawAccountInfo {
+                nonce: U256::from(i),
+                balance: U256::from(i),
+                bytecode: None,
+                storage: vec![],
+            };
+            data.data.insert(address, account);
+        }
+
+        let current_size = data.estimate_byte_size();
+
+        {
+            let max_size = current_size;
+            let result = split_add_account_request_data(max_size, data.clone());
+            assert_eq!(result.len(), 1);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(result[0], data);
+        }
+
+        {
+            let max_size = current_size - 1;
+            let result = split_add_account_request_data(max_size, data.clone());
+            assert_eq!(result.len(), 2);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(merge_account_info_maps(result), data);
+        }
+
+        {
+            let max_size = (current_size / 3) - 1;
+            let result = split_add_account_request_data(max_size, data.clone());
+            assert_eq!(result.len(), 4);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(merge_account_info_maps(result), data);
+        }
+    }
+
+    fn merge_account_info_maps(maps: Vec<AccountInfoMap>) -> AccountInfoMap {
+        let mut result = AccountInfoMap::new();
+        for map in maps {
+            for (address, account) in map.data {
+                result.data.insert(address, account);
+            }
+        }
+        result
     }
 }

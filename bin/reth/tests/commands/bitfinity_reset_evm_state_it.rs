@@ -37,7 +37,7 @@ async fn bitfinity_test_should_reset_evm_state() {
 
     // Block 100_000 -> ok
     // Block ? -> fail
-    let end_block = 20_000;
+    let end_block = 800_000;
     let data_dir = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
@@ -97,9 +97,9 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
 
-    // Block 100_000 -> ok
+    // Block 800_000 -> ok
     // Block ? -> fail
-    let end_block = 20_000;
+    let end_block = 800_000;
     let data_dir = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
@@ -149,7 +149,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
             let mut accounts_with_code = 0;
             let mut accounts_with_storage_values = 0;
-            for (executor_account_address, executor_account) in executor_accounts.iter() {
+            for (executor_account_address, executor_account) in executor_accounts.data.iter() {
                 let account =
                     provider.basic_account(executor_account_address.0 .0.into()).unwrap().unwrap();
 
@@ -170,7 +170,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
                 }
             }
 
-            info!("Executor accounts: {}", executor_accounts.len());
+            info!("Executor accounts: {}", executor_accounts.data.len());
             info!("Accounts with code: {accounts_with_code}");
             info!("Accounts with storage values: {accounts_with_storage_values}");
         }
@@ -180,7 +180,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
             let executor_accounts = executor.get_accounts();
 
             let calculated_root =
-                state_root(executor_accounts.into_iter().map(|(address, raw_account)| {
+                state_root(executor_accounts.data.into_iter().map(|(address, raw_account)| {
                     let account = reth_primitives::Account {
                         nonce: raw_account.nonce.0.as_u64(),
                         balance: raw_account.balance.into(),
@@ -255,7 +255,7 @@ impl InMemoryResetStateExecutor {
     }
 
     fn get_accounts_count(&self) -> usize {
-        self.accounts.lock().unwrap().len()
+        self.accounts.lock().unwrap().data.len()
     }
 
     fn get_block(&self) -> Option<did::Block<H256>> {
@@ -275,7 +275,7 @@ impl ResetStateExecutor for InMemoryResetStateExecutor {
         &self,
         mut accounts: AccountInfoMap,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
-        self.accounts.lock().unwrap().append(&mut accounts);
+        self.accounts.lock().unwrap().data.append(&mut accounts.data);
         Box::pin(async move { Ok(()) })
     }
 
