@@ -17,7 +17,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_network_types::{DNSNodeRecord, RetryStrategy};
+use reth_network_types::DNSNodeRecord;
 use reth_primitives::{mainnet_nodes, ChainSpec};
 use secp256k1::SecretKey;
 use std::{
@@ -51,9 +51,13 @@ pub struct NetworkArgs {
     #[arg(long, value_delimiter = ',')]
     pub bootnodes: Option<Vec<DNSNodeRecord>>,
 
-    /// DNS retry strategy for bootnode or peer hostname resolution.
-    #[arg(long)]
-    pub dns_retry_strategy: Option<RetryStrategy>,
+    /// Amount of milliseconds to wait before retrying DNS resolution requests peering.
+    #[arg(long, default_value_t = 1000)]
+    pub retry_millis: u64,
+
+    /// Amount of DNS resolution requests retries to perform when peering.
+    #[arg(long, default_value_t = 0)]
+    pub retry_attempts: usize,
 
     /// The path to the known peers file. Connected peers are dumped to this file on nodes
     /// shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
@@ -224,7 +228,8 @@ impl Default for NetworkArgs {
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
-            dns_retry_strategy: None,
+            retry_attempts: 0,
+            retry_millis: 1000,
             peers_file: None,
             identity: P2P_CLIENT_VERSION.to_string(),
             p2p_secret_key: None,
@@ -419,20 +424,38 @@ mod tests {
 
     #[test]
     fn parse_retry_strategy_args() {
-        let tests = vec![(
-            "interval=500,attempts=3",
-            Some(reth_network_types::RetryStrategy {
-                interval: core::time::Duration::from_millis(500),
-                attempts: 3,
-            }),
-        )];
+        use reth_network_types::RetryStrategy;
+        let tests = vec![
+            (
+                "1",
+                "0",
+                Some(RetryStrategy { interval: core::time::Duration::from_millis(1), attempts: 0 }),
+            ),
+            (
+                "1000",
+                "10",
+                Some(RetryStrategy {
+                    interval: core::time::Duration::from_millis(1000),
+                    attempts: 10,
+                }),
+            ),
+        ];
 
-        for (input, expected) in tests {
-            let args =
-                CommandParser::<NetworkArgs>::parse_from(["reth", "--dns-retry-strategy", input])
-                    .args;
+        for (interval, attempts, expected) in tests {
+            let args = CommandParser::<NetworkArgs>::parse_from([
+                "reth",
+                "--retry-millis",
+                interval,
+                "--retry-attempts",
+                attempts,
+            ])
+            .args;
 
-            assert_eq!(args.dns_retry_strategy, expected);
+            let found = Some(RetryStrategy::new(
+                core::time::Duration::from_millis(args.retry_millis),
+                args.retry_attempts,
+            ));
+            assert_eq!(found, expected);
         }
     }
 

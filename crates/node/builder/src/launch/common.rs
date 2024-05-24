@@ -10,6 +10,7 @@ use reth_auto_seal_consensus::MiningMode;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_network_types::RetryStrategy;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -80,8 +81,12 @@ impl LaunchContext {
 
             // resolve trusted peers if they use a domain instead of dns
             for peer in &config.network.trusted_peers {
+                let retry_strategy = RetryStrategy::new(
+                    std::time::Duration::from_millis(config.network.retry_millis),
+                    config.network.retry_attempts,
+                );
                 let resolved = peer
-                    .resolve(config.network.dns_retry_strategy.clone())
+                    .resolve(Some(retry_strategy))
                     .await
                     .wrap_err_with(|| format!("Could not resolve trusted peer {peer}"))?;
                 toml_config.peers.trusted_nodes.insert(resolved);

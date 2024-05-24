@@ -27,7 +27,6 @@ thiserror.workspace = true
 url.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-retry = { workspace = true }
-eyre.workspace = true
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
