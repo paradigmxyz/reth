@@ -50,4 +50,4 @@ assert_matches.workspace = true
 
 [features]
 test-utils = []
-optimism = ["reth-primitives/optimism", "reth-interfaces/optimism", "reth-provider/optimism"]
+optimism = ["reth-primitives/optimism", "reth-provider/optimism"]
