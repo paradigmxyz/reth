@@ -23,7 +23,7 @@ mod error;
 pub use error::{RethError, RethResult};
 
 /// P2P traits.
-pub mod p2p;
+pub use reth_network_p2p as p2p;
 
 /// Trie error
 pub mod trie;
@@ -34,6 +34,6 @@ pub mod sync;
 /// BlockchainTree related traits.
 pub mod blockchain_tree;
 
-#[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
-pub mod test_utils;
+#[cfg(feature = "test-utils")]
+pub use reth_network_p2p::test_utils;
