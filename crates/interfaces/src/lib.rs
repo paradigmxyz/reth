@@ -29,7 +29,7 @@ pub use reth_network_p2p as p2p;
 pub use reth_execution_errors::trie;
 
 /// Syncing related traits.
-pub mod sync;
+pub use reth_network_p2p::sync;
 
 /// BlockchainTree related traits.
 pub mod blockchain_tree;

@@ -7040,7 +7040,6 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
- "auto_impl",
  "reth-consensus",
  "reth-execution-errors",
  "reth-fs-util",
