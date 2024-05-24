@@ -4,8 +4,9 @@ use crate::execute::{
     BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
     BlockExecutorProvider, Executor,
 };
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
+use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 
 // re-export Either

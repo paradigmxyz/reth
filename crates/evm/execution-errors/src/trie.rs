@@ -1,7 +1,9 @@
-use crate::db::DatabaseError;
+//! Errors when computing the state root.
+
+use reth_storage_errors::db::DatabaseError;
 use thiserror::Error;
 
-/// State root error.
+/// State root errors.
 #[derive(Error, Debug, PartialEq, Eq, Clone)]
 pub enum StateRootError {
     /// Internal database error.
