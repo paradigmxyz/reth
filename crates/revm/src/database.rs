@@ -1,5 +1,6 @@
 use reth_primitives::{Address, B256, KECCAK_EMPTY, U256};
-use reth_provider::{ProviderError, StateProvider};
+use reth_provider::StateProvider;
+use reth_storage_errors::provider::ProviderError;
 use revm::{
     db::DatabaseRef,
     primitives::{AccountInfo, Bytecode},
