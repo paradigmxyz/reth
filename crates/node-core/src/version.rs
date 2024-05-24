@@ -17,28 +17,6 @@ pub const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
 /// The build timestamp.
 pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 
-//The identification of the client
-/// - The two letter client code
-/// - The human readable name of the client
-/// - The version string of the current implementation
-/// - first four bytes of the latest commit hash of this build
-///
-/// # Example
-///
-///  ```text
-// {
-//   code: "RH",
-//   name: "Reth",
-//   version: "v0.2.0-beta.5",
-//   commit: "defa64b2"
-// }
-///  ```
-// pub const CLIENT_VERSION_V1: ClientVersionV1 = ClientVersionV1 {
-//     code: CLIENT_CODE,
-//     name: NAME_CLIENT.to_string(),
-//     version: concat!(env!("CARGO_PKG_VERSION"), env!("RETH_VERSION_SUFFIX")).to_string(),
-//     commit: env!("VERGEN_GIT_SHA").to_string(),
-// };
 /// The short version information for reth.
 ///
 /// - The latest version from Cargo.toml
