@@ -23,7 +23,6 @@ use reth_config::{
 use reth_db::init_db;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
-use reth_net_common::dns_node_record_resolve::resolve_dns_node_record;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
@@ -180,7 +179,7 @@ impl Command {
                     config.peers.trusted_nodes_only = self.network.trusted_only;
                     if !self.network.trusted_peers.is_empty() {
                         for peer in &self.network.trusted_peers {
-                            let peer = resolve_dns_node_record(peer.clone(), None).await?;
+                            let peer = peer.resolve(None).await?;
                             config.peers.trusted_nodes.insert(peer);
                         }
                     }
