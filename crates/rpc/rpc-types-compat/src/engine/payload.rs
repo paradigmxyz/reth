@@ -115,7 +115,7 @@ pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, Pay
 }
 
 /// Converts [SealedBlock] to [ExecutionPayload]
-pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
+pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) {
     if value.header.requests_root.is_some() {
         (ExecutionPayload::V4(block_to_payload_v4(value)), None)
     } else if value.header.parent_beacon_block_root.is_some() {
@@ -232,7 +232,7 @@ pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
     ExecutionPayloadV4 {
         deposit_requests,
         withdrawal_requests,
-        payload_inner: block_to_payload_v3(value),
+        payload_inner: block_to_payload_v3(value).0,
     }
 }
 

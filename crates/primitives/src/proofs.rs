@@ -4,10 +4,9 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH,
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
-    B256, U256,
+    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Request, TransactionSigned,
+    Withdrawal, B256, U256,
 };
-use alloy_consensus::Request;
 use alloy_eips::eip7685::Encodable7685;
 use alloy_rlp::Encodable;
 use itertools::Itertools;

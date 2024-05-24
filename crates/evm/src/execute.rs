@@ -1,6 +1,8 @@
 //! Traits for execution.
 
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, U256};
+use reth_primitives::{
+    BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, Request, Requests, U256,
+};
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
@@ -96,6 +98,8 @@ pub struct BlockExecutionOutput<T> {
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
+    /// All the EIP-7685 requests of the transactions in the block.
+    pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
 }
@@ -124,18 +128,6 @@ pub struct BatchBlockExecutionOutput {
 
 impl BatchBlockExecutionOutput {
     /// Create Bundle State.
-<<<<<<< HEAD
-    pub fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
-        Self { bundle, receipts, first_block }
-||||||| parent of b60225fcf (feat: implement EIP-7685 (#8053))
-    pub fn new(
-        bundle: BundleState,
-        receipts: Receipts,
-        requests: Requests,
-        first_block: BlockNumber,
-    ) -> Self {
-        Self { bundle, receipts, requests, first_block }
-=======
     pub fn new(
         bundle: BundleState,
         receipts: Receipts,
@@ -143,7 +135,6 @@ impl BatchBlockExecutionOutput {
         first_block: BlockNumber,
     ) -> Self {
         Self { bundle, receipts, requests, first_block }
->>>>>>> b60225fcf (feat: implement EIP-7685 (#8053))
     }
 }
 

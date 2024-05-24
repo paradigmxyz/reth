@@ -16,14 +16,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainSpec, Header, Receipt, Receipts, Requests, SealedBlock, SealedHeader, TransactionSigned,
+    ChainSpec, Header, Receipts, Requests, SealedBlock, SealedHeader, TransactionSigned,
     Withdrawals, B256, U256,
 };
 use reth_provider::{
@@ -92,7 +92,7 @@ impl Consensus for AutoSealConsensus {
     fn validate_block_post_execution(
         &self,
         _block: &BlockWithSenders,
-        _receipts: &[Receipt],
+        _input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }

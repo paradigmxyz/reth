@@ -9,13 +9,12 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
 };
 use reth_primitives::{
-    BlockWithSenders, ChainSpec, Header, Receipt, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH,
-    U256,
+    BlockWithSenders, ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
@@ -111,8 +110,8 @@ impl Consensus for OptimismBeaconConsensus {
     fn validate_block_post_execution(
         &self,
         block: &BlockWithSenders,
-        receipts: &[Receipt],
+        input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, receipts)
+        validate_block_post_execution(block, &self.chain_spec, input.receipts)
     }
 }
