@@ -26,4 +26,3 @@ thiserror.workspace = true
 [features]
 test-utils = ["reth-consensus/test-utils", "reth-network-p2p/test-utils"]
 clap = ["reth-storage-errors/clap"]
-optimism = []
