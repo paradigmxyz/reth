@@ -89,7 +89,7 @@ pub enum BlockExecutionError {
     },
     /// Error when appending chain on fork is not possible
     #[error(
-        "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
+    "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
     AppendChainDoesntConnect {
         /// The tip of the current chain
@@ -105,7 +105,7 @@ pub enum BlockExecutionError {
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
-    /// Any other Block Executor Errors
+    /// Optimism Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -113,8 +113,8 @@ pub enum BlockExecutionError {
 impl BlockExecutionError {
     /// Create a new `BlockExecutionError::Other` variant.
     pub fn other<E>(error: E) -> Self
-    where
-        E: std::error::Error + Send + Sync + 'static,
+        where
+            E: std::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
     }

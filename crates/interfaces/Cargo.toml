@@ -18,6 +18,7 @@ reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
 reth-network-types.workspace = true
 reth-storage-errors.workspace = true
+reth-network-p2p.workspace = true
 
 # async
 futures.workspace = true
@@ -44,6 +45,6 @@ tokio = { workspace = true, features = ["full"] }
 secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
-test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
+test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "reth-network-p2p/test-utils"]
 clap = ["reth-storage-errors/clap"]
-optimism = ["reth-eth-wire-types/optimism"]
+optimism = []

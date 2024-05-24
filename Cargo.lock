@@ -7037,6 +7037,7 @@ dependencies = [
  "reth-eth-wire-types",
  "reth-fs-util",
  "reth-network-api",
+ "reth-network-p2p",
  "reth-network-types",
  "reth-primitives",
  "reth-storage-errors",
