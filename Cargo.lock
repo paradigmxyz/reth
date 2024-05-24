@@ -7030,21 +7030,13 @@ name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
  "auto_impl",
- "futures",
- "parking_lot 0.12.2",
- "rand 0.8.5",
  "reth-consensus",
- "reth-eth-wire-types",
  "reth-fs-util",
  "reth-network-api",
  "reth-network-p2p",
- "reth-network-types",
  "reth-primitives",
  "reth-storage-errors",
- "secp256k1 0.28.2",
  "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]

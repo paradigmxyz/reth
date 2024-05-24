@@ -303,6 +303,7 @@ impl InsertBlockErrorKind {
                     }
                     // these are internal errors, not caused by an invalid block
                     BlockExecutionError::LatestBlock(_) |
+                    BlockExecutionError::Pruning(_) |
                     BlockExecutionError::CanonicalRevert { .. } |
                     BlockExecutionError::CanonicalCommit { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
