@@ -17,6 +17,7 @@ members = [
     "crates/ethereum/node",
     "crates/etl/",
     "crates/evm/",
+    "crates/evm/execution-errors",
     "crates/exex/",
     "crates/interfaces/",
     "crates/metrics/",
@@ -238,6 +239,7 @@ reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
+reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-exex = { path = "crates/exex" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-interfaces = { path = "crates/interfaces" }
