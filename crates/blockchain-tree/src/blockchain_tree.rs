@@ -1196,21 +1196,20 @@ where
         );
 
         // clear trie updates for other childs
-        let chain_ids: Vec<_> = self
-            .block_indices()
+        self.block_indices()
             .fork_to_child()
             .get(&old_tip.hash)
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|child| self.block_indices().get_blocks_chain_id(&child))
-            .collect();
+            .for_each(|child| {
+                if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&child) {
+                    if let Some(chain) = self.state.chains.get_mut(&chain_id) {
+                        chain.clear_trie_updates();
+                    }
+                }
+            });
 
-        for chain_id in chain_ids {
-            if let Some(chain) = self.state.chains.get_mut(&chain_id) {
-                chain.clear_trie_updates();
-            }
-        }
         durations_recorder.record_relative(MakeCanonicalAction::ClearTrieUpdatesForOtherChilds);
 
         // Send notification about new canonical chain and return outcome of canonicalization.
