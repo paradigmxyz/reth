@@ -6551,11 +6551,11 @@ dependencies = [
 
 [[package]]
 name = "reth-chainspec"
-version = "0.2.0-beta.6"
+version = "0.2.0-beta.7"
 dependencies = [
  "alloy-chains",
- "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=77c1240)",
- "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=77c1240)",
+ "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
+ "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
