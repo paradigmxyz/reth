@@ -16,7 +16,7 @@
 pub use reth_storage_errors::{db, provider};
 
 /// Block Execution traits.
-pub mod executor;
+pub use reth_execution_errors as executor;
 
 /// Possible errors when interacting with the chain.
 mod error;
@@ -26,7 +26,7 @@ pub use error::{RethError, RethResult};
 pub use reth_network_p2p as p2p;
 
 /// Trie error
-pub mod trie;
+pub use reth_execution_errors::trie;
 
 /// Syncing related traits.
 pub mod sync;

@@ -6961,8 +6961,9 @@ version = "0.2.0-beta.7"
 dependencies = [
  "futures-util",
  "parking_lot 0.12.2",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-primitives",
+ "reth-storage-errors",
  "revm",
  "revm-primitives",
 ]
@@ -6974,7 +6975,6 @@ dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "reth-ethereum-consensus",
  "reth-evm",
- "reth-interfaces",
  "reth-primitives",
  "reth-revm",
  "revm-primitives",
@@ -7041,6 +7041,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "auto_impl",
  "reth-consensus",
+ "reth-execution-errors",
  "reth-fs-util",
  "reth-network-api",
  "reth-network-p2p",

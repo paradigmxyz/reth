@@ -8,10 +8,13 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_storage_errors::{provider::ProviderError, trie::StateRootError};
 use reth_consensus::ConsensusError;
 use reth_primitives::{revm_primitives::EVMError, BlockNumHash, PruneSegmentError, B256};
+use reth_storage_errors::provider::ProviderError;
 use thiserror::Error;
+
+pub mod trie;
+pub use trie::{StateRootError, StorageRootError};
 
 /// Transaction validation errors
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -99,7 +102,7 @@ pub enum BlockExecutionError {
     },
     /// Error when appending chain on fork is not possible
     #[error(
-    "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
+        "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
     )]
     AppendChainDoesntConnect {
         /// The tip of the current chain
@@ -123,8 +126,8 @@ pub enum BlockExecutionError {
 impl BlockExecutionError {
     /// Create a new `BlockExecutionError::Other` variant.
     pub fn other<E>(error: E) -> Self
-        where
-            E: std::error::Error + Send + Sync + 'static,
+    where
+        E: std::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
     }

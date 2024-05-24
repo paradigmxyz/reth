@@ -11,7 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
 reth-consensus.workspace = true
+reth-primitives.workspace = true
 reth-storage-errors.workspace = true
+
 thiserror.workspace = true
