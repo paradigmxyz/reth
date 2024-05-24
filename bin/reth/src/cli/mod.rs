@@ -206,7 +206,7 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     ImportOp(import_op::ImportOpCommand),
     /// This imports RLP encoded receipts from a file.
     #[cfg(feature = "optimism")]
-    #[command(name = "import-receipts")]
+    #[command(name = "import-receipts-op")]
     ImportReceiptsOp(import_receipts_op::ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
