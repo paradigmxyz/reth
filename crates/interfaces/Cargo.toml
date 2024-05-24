@@ -20,9 +20,7 @@ reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 
 # misc
-auto_impl.workspace = true
 thiserror.workspace = true
-
 
 [features]
 test-utils = ["reth-consensus/test-utils", "reth-network-p2p/test-utils"]
