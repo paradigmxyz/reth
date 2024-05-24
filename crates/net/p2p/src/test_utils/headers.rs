@@ -1,19 +1,6 @@
 //! Testing support for headers related interfaces.
 
-use std::{
-    fmt,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    task::{ready, Context, Poll},
-};
-
-use futures::{Future, FutureExt, Stream, StreamExt};
-use tokio::sync::Mutex;
-
-use crate::p2p::{
+use crate::{
     download::DownloadClient,
     error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
     headers::{
@@ -23,9 +10,20 @@ use crate::p2p::{
     },
     priority::Priority,
 };
+use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_network_types::{PeerId, WithPeerId};
 use reth_primitives::{Header, HeadersDirection, SealedHeader};
+use std::{
+    fmt,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    task::{ready, Context, Poll},
+};
+use tokio::sync::Mutex;
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]

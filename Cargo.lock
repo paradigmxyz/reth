@@ -6644,6 +6644,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-storage-errors",
  "reth-tracing",
  "rustc-hash",
  "serde",
@@ -6879,7 +6880,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "reth-codecs",
+ "reth-codecs-derive",
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
@@ -6962,8 +6963,9 @@ version = "0.2.0-beta.7"
 dependencies = [
  "futures-util",
  "parking_lot 0.12.2",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-primitives",
+ "reth-storage-errors",
  "revm",
  "revm-primitives",
 ]
@@ -6977,7 +6979,6 @@ dependencies = [
  "alloy-sol-types",
  "reth-ethereum-consensus",
  "reth-evm",
- "reth-interfaces",
  "reth-primitives",
  "reth-revm",
  "revm-interpreter",
@@ -7002,6 +7003,16 @@ dependencies = [
  "revm-primitives",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "reth-execution-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-consensus",
+ "reth-primitives",
+ "reth-storage-errors",
+ "thiserror",
 ]
 
 [[package]]
@@ -7037,20 +7048,14 @@ name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
  "auto_impl",
- "clap",
- "futures",
- "parking_lot 0.12.2",
- "rand 0.8.5",
  "reth-consensus",
- "reth-eth-wire-types",
+ "reth-execution-errors",
  "reth-fs-util",
  "reth-network-api",
- "reth-network-types",
+ "reth-network-p2p",
  "reth-primitives",
- "secp256k1 0.28.2",
+ "reth-storage-errors",
  "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -7215,15 +7220,34 @@ dependencies = [
 name = "reth-network-api"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-primitives",
  "enr",
- "reth-discv4",
  "reth-eth-wire",
  "reth-network-types",
- "reth-primitives",
  "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "reth-network-p2p"
+version = "0.2.0-beta.7"
+dependencies = [
+ "auto_impl",
+ "futures",
+ "parking_lot 0.12.2",
+ "rand 0.8.5",
+ "reth-consensus",
+ "reth-eth-wire-types",
+ "reth-network-api",
+ "reth-network-types",
+ "reth-primitives",
+ "reth-storage-errors",
+ "secp256k1 0.28.2",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7946,6 +7970,16 @@ dependencies = [
  "derive_more",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-storage-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "clap",
+ "reth-fs-util",
+ "reth-primitives",
+ "thiserror",
 ]
 
 [[package]]

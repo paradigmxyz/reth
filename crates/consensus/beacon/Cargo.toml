@@ -67,7 +67,6 @@ assert_matches.workspace = true
 [features]
 optimism = [
     "reth-primitives/optimism",
-    "reth-interfaces/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
     "reth-ethereum-consensus/optimism",

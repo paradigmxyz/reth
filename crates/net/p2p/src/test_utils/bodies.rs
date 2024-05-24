@@ -1,4 +1,4 @@
-use crate::p2p::{
+use crate::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::PeerRequestResult,

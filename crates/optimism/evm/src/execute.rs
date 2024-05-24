@@ -3,14 +3,10 @@
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
 use reth_evm::{
     execute::{
-        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, Executor,
+        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionError, BlockExecutionInput,
+        BlockExecutionOutput, BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     ConfigureEvm,
-};
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
 };
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_primitives::{

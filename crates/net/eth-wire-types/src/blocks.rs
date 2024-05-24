@@ -2,7 +2,7 @@
 //! types.
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
+use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
 
 #[cfg(any(test, feature = "arbitrary"))]

@@ -7,6 +7,9 @@ use reth_primitives::{
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
+pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+pub use reth_storage_errors::provider::ProviderError;
+
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
 ///
