@@ -2,7 +2,7 @@
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
-use reth_codecs::derive_arbitrary;
+use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{
     transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned, B256,
 };
