@@ -28,6 +28,13 @@ pub struct PostExecutionInput<'a> {
     pub requests: &'a [Request],
 }
 
+impl<'a> PostExecutionInput<'a> {
+    /// Creates a new instance of `PostExecutionInput`.
+    pub fn new(receipts: &'a [Receipt], requests: &'a [Request]) -> Self {
+        Self { receipts, requests }
+    }
+}
+
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {
