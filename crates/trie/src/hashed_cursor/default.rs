@@ -42,8 +42,8 @@ where
 }
 
 /// The structure wrapping a database cursor for hashed storage and
-/// a target hashed address. Implements [HashedStorageCursor] for iterating
-/// hashed state
+/// a target hashed address. Implements [HashedCursor] and [HashedStorageCursor]
+/// for iterating over hashed storage.
 #[derive(Debug)]
 pub struct DatabaseHashedStorageCursor<C> {
     cursor: C,

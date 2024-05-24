@@ -101,7 +101,7 @@ where
     /// database and the post state. The two entries are compared and the lowest is returned.
     ///
     /// The returned account key is memoized and the cursor remains positioned at that key until
-    /// [HashedAccountCursor::seek] or [HashedAccountCursor::next] are called.
+    /// [HashedCursor::seek] or [HashedCursor::next] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         self.last_account = None;
 
@@ -144,7 +144,7 @@ where
     /// If the cursor is positioned at the entry, return the entry with next greater key.
     /// Returns [None] if the previous memoized or the next greater entries are missing.
     ///
-    /// NOTE: This function will not return any entry unless [HashedAccountCursor::seek] has been
+    /// NOTE: This function will not return any entry unless [HashedCursor::seek] has been
     /// called.
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         let last_account = match self.last_account.as_ref() {
@@ -300,7 +300,7 @@ where
     ///
     /// # Panics
     ///
-    /// If the account key is not set. [HashedStorageCursor::seek] must be called first in order to
+    /// If the account key is not set. [HashedCursor::seek] must be called first in order to
     /// position the cursor.
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         let last_slot = match self.last_slot.as_ref() {
@@ -349,8 +349,8 @@ where
 {
     /// Returns `true` if the account has no storage entries.
     ///
-    /// This function should be called before attempting to call [HashedStorageCursor::seek] or
-    /// [HashedStorageCursor::next].
+    /// This function should be called before attempting to call [HashedCursor::seek] or
+    /// [HashedCursor::next].
     fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError> {
         let is_empty = match self.post_state.storages.get(&self.hashed_address) {
             Some(storage) => {
