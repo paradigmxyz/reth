@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::{NodeRecord, PeerId};
+use core::time::Duration;
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use url::Host;
@@ -31,15 +32,15 @@ pub struct DNSNodeRecord {
 /// Retry strategy for DNS lookups.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, SerializeDisplay, DeserializeFromStr)]
 pub struct RetryStrategy {
-    /// The amount of time between attempts.
-    pub interval: u64,
+    /// The amount of milliseconds between attempts.
+    pub interval: Duration,
     /// The number of attempts to make before failing.
     pub attempts: usize,
 }
 
 impl fmt::Display for RetryStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "interval={},attempts={}", self.interval, self.attempts)
+        write!(f, "interval={},attempts={}", self.interval.as_millis(), self.attempts)
     }
 }
 
@@ -56,13 +57,16 @@ impl FromStr for RetryStrategy {
             let value = parts.next().unwrap();
 
             match key {
-                "interval" => interval = Some(value.parse()?),
+                "interval" => interval = Some(Duration::from_millis(value.parse()?)),
                 "attempts" => attempts = Some(value.parse()?),
                 _ => return Err(eyre::eyre!("Invalid key: {}", key)),
             }
         }
 
-        Ok(Self { interval: interval.unwrap_or(0), attempts: attempts.unwrap_or(0) })
+        Ok(Self {
+            interval: interval.unwrap_or(Duration::from_secs(0)),
+            attempts: attempts.unwrap_or(0),
+        })
     }
 }
 
@@ -114,7 +118,7 @@ impl DNSNodeRecord {
                 // Retry if strategy is provided
                 if let Some(strat) = retry_strategy {
                     let lookup = || async { Self::lookup_host(&domain).await };
-                    let strat = tokio_retry::strategy::FixedInterval::from_millis(strat.interval)
+                    let strat = tokio_retry::strategy::FixedInterval::new(strat.interval)
                         .take(strat.attempts);
                     let ip = tokio_retry::Retry::spawn(strat, lookup).await?;
                     Ok(NodeRecord {
@@ -340,7 +344,10 @@ mod tests {
         // Set up tests
         let tests = vec![
             ("localhost", None),
-            ("localhost", Some(RetryStrategy { interval: 1000, attempts: 3 })),
+            (
+                "localhost",
+                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 3 }),
+            ),
         ];
 
         // Run tests

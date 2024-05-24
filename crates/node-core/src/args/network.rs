@@ -422,13 +422,16 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from([
             "reth",
             "--dns-retry-strategy",
-            "interval=5,attempts=3",
+            "interval=500,attempts=3",
         ])
         .args;
 
         assert_eq!(
             args.dns_retry_strategy,
-            Some(reth_network_types::RetryStrategy { interval: 5, attempts: 3 }),
+            Some(reth_network_types::RetryStrategy {
+                interval: core::time::Duration::from_millis(500),
+                attempts: 3
+            }),
         );
     }
 
