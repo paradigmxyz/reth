@@ -2715,7 +2715,7 @@ dependencies = [
 [[package]]
 name = "did"
 version = "0.20.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-860_reset_max_bytes_limit#798ad09190fe106c0acea7b8a819a2f440dda38f"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.20.x#412ef68c54787a61b3866787a0de6be287067f2a"
 dependencies = [
  "alloy-primitives",
  "bincode",
@@ -3152,7 +3152,7 @@ dependencies = [
 [[package]]
 name = "ethereum-json-rpc-client"
 version = "0.20.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-860_reset_max_bytes_limit#798ad09190fe106c0acea7b8a819a2f440dda38f"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.20.x#412ef68c54787a61b3866787a0de6be287067f2a"
 dependencies = [
  "anyhow",
  "candid",
@@ -3286,7 +3286,7 @@ dependencies = [
 [[package]]
 name = "evm-canister-client"
 version = "0.20.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-860_reset_max_bytes_limit#798ad09190fe106c0acea7b8a819a2f440dda38f"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.20.x#412ef68c54787a61b3866787a0de6be287067f2a"
 dependencies = [
  "candid",
  "did",

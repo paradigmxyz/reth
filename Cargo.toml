@@ -404,14 +404,14 @@ test-fuzz = "5"
 
 # Bitfinity Deps
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", branch = "EPROD-860_reset_max_bytes_limit" }
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.20.x" }
 dirs = "5.0.1"
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", branch = "EPROD-860_reset_max_bytes_limit", features = [
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.20.x", features = [
     "reqwest",
 ] }
 evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
     "ic-agent-client",
-], branch = "EPROD-860_reset_max_bytes_limit" }
+], tag = "v0.20.x" }
 ic-cbor = "2.3"
 ic-certificate-verification = "2.3"
 ic-certification = "2.3"
