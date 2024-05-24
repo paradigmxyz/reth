@@ -15,6 +15,7 @@ use discv5::ListenConfig;
 use reth_config::Config;
 use reth_db::create_db;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
+use reth_network::NetworkConfigBuilder;
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use std::{
@@ -112,8 +113,9 @@ impl Command {
         let rlpx_socket = (self.network.addr, self.network.port).into();
         let boot_nodes = self.chain.bootnodes().unwrap_or_default();
 
-        let mut network_config_builder = config
-            .network_config(self.network.nat, None, p2p_secret_key)
+        let mut network_config_builder = NetworkConfigBuilder::new(p2p_secret_key)
+            .peer_config(config.peers_config_with_basic_nodes_from_file(None))
+            .external_ip_resolver(self.network.nat)
             .chain_spec(self.chain.clone())
             .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .boot_nodes(boot_nodes.clone());

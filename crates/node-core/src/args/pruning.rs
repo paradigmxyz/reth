@@ -20,7 +20,7 @@ impl PruningArgs {
     /// Returns pruning configuration.
     pub fn prune_config(&self, chain_spec: &ChainSpec) -> Option<PruneConfig> {
         if !self.full {
-            return None;
+            return None
         }
         Some(PruneConfig {
             block_interval: 5,

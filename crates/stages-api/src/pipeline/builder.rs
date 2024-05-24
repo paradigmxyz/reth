@@ -80,7 +80,7 @@ where
             max_block,
             static_file_producer,
             tip_tx,
-            listeners: Default::default(),
+            event_sender: Default::default(),
             progress: Default::default(),
             metrics_tx,
         }

@@ -59,8 +59,7 @@ use tracing::*;
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountsHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StoragesHistory] to remove change set and apply old
-///   values
-/// to [tables::PlainStorageState]
+///   values to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<E> {
@@ -240,9 +239,11 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            executor.execute_one((&block, td).into()).map_err(|error| StageError::Block {
-                block: Box::new(block.header.clone().seal_slow()),
-                error: BlockErrorKind::Execution(error),
+            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
+                StageError::Block {
+                    block: Box::new(block.header.clone().seal_slow()),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
             execution_duration += execute_start.elapsed();
 

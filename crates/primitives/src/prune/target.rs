@@ -70,8 +70,8 @@ impl PruneModes {
 ///
 /// 1. For [PruneMode::Full], it fails if `MIN_BLOCKS > 0`.
 /// 2. For [PruneMode::Distance(distance)], it fails if `distance < MIN_BLOCKS + 1`. `+ 1` is needed
-/// because `PruneMode::Distance(0)` means that we leave zero blocks from the latest, meaning we
-/// have one block in the database.
+///    because `PruneMode::Distance(0)` means that we leave zero blocks from the latest, meaning we
+///    have one block in the database.
 fn deserialize_opt_prune_mode_with_min_blocks<'de, const MIN_BLOCKS: u64, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<PruneMode>, D::Error> {

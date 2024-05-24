@@ -315,7 +315,7 @@ impl<DB> NodeState<DB> {
                     warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
                 }
             }
         }
@@ -392,6 +392,9 @@ pub enum NodeEvent {
     Pruner(PrunerEvent),
     /// A static_file_producer event
     StaticFileProducer(StaticFileProducerEvent),
+    /// Used to encapsulate various conditions or situations that do not
+    /// naturally fit into the other more specific variants.
+    Other(String),
 }
 
 impl From<NetworkEvent> for NodeEvent {
@@ -574,6 +577,9 @@ where
                 }
                 NodeEvent::StaticFileProducer(event) => {
                     this.state.handle_static_file_producer_event(event);
+                }
+                NodeEvent::Other(event_description) => {
+                    warn!("{event_description}");
                 }
             }
         }

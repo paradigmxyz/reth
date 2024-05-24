@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rlp"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d58d9f5da7b40e9bfff0b7e7816700be4019db97d4b6359fe7f94a9e22e42ac"
+checksum = "b155716bab55763c95ba212806cf43d05bcc70e5f35b02bad20cf5ec7fe11fed"
 dependencies = [
  "alloy-rlp-derive",
  "arrayvec",
@@ -353,9 +353,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-rlp-derive"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a047897373be4bbb0224c1afdabca92648dc57a9c9ef6e7b0be3aff7a859c83"
+checksum = "8037e03c7f462a063f28daec9fda285a9a89da003c552f8637a80b9c8fd96241"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6450,6 +6450,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types",
  "reth-stages-api",
+ "reth-tokio-util",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",
@@ -6590,11 +6591,8 @@ version = "0.2.0-beta.7"
 dependencies = [
  "confy",
  "humantime-serde",
- "reth-discv4",
- "reth-net-nat",
  "reth-network",
  "reth-primitives",
- "secp256k1 0.28.2",
  "serde",
  "tempfile",
  "toml",
@@ -6785,6 +6783,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-layer",
+ "reth-tokio-util",
  "reth-tracing",
  "secp256k1 0.28.2",
  "serde_json",
@@ -6973,20 +6972,22 @@ name = "reth-evm-ethereum"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
+ "reth-ethereum-consensus",
  "reth-evm",
  "reth-interfaces",
  "reth-primitives",
  "reth-revm",
  "revm-primitives",
- "tracing",
 ]
 
 [[package]]
 name = "reth-evm-optimism"
 version = "0.2.0-beta.7"
 dependencies = [
+ "reth-consensus-common",
  "reth-evm",
  "reth-interfaces",
+ "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -7029,7 +7030,6 @@ name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
  "auto_impl",
- "clap",
  "futures",
  "parking_lot 0.12.2",
  "rand 0.8.5",
@@ -7039,6 +7039,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-types",
  "reth-primitives",
+ "reth-storage-errors",
  "secp256k1 0.28.2",
  "thiserror",
  "tokio",
@@ -7127,8 +7128,8 @@ dependencies = [
 name = "reth-net-common"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-primitives",
  "pin-project",
- "reth-network-types",
  "tokio",
 ]
 
@@ -7207,11 +7208,10 @@ dependencies = [
 name = "reth-network-api"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-primitives",
  "enr",
- "reth-discv4",
  "reth-eth-wire",
  "reth-network-types",
- "reth-primitives",
  "reth-rpc-types",
  "serde",
  "thiserror",
@@ -7565,7 +7565,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "c-kzg",
- "clap",
  "criterion",
  "derive_more",
  "hash-db",
@@ -7582,13 +7581,13 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-network-types",
+ "reth-static-file-types",
  "revm",
  "revm-primitives",
  "roaring",
  "secp256k1 0.28.2",
  "serde",
  "serde_json",
- "strum",
  "sucds",
  "tempfile",
  "test-fuzz",
@@ -7650,7 +7649,6 @@ dependencies = [
  "reth-tracing",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -7777,6 +7775,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",
@@ -7811,6 +7810,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
+ "reth-tokio-util",
  "serde",
  "thiserror",
  "tokio",
@@ -7943,8 +7943,30 @@ dependencies = [
  "reth-stages",
  "reth-tokio-util",
  "tempfile",
+ "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-static-file-types"
+version = "0.2.0-beta.7"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "derive_more",
+ "serde",
+ "strum",
+]
+
+[[package]]
+name = "reth-storage-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "clap",
+ "reth-fs-util",
+ "reth-primitives",
+ "thiserror",
 ]
 
 [[package]]
@@ -7978,6 +8000,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

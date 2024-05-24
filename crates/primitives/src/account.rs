@@ -106,6 +106,10 @@ impl Compact for Bytecode {
         len + bytecode.len() + 4
     }
 
+    // # Panics
+    //
+    // A panic will be triggered if a bytecode variant of 1 or greater than 2 is passed from the
+    // database.
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
         let bytes = Bytes::from(buf.copy_to_bytes(len as usize));

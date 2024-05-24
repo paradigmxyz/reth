@@ -9,6 +9,7 @@ use reth_primitives::{
 use reth_provider::{CanonChainTracker, CanonStateNotificationSender, Chain, StateProviderFactory};
 use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -18,7 +19,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
@@ -30,7 +30,7 @@ pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTyp
     /// The active miner
     miner: MiningMode,
     /// Single active future that inserts a new block into `storage`
-    insert_task: Option<BoxFuture<'static, Option<UnboundedReceiverStream<PipelineEvent>>>>,
+    insert_task: Option<BoxFuture<'static, Option<EventStream<PipelineEvent>>>>,
     /// Shared storage to insert new blocks
     storage: Storage,
     /// Pool where transactions are stored
@@ -42,7 +42,7 @@ pub struct MiningTask<Client, Pool: TransactionPool, Executor, Engine: EngineTyp
     /// Used to notify consumers of new blocks
     canon_state_notification: CanonStateNotificationSender,
     /// The pipeline events to listen on
-    pipe_line_events: Option<UnboundedReceiverStream<PipelineEvent>>,
+    pipe_line_events: Option<EventStream<PipelineEvent>>,
     /// The type used for block execution
     block_executor: Executor,
 }
@@ -80,7 +80,7 @@ impl<Executor, Client, Pool: TransactionPool, Engine: EngineTypes>
     }
 
     /// Sets the pipeline events to listen on.
-    pub fn set_pipeline_events(&mut self, events: UnboundedReceiverStream<PipelineEvent>) {
+    pub fn set_pipeline_events(&mut self, events: EventStream<PipelineEvent>) {
         self.pipe_line_events = Some(events);
     }
 }

@@ -1,0 +1,23 @@
+[package]
+name = "reth-static-file-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for static file usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+
+clap = { workspace = true, features = ["derive"], optional = true }
+derive_more.workspace = true
+serde = { workspace = true, features = ["derive"] }
+strum = { workspace = true, features = ["derive"] }
+
+[features]
+clap = ["dep:clap"]

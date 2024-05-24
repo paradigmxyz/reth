@@ -23,6 +23,10 @@ impl Compact for StoredHashBuilderValue {
         }
     }
 
+    // # Panics
+    //
+    // A panic will be triggered if a HashBuilderValue variant greater than 1 is passed from the
+    // database.
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
         match buf.get_u8() {
             0 => {
