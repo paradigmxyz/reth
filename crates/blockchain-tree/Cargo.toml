@@ -14,6 +14,8 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-interfaces.workspace = true
+reth-storage-errors.workspace = true
+reth-execution-errors.workspace = true
 reth-db.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
