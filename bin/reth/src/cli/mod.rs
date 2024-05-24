@@ -2,6 +2,8 @@
 
 #[cfg(feature = "optimism")]
 use crate::commands::import_op;
+#[cfg(feature = "optimism")]
+use crate::commands::import_receipts_op;
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
@@ -155,6 +157,10 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             }
             #[cfg(feature = "optimism")]
             Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            #[cfg(feature = "optimism")]
+            Commands::ImportReceiptsOp(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute())
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
@@ -198,6 +204,10 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]
     ImportOp(import_op::ImportOpCommand),
+    /// This imports RLP encoded receipts from a file.
+    #[cfg(feature = "optimism")]
+    #[command(name = "import-receipts")]
+    ImportReceiptsOp(import_receipts_op::ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
