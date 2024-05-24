@@ -11,7 +11,6 @@
 #![allow(clippy::needless_lifetimes)] // side effect of optimism fields
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-
 mod status;
 pub use status::{Status, StatusBuilder};
 
