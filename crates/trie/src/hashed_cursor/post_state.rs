@@ -1,6 +1,6 @@
-use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
+use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::state::HashedPostStateSorted;
-use reth_primitives::{Account, StorageEntry, B256, U256};
+use reth_primitives::{Account, B256, U256};
 
 /// The hashed cursor factory for the post state.
 #[derive(Debug, Clone)]
@@ -88,10 +88,12 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
     }
 }
 
-impl<'b, C> HashedAccountCursor for HashedPostStateAccountCursor<'b, C>
+impl<'b, C> HashedCursor for HashedPostStateAccountCursor<'b, C>
 where
-    C: HashedAccountCursor,
+    C: HashedCursor<Value = Account>,
 {
+    type Value = Account;
+
     /// Seek the next entry for a given hashed account key.
     ///
     /// If the post state contains the exact match for the key, return it.
@@ -100,7 +102,7 @@ where
     ///
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [HashedAccountCursor::seek] or [HashedAccountCursor::next] are called.
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         self.last_account = None;
 
         // Take the next account from the post state with the key greater than or equal to the
@@ -144,7 +146,7 @@ where
     ///
     /// NOTE: This function will not return any entry unless [HashedAccountCursor::seek] has been
     /// called.
-    fn next(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         let last_account = match self.last_account.as_ref() {
             Some(account) => account,
             None => return Ok(None), // no previous entry was found
@@ -222,49 +224,35 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     /// If the storage keys are the same, the post state entry is given precedence.
     fn next_slot(
         post_state_item: Option<&(B256, U256)>,
-        db_item: Option<StorageEntry>,
-    ) -> Option<StorageEntry> {
+        db_item: Option<(B256, U256)>,
+    ) -> Option<(B256, U256)> {
         match (post_state_item, db_item) {
             // If both are not empty, return the smallest of the two
             // Post state is given precedence if keys are equal
-            (Some((post_state_slot, post_state_value)), Some(db_entry)) => {
-                if post_state_slot <= &db_entry.key {
-                    Some(StorageEntry { key: *post_state_slot, value: *post_state_value })
+            (Some((post_state_slot, post_state_value)), Some((db_slot, db_value))) => {
+                if post_state_slot <= &db_slot {
+                    Some((*post_state_slot, *post_state_value))
                 } else {
-                    Some(db_entry)
+                    Some((db_slot, db_value))
                 }
             }
             // Return either non-empty entry
-            _ => db_item.or_else(|| {
-                post_state_item.copied().map(|(key, value)| StorageEntry { key, value })
-            }),
+            _ => db_item.or_else(|| post_state_item.copied()),
         }
     }
 }
 
-impl<'b, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
+impl<'b, C> HashedCursor for HashedPostStateStorageCursor<'b, C>
 where
-    C: HashedStorageCursor,
+    C: HashedStorageCursor<Value = U256>,
 {
-    /// Returns `true` if the account has no storage entries.
-    ///
-    /// This function should be called before attempting to call [HashedStorageCursor::seek] or
-    /// [HashedStorageCursor::next].
-    fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError> {
-        let is_empty = match self.post_state.storages.get(&self.hashed_address) {
-            Some(storage) => {
-                // If the storage has been wiped at any point
-                storage.wiped &&
-                    // and the current storage does not contain any non-zero values
-                    storage.non_zero_valued_slots.is_empty()
-            }
-            None => self.cursor.is_storage_empty()?,
-        };
-        Ok(is_empty)
-    }
+    type Value = U256;
 
     /// Seek the next account storage entry for a given hashed key pair.
-    fn seek(&mut self, subkey: B256) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
+    fn seek(
+        &mut self,
+        subkey: B256,
+    ) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
         if let Some(storage) = self.post_state.storages.get(&self.hashed_address) {
@@ -281,7 +269,7 @@ where
         if let Some((slot, value)) = post_state_entry {
             if slot == &subkey {
                 self.last_slot = Some(*slot);
-                return Ok(Some(StorageEntry { key: *slot, value: *value }))
+                return Ok(Some((*slot, *value)))
             }
         }
 
@@ -293,7 +281,7 @@ where
 
             while db_entry
                 .as_ref()
-                .map(|entry| self.is_slot_zero_valued(&entry.key))
+                .map(|entry| self.is_slot_zero_valued(&entry.0))
                 .unwrap_or_default()
             {
                 db_entry = self.cursor.next()?;
@@ -304,7 +292,7 @@ where
 
         // Compare two entries and return the lowest.
         let result = Self::next_slot(post_state_entry, db_entry);
-        self.last_slot = result.as_ref().map(|entry| entry.key);
+        self.last_slot = result.as_ref().map(|entry| entry.0);
         Ok(result)
     }
 
@@ -314,7 +302,7 @@ where
     ///
     /// If the account key is not set. [HashedStorageCursor::seek] must be called first in order to
     /// position the cursor.
-    fn next(&mut self) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         let last_slot = match self.last_slot.as_ref() {
             Some(slot) => slot,
             None => return Ok(None), // no previous entry was found
@@ -329,7 +317,7 @@ where
             // If the entry was already returned or is zero-values, move to the next.
             while db_entry
                 .as_ref()
-                .map(|entry| &entry.key == last_slot || self.is_slot_zero_valued(&entry.key))
+                .map(|entry| &entry.0 == last_slot || self.is_slot_zero_valued(&entry.0))
                 .unwrap_or_default()
             {
                 db_entry = self.cursor.next()?;
@@ -350,8 +338,30 @@ where
 
         // Compare two entries and return the lowest.
         let result = Self::next_slot(post_state_entry, db_entry);
-        self.last_slot = result.as_ref().map(|entry| entry.key);
+        self.last_slot = result.as_ref().map(|entry| entry.0);
         Ok(result)
+    }
+}
+
+impl<'b, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
+where
+    C: HashedStorageCursor<Value = U256>,
+{
+    /// Returns `true` if the account has no storage entries.
+    ///
+    /// This function should be called before attempting to call [HashedStorageCursor::seek] or
+    /// [HashedStorageCursor::next].
+    fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError> {
+        let is_empty = match self.post_state.storages.get(&self.hashed_address) {
+            Some(storage) => {
+                // If the storage has been wiped at any point
+                storage.wiped &&
+                    // and the current storage does not contain any non-zero values
+                    storage.non_zero_valued_slots.is_empty()
+            }
+            None => self.cursor.is_storage_empty()?,
+        };
+        Ok(is_empty)
     }
 }
 
@@ -363,6 +373,7 @@ mod tests {
     use reth_db::{
         database::Database, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
     };
+    use reth_primitives::StorageEntry;
     use std::collections::BTreeMap;
 
     fn assert_account_cursor_order(
@@ -391,11 +402,11 @@ mod tests {
             let mut expected_storage = storage.into_iter();
 
             let first_storage = cursor.seek(B256::default()).unwrap();
-            assert_eq!(first_storage.map(|e| (e.key, e.value)), expected_storage.next());
+            assert_eq!(first_storage, expected_storage.next());
 
             for expected_entry in expected_storage {
                 let next_cursor_storage = cursor.next().unwrap();
-                assert_eq!(next_cursor_storage.map(|e| (e.key, e.value)), Some(expected_entry));
+                assert_eq!(next_cursor_storage, Some(expected_entry));
             }
 
             assert!(cursor.next().unwrap().is_none());
