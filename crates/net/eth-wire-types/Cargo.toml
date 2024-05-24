@@ -55,4 +55,3 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
-optimism = ["reth-primitives/optimism"]
