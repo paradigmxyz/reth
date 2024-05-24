@@ -81,7 +81,7 @@ impl LaunchContext {
             // resolve trusted peers if they use a domain instead of dns
             for peer in &config.network.trusted_peers {
                 let resolved = peer
-                    .resolve(None)
+                    .resolve(config.network.dns_retry_strategy.clone())
                     .await
                     .wrap_err_with(|| format!("Could not resolve trusted peer {peer}"))?;
                 toml_config.peers.trusted_nodes.insert(resolved);

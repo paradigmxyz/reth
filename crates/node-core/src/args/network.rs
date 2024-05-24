@@ -17,7 +17,8 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, DNSNodeRecord};
+use reth_network_types::{DNSNodeRecord, RetryStrategy};
+use reth_primitives::{mainnet_nodes, ChainSpec};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -49,6 +50,10 @@ pub struct NetworkArgs {
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
     pub bootnodes: Option<Vec<DNSNodeRecord>>,
+
+    /// DNS retry strategy for bootnode or peer hostname resolution.
+    #[arg(long)]
+    pub dns_retry_strategy: Option<RetryStrategy>,
 
     /// The path to the known peers file. Connected peers are dumped to this file on nodes
     /// shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
@@ -219,6 +224,7 @@ impl Default for NetworkArgs {
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
+            dns_retry_strategy: None,
             peers_file: None,
             identity: P2P_CLIENT_VERSION.to_string(),
             p2p_secret_key: None,
@@ -408,6 +414,21 @@ mod tests {
             "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303".parse().unwrap(),
             "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303".parse().unwrap()
             ]
+        );
+    }
+
+    #[test]
+    fn parse_retry_strategy_args() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--dns-retry-strategy",
+            "interval=5,attempts=3",
+        ])
+        .args;
+
+        assert_eq!(
+            args.dns_retry_strategy,
+            Some(reth_network_types::RetryStrategy { interval: 5, attempts: 3 }),
         );
     }
 

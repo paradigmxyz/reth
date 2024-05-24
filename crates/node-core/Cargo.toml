@@ -18,6 +18,7 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-interfaces = { workspace = true, features = ["clap"] }
 reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
+reth-network-types.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true

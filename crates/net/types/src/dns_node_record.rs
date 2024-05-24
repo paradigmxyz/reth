@@ -29,12 +29,41 @@ pub struct DNSNodeRecord {
 }
 
 /// Retry strategy for DNS lookups.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, SerializeDisplay, DeserializeFromStr)]
 pub struct RetryStrategy {
-    /// The amount of time between retries.
-    interval: u64,
-    /// The number of retries.
-    retries: usize,
+    /// The amount of time between attempts.
+    pub interval: u64,
+    /// The number of attempts to make before failing.
+    pub attempts: usize,
+}
+
+impl fmt::Display for RetryStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "interval={},attempts={}", self.interval, self.attempts)
+    }
+}
+
+impl FromStr for RetryStrategy {
+    type Err = eyre::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut interval = None;
+        let mut attempts = None;
+
+        for pair in s.split(',') {
+            let mut parts = pair.split('=');
+            let key = parts.next().unwrap();
+            let value = parts.next().unwrap();
+
+            match key {
+                "interval" => interval = Some(value.parse()?),
+                "attempts" => attempts = Some(value.parse()?),
+                _ => return Err(eyre::eyre!("Invalid key: {}", key)),
+            }
+        }
+
+        Ok(Self { interval: interval.unwrap_or(0), attempts: attempts.unwrap_or(0) })
+    }
 }
 
 impl DNSNodeRecord {
@@ -86,7 +115,7 @@ impl DNSNodeRecord {
                 if let Some(strat) = retry_strategy {
                     let lookup = || async { Self::lookup_host(&domain).await };
                     let strat = tokio_retry::strategy::FixedInterval::from_millis(strat.interval)
-                        .take(strat.retries);
+                        .take(strat.attempts);
                     let ip = tokio_retry::Retry::spawn(strat, lookup).await?;
                     Ok(NodeRecord {
                         address: ip,
@@ -311,7 +340,7 @@ mod tests {
         // Set up tests
         let tests = vec![
             ("localhost", None),
-            ("localhost", Some(RetryStrategy { interval: 1000, retries: 3 })),
+            ("localhost", Some(RetryStrategy { interval: 1000, attempts: 3 })),
         ];
 
         // Run tests
