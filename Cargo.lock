@@ -6998,6 +6998,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-execution-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-consensus",
+ "reth-primitives",
+ "reth-storage-errors",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-exex"
 version = "0.2.0-beta.7"
 dependencies = [
