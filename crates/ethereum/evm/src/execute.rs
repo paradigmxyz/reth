@@ -4,7 +4,6 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
-use alloy_consensus::Request;
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
@@ -18,8 +17,8 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Withdrawals,
-    MAINNET, U256,
+    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Request,
+    Withdrawals, MAINNET, U256,
 };
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -201,15 +200,23 @@ where
             );
         }
 
-        // Collect all EIP-6110 deposits
-        let deposit_requests =
-            crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
+        let requests = if self.chain_spec.is_prague_active_at_timestamp(block.header.timestamp) {
+            // Collect all EIP-6110 deposits
+            let deposit_requests =
+                crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-        // Collect all EIP-7685 requests
-        let withdrawal_requests =
-            apply_withdrawal_requests_contract_call(&self.chain_spec, block.timestamp, &mut evm)?;
-        // Requests are ordered by Request Type ID.
-        let requests = [deposit_requests, withdrawal_requests].concat();
+            // Collect all EIP-7685 requests
+            let withdrawal_requests = apply_withdrawal_requests_contract_call(
+                &self.chain_spec,
+                block.timestamp,
+                &mut evm,
+            )?;
+
+            // Requests are ordered by Request Type ID
+            [deposit_requests, withdrawal_requests].concat()
+        } else {
+            vec![]
+        };
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
@@ -408,7 +415,7 @@ where
         let EthExecuteOutput { receipts, requests, gas_used: _ } =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
-        validate_block_post_execution(block, self.executor.chain_spec(), &receipts)?;
+        validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &requests)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -453,12 +460,18 @@ mod tests {
     use alloy_eips::{
         eip2935::HISTORY_STORAGE_ADDRESS,
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
-        eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+        eip7002::{
+            WithdrawalRequest, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+            WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
+        },
     };
     use reth_interfaces::test_utils::generators::{self, sign_tx_with_key_pair};
     use reth_primitives::{
-        constants::ETH_TO_WEI, keccak256, public_key_to_address, Account, Block, ChainSpecBuilder,
-        ForkCondition, Transaction, TxKind, TxLegacy, B256,
+        constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
+        keccak256,
+        proofs::calculate_requests_root,
+        public_key_to_address, Account, Block, ChainSpecBuilder, ForkCondition, Transaction,
+        TxKind, TxLegacy, B256,
     };
     use reth_revm::{
         database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,
@@ -879,11 +892,20 @@ mod tests {
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
         assert_eq!(input.len(), 56);
 
+        let expected_withdrawal_request = WithdrawalRequest {
+            source_address: sender_address,
+            validator_public_key,
+            amount: u64::from_be_bytes(withdrawal_amount.into()),
+        };
+
         let mut header = chain_spec.genesis_header();
         header.gas_limit = 1_500_000;
         header.gas_used = 134_807;
         header.receipts_root =
             b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
+        header.requests_root = Some(calculate_requests_root(&[Request::WithdrawalRequest(
+            expected_withdrawal_request,
+        )]));
 
         let tx = sign_tx_with_key_pair(
             sender_key_pair,
@@ -926,9 +948,7 @@ mod tests {
 
         let request = requests.first().unwrap();
         let withdrawal_request = request.as_withdrawal_request().unwrap();
-        assert_eq!(withdrawal_request.source_address, sender_address);
-        assert_eq!(withdrawal_request.validator_public_key, validator_public_key);
-        assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
+        assert_eq!(*withdrawal_request, expected_withdrawal_request);
     }
 
     fn create_state_provider_with_block_hashes(latest_block: u64) -> StateProviderTest {
@@ -1039,7 +1059,12 @@ mod tests {
                 .build(),
         );
 
-        let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
         let provider = executor_provider(chain_spec);
         let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
@@ -1098,7 +1123,12 @@ mod tests {
         let provider = executor_provider(chain_spec);
         let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
-        let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
 
         // attempt to execute the fork activation block, this should not fail
         executor
@@ -1172,7 +1202,12 @@ mod tests {
         assert!(executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero());
 
         // attempt to execute block 1, this should not fail
-        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
         executor
             .execute_without_verification(
                 &BlockWithSenders {
@@ -1200,7 +1235,12 @@ mod tests {
         assert!(executor.state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero());
 
         // attempt to execute block 2, this should not fail
-        let header = Header { timestamp: 1, number: 2, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: 2,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
         executor
             .execute_without_verification(
                 &BlockWithSenders {

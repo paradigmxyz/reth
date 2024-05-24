@@ -25,7 +25,6 @@ revm-interpreter.workspace = true
 revm-precompile = { version = "7.0.0", features = ["std"], default-features = false }
 
 # Alloy
-alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
 alloy-sol-types.workspace = true

@@ -1,9 +1,8 @@
 //! Traits for execution.
 
-use alloy_consensus::Request;
 use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, Requests, U256,
+    BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, Request, Requests, U256,
 };
 use revm::db::BundleState;
 use revm_primitives::db::Database;
