@@ -69,15 +69,12 @@ pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-<<<<<<< HEAD
-=======
     /// Pruning error, transparently wrapping `PruneSegmentError`
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
     /// Consensus error, transparently wrapping `ConsensusError`
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
->>>>>>> main
     /// Transaction error on revert with inner details
     #[error("transaction error on revert: {inner}")]
     CanonicalRevert {

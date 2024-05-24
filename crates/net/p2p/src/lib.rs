@@ -4,8 +4,8 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
 
 /// Shared abstractions for downloader implementations.
 pub mod download;
@@ -33,3 +33,7 @@ pub mod error;
 
 /// Priority enum for BlockHeader and BlockBody requests
 pub mod priority;
+
+/// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;

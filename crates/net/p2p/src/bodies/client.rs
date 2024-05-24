@@ -2,6 +2,7 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
+
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
 use reth_primitives::{BlockBody, B256};
