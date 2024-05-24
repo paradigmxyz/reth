@@ -1,4 +1,7 @@
-#![allow(missing_docs)]
+//! # reth-benchmark
+//!
+//! This is a tool that converts existing blocks into a stream of blocks for benchmarking purposes.
+//! These blocks are then fed into reth as a stream of execution payloads.
 
 // We use jemalloc for performance reasons.
 #[cfg(all(feature = "jemalloc", unix))]

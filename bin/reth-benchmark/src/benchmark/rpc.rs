@@ -111,7 +111,8 @@ impl Command {
             // just put gas used here
             let gas_used = block.header.gas_used as f64;
 
-            let versioned_hashes: Vec<B256> = block.blob_versioned_hashes().into_iter().copied().collect();
+            let versioned_hashes: Vec<B256> =
+                block.blob_versioned_hashes().into_iter().copied().collect();
             let (payload, parent_beacon_block_root) = block_to_payload_v3(block);
 
             debug!(
@@ -121,14 +122,11 @@ impl Command {
                 "Sending payload",
             );
 
-            let parent_beacon_block_root = parent_beacon_block_root.expect("this is a valid v3 payload");
+            let parent_beacon_block_root =
+                parent_beacon_block_root.expect("this is a valid v3 payload");
             let start = Instant::now();
             auth_provider
-                .new_payload_v3_wait(
-                    payload,
-                    versioned_hashes,
-                    parent_beacon_block_root,
-                )
+                .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
                 .await?;
             let new_payload_duration = start.elapsed();
 
@@ -160,12 +158,7 @@ impl Command {
         let total_duration: Duration = results.iter().map(|(dur, _)| dur).sum();
         let total_ggas_used = total_gas_used / 1_000_000_000.0;
         let total_ggas_per_second = total_ggas_used / total_duration.as_secs_f64();
-        info!(
-            ?total_duration,
-            ?total_gas_used,
-            "Total Ggas/s: {:.2}",
-            total_ggas_per_second
-        );
+        info!(?total_duration, ?total_gas_used, "Total Ggas/s: {:.2}", total_ggas_per_second);
 
         // TODO: support properly sending versioned fork stuff. like if timestamp > fork, use
         // correct engine method

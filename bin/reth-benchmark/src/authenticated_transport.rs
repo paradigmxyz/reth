@@ -31,6 +31,7 @@ pub enum InnerTransport {
     Ipc(PubSubFrontend),
 }
 
+/// An authenticated transport that can be used to send requests that contain a jwt bearer token.
 #[derive(Debug, Clone)]
 pub struct AuthenticatedTransport {
     /// The inner actual transport used.

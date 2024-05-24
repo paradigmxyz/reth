@@ -1,3 +1,5 @@
+//! The benchmark mode defines whether the benchmark should run for a specific range of blocks or as
+//! a continuous stream of payloads.
 use std::ops::RangeInclusive;
 
 /// Whether or not the benchmark should run as a continuous stream of payloads.

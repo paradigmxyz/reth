@@ -1,3 +1,5 @@
+//! This provides block fetcher and stream utilities for fetching blocks asynchronously.
+
 use crate::benchmark_mode::BenchmarkMode;
 use alloy_provider::{Provider, RootProvider};
 use alloy_transport::{Transport, TransportResult};
@@ -36,28 +38,6 @@ where
     T: Transport + Clone,
 {
     /// Create a new `BlockStream` with the given mode and provider.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use alloy_provider::{Provider, RootProvider};
-    /// use alloy_transport::HttpTransport;
-    /// use futures::FutureExt;
-    /// use reth_benchmark::{BenchmarkMode, BlockFetcher};
-    /// use reth_rpc_types::Block;
-    /// use tokio::sync::mpsc::Receiver;
-    ///
-    /// #[tokio::main]
-    /// async fn main() {
-    ///     let provider = RootProvider::new(HttpTransport::new("http://localhost:8545").unwrap());
-    ///     let (block_fetcher, block_receiver) =
-    ///         BlockFetcher::new(BenchmarkMode::Continuous, &provider, 10).unwrap();
-    ///
-    ///     let _handle = tokio::spawn(block_fetcher);
-    ///     while let Some(block) = block_receiver.recv().await {
-    ///         println!("{:?}", block);
-    ///     }
-    /// }
-    /// ```
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         mut mode: BenchmarkMode,
@@ -260,7 +240,6 @@ where
                 Poll::Ready(Some(block))
             }
             Poll::Pending => {
-                // tracing::info!("Returning Poll::Pending!!");
                 // receiver is pending
                 Poll::Pending
             }
