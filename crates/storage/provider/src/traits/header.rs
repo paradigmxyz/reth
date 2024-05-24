@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, U256};
+use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
 /// Client trait for fetching `Header` related data.

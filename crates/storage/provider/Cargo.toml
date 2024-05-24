@@ -13,8 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
+reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
+reth-storage-errors.workspace = true
 reth-interfaces.workspace = true
 reth-db.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
