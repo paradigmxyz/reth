@@ -81,8 +81,8 @@ impl Chain {
         self.trie_updates.as_ref()
     }
 
-    /// Reset cached trie updates for this chain.
-    pub fn reset_trie_updates(&mut self) {
+    /// Remove cached trie updates for this chain.
+    pub fn clear_trie_updates(&mut self) {
         self.trie_updates.take();
     }
 

@@ -1195,7 +1195,7 @@ where
             "Canonicalization finished"
         );
 
-        // reset trie updates for other childs
+        // clear trie updates for other childs
         let chain_ids: Vec<_> = self
             .block_indices()
             .fork_to_child()
@@ -1203,13 +1203,12 @@ where
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter(|child| child != &block_hash)
             .filter_map(|child| self.block_indices().get_blocks_chain_id(&child))
             .collect();
 
         for chain_id in chain_ids {
             if let Some(chain) = self.state.chains.get_mut(&chain_id) {
-                chain.reset_trie_updates();
+                chain.clear_trie_updates();
             }
         }
         durations_recorder.record_relative(MakeCanonicalAction::ResetTrieUpdatesForOtherChilds);
