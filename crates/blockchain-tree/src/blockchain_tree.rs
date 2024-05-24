@@ -139,6 +139,14 @@ where
         }
         .copied()
         .unwrap_or_default();
+        println!(
+            "in BlochainTree::new, last_canonical_hashes.len(): {}",
+            last_canonical_hashes.len()
+        );
+        println!("in BlochainTree::new, max_reorg_depth: {max_reorg_depth}");
+        println!(
+            "in BlochainTree::new, last_finalized_block_number: {last_finalized_block_number}"
+        );
 
         Ok(Self {
             externals,
@@ -2356,5 +2364,51 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::default()))
             .with_buffered_blocks(HashMap::default())
             .assert(&tree);
+    }
+
+    #[test]
+    fn last_finalized_block_initialiation() {
+        let data = BlockchainTestData::default_from_number(11);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
+        let genesis = data.genesis;
+
+        // test pops execution results from vector, so order is from last to first.
+        let externals =
+            setup_externals(vec![exec2.clone(), exec1.clone(), exec2.clone(), exec1.clone()]);
+        let cloned_externals = TreeExternals {
+            provider_factory: externals.provider_factory.clone(),
+            executor_factory: externals.executor_factory.clone(),
+            consensus: externals.consensus.clone(),
+        };
+
+        // last finalized block would be number 9.
+        setup_genesis(&externals.provider_factory, genesis);
+
+        // make tree
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+
+        assert_eq!(
+            tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+        tree.make_canonical(block2.hash()).unwrap();
+
+        // restart
+        drop(tree);
+        let mut tree =
+            BlockchainTree::new(cloned_externals, config, None).expect("failed to create tree");
+
+        assert_eq!(
+            tree.make_canonical(block2.hash()).unwrap(),
+            CanonicalOutcome::AlreadyCanonical { header: block2.header.clone() }
+        );
+        //tree.finalize_block(12);
     }
 }

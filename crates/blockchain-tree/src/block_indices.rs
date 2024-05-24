@@ -320,6 +320,8 @@ impl BlockIndices {
             .filter(|(number, _)| *number >= self.last_finalized_block && *number < finalized_block)
             .map(|(_, hash)| hash)
             .collect();
+        println!("self.last_finalized_block: {}", self.last_finalized_block);
+        println!("finalized_blocks.len(): {}", finalized_blocks.len());
 
         // remove unneeded canonical hashes.
         let remove_until =
