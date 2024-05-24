@@ -1,10 +1,10 @@
-use super::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor};
+use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
     transaction::DbTx,
 };
-use reth_primitives::{Account, StorageEntry, B256};
+use reth_primitives::{Account, B256, U256};
 
 impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
     type AccountCursor = <TX as DbTx>::Cursor<tables::HashedAccounts>;
@@ -26,15 +26,17 @@ impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
     }
 }
 
-impl<C> HashedAccountCursor for C
+impl<C> HashedCursor for C
 where
     C: DbCursorRO<tables::HashedAccounts>,
 {
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
+    type Value = Account;
+
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         self.seek(key)
     }
 
-    fn next(&mut self) -> Result<Option<(B256, Account)>, reth_db::DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         self.next()
     }
 }
@@ -55,19 +57,29 @@ impl<C> DatabaseHashedStorageCursor<C> {
     }
 }
 
+impl<C> HashedCursor for DatabaseHashedStorageCursor<C>
+where
+    C: DbCursorRO<tables::HashedStorages> + DbDupCursorRO<tables::HashedStorages>,
+{
+    type Value = U256;
+
+    fn seek(
+        &mut self,
+        subkey: B256,
+    ) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
+        Ok(self.cursor.seek_by_key_subkey(self.hashed_address, subkey)?.map(|e| (e.key, e.value)))
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
+        Ok(self.cursor.next_dup_val()?.map(|e| (e.key, e.value)))
+    }
+}
+
 impl<C> HashedStorageCursor for DatabaseHashedStorageCursor<C>
 where
     C: DbCursorRO<tables::HashedStorages> + DbDupCursorRO<tables::HashedStorages>,
 {
     fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError> {
         Ok(self.cursor.seek_exact(self.hashed_address)?.is_none())
-    }
-
-    fn seek(&mut self, subkey: B256) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
-        self.cursor.seek_by_key_subkey(self.hashed_address, subkey)
-    }
-
-    fn next(&mut self) -> Result<Option<StorageEntry>, reth_db::DatabaseError> {
-        self.cursor.next_dup_val()
     }
 }
