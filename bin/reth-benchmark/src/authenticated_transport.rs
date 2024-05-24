@@ -36,6 +36,9 @@ pub enum InnerTransport {
 pub struct AuthenticatedTransport {
     /// The inner actual transport used.
     inner: Arc<RwLock<InnerTransport>>,
+    /// The current claims being used. This is used to determine whether or not we should create
+    /// another client.
+    claims: Claims,
 }
 
 /// An error that can occur when creating an authenticated transport.
@@ -79,7 +82,7 @@ impl AuthenticatedTransport {
         let mut headers = reqwest::header::HeaderMap::new();
 
         // Add the JWT it to the headers if we can decode it.
-        let auth =
+        let (auth, claims) =
             build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
 
         let token_value = match auth {
@@ -106,13 +109,13 @@ impl AuthenticatedTransport {
 
         let inner = InnerTransport::Http(Http::with_client(client, url));
 
-        Ok(Self { inner: Arc::new(RwLock::new(inner)) })
+        Ok(Self { inner: Arc::new(RwLock::new(inner)), claims })
     }
 
     /// Connects to a WebSocket [alloy_transport_ws::WsConnect] transport.
     async fn connect_ws(url: Url, jwt: JwtSecret) -> Result<Self, AuthenticatedTransportError> {
         // Add the JWT it to the headers if we can decode it.
-        let auth =
+        let (auth, claims) =
             build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
 
         let inner = WsConnect { url: url.to_string(), auth: Some(auth) }
@@ -121,7 +124,7 @@ impl AuthenticatedTransport {
             .map(InnerTransport::Ws)
             .map_err(|e| AuthenticatedTransportError::TransportError(e, url.to_string()))?;
 
-        Ok(Self { inner: Arc::new(RwLock::new(inner)) })
+        Ok(Self { inner: Arc::new(RwLock::new(inner)), claims })
     }
 
     /// Connects to an IPC [alloy_transport_ipc::IpcConnect] transport.
@@ -133,7 +136,8 @@ impl AuthenticatedTransport {
             .map(InnerTransport::Ipc)
             .map_err(|e| AuthenticatedTransportError::TransportError(e, url.to_string()))?;
 
-        Ok(Self { inner: Arc::new(RwLock::new(inner)) })
+        // IPC doesn't really require claims so we just set them to default here
+        Ok(Self { inner: Arc::new(RwLock::new(inner)), claims: Claims::default() })
     }
 
     /// Sends a request using the underlying transport.
@@ -143,11 +147,16 @@ impl AuthenticatedTransport {
     /// information.
     fn request(&self, req: RequestPacket) -> TransportFut<'static> {
         let this = self.clone();
+
         Box::pin(async move {
-            let inner = this.inner.read().await;
+            let inner = this.inner.write().await;
+
+            // if the claims are out of date, reset the inner transport
+
             match *inner {
                 InnerTransport::Http(ref http) => {
                     let mut http = http;
+                    // TODO: recreate client if claims are out of date
                     http.call(req)
                 }
                 InnerTransport::Ws(ref ws) => {
@@ -156,6 +165,7 @@ impl AuthenticatedTransport {
                 }
                 InnerTransport::Ipc(ref ipc) => {
                     let mut ipc = ipc;
+                    // we don't need to recreate the client for IPC
                     ipc.call(req)
                 }
             }
@@ -164,14 +174,14 @@ impl AuthenticatedTransport {
     }
 }
 
-fn build_auth(secret: JwtSecret) -> eyre::Result<Authorization> {
+fn build_auth(secret: JwtSecret) -> eyre::Result<(Authorization, Claims)> {
     // Generate claims (iat with current timestamp), this happens by default using the Default trait
     // for Claims.
     let claims = Claims::default();
     let token = secret.encode(&claims)?;
     let auth = Authorization::Bearer(token);
 
-    Ok(auth)
+    Ok((auth, claims))
 }
 
 /// This specifies how to connect to an authenticated transport.

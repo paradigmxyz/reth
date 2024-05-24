@@ -9,7 +9,8 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver};
+use tokio_util::sync::PollSender;
 use tracing::error;
 
 /// This implements a stream of blocks for the benchmark mode
@@ -19,7 +20,7 @@ pub(crate) struct BlockFetcher<'a, T> {
     /// The provider to be used to fetch blocks
     provider: &'a RootProvider<T>,
     /// The sending channel for blocks
-    block_sender: Sender<TransportResult<Option<Block>>>,
+    block_sender: PollSender<TransportResult<Option<Block>>>,
     /// The current block future in flight
     current_block: BoxFuture<'a, TransportResult<Option<Block>>>,
     // TODO: make this include a fn, with generic output, instead of just
@@ -63,6 +64,7 @@ where
                 }
             }
         };
+        let block_sender = PollSender::new(block_sender);
         let block_stream = Self { mode, provider, block_sender, current_block };
         Ok((block_stream, block_receiver))
     }
@@ -99,9 +101,8 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        // if there is capacity in the channel and we are not done, poll the next block
-        match this.block_sender.try_reserve() {
-            Ok(permit) => {
+        match ready!(this.block_sender.poll_reserve(cx)) {
+            Ok(()) => {
                 // we have capacity, poll the next block
                 match ready!(this.current_block.poll_unpin(cx)) {
                     Ok(Some(block)) => {
@@ -119,7 +120,10 @@ where
                         };
 
                         // send the block
-                        permit.send(Ok(Some(block)));
+                        if this.block_sender.send_item(Ok(Some(block))).is_err() {
+                            // this means the channel is closed, so we should exit
+                            return Poll::Ready(());
+                        }
 
                         // fetch the next block
                         this.current_block = match this.mode {
@@ -146,12 +150,15 @@ where
                         // this means the stream could not get the next block
                         // TODO: what should we do here?
                         error!("Block stream returned None");
-                        permit.send(Ok(None));
+                        // send Ok(None), we ignore result because we'll return Poll::Ready(())
+                        // anyways
+                        let _ = this.block_sender.send_item(Ok(None));
                         return Poll::Ready(());
                     }
                     Err(e) => {
-                        // send the error
-                        permit.send(Err(e));
+                        // send the error, we ignore result because we'll return Poll::Ready(())
+                        // anyways
+                        let _ = this.block_sender.send_item(Err(e)).is_err();
                         return Poll::Ready(());
                     }
                 }
@@ -161,7 +168,6 @@ where
             }
         }
 
-        // tracing::info!("BlockFetcher Returning Poll::Pending!!");
         // nothing to do
         Poll::Pending
     }
