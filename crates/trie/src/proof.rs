@@ -1,6 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
+    node_iter::{TrieElement, TrieNodeIter},
     prefix_set::PrefixSetMut,
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
@@ -64,13 +64,13 @@ where
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut account_rlp = Vec::with_capacity(128);
-        let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);
+        let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
-                AccountNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                AccountNode::Leaf(hashed_address, account) => {
+                TrieElement::Leaf(hashed_address, account) => {
                     let storage_root = if hashed_address == target_hashed_address {
                         let (storage_root, storage_proofs) =
                             self.storage_root_with_proofs(hashed_address, slots)?;
@@ -129,13 +129,13 @@ where
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        let mut storage_node_iter = StorageNodeIter::new(walker, hashed_storage_cursor);
+        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
-                StorageNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                StorageNode::Leaf(hashed_slot, value) => {
+                TrieElement::Leaf(hashed_slot, value) => {
                     let nibbles = Nibbles::unpack(hashed_slot);
                     if let Some(proof) = proofs.iter_mut().find(|proof| proof.nibbles == nibbles) {
                         proof.set_value(value);

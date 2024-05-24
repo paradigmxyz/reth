@@ -10,7 +10,7 @@ use reth_primitives::{
 use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
-    node_iter::{AccountNode, AccountNodeIter},
+    node_iter::{TrieElement, TrieNodeIter},
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     walker::TrieWalker,
@@ -115,23 +115,24 @@ where
             HashedPostStateCursorFactory::new(provider_ro.tx_ref(), &hashed_state_sorted);
         let trie_cursor_factory = provider_ro.tx_ref();
 
-        let hashed_account_cursor =
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?;
-        let trie_cursor =
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?;
+        let walker = TrieWalker::new(
+            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+            prefix_sets.account_prefix_set,
+        )
+        .with_updates(retain_updates);
+        let mut account_node_iter = TrieNodeIter::new(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+        );
 
-        let walker = TrieWalker::new(trie_cursor, prefix_sets.account_prefix_set)
-            .with_updates(retain_updates);
-        let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
-
         let mut account_rlp = Vec::with_capacity(128);
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
-                AccountNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                AccountNode::Leaf(hashed_address, account) => {
+                TrieElement::Leaf(hashed_address, account) => {
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
                         Some(result) => result,
                         // Since we do not store all intermediate nodes in the database, there might

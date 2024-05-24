@@ -28,7 +28,7 @@ pub trait HashedCursorFactory {
 /// The cursor for iterating over hashed entries.
 pub trait HashedCursor {
     /// Value returned by the cursor.
-    type Value;
+    type Value: std::fmt::Debug;
 
     /// Seek an entry greater or equal to the given key and position the cursor there.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError>;
