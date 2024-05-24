@@ -7325,6 +7325,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-engine-api",
  "reth-rpc-layer",
+ "reth-rpc-types",
  "reth-stages",
  "reth-static-file",
  "reth-tasks",
