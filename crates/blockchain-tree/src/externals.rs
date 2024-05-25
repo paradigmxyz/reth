@@ -4,9 +4,9 @@ use reth_consensus::Consensus;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
-use reth_interfaces::RethResult;
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{ProviderFactory, StaticFileProviderFactory, StatsReader};
+use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// A container for external components.
@@ -46,7 +46,7 @@ impl<DB: Database, E> TreeExternals<DB, E> {
     pub(crate) fn fetch_latest_canonical_hashes(
         &self,
         num_hashes: usize,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+    ) -> ProviderResult<BTreeMap<BlockNumber, BlockHash>> {
         // Fetch the latest canonical hashes from the database
         let mut hashes = self
             .provider_factory

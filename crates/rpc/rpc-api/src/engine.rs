@@ -8,8 +8,9 @@ use reth_engine_primitives::EngineTypes;
 use reth_primitives::{Address, BlockHash, BlockId, BlockNumberOrTag, Bytes, B256, U256, U64};
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-        ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
+        ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
+        ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+        TransitionConfiguration,
     },
     state::StateOverride,
     BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
@@ -153,6 +154,22 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         transition_configuration: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration>;
+
+    /// This function will return the ClientVersionV1 object.
+    /// See also:
+    /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
+    ///
+    ///
+    /// - When connected to a single execution client, the consensus client **MUST** receive an
+    ///   array with a single `ClientVersionV1` object.
+    /// - When connected to multiple execution clients via a multiplexer, the multiplexer **MUST**
+    ///   concatenate the responses from each execution client into a single,
+    /// flat array before returning the response to the consensus client.
+    #[method(name = "getClientVersionV1")]
+    async fn get_client_version_v1(
+        &self,
+        client_version: ClientVersionV1,
+    ) -> RpcResult<Vec<ClientVersionV1>>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     #[method(name = "exchangeCapabilities")]
