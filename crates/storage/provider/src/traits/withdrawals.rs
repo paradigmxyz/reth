@@ -1,5 +1,5 @@
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, Withdrawal, Withdrawals};
+use reth_storage_errors::provider::ProviderResult;
 
 ///  Client trait for fetching [Withdrawal] related data.
 #[auto_impl::auto_impl(&, Arc)]
