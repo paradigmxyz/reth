@@ -912,7 +912,9 @@ where
             },
         }
 
-        shutdown_hook(self)
+        let res = shutdown_hook(self);
+        drop(graceful_guard);
+        res
     }
 }
 
