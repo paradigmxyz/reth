@@ -8,6 +8,7 @@ use crate::{
     cli::config::RethRpcConfig,
     utils::get_or_create_jwt_secret_from_path,
 };
+use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
@@ -31,7 +32,6 @@ use reth_rpc_builder::{
     RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApi;
-use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
