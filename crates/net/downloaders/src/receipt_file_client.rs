@@ -75,10 +75,10 @@ impl FromReader for ReceiptFileClient {
                     Err(err) => return Err(err),
                 };
 
-                total_receipts += 1;
-
                 match receipt {
                     Some(ReceiptWithBlockNumber { receipt, number }) => {
+                        total_receipts += 1;
+
                         if first_block.is_none() {
                             first_block = Some(number);
                             block_number = number;
