@@ -6530,6 +6530,7 @@ dependencies = [
  "linked_hash_set",
  "metrics",
  "parking_lot 0.12.2",
+ "reth-blockchain-tree-api",
  "reth-consensus",
  "reth-db",
  "reth-evm",
@@ -7053,12 +7054,12 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
+ "reth-blockchain-tree-api",
  "reth-consensus",
  "reth-execution-errors",
  "reth-fs-util",
  "reth-network-api",
  "reth-network-p2p",
- "reth-primitives",
  "reth-storage-errors",
  "thiserror",
 ]
@@ -7629,6 +7630,7 @@ dependencies = [
  "pin-project",
  "rand 0.8.5",
  "rayon",
+ "reth-blockchain-tree-api",
  "reth-codecs",
  "reth-db",
  "reth-evm",
@@ -7637,6 +7639,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-storage-errors",
  "reth-trie",
  "revm",
  "strum",

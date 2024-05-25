@@ -11,12 +11,12 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+reth-blockchain-tree-api.workspace = true
 reth-consensus.workspace = true
 reth-execution-errors.workspace = true
 reth-fs-util.workspace = true
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
-reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 
 # misc

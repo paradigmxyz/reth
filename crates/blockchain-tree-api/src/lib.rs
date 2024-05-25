@@ -7,14 +7,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use crate::{error::InsertBlockError};
+use self::error::CanonicalError;
+use crate::error::InsertBlockError;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
-use std::collections::{BTreeMap, HashSet};
-use self::error::CanonicalError;
 use reth_storage_errors::provider::ProviderError;
+use std::collections::{BTreeMap, HashSet};
 
 pub mod error;
 
@@ -85,21 +85,21 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> RethResult<()>;
+    ) -> Result<(), CanonicalError>;
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
     /// them. Remove all mismatches, disconnect them, removes all chains and clears all buffered
     /// blocks before the tip.
     fn update_block_hashes_and_clear_buffered(
         &self,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>>;
+    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError>;
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
     /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()>;
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError>;
 
     /// Make a block and its parent chain part of the canonical chain by committing it to the
     /// database.
@@ -356,4 +356,3 @@ pub trait BlockchainTreeViewer: Send + Sync {
         self.header_by_hash(self.pending_block_num_hash()?.hash)
     }
 }
-
