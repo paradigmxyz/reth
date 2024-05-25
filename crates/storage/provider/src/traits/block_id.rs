@@ -1,6 +1,6 @@
 use super::BlockHashReader;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
 /// block hashes to numbers, and fetching a block hash from its block number.
