@@ -17,7 +17,7 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::{stage::StageId, ChainSpec, Receipts, StaticFileSegment};
 use reth_provider::{
     BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StaticFileWriter,
+    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use tracing::{debug, error, info, trace};
 
@@ -111,6 +111,13 @@ where
     let provider = provider_factory.provider_rw()?;
     let static_file_provider = provider_factory.static_file_provider();
 
+    let total_imported_txns = static_file_provider
+        .count_entries::<tables::Transactions>()
+        .expect("transaction static files must exist before importing receipts");
+    let highest_block_transactions = static_file_provider
+        .get_highest_static_file_block(StaticFileSegment::Transactions)
+        .expect("transaction static files must exist before importing receipts");
+
     for stage in StageId::ALL {
         let checkpoint = provider.get_stage_checkpoint(stage)?;
         trace!(target: "reth::cli",
@@ -170,16 +177,11 @@ where
         return Ok(())
     }
 
-    // compare the highest static file block to the number of receipts we decoded
-    //
-    // `HeaderNumbers` and `TransactionHashNumbers` tables serve as additional indexes, but
-    // nothing like this needs to exist for Receipts. So `tx.entries::<tables::Receipts>` would
-    // return zero here.
     let total_imported_receipts = static_file_provider
-        .get_highest_static_file_block(StaticFileSegment::Receipts)
+        .count_entries::<tables::Receipts>()
         .expect("static files must exist after ensuring we decoded more than zero");
 
-    if total_imported_receipts + total_filtered_out_txns as u64 != total_decoded_receipts as u64 {
+    if total_imported_receipts + total_filtered_out_txns != total_decoded_receipts {
         error!(target: "reth::cli",
             total_decoded_receipts,
             total_imported_receipts,
@@ -188,15 +190,23 @@ where
         );
     }
 
-    let total_imported_txns =
-        provider_factory.provider()?.tx_ref().entries::<tables::TransactionHashNumbers>()?;
-
-    if total_imported_receipts != total_imported_txns as u64 {
+    if total_imported_receipts != total_imported_txns {
         error!(target: "reth::cli",
-            total_decoded_receipts,
             total_imported_receipts,
-            total_filtered_out_txns,
+            total_imported_txns,
             "Receipts inconsistent with transactions"
+        );
+    }
+
+    let highest_block_receipts = static_file_provider
+        .get_highest_static_file_block(StaticFileSegment::Receipts)
+        .expect("static files must exist after ensuring we decoded more than zero");
+
+    if highest_block_receipts != highest_block_transactions {
+        error!(target: "reth::cli",
+            highest_block_receipts,
+            highest_block_transactions,
+            "Height of receipts inconsistent with transactions"
         );
     }
 
