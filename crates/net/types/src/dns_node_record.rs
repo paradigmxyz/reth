@@ -12,6 +12,7 @@ use crate::{NodeRecord, PeerId};
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::time::Duration;
+use tokio_retry::{strategy::FixedInterval, Retry};
 use url::Host;
 
 /// Represents a ENR in discovery.
@@ -81,33 +82,21 @@ impl DNSNodeRecord {
             Host::Domain(domain) => domain,
         };
 
-        // Lookip ipaddr from domain
-        match Self::lookup_host(&domain).await {
-            Ok(ip) => Ok(NodeRecord {
-                address: ip,
-                id: self.id,
-                tcp_port: self.tcp_port,
-                udp_port: self.udp_port,
-            }),
-            Err(e) => {
-                // Retry if strategy is provided
-                match retry_strategy {
-                    Some(strategy) if strategy.attempts > 0 => {
-                        let lookup = || async { Self::lookup_host(&domain).await };
-                        let strat = tokio_retry::strategy::FixedInterval::new(strategy.interval)
-                            .take(strategy.attempts);
-                        let ip = tokio_retry::Retry::spawn(strat, lookup).await?;
-                        Ok(NodeRecord {
-                            address: ip,
-                            id: self.id,
-                            tcp_port: self.tcp_port,
-                            udp_port: self.udp_port,
-                        })
-                    }
-                    _ => Err(e),
-                }
-            }
-        }
+        // Use provided retry strategy or use strategy which does not retry
+        let strategy = match retry_strategy {
+            Some(rs) => rs,
+            None => RetryStrategy::new(Duration::from_millis(0), 0),
+        };
+        // Execute the lookup
+        let lookup = || async { Self::lookup_host(&domain).await };
+        let retry = FixedInterval::new(strategy.interval).take(strategy.attempts);
+        let ip = Retry::spawn(retry, lookup).await?;
+        Ok(NodeRecord {
+            address: ip,
+            id: self.id,
+            tcp_port: self.tcp_port,
+            udp_port: self.udp_port,
+        })
     }
 
     async fn lookup_host(domain: &str) -> Result<std::net::IpAddr, Error> {
@@ -319,7 +308,6 @@ mod tests {
 
         // Set up tests
         let tests = vec![
-            ("localhost", None),
             (
                 "localhost",
                 Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 0 }),
@@ -327,6 +315,11 @@ mod tests {
             (
                 "localhost",
                 Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 3 }),
+            ),
+            ("localhost", None),
+            (
+                "localhost",
+                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 0 }),
             ),
         ];
 
