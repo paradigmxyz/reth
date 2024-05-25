@@ -6391,6 +6391,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-db-common",
  "reth-discv4",
  "reth-discv5",
  "reth-downloaders",
@@ -6535,6 +6536,7 @@ dependencies = [
  "reth-db",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-execution-errors",
  "reth-interfaces",
  "reth-metrics",
  "reth-network",
@@ -6542,6 +6544,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-stages-api",
+ "reth-storage-errors",
  "reth-trie",
  "reth-trie-parallel",
  "tokio",
@@ -6648,6 +6651,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-storage-errors",
  "reth-tracing",
  "rustc-hash",
  "serde",
@@ -6656,6 +6660,25 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "thiserror",
+]
+
+[[package]]
+name = "reth-db-common"
+version = "0.2.0-beta.7"
+dependencies = [
+ "eyre",
+ "reth-codecs",
+ "reth-config",
+ "reth-db",
+ "reth-etl",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-trie",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -6883,7 +6906,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "reth-codecs",
+ "reth-codecs-derive",
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
@@ -6963,8 +6986,9 @@ version = "0.2.0-beta.7"
 dependencies = [
  "futures-util",
  "parking_lot 0.12.2",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-primitives",
+ "reth-storage-errors",
  "revm",
  "revm-primitives",
 ]
@@ -6976,7 +7000,6 @@ dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "reth-ethereum-consensus",
  "reth-evm",
- "reth-interfaces",
  "reth-primitives",
  "reth-revm",
  "revm-primitives",
@@ -6988,7 +7011,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "reth-consensus-common",
  "reth-evm",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
@@ -6997,6 +7020,16 @@ dependencies = [
  "revm-primitives",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "reth-execution-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-consensus",
+ "reth-primitives",
+ "reth-storage-errors",
+ "thiserror",
 ]
 
 [[package]]
@@ -7031,21 +7064,14 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
- "auto_impl",
- "clap",
- "futures",
- "parking_lot 0.12.2",
- "rand 0.8.5",
  "reth-consensus",
- "reth-eth-wire-types",
+ "reth-execution-errors",
  "reth-fs-util",
  "reth-network-api",
- "reth-network-types",
+ "reth-network-p2p",
  "reth-primitives",
- "secp256k1 0.28.2",
+ "reth-storage-errors",
  "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -7210,15 +7236,34 @@ dependencies = [
 name = "reth-network-api"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-primitives",
  "enr",
- "reth-discv4",
  "reth-eth-wire",
  "reth-network-types",
- "reth-primitives",
  "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "reth-network-p2p"
+version = "0.2.0-beta.7"
+dependencies = [
+ "auto_impl",
+ "futures",
+ "parking_lot 0.12.2",
+ "rand 0.8.5",
+ "reth-consensus",
+ "reth-eth-wire-types",
+ "reth-network-api",
+ "reth-network-types",
+ "reth-primitives",
+ "reth-storage-errors",
+ "secp256k1 0.28.2",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7287,6 +7332,7 @@ dependencies = [
  "reth-config",
  "reth-consensus",
  "reth-db",
+ "reth-db-common",
  "reth-downloaders",
  "reth-evm",
  "reth-exex",
@@ -7302,6 +7348,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-engine-api",
  "reth-rpc-layer",
+ "reth-rpc-types",
  "reth-stages",
  "reth-static-file",
  "reth-tasks",
@@ -7316,6 +7363,7 @@ dependencies = [
 name = "reth-node-core"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-rpc-types-engine",
  "assert_matches",
  "clap",
  "const-str",
@@ -7337,34 +7385,27 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-beacon-consensus",
- "reth-codecs",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
  "reth-discv5",
  "reth-engine-primitives",
- "reth-etl",
- "reth-evm",
  "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
  "reth-net-nat",
  "reth-network",
- "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
- "reth-rpc-engine-api",
- "reth-rpc-layer",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "reth-trie",
  "secp256k1 0.28.2",
  "serde",
  "serde_json",
@@ -7601,11 +7642,13 @@ dependencies = [
  "reth-codecs",
  "reth-db",
  "reth-evm",
+ "reth-execution-errors",
  "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-storage-errors",
  "reth-trie",
  "revm",
  "strum",
@@ -7644,9 +7687,10 @@ version = "0.2.0-beta.7"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "reth-consensus-common",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-primitives",
  "reth-provider",
+ "reth-storage-errors",
  "reth-trie",
  "revm",
  "tracing",
@@ -7943,6 +7987,16 @@ dependencies = [
  "derive_more",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-storage-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "clap",
+ "reth-fs-util",
+ "reth-primitives",
+ "thiserror",
 ]
 
 [[package]]

@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
-reth-interfaces.workspace = true
+reth-storage-errors.workspace = true
 reth-codecs.workspace = true
 reth-libmdbx = { workspace = true, optional = true, features = [
     "return-borrowed",

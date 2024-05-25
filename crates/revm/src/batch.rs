@@ -1,7 +1,7 @@
 //! Helper for handling execution of multiple blocks.
 
 use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
-use reth_interfaces::executor::BlockExecutionError;
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
     PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, MINIMUM_PRUNING_DISTANCE,
 };
