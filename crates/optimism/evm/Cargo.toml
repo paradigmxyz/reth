@@ -15,7 +15,7 @@ workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
-reth-interfaces.workspace = true
+reth-execution-errors.workspace = true
 reth-provider.workspace = true
 reth-consensus-common.workspace = true
 
