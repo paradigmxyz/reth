@@ -377,18 +377,3 @@ impl InsertBlockErrorKind {
         }
     }
 }
-
-// // This is a convenience impl to convert from crate::Error to InsertBlockErrorKind
-// impl From<RethError> for InsertBlockErrorKind {
-//     fn from(err: RethError) -> Self {
-//         match err {
-//             RethError::Execution(err) => InsertBlockErrorKind::Execution(err),
-//             RethError::Consensus(err) => InsertBlockErrorKind::Consensus(err),
-//             RethError::Database(err) => InsertBlockErrorKind::Internal(Box::new(err)),
-//             RethError::Provider(err) => InsertBlockErrorKind::Internal(Box::new(err)),
-//             RethError::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
-//             RethError::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
-//             RethError::Canonical(err) => InsertBlockErrorKind::Canonical(err),
-//         }
-//     }
-// }
