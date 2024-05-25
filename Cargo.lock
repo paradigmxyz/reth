@@ -6391,6 +6391,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-db-common",
  "reth-discv4",
  "reth-discv5",
  "reth-downloaders",
@@ -6657,6 +6658,25 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "thiserror",
+]
+
+[[package]]
+name = "reth-db-common"
+version = "0.2.0-beta.7"
+dependencies = [
+ "eyre",
+ "reth-codecs",
+ "reth-config",
+ "reth-db",
+ "reth-etl",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-trie",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -7310,6 +7330,7 @@ dependencies = [
  "reth-config",
  "reth-consensus",
  "reth-db",
+ "reth-db-common",
  "reth-downloaders",
  "reth-evm",
  "reth-exex",
@@ -7361,14 +7382,12 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-beacon-consensus",
- "reth-codecs",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
  "reth-discv4",
  "reth-discv5",
  "reth-engine-primitives",
- "reth-etl",
  "reth-evm",
  "reth-fs-util",
  "reth-interfaces",
@@ -7388,7 +7407,6 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "reth-trie",
  "secp256k1 0.28.2",
  "serde",
  "serde_json",
