@@ -1,4 +1,5 @@
 //! Optimism RPC extension.
 
 pub mod error;
-pub mod receipts;
+pub mod receipt;
+pub mod transaction;

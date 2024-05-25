@@ -1,4 +1,4 @@
-//! Formats OP receipt RPC responses.   
+//! Formats OP receipt RPC response.   
 
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::RethL1BlockInfo;
@@ -14,9 +14,8 @@ use reth_rpc::{
 };
 use reth_rpc_types::{AnyTransactionReceipt, OptimismTransactionReceiptFields};
 use reth_transaction_pool::TransactionPool;
-use revm::L1BlockInfo;
 
-use crate::error::OptimismEthApiError;
+use crate::{error::OptimismEthApiError, transaction::OptimismTxMeta};
 
 /// Helper function for `eth_getBlockReceipts`. Returns all transaction receipts in the block.
 ///
@@ -161,32 +160,4 @@ pub fn op_fields(
     }
 
     resp_builder.add_other_fields(op_fields.into())
-}
-
-/// Optimism Transaction Metadata
-///
-/// Includes the L1 fee and data gas for the tx along with the L1
-/// block info. In order to pass the [OptimismTxMeta] into the
-/// async colored [ReceiptResponseBuilder], a reference counter
-/// for the L1 block info is used so the L1 block info can be
-/// shared between receipts.
-#[derive(Debug, Default, Clone)]
-pub struct OptimismTxMeta {
-    /// The L1 block info.
-    pub l1_block_info: Option<L1BlockInfo>,
-    /// The L1 fee for the block.
-    pub l1_fee: Option<u128>,
-    /// The L1 data gas for the block.
-    pub l1_data_gas: Option<u128>,
-}
-
-impl OptimismTxMeta {
-    /// Creates a new [OptimismTxMeta].
-    pub fn new(
-        l1_block_info: Option<L1BlockInfo>,
-        l1_fee: Option<u128>,
-        l1_data_gas: Option<u128>,
-    ) -> Self {
-        Self { l1_block_info, l1_fee, l1_data_gas }
-    }
 }
