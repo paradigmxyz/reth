@@ -1,7 +1,5 @@
 use crate::{
-    segments::{
-        history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
-    },
+    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
 };
 use reth_db::{
@@ -9,7 +7,7 @@ use reth_db::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
     tables,
 };
-use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
+use reth_primitives::{PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};
 
@@ -45,14 +43,13 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let range = match input.get_next_block_range() {
-            Some(range) => range,
+        let (block_range_start, block_range_end) = match input.get_next_block_range() {
+            Some(range) => (*range.start(), *range.end()),
             None => {
-                trace!(target: "pruner", "No storage history to prune");
+                trace!(target: "pruner", "No headers to prune");
                 return Ok(PruneOutput::done())
             }
         };
-        let range_end = *range.end();
 
         let mut limiter = if let Some(limit) = input.limiter.deleted_entries_limit() {
             input.limiter.set_deleted_entries_limit(limit / STORAGE_HISTORY_TABLES_TO_PRUNE)
@@ -66,7 +63,19 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             ))
         }
 
-        let mut last_changeset_pruned_block = None;
+        let mut last_pruned_block =
+            if block_range_start == 0 { None } else { Some(block_range_start - 1) };
+
+        let mut limiter = input.limiter;
+
+        let tables_iter = StorageHistoryTablesIter::new(
+            provider,
+            &mut limiter,
+            last_pruned_block,
+            block_range_end,
+        );
+
+        /*let mut last_changeset_pruned_block = None;
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
@@ -87,19 +96,108 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             last_changeset_pruned_block,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
             |key| StorageShardedKey::last(key.address, key.sharded_key.key),
-        )?;
-        trace!(target: "pruner", %processed, deleted = %pruned_indices, %done, "Pruned storage history (history)");
+        )?;*/
 
+        for res in tables_iter.into_iter() {
+            last_pruned_block = res?;
+        }
+
+        let done = last_pruned_block.map_or(false, |block| block == block_range_end);
         let progress = PruneProgress::new(done, &limiter);
+        let pruned = limiter.deleted_entries().expect("limit on deleted entries is set");
+
+        trace!(target: "pruner", deleted = %pruned, %done, "Pruned storage history (history)");
 
         Ok(PruneOutput {
             progress,
-            pruned: pruned_changesets + pruned_indices,
+            pruned,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
+                block_number: last_pruned_block,
                 tx_number: None,
             }),
         })
+    }
+}
+
+#[derive(Debug)]
+struct StorageHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    provider: &'a DatabaseProviderRW<DB>,
+    limiter: &'b mut PruneLimiter,
+    last_pruned_block: Option<u64>,
+    to_block: u64,
+}
+
+impl<'a, 'b, DB> StorageHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    fn new(
+        provider: &'a DatabaseProviderRW<DB>,
+        limiter: &'b mut PruneLimiter,
+        last_pruned_block: Option<u64>,
+        to_block: u64,
+    ) -> Self {
+        Self { provider, limiter, last_pruned_block, to_block }
+    }
+}
+
+impl<'a, 'b, DB> Iterator for StorageHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    type Item = Result<Option<u64>, PrunerError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let Self { provider, limiter, last_pruned_block, to_block } = self;
+
+        if limiter.is_limit_reached() || Some(*to_block) == *last_pruned_block {
+            return None
+        }
+
+        let block_step = BlockNumberAddress::range(if let Some(block) = *last_pruned_block {
+            block + 1..=block + 2
+        } else {
+            0..=1
+        });
+
+        let next_up_last_pruned_block = Some(block_step.start.block_number());
+        let mut last_pruned_block_changesets = None;
+        // todo: guarantee skip filter and delete callback are same for all header table types
+
+        let to_block = match provider.with_walker::<tables::StorageChangeSets, _, _>(
+            block_step.clone(),
+            |ref mut walker| {
+                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_changesets = Some(row.0.block_number())
+                })
+            },
+        ) {
+            Err(err) => return Some(Err(err.into())),
+            Ok(res) => if res.is_finished() {
+                last_pruned_block_changesets
+            } else {
+                last_pruned_block_changesets.map(|block| block.saturating_sub(1))
+            }
+            .unwrap_or_else(|| block_step.end.block_number()),
+        };
+
+        if let Err(err) = provider.with_cursor::<tables::StoragesHistory, _, _>(|ref mut cursor| {
+            step_prune_indices::<DB, _, _>(
+                cursor,
+                to_block,
+                limiter,
+                &|a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
+                &|key| StorageShardedKey::last(key.address, key.sharded_key.key),
+            )
+        }) {
+            return Some(Err(err.into()))
+        }
+
+        *last_pruned_block = next_up_last_pruned_block;
+
+        Some(Ok(*last_pruned_block))
     }
 }
 

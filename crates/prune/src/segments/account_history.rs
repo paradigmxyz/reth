@@ -1,12 +1,10 @@
 use crate::{
-    segments::{
-        history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
-    },
+    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
 };
 use reth_db::{database::Database, models::ShardedKey, tables};
 use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, PruneLimiter, PruneLimiterBuilder};
 use tracing::{instrument, trace};
 
 /// Number of account history tables to prune in one step.
@@ -41,10 +39,10 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let range = match input.get_next_block_range() {
-            Some(range) => range,
+        let (block_range_start, block_range_end) = match input.get_next_block_range() {
+            Some(range) => (*range.start(), *range.end()),
             None => {
-                trace!(target: "pruner", "No account history to prune");
+                trace!(target: "pruner", "No headers to prune");
                 return Ok(PruneOutput::done())
             }
         };
@@ -78,75 +76,97 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
             .unwrap_or(range_end);
 
-        let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
+        let tables_iter = AccountHistoryTablesIter::new(
             provider,
-            last_changeset_pruned_block,
-            |a, b| a.key == b.key,
-            |key| ShardedKey::last(key.key),
-        )?;
+            &mut limiter,
+            last_pruned_block,
+            block_range_end,
+        );
+
+        for res in tables_iter.into_iter() {
+            last_pruned_block = res?;
+        }
+
+        let done = || -> bool {
+            let Some(block) = last_pruned_block else { return false };
+            block == block_range_end
+        }();
+
         trace!(target: "pruner", %processed, pruned = %pruned_indices, %done, "Pruned account history (history)");
 
         let progress = PruneProgress::new(done, &limiter);
 
         Ok(PruneOutput {
             progress,
-            pruned: pruned_changesets + pruned_indices,
+            pruned,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
+                block_number: last_pruned_block,
                 tx_number: None,
             }),
         })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::segments::{
-        account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput, PruneOutput,
-        Segment,
-    };
-    use assert_matches::assert_matches;
-    use reth_db::{tables, BlockNumberList};
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
-    };
-    use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, B256,
-    };
-    use reth_provider::PruneCheckpointReader;
-    use reth_stages::test_utils::{StorageKind, TestStageDB};
-    use std::{collections::BTreeMap, ops::AddAssign};
+#[allow(missing_debug_implementations)]
+struct AccountHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    provider: &'a DatabaseProviderRW<DB>,
+    limiter: &'b mut PruneLimiter,
+    last_pruned_block: Option<u64>,
+    to_block: u64,
+}
 
-    #[test]
-    fn prune() {
-        let db = TestStageDB::default();
-        let mut rng = generators::rng();
+impl<'a, 'b, DB> AccountHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    fn new(
+        provider: &'a DatabaseProviderRW<DB>,
+        limiter: &'b mut PruneLimiter,
+        last_pruned_block: Option<u64>,
+        to_block: u64,
+    ) -> Self {
+        Self { provider, limiter, last_pruned_block, to_block }
+    }
+}
 
-        let blocks = random_block_range(&mut rng, 1..=5000, B256::ZERO, 0..1);
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+impl<'a, 'b, DB> Iterator for AccountHistoryTablesIter<'a, 'b, DB>
+where
+    DB: Database,
+{
+    type Item = Result<Option<u64>, PrunerError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let Self { provider, limiter, last_pruned_block, to_block } = self;
 
-        let accounts = random_eoa_accounts(&mut rng, 2).into_iter().collect::<BTreeMap<_, _>>();
+        if limiter.is_limit_reached() || Some(*to_block) == *last_pruned_block {
+            return None
+        }
 
-        let (changesets, _) = random_changeset_range(
-            &mut rng,
-            blocks.iter(),
-            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
-            0..0,
-            0..0,
-        );
-        db.insert_changesets(changesets.clone(), None).expect("insert changesets");
-        db.insert_history(changesets.clone(), None).expect("insert history");
+        let block_step =
+            if let Some(block) = *last_pruned_block { block + 1..=block + 2 } else { 0..=1 };
 
-        let account_occurrences = db.table::<tables::AccountsHistory>().unwrap().into_iter().fold(
-            BTreeMap::<_, usize>::new(),
-            |mut map, (key, _)| {
-                map.entry(key.key).or_default().add_assign(1);
-                map
+        let next_up_last_pruned_block = Some(*block_step.start());
+        let mut last_pruned_block_changesets = None;
+        // todo: guarantee skip filter and delete callback are same for all header table types
+
+        let to_block = match provider.with_walker::<tables::AccountChangeSets, _, _>(
+            block_step.clone(),
+            |ref mut walker| {
+                provider.step_prune_range(walker, limiter, &mut |_| false, &mut |row| {
+                    last_pruned_block_changesets = Some(row.0)
+                })
             },
-        );
-        assert!(account_occurrences.into_iter().any(|(_, occurrences)| occurrences > 1));
+        ) {
+            Err(err) => return Some(Err(err.into())),
+            Ok(res) => if res.is_done() {
+                last_pruned_block_changesets
+            } else {
+                last_pruned_block_changesets.map(|block| block.saturating_sub(1))
+            }
+            .unwrap_or(*block_step.end()),
+        };
 
         assert_eq!(
             db.table::<tables::AccountChangeSets>().unwrap().len(),
