@@ -4,7 +4,8 @@ use jsonrpsee::{
     http_client::{transport::HttpBackend, HttpClient},
 };
 use reth::{
-    api::{EngineTypes, PayloadBuilderAttributes},
+    api::EngineTypes,
+    payload::PayloadBuilderAttributes,
     providers::CanonStateNotificationStream,
     rpc::{
         api::EngineApiClient,

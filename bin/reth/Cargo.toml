@@ -42,6 +42,7 @@ reth-tasks.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
+reth-payload-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true

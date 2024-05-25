@@ -7,8 +7,9 @@ use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
 use reth::{
-    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
+    api::{EngineTypes, FullNodeComponents},
     builder::FullNode,
+    payload::{BuiltPayload, PayloadBuilderAttributes},
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::types::engine::PayloadStatusEnum,
 };

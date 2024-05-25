@@ -32,10 +32,7 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     PayloadBuilder, PayloadConfig,
 };
-use reth_node_api::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
-};
+use reth_node_api::EngineTypes;
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
     EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
@@ -43,7 +40,11 @@ use reth_node_ethereum::node::{
 use reth_payload_builder::{
     EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
 };
-use reth_payload_primitives::error::PayloadBuilderError;
+use reth_payload_primitives::{
+    error::{EngineObjectValidationError, PayloadBuilderError},
+    validate_version_specific_fields, EngineApiMessageVersion, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes,
+};
 use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
@@ -98,7 +99,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
         if self.custom == 0 {
             return Err(EngineObjectValidationError::invalid_params(
                 CustomError::CustomFieldIsNotZero,
-            ))
+            ));
         }
 
         Ok(())
@@ -312,8 +313,8 @@ where
             attributes,
             chain_spec,
         } = config;
-        <reth_ethereum_payload_builder::EthereumPayloadBuilder  as PayloadBuilder<Pool,Client>>  ::build_empty_payload(client,
-                                                                                                                       PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec }
+        <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(client,
+                                                                                                                     PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec },
         )
     }
 }

@@ -21,7 +21,6 @@ reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-interfaces.workspace = true
-reth-engine-primitives.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
