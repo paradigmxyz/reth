@@ -2,8 +2,7 @@ use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_engine_primitives::EngineObjectValidationError;
-use reth_payload_primitives::error::PayloadBuilderError;
+use reth_payload_primitives::error::{EngineObjectValidationError, PayloadBuilderError};
 use reth_primitives::{B256, U256};
 use reth_rpc_types::ToRpcError;
 use thiserror::Error;

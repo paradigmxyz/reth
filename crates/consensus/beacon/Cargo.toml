@@ -22,11 +22,11 @@ reth-rpc-types.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
+reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
-reth-engine-primitives.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

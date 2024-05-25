@@ -1,6 +1,6 @@
 use futures::{stream::BoxStream, Future, StreamExt};
 use reth_db::database::Database;
-use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
+use reth_engine_primitives::EngineTypes;
 use reth_interfaces::{
     blockchain_tree::{
         error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -13,6 +13,7 @@ use reth_interfaces::{
     RethError, RethResult,
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     constants::EPOCH_SLOTS,

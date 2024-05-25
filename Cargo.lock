@@ -6833,10 +6833,9 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "0.2.0-beta.7"
 dependencies = [
+ "reth-payload-primitives",
  "reth-primitives",
- "reth-rpc-types",
  "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -6912,6 +6911,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "alloy-rlp",
  "reth-engine-primitives",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -7511,7 +7511,6 @@ version = "0.2.0-beta.7"
 dependencies = [
  "alloy-rlp",
  "reth-basic-payload-builder",
- "reth-engine-primitives",
  "reth-evm",
  "reth-evm-optimism",
  "reth-payload-builder",
@@ -7552,10 +7551,10 @@ dependencies = [
 name = "reth-payload-primitives"
 version = "0.2.0-beta.7"
 dependencies = [
- "reth-engine-primitives",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-rpc-types",
  "reth-transaction-pool",
  "thiserror",
  "tokio",

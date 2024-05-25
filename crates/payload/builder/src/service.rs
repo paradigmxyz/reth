@@ -8,9 +8,10 @@ use crate::{
     metrics::PayloadBuilderServiceMetrics,
 };
 use futures_util::{future::FutureExt, Stream, StreamExt};
-use reth_engine_primitives::{BuiltPayload, EngineTypes, PayloadBuilderAttributes};
+use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{
-    error::PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator,
+    error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes,
+    PayloadJob, PayloadJobGenerator,
 };
 use reth_provider::CanonStateNotification;
 use reth_rpc_types::engine::PayloadId;
@@ -436,7 +437,7 @@ where
             }
 
             if !new_job {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }

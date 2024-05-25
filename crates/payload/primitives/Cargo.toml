@@ -12,11 +12,11 @@ workspace = true
 
 [dependencies]
 # reth
-reth-engine-primitives.workspace = true
 reth-provider.workspace = true
 reth-interfaces.workspace = true
 reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
+reth-rpc-types.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }

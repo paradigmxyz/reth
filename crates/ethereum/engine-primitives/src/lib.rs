@@ -9,11 +9,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod payload;
+
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 
-use reth_engine_primitives::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    EngineTypes, PayloadOrAttributes,
+use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::{
+    error::EngineObjectValidationError, validate_version_specific_fields, EngineApiMessageVersion,
+    PayloadOrAttributes,
 };
 use reth_primitives::ChainSpec;
 use reth_rpc_types::{

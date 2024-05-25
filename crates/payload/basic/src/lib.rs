@@ -11,11 +11,11 @@
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_interfaces::RethResult;
 use reth_payload_builder::{database::CachedReads, PayloadId};
 use reth_payload_primitives::{
-    error::PayloadBuilderError, KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator,
+    error::PayloadBuilderError, BuiltPayload, KeepPayloadJobAlive, PayloadBuilderAttributes,
+    PayloadJob, PayloadJobGenerator,
 };
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},

@@ -1,8 +1,32 @@
-use crate::PayloadAttributes;
+use crate::{
+    error::{EngineObjectValidationError, VersionSpecificValidationError},
+    PayloadAttributes,
+};
 use reth_primitives::B256;
 use reth_rpc_types::engine::ExecutionPayload;
 
-use super::MessageValidationKind;
+/// A type that represents whether or not we are validating a payload or payload attributes.
+///
+/// This is used to ensure that the correct error code is returned when validating the payload or
+/// payload attributes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageValidationKind {
+    /// We are validating fields of a payload attributes.
+    PayloadAttributes,
+    /// We are validating fields of a payload.
+    Payload,
+}
+
+impl MessageValidationKind {
+    /// Returns an `EngineObjectValidationError` based on the given
+    /// `VersionSpecificValidationError` and the current validation kind.
+    pub fn to_error(self, error: VersionSpecificValidationError) -> EngineObjectValidationError {
+        match self {
+            Self::Payload => EngineObjectValidationError::Payload(error),
+            Self::PayloadAttributes => EngineObjectValidationError::PayloadAttributes(error),
+        }
+    }
+}
 
 /// Either an [ExecutionPayload] or a types that implements the [PayloadAttributes] trait.
 #[derive(Debug)]

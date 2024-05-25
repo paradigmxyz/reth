@@ -12,6 +12,16 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod error;
-mod traits;
 
-pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+mod primitives;
+pub use primitives::validate_version_specific_fields;
+
+mod traits;
+pub use traits::{
+    BuiltPayload, EngineApiMessageVersion, KeepPayloadJobAlive, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadJob, PayloadJobGenerator,
+};
+
+mod payload_or_attribute;
+
+pub use payload_or_attribute::{MessageValidationKind, PayloadOrAttributes};
