@@ -5,8 +5,8 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
+use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
 

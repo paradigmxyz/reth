@@ -9,7 +9,7 @@ use crate::{
 };
 use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
+use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
@@ -30,6 +30,7 @@ mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 use reth_db::mdbx::DatabaseArguments;
+use reth_storage_errors::provider::ProviderResult;
 
 /// A common provider that fetches data from a database or static file.
 ///
@@ -583,7 +584,6 @@ mod tests {
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_interfaces::{
-        provider::ProviderError,
         test_utils::{
             generators,
             generators::{random_block, random_header},
@@ -594,6 +594,7 @@ mod tests {
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
         TxNumber, B256, U256,
     };
+    use reth_storage_errors::provider::ProviderError;
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
 

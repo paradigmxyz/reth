@@ -31,20 +31,20 @@ macro_rules! delegate_provider_impls {
         $crate::providers::state::macros::delegate_impls_to_as_ref!(
             for $target =>
             StateRootProvider $(where [$($generics)*])? {
-                fn state_root(&self, state: &revm::db::BundleState) -> reth_interfaces::provider::ProviderResult<reth_primitives::B256>;
-                fn state_root_with_updates(&self, state: &revm::db::BundleState) -> reth_interfaces::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
+                fn state_root(&self, state: &revm::db::BundleState) -> reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
+                fn state_root_with_updates(&self, state: &revm::db::BundleState) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
             }
             AccountReader $(where [$($generics)*])? {
-                fn basic_account(&self, address: reth_primitives::Address) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::Account>>;
+                fn basic_account(&self, address: reth_primitives::Address) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Account>>;
             }
             BlockHashReader $(where [$($generics)*])? {
-                fn block_hash(&self, number: u64) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::B256>>;
-                fn canonical_hashes_range(&self, start: reth_primitives::BlockNumber, end: reth_primitives::BlockNumber) -> reth_interfaces::provider::ProviderResult<Vec<reth_primitives::B256>>;
+                fn block_hash(&self, number: u64) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::B256>>;
+                fn canonical_hashes_range(&self, start: reth_primitives::BlockNumber, end: reth_primitives::BlockNumber) -> reth_storage_errors::provider::ProviderResult<Vec<reth_primitives::B256>>;
             }
             StateProvider $(where [$($generics)*])?{
-                fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::StorageValue>>;
-                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_interfaces::provider::ProviderResult<reth_primitives::trie::AccountProof>;
-                fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_interfaces::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
+                fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::StorageValue>>;
+                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_primitives::trie::AccountProof>;
+                fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
             }
         );
     }
