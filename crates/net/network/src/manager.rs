@@ -53,7 +53,7 @@ use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
-    pin::{pin, Pin},
+    pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -895,25 +895,24 @@ where
 {
     /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
     ///
-    /// This also run the given function `shutdown_hook` afterwards.
-    pub async fn run_until_graceful_shutdown(
-        self,
+    /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
+    pub async fn run_until_graceful_shutdown<F, R>(
+        mut self,
         shutdown: GracefulShutdown,
-        shutdown_hook: impl FnOnce(&mut Self),
-    ) {
-        let network = self;
-        let mut network = pin!(network);
-
+        shutdown_hook: F,
+    ) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
         let mut graceful_guard = None;
         tokio::select! {
-            _ = &mut network => {},
+            _ = &mut self => {},
             guard = shutdown => {
                 graceful_guard = Some(guard);
             },
         }
 
-        shutdown_hook(&mut network);
-        drop(graceful_guard);
+        shutdown_hook(self)
     }
 }
 
