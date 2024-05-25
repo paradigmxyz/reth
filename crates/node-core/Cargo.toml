@@ -18,7 +18,6 @@ reth-db = { workspace = true, features = ["mdbx"] }
 reth-interfaces = { workspace = true, features = ["clap"] }
 reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
-reth-rpc-engine-api.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
 reth-rpc-types.workspace = true
@@ -30,8 +29,6 @@ reth-config.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
-reth-network-api.workspace = true
-reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
@@ -104,7 +101,6 @@ assert_matches.workspace = true
 optimism = [
     "reth-primitives/optimism",
     "reth-rpc/optimism",
-    "reth-rpc-engine-api/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-beacon-consensus/optimism",
