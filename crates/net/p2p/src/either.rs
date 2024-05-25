@@ -1,6 +1,6 @@
 //! Support for different download types.
 
-use crate::p2p::{
+use crate::{
     bodies::client::BodiesClient,
     download::DownloadClient,
     headers::client::{HeadersClient, HeadersRequest},

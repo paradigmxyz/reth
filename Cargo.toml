@@ -17,6 +17,7 @@ members = [
     "crates/ethereum/node",
     "crates/etl/",
     "crates/evm/",
+    "crates/evm/execution-errors",
     "crates/exex/",
     "crates/interfaces/",
     "crates/metrics/",
@@ -32,6 +33,7 @@ members = [
     "crates/net/nat/",
     "crates/net/network-api/",
     "crates/net/network/",
+    "crates/net/p2p/",
     "crates/net/types/",
     "crates/node-core/",
     "crates/node/api/",
@@ -216,6 +218,7 @@ reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
+reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
@@ -238,6 +241,7 @@ reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
+reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-exex = { path = "crates/exex" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-interfaces = { path = "crates/interfaces" }
@@ -251,6 +255,7 @@ reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
 reth-network-types = { path = "crates/net/types" }
+reth-network-p2p = { path = "crates/net/p2p" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-node-api = { path = "crates/node/api" }
 reth-node-builder = { path = "crates/node/builder" }

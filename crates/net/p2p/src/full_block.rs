@@ -1,5 +1,5 @@
 use super::headers::client::HeadersRequest;
-use crate::p2p::{
+use crate::{
     bodies::client::{BodiesClient, SingleBodyRequest},
     error::PeerRequestResult,
     headers::client::{HeadersClient, SingleHeaderRequest},
@@ -727,11 +727,10 @@ enum RangeResponseResult {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
-
     use super::*;
     use crate::test_utils::TestFullBlockClient;
     use futures::StreamExt;
+    use std::ops::Range;
 
     #[tokio::test]
     async fn download_single_full_block() {

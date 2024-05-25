@@ -7,14 +7,10 @@ use crate::{
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
-        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, Executor,
+        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionError, BlockExecutionInput,
+        BlockExecutionOutput, BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     ConfigureEvm,
-};
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
 };
 use reth_primitives::{
     BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Withdrawals,

@@ -6535,6 +6535,7 @@ dependencies = [
  "reth-db",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-execution-errors",
  "reth-interfaces",
  "reth-metrics",
  "reth-network",
@@ -6542,6 +6543,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-stages-api",
+ "reth-storage-errors",
  "reth-trie",
  "reth-trie-parallel",
  "tokio",
@@ -6647,6 +6649,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-storage-errors",
  "reth-tracing",
  "rustc-hash",
  "serde",
@@ -6901,7 +6904,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "reth-codecs",
+ "reth-codecs-derive",
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
@@ -6981,8 +6984,9 @@ version = "0.2.0-beta.7"
 dependencies = [
  "futures-util",
  "parking_lot 0.12.2",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-primitives",
+ "reth-storage-errors",
  "revm",
  "revm-primitives",
 ]
@@ -6994,7 +6998,6 @@ dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "reth-ethereum-consensus",
  "reth-evm",
- "reth-interfaces",
  "reth-primitives",
  "reth-revm",
  "revm-primitives",
@@ -7015,6 +7018,16 @@ dependencies = [
  "revm-primitives",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "reth-execution-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-consensus",
+ "reth-primitives",
+ "reth-storage-errors",
+ "thiserror",
 ]
 
 [[package]]
@@ -7049,21 +7062,14 @@ dependencies = [
 name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
- "auto_impl",
- "futures",
- "parking_lot 0.12.2",
- "rand 0.8.5",
  "reth-consensus",
- "reth-eth-wire-types",
+ "reth-execution-errors",
  "reth-fs-util",
  "reth-network-api",
- "reth-network-types",
+ "reth-network-p2p",
  "reth-primitives",
  "reth-storage-errors",
- "secp256k1 0.28.2",
  "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -7228,15 +7234,34 @@ dependencies = [
 name = "reth-network-api"
 version = "0.2.0-beta.7"
 dependencies = [
+ "alloy-primitives",
  "enr",
- "reth-discv4",
  "reth-eth-wire",
  "reth-network-types",
- "reth-primitives",
  "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "reth-network-p2p"
+version = "0.2.0-beta.7"
+dependencies = [
+ "auto_impl",
+ "futures",
+ "parking_lot 0.12.2",
+ "rand 0.8.5",
+ "reth-consensus",
+ "reth-eth-wire-types",
+ "reth-network-api",
+ "reth-network-types",
+ "reth-primitives",
+ "reth-storage-errors",
+ "secp256k1 0.28.2",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -7321,6 +7346,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-engine-api",
  "reth-rpc-layer",
+ "reth-rpc-types",
  "reth-stages",
  "reth-static-file",
  "reth-tasks",
@@ -7656,9 +7682,10 @@ version = "0.2.0-beta.7"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=64feb9b)",
  "reth-consensus-common",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-primitives",
  "reth-provider",
+ "reth-storage-errors",
  "reth-trie",
  "revm",
  "tracing",

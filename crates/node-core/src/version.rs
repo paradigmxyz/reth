@@ -1,6 +1,12 @@
 //! Version information for reth.
-
 use reth_db::models::client_version::ClientVersion;
+use reth_rpc_types::engine::ClientCode;
+
+/// The client code for Reth
+pub const CLIENT_CODE: ClientCode = ClientCode::RH;
+
+/// The human readable name of the client
+pub const NAME_CLIENT: &str = "Reth";
 
 /// The latest version from Cargo.toml.
 pub const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
