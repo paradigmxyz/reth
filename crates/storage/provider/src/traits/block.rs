@@ -4,11 +4,11 @@ use crate::{
 };
 use auto_impl::auto_impl;
 use reth_db::models::StoredBlockBodyIndices;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
     PruneModes, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::ops::RangeInclusive;
 

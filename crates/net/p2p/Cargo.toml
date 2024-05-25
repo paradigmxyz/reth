@@ -1,0 +1,48 @@
+[package]
+name = "reth-network-p2p"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "traits and commonly used types for p2p and network communication"
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-primitives.workspace = true
+reth-network-api.workspace = true
+reth-eth-wire-types.workspace = true
+reth-consensus.workspace = true
+reth-network-types.workspace = true
+reth-storage-errors.workspace = true
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+# misc
+auto_impl.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+secp256k1 = { workspace = true, default-features = false, features = [
+    "alloc",
+    "recovery",
+    "rand",
+], optional = true }
+parking_lot = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-consensus = { workspace = true, features = ["test-utils"] }
+
+parking_lot.workspace = true
+rand.workspace = true
+tokio = { workspace = true, features = ["full"] }
+secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
+
+[features]
+test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]

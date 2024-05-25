@@ -16,6 +16,7 @@ workspace = true
 reth-codecs.workspace = true
 reth-ethereum-forks.workspace = true
 reth-network-types.workspace = true
+reth-static-file-types.workspace = true
 revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
@@ -41,7 +42,6 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 # misc
 bytes.workspace = true
 byteorder = "1"
-clap = { workspace = true, features = ["derive"], optional = true }
 derive_more.workspace = true
 itertools.workspace = true
 modular-bitfield.workspace = true
@@ -62,7 +62,6 @@ plain_hasher = { version = "0.2", optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 # eth
@@ -116,7 +115,7 @@ c-kzg = [
     "alloy-eips/kzg",
 ]
 zstd-codec = ["dep:zstd"]
-clap = ["dep:clap"]
+clap = ["reth-static-file-types/clap"]
 optimism = [
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",

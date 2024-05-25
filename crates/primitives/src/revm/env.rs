@@ -138,8 +138,8 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 /// and therefore:
 ///  * the call must execute to completion
 ///  * the call does not count against the block’s gas limit
-///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
-///  part of the call
+///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as part
+///    of the call
 ///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
 pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
     env.tx = TxEnv {

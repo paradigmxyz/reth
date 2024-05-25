@@ -10,11 +10,11 @@ use reth_db::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
     StaticFileSegment, StorageKey, StorageValue, B256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::db::BundleState;
 use std::fmt::Debug;
@@ -413,8 +413,8 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_interfaces::provider::ProviderError;
     use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
+    use reth_storage_errors::provider::ProviderError;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");

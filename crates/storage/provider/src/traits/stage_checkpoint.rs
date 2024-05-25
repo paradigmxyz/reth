@@ -1,8 +1,8 @@
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber,
 };
+use reth_storage_errors::provider::ProviderResult;
 
 /// The trait for fetching stage checkpoint related data.
 #[auto_impl::auto_impl(&, Arc)]

@@ -1,5 +1,5 @@
 use crate::{Consensus, ConsensusError};
-use reth_primitives::{Header, SealedBlock, SealedHeader, U256};
+use reth_primitives::{BlockWithSenders, Header, Receipt, SealedBlock, SealedHeader, U256};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Consensus engine implementation for testing
@@ -60,7 +60,19 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn validate_block(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+        if self.fail_validation() {
+            Err(ConsensusError::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        _block: &BlockWithSenders,
+        _receipts: &[Receipt],
+    ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
         } else {

@@ -1,5 +1,5 @@
 use reth_db::table::Table;
-use reth_interfaces::provider::ProviderResult;
+use reth_storage_errors::provider::ProviderResult;
 
 /// The trait for fetching provider statistics.
 #[auto_impl::auto_impl(&, Arc)]

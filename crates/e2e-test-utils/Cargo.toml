@@ -20,6 +20,7 @@ reth-rpc-layer.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider.workspace = true
 reth-node-builder.workspace = true
+reth-tokio-util.workspace = true
 
 jsonrpsee.workspace = true
 

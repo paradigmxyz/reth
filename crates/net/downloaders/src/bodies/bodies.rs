@@ -95,7 +95,7 @@ where
         max_non_empty: u64,
     ) -> DownloadResult<Option<Vec<SealedHeader>>> {
         if range.is_empty() || max_non_empty == 0 {
-            return Ok(None);
+            return Ok(None)
         }
 
         // Collect headers while
@@ -144,7 +144,7 @@ where
 
         // if we're only connected to a few peers, we keep it low
         if num_peers < *self.concurrent_requests_range.start() {
-            return max_requests;
+            return max_requests
         }
 
         max_requests.min(*self.concurrent_requests_range.end())
@@ -238,7 +238,7 @@ where
                         .skip_while(|b| b.block_number() < expected)
                         .take_while(|b| self.download_range.contains(&b.block_number()))
                         .collect()
-                });
+                })
             }
 
             // Drop buffered response since we passed that range
@@ -257,7 +257,7 @@ where
             self.queued_bodies.shrink_to_fit();
             self.metrics.total_flushed.increment(next_batch.len() as u64);
             self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
-            return Some(next_batch);
+            return Some(next_batch)
         }
         None
     }
@@ -354,13 +354,13 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         if this.is_terminated() {
-            return Poll::Ready(None);
+            return Poll::Ready(None)
         }
         // Submit new requests and poll any in progress
         loop {
             // Yield next batch if ready
             if let Some(next_batch) = this.try_split_next_batch() {
-                return Poll::Ready(Some(Ok(next_batch)));
+                return Poll::Ready(Some(Ok(next_batch)))
             }
 
             // Poll requests
@@ -373,7 +373,7 @@ where
                     Err(error) => {
                         tracing::debug!(target: "downloaders::bodies", %error, "Request failed");
                         this.clear();
-                        return Poll::Ready(Some(Err(error)));
+                        return Poll::Ready(Some(Err(error)))
                     }
                 };
             }
@@ -396,7 +396,7 @@ where
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", %error, "Failed to download from next request");
                         this.clear();
-                        return Poll::Ready(Some(Err(error)));
+                        return Poll::Ready(Some(Err(error)))
                     }
                 };
             }
@@ -409,21 +409,21 @@ where
             this.buffered_responses.shrink_to_fit();
 
             if !new_request_submitted {
-                break;
+                break
             }
         }
 
         // All requests are handled, stream is finished
         if this.in_progress_queue.is_empty() {
             if this.queued_bodies.is_empty() {
-                return Poll::Ready(None);
+                return Poll::Ready(None)
             }
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size).collect::<Vec<_>>();
             this.queued_bodies.shrink_to_fit();
             this.metrics.total_flushed.increment(next_batch.len() as u64);
             this.metrics.queued_blocks.set(this.queued_bodies.len() as f64);
-            return Poll::Ready(Some(Ok(next_batch)));
+            return Poll::Ready(Some(Ok(next_batch)))
         }
 
         Poll::Pending
