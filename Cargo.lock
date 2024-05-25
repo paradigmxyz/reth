@@ -7009,7 +7009,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "reth-consensus-common",
  "reth-evm",
- "reth-interfaces",
+ "reth-execution-errors",
  "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
