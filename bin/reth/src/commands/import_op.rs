@@ -13,19 +13,15 @@ use crate::{
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
-
 use reth_db::{init_db, tables, transaction::DbTx};
+use reth_db_common::init::init_genesis;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
-
-use reth_node_core::init::init_genesis;
-
 use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, PruneModes};
 use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
-
 use tracing::{debug, error, info};
 
 /// Syncs RLP encoded blocks from a file.
