@@ -98,7 +98,12 @@ pub(crate) struct NewPayloadStatusResponseMetrics {
 
 impl NewPayloadStatusResponseMetrics {
     /// Increment the newPayload counter based on the given rpc result
-    pub(crate) fn update_response_metrics(&self, result: &Result<PayloadStatus, EngineApiError>, gas_used: u64, time: Duration) {
+    pub(crate) fn update_response_metrics(
+        &self,
+        result: &Result<PayloadStatus, EngineApiError>,
+        gas_used: u64,
+        time: Duration,
+    ) {
         match result {
             Ok(status) => match status.status {
                 PayloadStatusEnum::Valid => {

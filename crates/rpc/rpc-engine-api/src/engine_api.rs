@@ -560,10 +560,11 @@ where
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         let start = Instant::now();
-        let res = EngineApi::new_payload_v1(self, payload.clone()).await;
+        let gas_used = payload.gas_used;
+        let res = EngineApi::new_payload_v1(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, payload.gas_used, elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -572,10 +573,11 @@ where
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         let start = Instant::now();
-        let res = EngineApi::new_payload_v2(self, payload.clone()).await;
+        let gas_used = payload.execution_payload.gas_used;
+        let res = EngineApi::new_payload_v2(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, payload.execution_payload.gas_used, elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -589,12 +591,13 @@ where
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
         let res =
-            EngineApi::new_payload_v3(self, payload.clone(), versioned_hashes, parent_beacon_block_root)
+            EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
                 .await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, payload.payload_inner.payload_inner.gas_used, elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
