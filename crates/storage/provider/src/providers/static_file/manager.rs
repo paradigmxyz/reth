@@ -49,7 +49,7 @@ pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
     /// Creates a new [`StaticFileProvider`].
-    pub fn new(path: impl AsRef<Path>, env: StaticFileEnv) -> ProviderResult<Self> {
+    pub fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self(Arc::new(StaticFileProviderInner::new(path, env)?));
         provider.initialize_index()?;
         Ok(provider)
@@ -82,13 +82,13 @@ pub struct StaticFileProviderInner {
     /// Maintains a map of StaticFile writers for each [`StaticFileSegment`]
     writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
-    /// Whether the provider should operate on a read-only environment.
-    env: StaticFileEnv,
+    /// Whether the provider should operate on a read-only access.
+    env: StaticFileAccess,
 }
 
 impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
-    fn new(path: impl AsRef<Path>, env: StaticFileEnv) -> ProviderResult<Self> {
+    fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -893,7 +893,7 @@ impl StaticFileWriter for StaticFileProvider {
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
         if self.env.is_read_only() {
-            return Err(ProviderError::ReadOnlyStaticFileEnv)
+            return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 
         tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
@@ -932,7 +932,7 @@ impl StaticFileWriter for StaticFileProvider {
 
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
         match self.env {
-            StaticFileEnv::RO => {
+            StaticFileAccess::RO => {
                 let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
 
                 let mut writer = StaticFileProviderRW::new(
@@ -944,7 +944,7 @@ impl StaticFileWriter for StaticFileProvider {
 
                 writer.ensure_file_consistency(self.env.is_read_only())?;
             }
-            StaticFileEnv::RW => {
+            StaticFileAccess::RW => {
                 self.latest_writer(segment)?;
             }
         }
@@ -1349,20 +1349,20 @@ impl StatsReader for StaticFileProvider {
     }
 }
 
-/// Environment used when opening a static file provider. RO/RW.
+/// Access mode on static file provider. RO/RW.
 #[derive(Debug, Default)]
-pub enum StaticFileEnv {
-    /// Read-only environment.
+pub enum StaticFileAccess {
+    /// Read-only access.
     #[default]
     RO,
-    /// Read-write environment.
+    /// Read-write access.
     RW,
 }
 
-impl StaticFileEnv {
-    /// Returns `true` if read-only environment.
+impl StaticFileAccess {
+    /// Returns `true` if read-only access.
     pub const fn is_read_only(&self) -> bool {
-        matches!(self, StaticFileEnv::RO)
+        matches!(self, StaticFileAccess::RO)
     }
 }
 

@@ -26,7 +26,7 @@ use reth_exex::ExExManagerHandle;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     providers::StaticFileProvider, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileEnv, StaticFileProviderFactory,
+    StaticFileAccess, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -149,7 +149,7 @@ impl Command {
         let factory = ProviderFactory::new(
             Arc::clone(&db),
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
+            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
         )?;
         let mut provider_rw = factory.provider_rw()?;
 
@@ -199,7 +199,7 @@ impl Command {
                     let provider_factory = Arc::new(ProviderFactory::new(
                         db.clone(),
                         self.chain.clone(),
-                        StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
+                        StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
                     )?);
 
                     let network = self

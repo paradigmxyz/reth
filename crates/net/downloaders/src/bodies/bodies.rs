@@ -608,7 +608,7 @@ mod tests {
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockBody, B256, MAINNET};
-    use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileEnv};
+    use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
     use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -632,7 +632,7 @@ mod tests {
             ProviderFactory::new(
                 db,
                 MAINNET.clone(),
-                StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
+                StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
             )
             .unwrap(),
         );
@@ -678,7 +678,7 @@ mod tests {
                 ProviderFactory::new(
                     db,
                     MAINNET.clone(),
-                    StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
+                    StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
                 )
                 .unwrap(),
             );
@@ -713,7 +713,7 @@ mod tests {
                 ProviderFactory::new(
                     db,
                     MAINNET.clone(),
-                    StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
+                    StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
                 )
                 .unwrap(),
             );
@@ -750,7 +750,7 @@ mod tests {
             ProviderFactory::new(
                 db,
                 MAINNET.clone(),
-                StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
+                StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
             )
             .unwrap(),
         );
@@ -797,7 +797,7 @@ mod tests {
                 ProviderFactory::new(
                     db,
                     MAINNET.clone(),
-                    StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
+                    StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
                 )
                 .unwrap(),
             );
@@ -835,7 +835,7 @@ mod tests {
                 ProviderFactory::new(
                     db,
                     MAINNET.clone(),
-                    StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
+                    StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
                 )
                 .unwrap(),
             );

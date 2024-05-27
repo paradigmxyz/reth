@@ -335,7 +335,7 @@ mod tests {
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::{FinishedExExHeight, MAINNET};
-    use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileEnv};
+    use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
 
     #[test]
     fn is_pruning_needed() {
@@ -344,7 +344,7 @@ mod tests {
         let provider_factory = ProviderFactory::new(
             db,
             MAINNET.clone(),
-            StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
+            StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
         )
         .expect("create provide factory with static_files");
 

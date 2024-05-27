@@ -124,7 +124,7 @@ pub enum ProviderError {
     UnexpectedStaticFileBlockNumber(StaticFileSegment, BlockNumber, BlockNumber),
     /// Static File Provider was initialized as read-only.
     #[error("cannot get a writer on a read-only environment.")]
-    ReadOnlyStaticFileEnv,
+    ReadOnlyStaticFileAccess,
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),

@@ -1,5 +1,5 @@
 mod manager;
-pub use manager::{StaticFileEnv, StaticFileProvider, StaticFileWriter};
+pub use manager::{StaticFileAccess, StaticFileProvider, StaticFileWriter};
 
 mod jar;
 pub use jar::StaticFileJarProvider;
@@ -150,7 +150,7 @@ mod tests {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = StaticFileProvider::new(static_files_path.path(), StaticFileEnv::RW)
+            let manager = StaticFileProvider::new(static_files_path.path(), StaticFileAccess::RW)
                 .unwrap()
                 .with_filters();
             let jar_provider = manager

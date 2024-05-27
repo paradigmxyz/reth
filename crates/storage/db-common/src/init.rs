@@ -533,7 +533,9 @@ mod tests {
         Chain, Genesis, IntegerList, GOERLI, GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH,
         SEPOLIA, SEPOLIA_GENESIS_HASH,
     };
-    use reth_provider::{test_utils::create_test_provider_factory_with_chain_spec, StaticFileEnv};
+    use reth_provider::{
+        test_utils::create_test_provider_factory_with_chain_spec, StaticFileAccess,
+    };
 
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
@@ -583,7 +585,7 @@ mod tests {
             ProviderFactory::new(
                 factory.into_db(),
                 MAINNET.clone(),
-                StaticFileProvider::new(static_file_provider.path(), StaticFileEnv::RW).unwrap(),
+                StaticFileProvider::new(static_file_provider.path(), StaticFileAccess::RW).unwrap(),
             )
             .unwrap(),
         );

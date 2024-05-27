@@ -40,7 +40,7 @@ pub use database::*;
 
 mod static_file;
 pub use static_file::{
-    StaticFileEnv, StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW,
+    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW,
     StaticFileProviderRWRefMut, StaticFileWriter,
 };
 

@@ -26,7 +26,7 @@ use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, Prun
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory,
-    StateWriter, StaticFileEnv,
+    StateWriter, StaticFileAccess,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -105,7 +105,7 @@ impl Command {
                 self.chain.clone(),
                 StaticFileProvider::new(
                     self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-                    StaticFileEnv::RO,
+                    StaticFileAccess::RO,
                 )?,
             )?)
             .start_network()
@@ -129,7 +129,7 @@ impl Command {
         let factory = ProviderFactory::new(
             &db,
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RO)?,
+            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RO)?,
         )?;
         let provider_rw = factory.provider_rw()?;
 

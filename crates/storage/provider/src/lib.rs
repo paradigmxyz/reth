@@ -21,7 +21,7 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    StaticFileEnv, StaticFileWriter,
+    StaticFileAccess, StaticFileWriter,
 };
 
 #[cfg(any(test, feature = "test-utils"))]

@@ -18,7 +18,7 @@ use reth_db::{
 use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
-use reth_provider::{providers::StaticFileProvider, StaticFileEnv};
+use reth_provider::{providers::StaticFileProvider, StaticFileAccess};
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -177,7 +177,7 @@ impl Command {
 
         let static_files = iter_static_files(data_dir.static_files())?;
         let static_file_provider =
-            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RO)?;
+            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RO)?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;

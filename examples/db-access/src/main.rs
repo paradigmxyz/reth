@@ -2,7 +2,7 @@ use reth_db::open_db_read_only;
 use reth_primitives::{Address, ChainSpecBuilder, B256};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
-    ProviderFactory, ReceiptProvider, StateProvider, StaticFileEnv, TransactionsProvider,
+    ProviderFactory, ReceiptProvider, StateProvider, StaticFileAccess, TransactionsProvider,
 };
 use reth_rpc_types::{Filter, FilteredParams};
 use std::path::Path;
@@ -27,7 +27,7 @@ fn main() -> eyre::Result<()> {
     let factory = ProviderFactory::new(
         db,
         spec.into(),
-        StaticFileProvider::new(db_path.join("static_files"), StaticFileEnv::RO)?,
+        StaticFileProvider::new(db_path.join("static_files"), StaticFileAccess::RO)?,
     )?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call

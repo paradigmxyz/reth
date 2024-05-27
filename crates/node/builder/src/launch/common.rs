@@ -23,7 +23,7 @@ use reth_primitives::{
     stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, PruneModes, B256,
 };
 use reth_provider::{
-    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileEnv,
+    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileAccess,
     StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
@@ -330,7 +330,7 @@ where
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
-            StaticFileProvider::new(self.data_dir().static_files(), StaticFileEnv::RW)?,
+            StaticFileProvider::new(self.data_dir().static_files(), StaticFileAccess::RW)?,
         )?
         .with_static_files_metrics();
 

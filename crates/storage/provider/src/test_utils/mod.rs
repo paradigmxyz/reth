@@ -1,4 +1,4 @@
-use crate::{providers::StaticFileProvider, ProviderFactory, StaticFileEnv};
+use crate::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
     DatabaseEnv,
@@ -29,7 +29,7 @@ pub fn create_test_provider_factory_with_chain_spec(
     ProviderFactory::new(
         db,
         chain_spec,
-        StaticFileProvider::new(static_dir.into_path(), StaticFileEnv::RW)
+        StaticFileProvider::new(static_dir.into_path(), StaticFileAccess::RW)
             .expect("static file provider"),
     )
     .expect("create provider factory with static_files")

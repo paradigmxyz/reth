@@ -14,7 +14,7 @@ use reth_db::{
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
 };
 use reth_primitives::ChainSpec;
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileEnv};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -99,7 +99,7 @@ macro_rules! db_ro_exec {
         let provider_factory = ProviderFactory::new(
             db,
             $chain.clone(),
-            StaticFileProvider::new($sfp, StaticFileEnv::RO)?,
+            StaticFileProvider::new($sfp, StaticFileAccess::RO)?,
         )?;
 
         let $tool = DbTool::new(provider_factory, $chain.clone())?;
@@ -163,7 +163,7 @@ impl Command {
                 let provider_factory = ProviderFactory::new(
                     db,
                     self.chain.clone(),
-                    StaticFileProvider::new(&static_files_path, StaticFileEnv::RW)?,
+                    StaticFileProvider::new(&static_files_path, StaticFileAccess::RW)?,
                 )?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
@@ -174,7 +174,7 @@ impl Command {
                 let provider_factory = ProviderFactory::new(
                     db,
                     self.chain.clone(),
-                    StaticFileProvider::new(static_files_path, StaticFileEnv::RW)?,
+                    StaticFileProvider::new(static_files_path, StaticFileAccess::RW)?,
                 )?;
 
                 command.execute(provider_factory)?;

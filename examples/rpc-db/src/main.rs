@@ -16,7 +16,7 @@ use reth::{
     primitives::ChainSpecBuilder,
     providers::{
         providers::{BlockchainProvider, StaticFileProvider},
-        ProviderFactory, StaticFileEnv,
+        ProviderFactory, StaticFileAccess,
     },
     utils::db::open_db_read_only,
 };
@@ -50,7 +50,7 @@ async fn main() -> eyre::Result<()> {
     let factory = ProviderFactory::new(
         db.clone(),
         spec.clone(),
-        StaticFileProvider::new(db_path.join("static_files"), StaticFileEnv::RO)?,
+        StaticFileProvider::new(db_path.join("static_files"), StaticFileAccess::RO)?,
     )?;
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to

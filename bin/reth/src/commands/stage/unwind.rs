@@ -11,7 +11,7 @@ use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     providers::StaticFileProvider, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
-    HeaderSyncMode, ProviderFactory, StaticFileEnv, StaticFileProviderFactory,
+    HeaderSyncMode, ProviderFactory, StaticFileAccess, StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -84,7 +84,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
+            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
         )?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;

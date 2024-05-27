@@ -14,7 +14,7 @@ use reth_node_core::args::DatabaseArgs;
 use reth_primitives::ChainSpec;
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
-    StaticFileEnv,
+    StaticFileAccess,
 };
 use reth_trie::StateRoot;
 use std::{fs, sync::Arc};
@@ -61,7 +61,7 @@ impl Command {
         let factory = ProviderFactory::new(
             &db,
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
+            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
         )?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");

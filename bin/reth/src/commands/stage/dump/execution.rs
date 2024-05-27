@@ -7,7 +7,7 @@ use reth_db::{
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::stage::StageCheckpoint;
 use reth_provider::{
-    providers::StaticFileProvider, ChainSpecProvider, ProviderFactory, StaticFileEnv,
+    providers::StaticFileProvider, ChainSpecProvider, ProviderFactory, StaticFileAccess,
 };
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use tracing::info;
@@ -30,7 +30,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
             ProviderFactory::new(
                 output_db,
                 db_tool.chain.clone(),
-                StaticFileProvider::new(output_datadir.static_files(), StaticFileEnv::RO)?,
+                StaticFileProvider::new(output_datadir.static_files(), StaticFileAccess::RO)?,
             )?,
             to,
             from,

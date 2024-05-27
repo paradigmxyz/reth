@@ -6,7 +6,7 @@ use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber, PruneModes};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileEnv};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
@@ -48,7 +48,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
             ProviderFactory::new(
                 output_db,
                 db_tool.chain.clone(),
-                StaticFileProvider::new(output_datadir.static_files(), StaticFileEnv::RO)?,
+                StaticFileProvider::new(output_datadir.static_files(), StaticFileAccess::RO)?,
             )?,
             to,
             from,

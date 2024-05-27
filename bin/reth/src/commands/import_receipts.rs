@@ -17,7 +17,8 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::{stage::StageId, ChainSpec, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileProvider, BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileEnv, StaticFileProviderFactory, StaticFileWriter,
+    StageCheckpointReader, StateWriter, StaticFileAccess, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use tracing::{debug, error, info, trace};
 
@@ -84,7 +85,7 @@ impl ImportReceiptsCommand {
         let provider_factory = ProviderFactory::new(
             db.clone(),
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
+            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
         )?;
 
         let provider = provider_factory.provider_rw()?;
