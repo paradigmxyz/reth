@@ -7,24 +7,10 @@ use reth_rpc_types::{
     TransactionRequest, Work,
 };
 
-pub trait NetworkEthApi {
-    type Block;
-    type TxReceipt;
-
-    async fn block_by_hash(&self, eth: &EthApiInner,   hash: B256, full: bool) -> RpcResult<Option<Self::Block>>;
-
-    async fn build_transaction_receipt(
-        &self,
-        tx: TransactionSigned,
-        meta: TransactionMeta,
-        receipt: Receipt,
-    ) -> EthResult<Self::TxReceipt>;
-}
-
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<N: NetworkEthApi> {
+pub trait EthApi {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -51,7 +37,7 @@ pub trait EthApi<N: NetworkEthApi> {
 
     /// Returns information about a block by hash.
     #[method(name = "getBlockByHash")]
-    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<N::Block>>;
+    async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>>;
 
     /// Returns information about a block by number.
     #[method(name = "getBlockByNumber")]
