@@ -43,6 +43,23 @@ use tracing::warn;
 /// range.
 type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
+/// Access mode on a static file provider. RO/RW.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum StaticFileAccess {
+    /// Read-only access.
+    #[default]
+    RO,
+    /// Read-write access.
+    RW,
+}
+
+impl StaticFileAccess {
+    /// Returns `true` if read-only access.
+    pub const fn is_read_only(&self) -> bool {
+        matches!(self, StaticFileAccess::RO)
+    }
+}
+
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
 #[derive(Debug, Default, Clone)]
 pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
@@ -1346,23 +1363,6 @@ impl StatsReader for StaticFileProvider {
                 .unwrap_or_default() as usize),
             _ => Err(ProviderError::UnsupportedProvider),
         }
-    }
-}
-
-/// Access mode on static file provider. RO/RW.
-#[derive(Debug, Default)]
-pub enum StaticFileAccess {
-    /// Read-only access.
-    #[default]
-    RO,
-    /// Read-write access.
-    RW,
-}
-
-impl StaticFileAccess {
-    /// Returns `true` if read-only access.
-    pub const fn is_read_only(&self) -> bool {
-        matches!(self, StaticFileAccess::RO)
     }
 }
 
