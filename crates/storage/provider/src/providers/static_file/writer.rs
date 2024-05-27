@@ -640,20 +640,20 @@ impl StaticFileProviderRW {
         self.writer.user_header_mut()
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     /// Helper function to override block range for testing.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     /// Helper function to access [`SegmentHeader`].
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn user_header(&self) -> &SegmentHeader {
         self.writer.user_header()
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     /// Helper function to override block range for testing.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn inner(&mut self) -> &mut NippyJarWriter<SegmentHeader> {
         &mut self.writer
     }
