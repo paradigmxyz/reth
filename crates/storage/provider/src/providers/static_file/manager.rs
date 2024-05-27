@@ -882,8 +882,7 @@ pub trait StaticFileWriter {
     /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
 
-    /// Checks consistency of the segment latest file and heals if necessary and `dry_run` is set to
-    /// false.
+    /// Checks consistency of the segment latest file and heals if possible.
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()>;
 }
 
