@@ -37,7 +37,7 @@ Imports a `.rlp` file of receipts, that has been exported with command specified
 <https://github.com/testinprod-io/op-geth/pull/1> (command for exporting receipts uses custom RLP-encoding). 
 
 ```bash
-./op-reth import-receipts --chain optimism <exported-receipts>
+./op-reth import-receipts-op <exported-receipts>
 ```
 
 ### 3. Import State
