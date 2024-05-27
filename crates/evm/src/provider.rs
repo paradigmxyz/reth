@@ -1,12 +1,15 @@
-use reth_evm::ConfigureEvmEnv;
+//! Provider trait for populating the EVM environment.
+
+use crate::ConfigureEvmEnv;
 use reth_primitives::{BlockHashOrNumber, Header};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 
-/// A provider type that knows chain specific information required to configure an
+/// A provider type that knows chain specific information required to configure a
 /// [CfgEnvWithHandlerCfg].
 ///
-/// This type is mainly used to provide required data to configure the EVM environment.
+/// This type is mainly used to provide required data to configure the EVM environment that is
+/// usually stored on disk.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EvmEnvProvider: Send + Sync {
     /// Fills the [CfgEnvWithHandlerCfg] and [BlockEnv] fields with values specific to the given
