@@ -330,7 +330,7 @@ mod tests {
         let hook_ro_name = "read-only";
         let mut hook_ro = TestHook::new_ro(hook_ro_name);
         hook_ro.add_result(Ok(EngineHookEvent::Started));
-        hook_ro.add_result(Err(RethError::Custom("something went wrong".to_string())));
+        hook_ro.add_result(Err(RethError::msg("something went wrong")));
 
         let mut hooks = EngineHooks::new();
         hooks.add(hook_rw_1);

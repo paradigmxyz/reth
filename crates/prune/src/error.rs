@@ -26,7 +26,7 @@ impl From<PrunerError> for RethError {
     fn from(err: PrunerError) -> Self {
         match err {
             PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
-                RethError::Custom(err.to_string())
+                RethError::other(err)
             }
             PrunerError::Interface(err) => err,
             PrunerError::Database(err) => RethError::Database(err),

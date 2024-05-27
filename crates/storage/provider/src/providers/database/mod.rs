@@ -87,7 +87,7 @@ impl ProviderFactory<DatabaseEnv> {
         static_files_path: PathBuf,
     ) -> RethResult<Self> {
         Ok(ProviderFactory::<DatabaseEnv> {
-            db: Arc::new(init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?),
+            db: Arc::new(init_db(path, args).map_err(|e| RethError::msg(e))?),
             chain_spec,
             static_file_provider: StaticFileProvider::new(static_files_path)?,
         })
