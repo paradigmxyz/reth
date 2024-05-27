@@ -10,7 +10,7 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, import_receipts, init_cmd, init_state,
+        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state,
         node::{self, NoArgs},
         p2p, recover, stage, test_vectors,
     },
