@@ -11,7 +11,7 @@ use reth_db::{
     transaction::DbTx,
     DatabaseError,
 };
-use reth_interfaces::trie::StateRootError;
+use reth_execution_errors::StateRootError;
 use reth_primitives::{
     keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, BlockNumber, B256,
     U256,

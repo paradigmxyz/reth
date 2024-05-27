@@ -10,7 +10,7 @@ use crate::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::transaction::DbTx;
-use reth_interfaces::trie::{StateRootError, StorageRootError};
+use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
