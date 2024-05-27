@@ -219,15 +219,16 @@ where
         .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
         .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
         .collect();
+
     let mut all_blobs_available = true;
     let mut actions_to_queue: Vec<BlockEvent> = Vec::new();
+
     if txs.is_empty() {
         return;
     }
+
     match this.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
         Ok(blobs) => {
-            // Match the corresponding BlobTransaction with its
-            // Transcation
             for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
                 let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
                     .expect("should not fail to convert blob tx if it is already eip4844");
@@ -241,7 +242,6 @@ where
             }
         }
         Err(_err) => {
-            // If a single BlobTransaction is missing we skip the queue.
             all_blobs_available = false;
         }
     };
