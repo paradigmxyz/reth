@@ -305,7 +305,8 @@ fn split_add_account_request_data(
         let address_size = H160::BYTE_SIZE;
         let account_size = account.estimate_byte_size();
 
-        if current_size + address_size + account_size > max_byte_size {
+        let available_size = max_byte_size - current_size;
+        if address_size + account_size > available_size {
             result.push(std::mem::replace(&mut current_map, AccountInfoMap::new()));
         }
 
@@ -318,6 +319,103 @@ fn split_add_account_request_data(
 
     result
 }
+
+/// Receive an account and split it into a list of pieces having a size of `max_byte_size`
+fn split_single_account_data(
+    max_byte_size: usize,
+    mut data: RawAccountInfo,
+) -> Vec<RawAccountInfo> {
+    if data.estimate_byte_size() <= max_byte_size {
+        return vec![data];
+    }
+
+    warn!(target: "reth::cli", "Single account data size exceeds max byte size, splitting it into multiple requests");
+
+    let mut result = vec![];
+
+    let mut current_account = RawAccountInfo {
+        nonce: data.nonce.clone(),
+        balance: data.balance.clone(),
+        bytecode: None,
+        storage: vec![],
+    };
+
+    let storage = std::mem::take(&mut data.storage);
+    let nonce = data.nonce.clone();
+    let balance = data.balance.clone();
+
+    // We push data that contains the bytecode.
+    // This works in the case where the bytecode is not larger than the max_byte_size, but this should always be the case
+    result.push(data);
+
+    for (key, value) in storage {
+        let current_size = current_account.estimate_byte_size();
+        let key_size = H256::BYTE_SIZE;
+        let value_size = H256::BYTE_SIZE;
+
+        let available_size = max_byte_size - current_size;
+        if key_size + value_size > available_size {
+            result.push(std::mem::replace(&mut current_account, RawAccountInfo {
+                nonce: nonce.clone(),
+                balance: balance.clone(),
+                bytecode: None,
+                storage: vec![],
+            }));
+        }
+
+        current_account.storage.push((key, value));
+    }
+
+    if !current_account.storage.is_empty() {
+        result.push(current_account);
+    }
+
+
+
+    result
+}
+
+
+
+// /// Receive an account and split it into two pieces with the first piece having a size of `max_byte_size`
+// fn split_single_account_data(
+//     max_byte_size: usize,
+//     data: RawAccountInfo,
+// ) -> (RawAccountInfo, Option<RawAccountInfo>) {
+//     if data.estimate_byte_size() <= max_byte_size {
+//         return (data, None);
+//     }
+//     warn!(target: "reth::cli", "Single account data size exceeds max byte size, splitting it into multiple requests");
+
+//     let mut current_account = RawAccountInfo {
+//         nonce: data.nonce.clone(),
+//         balance: data.balance.clone(),
+//         bytecode: None,
+//         storage: vec![],
+//     };
+
+//     let mut remaining_account = RawAccountInfo {
+//         nonce: data.nonce,
+//         balance: data.balance,
+//         bytecode: data.bytecode,
+//         storage: vec![],
+//     };
+
+//     for (key, value) in data.storage {
+//         let current_size = current_account.estimate_byte_size();
+//         let key_size = H256::BYTE_SIZE;
+//         let value_size = H256::BYTE_SIZE;
+
+//         let available_size = max_byte_size - current_size;
+//         if key_size + value_size > available_size {
+//             remaining_account.storage.push((key, value));
+//         }
+
+//         current_account.storage.push((key, value));
+//     }
+
+//     (current_account, Some(remaining_account))
+// }
 
 #[cfg(test)]
 mod test {
@@ -382,4 +480,61 @@ mod test {
         }
         result
     }
+
+    #[test]
+    fn bitfinity_test_split_single_account_data() {
+        
+        let mut account = RawAccountInfo {
+            nonce: U256::from(1u64),
+            balance: U256::from(1u64),
+            bytecode: None,
+            storage: vec![],
+        };
+        
+        for i in 0u64..1000 {
+            account.storage.push((U256::from(i), U256::from(i)));
+        }
+
+        let current_size = account.estimate_byte_size();
+
+        {
+            let max_size = current_size;
+            let result = split_single_account_data(max_size, account.clone());
+            assert_eq!(result.len(), 1);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(result[0], account);
+        }
+
+        {
+            let max_size = current_size - 1;
+            let result = split_single_account_data(max_size, account.clone());
+            assert_eq!(result.len(), 3);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(merge_accounts(result), account);
+        }
+
+        {
+            let max_size = (current_size / 3) - 1;
+            let result = split_single_account_data(max_size, account.clone());
+            assert_eq!(result.len(), 5);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(merge_accounts(result), account);
+        }
+    }
+
+    /// Merge accouts into a single account. The nonce, balance and bytecode are taken from the first account
+    fn merge_accounts(accounts: Vec<RawAccountInfo>) -> RawAccountInfo {
+        let mut result = accounts[0].clone();
+        for account in accounts {
+            result.storage.extend(account.storage);
+        }
+        result
+    }
+
 }
