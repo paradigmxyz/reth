@@ -9,13 +9,13 @@ Usage: reth node [OPTIONS]
 Options:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
-          
+
           Defaults to the OS-specific data directory:
-          
+
           - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
           - Windows: `{FOLDERID_RoamingAppData}/reth/`
           - macOS: `$HOME/Library/Application Support/reth/`
-          
+
           [default: default]
 
       --config <FILE>
@@ -24,26 +24,26 @@ Options:
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
-          
+
           Built-in chains:
               mainnet, sepolia, goerli, holesky, dev
-          
+
           [default: mainnet]
 
       --instance <INSTANCE>
           Add a new instance of a node.
-          
+
           Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-          
+
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-          
+
           Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
-          
+
           [default: 1]
 
       --with-unused-ports
           Sets all ports to unused, allowing the OS to choose random unused ports when sockets are bound.
-          
+
           Mutually exclusive with `--instance`.
 
   -h, --help
@@ -52,7 +52,7 @@ Options:
 Metrics:
       --metrics <SOCKET>
           Enable Prometheus metrics.
-          
+
           The metrics will be served at the given interface and port.
 
 Networking:
@@ -70,50 +70,56 @@ Networking:
 
       --discovery.addr <DISCOVERY_ADDR>
           The UDP address to use for devp2p peer discovery version 4
-          
+
           [default: 0.0.0.0]
 
       --discovery.port <DISCOVERY_PORT>
           The UDP port to use for devp2p peer discovery version 4
-          
+
           [default: 30303]
 
       --discovery.v5.addr <DISCOVERY_V5_ADDR>
-          The UDP address to use for devp2p peer discovery version 5
-          
-          [default: 0.0.0.0]
+          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv4
+
+      --discovery.v5.addr.ipv6 <DISCOVERY_V5_ADDR_IPV6>
+          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
-          The UDP port to use for devp2p peer discovery version 5
-          
+          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
+
+          [default: 9000]
+
+      --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
+          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discv5.addr.ipv6` is set
+
           [default: 9000]
 
       --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
-          
+
           [default: 60]
 
       --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
           The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
-          
+
           [default: 5]
 
       --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
           The number of times to carry out boost lookup queries at bootstrap
-          
+
           [default: 100]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
-          
+
           --trusted-peers enode://abcd@192.168.0.1:30303
 
       --trusted-only
-          Connect only to trusted peers
+          Connect to or accept from trusted peers only
 
       --bootnodes <BOOTNODES>
           Comma separated enode URLs for P2P discovery bootstrap.
-          
+
           Will fall back to a network-specific default if not specified.
 
       --peers-file <FILE>
@@ -122,12 +128,12 @@ Networking:
 
       --identity <IDENTITY>
           Custom node identity
-          
+
           [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
-          
+
           This will also deterministically set the peer ID. If not specified, it will be set in the data dir for the chain being used.
 
       --no-persist-peers
@@ -135,17 +141,17 @@ Networking:
 
       --nat <NAT>
           NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
-          
+
           [default: any]
 
       --addr <ADDR>
           Network listening address
-          
+
           [default: 0.0.0.0]
 
       --port <PORT>
           Network listening port
-          
+
           [default: 30303]
 
       --max-outbound-peers <MAX_OUTBOUND_PEERS>
@@ -155,15 +161,25 @@ Networking:
           Maximum number of inbound requests. default: 30
 
       --pooled-tx-response-soft-limit <BYTES>
-          Soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. Spec'd at 2 MiB.
-          
-          <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
-          
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions
+          to pack in one response.
+          Spec'd at 2MiB.
+
           [default: 2097152]
 
       --pooled-tx-pack-soft-limit <BYTES>
-          Default soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a `PooledTransactions` response. Default is 128 KiB
-          
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions to
+          request in one request.
+
+          Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
+          transaction announcement (see RLPx specs). This allows a node to request a specific size
+          response.
+
+          By default, nodes request only 128 KiB worth of transactions, but should a peer request
+          more, up to 2 MiB, a node will answer with more than 128 KiB.
+
+          Default is 128 KiB.
+
           [default: 131072]
 
 RPC:
@@ -172,17 +188,17 @@ RPC:
 
       --http.addr <HTTP_ADDR>
           Http server address to listen on
-          
+
           [default: 127.0.0.1]
 
       --http.port <HTTP_PORT>
           Http server port to listen on
-          
+
           [default: 8545]
 
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
-          
+
           [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
@@ -193,12 +209,12 @@ RPC:
 
       --ws.addr <WS_ADDR>
           Ws server address to listen on
-          
+
           [default: 127.0.0.1]
 
       --ws.port <WS_PORT>
           Ws server port to listen on
-          
+
           [default: 8546]
 
       --ws.origins <ws.origins>
@@ -206,7 +222,7 @@ RPC:
 
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
-          
+
           [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, eth-call-bundle]
 
       --ipcdisable
@@ -214,24 +230,24 @@ RPC:
 
       --ipcpath <IPCPATH>
           Filename for IPC socket/pipe within the datadir
-          
+
           [default: <CACHE_DIR>.ipc]
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
-          
+
           [default: 127.0.0.1]
 
       --authrpc.port <AUTH_PORT>
           Auth server port to listen on
-          
+
           [default: 8551]
 
       --authrpc.jwtsecret <PATH>
           Path to a JWT secret to use for the authenticated engine-API RPC server.
-          
+
           This will enforce JWT authentication for all requests coming from the consensus layer.
-          
+
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
 
       --auth-ipc
@@ -239,151 +255,151 @@ RPC:
 
       --auth-ipc.path <AUTH_IPC_PATH>
           Filename for auth IPC socket/pipe within the datadir
-          
+
           [default: <CACHE_DIR>_engine_api.ipc]
 
       --rpc.jwtsecret <HEX>
           Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
-          
+
           This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
 
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
           Set the maximum RPC request payload size for both HTTP and WS in megabytes
-          
+
           [default: 15]
 
       --rpc.max-response-size <RPC_MAX_RESPONSE_SIZE>
           Set the maximum RPC response payload size for both HTTP and WS in megabytes
-          
+
           [default: 160]
           [aliases: rpc.returndata.limit]
 
       --rpc.max-subscriptions-per-connection <RPC_MAX_SUBSCRIPTIONS_PER_CONNECTION>
           Set the maximum concurrent subscriptions per connection
-          
+
           [default: 1024]
 
       --rpc.max-connections <COUNT>
           Maximum number of RPC server connections
-          
+
           [default: 500]
 
       --rpc.max-tracing-requests <COUNT>
           Maximum number of concurrent tracing requests
-          
-          [default: 8]
+
+          [default: <NUM CPU CORES-2>]
 
       --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
-          
+
           [default: 100000]
 
       --rpc.max-logs-per-response <COUNT>
           Maximum number of logs that can be returned in a single response. (0 = no limit)
-          
+
           [default: 20000]
 
       --rpc.gascap <GAS_CAP>
           Maximum gas limit for `eth_call` and call tracing RPC methods
-          
+
           [default: 50000000]
 
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
           Max number of blocks in cache
-          
+
           [default: 5000]
 
       --rpc-cache.max-receipts <MAX_RECEIPTS>
           Max number receipts in cache
-          
+
           [default: 2000]
 
       --rpc-cache.max-envs <MAX_ENVS>
           Max number of bytes for cached env data
-          
+
           [default: 1000]
 
       --rpc-cache.max-concurrent-db-requests <MAX_CONCURRENT_DB_REQUESTS>
           Max number of concurrent database requests
-          
+
           [default: 512]
 
 Gas Price Oracle:
       --gpo.blocks <BLOCKS>
           Number of recent blocks to check for gas price
-          
+
           [default: 20]
 
       --gpo.ignoreprice <IGNORE_PRICE>
           Gas Price below which gpo will ignore transactions
-          
+
           [default: 2]
 
       --gpo.maxprice <MAX_PRICE>
           Maximum transaction priority fee(or gasprice before London Fork) to be recommended by gpo
-          
+
           [default: 500000000000]
 
       --gpo.percentile <PERCENTILE>
           The percentile of gas prices to use for the estimate
-          
+
           [default: 60]
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool
-          
+
           [default: 10000]
 
       --txpool.pending-max-size <PENDING_MAX_SIZE>
           Max size of the pending sub-pool in megabytes
-          
+
           [default: 20]
 
       --txpool.basefee-max-count <BASEFEE_MAX_COUNT>
           Max number of transaction in the basefee sub-pool
-          
+
           [default: 10000]
 
       --txpool.basefee-max-size <BASEFEE_MAX_SIZE>
           Max size of the basefee sub-pool in megabytes
-          
+
           [default: 20]
 
       --txpool.queued-max-count <QUEUED_MAX_COUNT>
           Max number of transaction in the queued sub-pool
-          
+
           [default: 10000]
 
       --txpool.queued-max-size <QUEUED_MAX_SIZE>
           Max size of the queued sub-pool in megabytes
-          
+
           [default: 20]
 
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
-          
+
           [default: 16]
 
       --txpool.pricebump <PRICE_BUMP>
           Price bump (in %) for the transaction pool underpriced check
-          
+
           [default: 10]
 
       --blobpool.pricebump <BLOB_TRANSACTION_PRICE_BUMP>
           Price bump percentage to replace an already existing blob transaction
-          
+
           [default: 100]
 
       --txpool.max-tx-input-bytes <MAX_TX_INPUT_BYTES>
           Max size in bytes of a single transaction allowed to enter the pool
-          
+
           [default: 131072]
 
       --txpool.max-cached-entries <MAX_CACHED_ENTRIES>
           The maximum number of blobs to keep in the in memory blob cache
-          
+
           [default: 100]
 
       --txpool.nolocals
@@ -398,33 +414,33 @@ TxPool:
 Builder:
       --builder.extradata <EXTRADATA>
           Block extra data set by the payload builder
-          
+
           [default: reth/<VERSION>/<OS>]
 
       --builder.gaslimit <GAS_LIMIT>
           Target gas ceiling for built blocks
-          
+
           [default: 30000000]
 
       --builder.interval <SECONDS>
           The interval at which the job should build a new payload after the last (in seconds)
-          
+
           [default: 1]
 
       --builder.deadline <SECONDS>
           The deadline for when the payload builder job should resolve
-          
+
           [default: 12]
 
       --builder.max-tasks <MAX_PAYLOAD_TASKS>
           Maximum number of tasks to spawn for building a payload
-          
+
           [default: 3]
 
 Debug:
       --debug.continuous
           Prompt the downloader to download blocks one at a time.
-          
+
           NOTE: This is for testing purposes only.
 
       --debug.terminate
@@ -432,7 +448,7 @@ Debug:
 
       --debug.tip <TIP>
           Set the chain tip manually for testing purposes.
-          
+
           NOTE: This is a temporary flag
 
       --debug.max-block <MAX_BLOCK>
@@ -463,13 +479,13 @@ Database:
 
       --db.exclusive <EXCLUSIVE>
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
-          
+
           [possible values: true, false]
 
 Dev testnet:
       --dev
           Start the node in dev mode
-          
+
           This mode uses a local proof-of-authority consensus engine with either fixed block times
           or automatically mined blocks.
           Disables network discovery and enables local http server.
@@ -481,7 +497,7 @@ Dev testnet:
 
       --dev.block-time <BLOCK_TIME>
           Interval between blocks.
-          
+
           Parses strings using [humantime::parse_duration]
           --dev.block-time 12s
 
@@ -492,7 +508,7 @@ Pruning:
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
-          
+
           [default: terminal]
 
           Possible values:
@@ -502,12 +518,12 @@ Logging:
 
       --log.stdout.filter <FILTER>
           The filter to use for logs written to stdout
-          
+
           [default: ]
 
       --log.file.format <FORMAT>
           The format to use for logs written to the log file
-          
+
           [default: terminal]
 
           Possible values:
@@ -517,22 +533,22 @@ Logging:
 
       --log.file.filter <FILTER>
           The filter to use for logs written to the log file
-          
+
           [default: debug]
 
       --log.file.directory <PATH>
           The path to put log files in
-          
+
           [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
-          
+
           [default: 200]
 
       --log.file.max-files <COUNT>
           The maximum amount of log files that will be stored. If set to 0, background file logging is disabled
-          
+
           [default: 5]
 
       --log.journald
@@ -540,12 +556,12 @@ Logging:
 
       --log.journald.filter <FILTER>
           The filter to use for logs written to journald
-          
+
           [default: error]
 
       --color <COLOR>
           Sets whether or not the formatter emits ANSI terminal escape codes for colors and other text formatting
-          
+
           [default: always]
 
           Possible values:
@@ -556,7 +572,7 @@ Logging:
 Display:
   -v, --verbosity...
           Set the minimum log level.
-          
+
           -v      Errors
           -vv     Warnings
           -vvv    Info

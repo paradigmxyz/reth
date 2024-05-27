@@ -5,7 +5,8 @@ use reth_db::{
     transaction::DbTxMut,
     DatabaseEnv,
 };
-use reth_primitives::{fs, Bytes};
+use reth_fs_util as fs;
+use reth_primitives::Bytes;
 use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.

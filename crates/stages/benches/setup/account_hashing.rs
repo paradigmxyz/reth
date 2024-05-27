@@ -4,12 +4,12 @@ use super::constants;
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
-use reth_primitives::{fs, stage::StageCheckpoint, BlockNumber};
+use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestStageDB,
 };
-use std::{ops::RangeInclusive, path::Path};
+use std::{fs, ops::RangeInclusive, path::Path};
 
 /// Prepares a database for [`AccountHashingStage`]
 /// If the environment variable [`constants::ACCOUNT_HASHING_DB`] is set, it will use that one and

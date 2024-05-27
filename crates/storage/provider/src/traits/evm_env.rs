@@ -1,6 +1,6 @@
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, Header};
+use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 
 /// A provider type that knows chain specific information required to configure an

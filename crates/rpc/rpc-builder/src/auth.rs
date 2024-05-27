@@ -133,7 +133,7 @@ where
 
     // Create auth middleware.
     let middleware =
-        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
     // By default, both http and ws are enabled.
     let server = ServerBuilder::new()
@@ -184,8 +184,8 @@ impl AuthServerConfig {
         let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint } = self;
 
         // Create auth middleware.
-        let middleware = tower::ServiceBuilder::new()
-            .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+        let middleware =
+            tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
         // By default, both http and ws are enabled.
         let server = server_config
@@ -403,7 +403,7 @@ impl AuthServerHandle {
         &self,
     ) -> jsonrpsee::http_client::HttpClient<AuthClientService<HttpBackend>> {
         // Create a middleware that adds a new JWT token to every request.
-        let secret_layer = AuthClientLayer::new(self.secret.clone());
+        let secret_layer = AuthClientLayer::new(self.secret);
         let middleware = tower::ServiceBuilder::default().layer(secret_layer);
         jsonrpsee::http_client::HttpClientBuilder::default()
             .set_http_middleware(middleware)

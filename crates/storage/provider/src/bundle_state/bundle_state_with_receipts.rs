@@ -1,17 +1,20 @@
-use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts, StateWriter};
+use crate::{
+    providers::StaticFileProviderRWRefMut, BundleStateDataProvider, StateChanges, StateReverts,
+    StateWriter,
+};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_evm::execute::BatchBlockExecutionOutput;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StaticFileSegment,
-    StorageEntry, B256, U256,
+    Account, Address, BlockHash, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts,
+    StaticFileSegment, StorageEntry, B256, U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::HashedPostState;
 pub use revm::db::states::OriginalValuesKnown;
 use revm::{
@@ -179,12 +182,11 @@ impl BundleStateWithReceipts {
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    #[allow(unused_variables)]
-    pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<B256> {
+    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
         #[cfg(feature = "optimism")]
         panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
         #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(self.block_number_to_index(block_number)?)
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
     }
 
     /// Returns the receipt root for all recorded receipts.
@@ -362,6 +364,17 @@ impl StateWriter for BundleStateWithReceipts {
         StateChanges(plain_state).write_to_db(tx)?;
 
         Ok(())
+    }
+}
+
+impl BundleStateDataProvider for BundleStateWithReceipts {
+    fn state(&self) -> &BundleStateWithReceipts {
+        self
+    }
+
+    /// Always returns [None] because we don't have any information about the block header.
+    fn block_hash(&self, _block_number: BlockNumber) -> Option<BlockHash> {
+        None
     }
 }
 

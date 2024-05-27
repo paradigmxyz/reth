@@ -1,4 +1,4 @@
-//! Reth RPC testing utilities.
+//! Layer implementations used in RPC
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -8,20 +8,17 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use assert_matches as _;
 use http::{HeaderMap, Response};
-use jsonrpsee as _;
-use tempfile as _;
-use tokio as _;
 
 mod auth_client_layer;
 mod auth_layer;
-mod jwt_secret;
 mod jwt_validator;
+
+// Export alloy JWT types
+pub use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
 
 pub use auth_client_layer::{secret_to_bearer_header, AuthClientLayer, AuthClientService};
 pub use auth_layer::AuthLayer;
-pub use jwt_secret::{Claims, JwtError, JwtSecret};
 pub use jwt_validator::JwtAuthValidator;
 
 /// General purpose trait to validate Http Authorization headers. It's supposed to be integrated as

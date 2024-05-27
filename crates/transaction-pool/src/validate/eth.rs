@@ -479,7 +479,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Whether to allow exemptions for local transaction exemptions.
-    pub fn set_local_transactions_config(
+    pub fn with_local_transactions_config(
         mut self,
         local_transactions_config: LocalTransactionConfig,
     ) -> Self {
@@ -708,7 +708,7 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     if transaction.gas_limit() <
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
-            transaction.kind(),
+            &transaction.kind(),
             &access_list,
             is_shanghai,
         )

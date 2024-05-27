@@ -9,8 +9,8 @@ use crate::{
     DatabaseError,
 };
 use once_cell::sync::OnceCell;
-use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
@@ -395,8 +395,8 @@ mod tests {
         database::Database, mdbx::DatabaseArguments, models::client_version::ClientVersion, tables,
         transaction::DbTx, DatabaseEnv, DatabaseEnvKind,
     };
-    use reth_interfaces::db::DatabaseError;
     use reth_libmdbx::MaxReadTransactionDuration;
+    use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
     use tempfile::tempdir;
 

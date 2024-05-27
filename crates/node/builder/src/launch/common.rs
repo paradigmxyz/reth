@@ -10,13 +10,12 @@ use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
-    init::{init_genesis, InitDatabaseError},
     node_config::NodeConfig,
 };
 use reth_primitives::{

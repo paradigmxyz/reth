@@ -1,12 +1,9 @@
-use crate::{
-    blockchain_tree::error::{BlockchainTreeError, CanonicalError},
-    db::DatabaseError,
-    executor::BlockExecutionError,
-    provider::ProviderError,
-};
+use crate::blockchain_tree::error::{BlockchainTreeError, CanonicalError};
 use reth_consensus::ConsensusError;
+use reth_execution_errors::BlockExecutionError;
+use reth_fs_util::FsPathError;
 use reth_network_api::NetworkError;
-use reth_primitives::fs::FsPathError;
+use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 
 /// Result alias for [`RethError`].
 pub type RethResult<T> = Result<T, RethError>;

@@ -13,13 +13,12 @@ use reth_primitives::{
 use reth_provider::{
     DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::{EventSender, EventStream};
 use std::{
     collections::BTreeMap,
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::debug;
 
 /// Result of [Pruner::run] execution.
@@ -53,7 +52,7 @@ pub struct Pruner<DB> {
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
     #[doc(hidden)]
     metrics: Metrics,
-    listeners: EventListeners<PrunerEvent>,
+    event_sender: EventSender<PrunerEvent>,
 }
 
 impl<DB: Database> Pruner<DB> {
@@ -77,13 +76,13 @@ impl<DB: Database> Pruner<DB> {
             timeout,
             finished_exex_height,
             metrics: Metrics::default(),
-            listeners: Default::default(),
+            event_sender: Default::default(),
         }
     }
 
     /// Listen for events on the pruner.
-    pub fn events(&mut self) -> UnboundedReceiverStream<PrunerEvent> {
-        self.listeners.new_listener()
+    pub fn events(&self) -> EventStream<PrunerEvent> {
+        self.event_sender.new_listener()
     }
 
     /// Run the pruner
@@ -100,7 +99,7 @@ impl<DB: Database> Pruner<DB> {
             return Ok(PruneProgress::Finished)
         }
 
-        self.listeners.notify(PrunerEvent::Started { tip_block_number });
+        self.event_sender.notify(PrunerEvent::Started { tip_block_number });
 
         debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
@@ -154,7 +153,7 @@ impl<DB: Database> Pruner<DB> {
             "{message}",
         );
 
-        self.listeners.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
+        self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
         Ok(progress)
     }

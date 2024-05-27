@@ -3,6 +3,7 @@
   - [`reth init`](./reth/init.md)
   - [`reth init-state`](./reth/init-state.md)
   - [`reth import`](./reth/import.md)
+  - [`reth import-receipts`](./reth/import-receipts.md)
   - [`reth dump-genesis`](./reth/dump-genesis.md)
   - [`reth db`](./reth/db.md)
     - [`reth db stats`](./reth/db/stats.md)

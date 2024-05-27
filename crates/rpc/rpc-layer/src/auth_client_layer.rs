@@ -24,7 +24,7 @@ impl<S> Layer<S> for AuthClientLayer {
     type Service = AuthClientService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        AuthClientService::new(self.secret.clone(), inner)
+        AuthClientService::new(self.secret, inner)
     }
 }
 

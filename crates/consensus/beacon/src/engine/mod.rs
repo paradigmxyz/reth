@@ -29,7 +29,7 @@ use reth_rpc_types::engine::{
 };
 use reth_stages_api::{ControlFlow, Pipeline};
 use reth_tasks::TaskSpawner;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::EventSender;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -202,8 +202,8 @@ where
     /// be used to download and execute the missing blocks.
     pipeline_run_threshold: u64,
     hooks: EngineHooksController,
-    /// Listeners for engine events.
-    listeners: EventListeners<BeaconConsensusEngineEvent>,
+    /// Sender for engine events.
+    event_sender: EventSender<BeaconConsensusEngineEvent>,
     /// Consensus engine metrics.
     metrics: EngineMetrics,
 }
@@ -282,8 +282,8 @@ where
         engine_message_stream: BoxStream<'static, BeaconEngineMessage<EngineT>>,
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<EngineT>)> {
-        let handle = BeaconConsensusEngineHandle { to_engine };
-        let listeners = EventListeners::default();
+        let event_sender = EventSender::default();
+        let handle = BeaconConsensusEngineHandle::new(to_engine, event_sender.clone());
         let sync = EngineSyncController::new(
             pipeline,
             client,
@@ -291,7 +291,7 @@ where
             run_pipeline_continuously,
             max_block,
             blockchain.chain_spec(),
-            listeners.clone(),
+            event_sender.clone(),
         );
         let mut this = Self {
             sync,
@@ -306,7 +306,7 @@ where
             blockchain_tree_action: None,
             pipeline_run_threshold,
             hooks: EngineHooksController::new(hooks),
-            listeners,
+            event_sender,
             metrics: EngineMetrics::default(),
         };
 
@@ -406,7 +406,7 @@ where
                 if should_update_head {
                     let head = outcome.header();
                     let _ = self.update_head(head.clone());
-                    self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                    self.event_sender.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
                         Box::new(head.clone()),
                         elapsed,
                     ));
@@ -543,7 +543,7 @@ where
         }
 
         // notify listeners about new processed FCU
-        self.listeners.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status));
+        self.event_sender.notify(BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status));
     }
 
     /// Check if the pipeline is consistent (all stages have the checkpoint block numbers no less
@@ -595,13 +595,6 @@ where
     /// [`BeaconConsensusEngine`]
     pub fn handle(&self) -> BeaconConsensusEngineHandle<EngineT> {
         self.handle.clone()
-    }
-
-    /// Pushes an [UnboundedSender] to the engine's listeners. Also pushes an [UnboundedSender] to
-    /// the sync controller's listeners.
-    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
-        self.listeners.push_listener(listener.clone());
-        self.sync.push_listener(listener);
     }
 
     /// Returns true if the distance from the local tip to the block is greater than the configured
@@ -710,13 +703,13 @@ where
     /// If validation fails, the response MUST contain the latest valid hash:
     ///
     ///   - The block hash of the ancestor of the invalid payload satisfying the following two
-    ///    conditions:
+    ///     conditions:
     ///     - It is fully validated and deemed VALID
     ///     - Any other ancestor of the invalid payload with a higher blockNumber is INVALID
     ///   - 0x0000000000000000000000000000000000000000000000000000000000000000 if the above
-    ///    conditions are satisfied by a PoW block.
+    ///     conditions are satisfied by a PoW block.
     ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
-    ///    the above conditions.
+    ///     the above conditions.
     fn latest_valid_hash_for_invalid_payload(
         &mut self,
         parent_hash: B256,
@@ -1110,8 +1103,8 @@ where
     ///    - invalid extra data
     ///    - invalid transactions
     ///    - incorrect hash
-    ///    - the versioned hashes passed with the payload do not exactly match transaction
-    ///    versioned hashes
+    ///    - the versioned hashes passed with the payload do not exactly match transaction versioned
+    ///      hashes
     ///    - the block does not contain blob transactions if it is pre-cancun
     ///
     /// This validates the following engine API rule:
@@ -1255,7 +1248,7 @@ where
                 } else {
                     BeaconConsensusEngineEvent::ForkBlockAdded(block)
                 };
-                self.listeners.notify(event);
+                self.event_sender.notify(event);
                 PayloadStatusEnum::Valid
             }
             InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
@@ -1429,7 +1422,7 @@ where
         match make_canonical_result {
             Ok(outcome) => {
                 if let CanonicalOutcome::Committed { head } = &outcome {
-                    self.listeners.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
+                    self.event_sender.notify(BeaconConsensusEngineEvent::CanonicalChainCommitted(
                         Box::new(head.clone()),
                         elapsed,
                     ));
@@ -1663,7 +1656,7 @@ where
                         self.blockchain.connect_buffered_blocks_to_canonical_hashes()
                     {
                         error!(target: "consensus::engine", %error, "Error connecting buffered blocks to canonical hashes on hook result");
-                        return Err(error.into())
+                        return Err(RethError::Canonical(error).into())
                     }
                 }
             }
@@ -1878,7 +1871,6 @@ where
                         BeaconEngineMessage::TransitionConfigurationExchanged => {
                             this.blockchain.on_transition_configuration_exchanged();
                         }
-                        BeaconEngineMessage::EventListener(tx) => this.push_listener(tx),
                     }
                     continue
                 }

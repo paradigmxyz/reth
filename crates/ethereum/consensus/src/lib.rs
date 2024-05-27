@@ -9,11 +9,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_consensus::{Consensus, ConsensusError};
-use reth_consensus_common::validation;
+use reth_consensus_common::validation::{
+    validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
+};
 use reth_primitives::{
-    Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    BlockWithSenders, Chain, ChainSpec, Hardfork, Header, Receipt, SealedBlock, SealedHeader,
+    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
+
+mod validation;
+pub use validation::validate_block_post_execution;
 
 /// Ethereum beacon consensus
 ///
@@ -33,7 +39,7 @@ impl EthBeaconConsensus {
 
 impl Consensus for EthBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
-        validation::validate_header_standalone(header, &self.chain_spec)?;
+        validate_header_standalone(header, &self.chain_spec)?;
         Ok(())
     }
 
@@ -87,7 +93,7 @@ impl Consensus for EthBeaconConsensus {
             // is greater than its parent timestamp.
 
             // validate header extradata for all networks post merge
-            validation::validate_header_extradata(header)?;
+            validate_header_extradata(header)?;
 
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
@@ -111,14 +117,22 @@ impl Consensus for EthBeaconConsensus {
             //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
             //  support clique. Same goes for OP blocks below Bedrock.
             if self.chain_spec.chain != Chain::goerli() && !self.chain_spec.is_optimism() {
-                validation::validate_header_extradata(header)?;
+                validate_header_extradata(header)?;
             }
         }
 
         Ok(())
     }
 
-    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validation::validate_block_standalone(block, &self.chain_spec)
+    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+        validate_block_pre_execution(block, &self.chain_spec)
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        receipts: &[Receipt],
+    ) -> Result<(), ConsensusError> {
+        validate_block_post_execution(block, &self.chain_spec, receipts)
     }
 }

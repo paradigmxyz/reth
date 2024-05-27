@@ -16,6 +16,7 @@ workspace = true
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
+reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-exex.workspace = true
 reth-provider = { workspace = true }
@@ -43,6 +44,7 @@ reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-static-file = { workspace = true }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
@@ -52,6 +54,7 @@ reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
 ] }
 reth-node-core.workspace = true
+reth-db-common.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
@@ -132,7 +135,6 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
     "reth-primitives/optimism",
-    "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
