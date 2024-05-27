@@ -7073,7 +7073,6 @@ dependencies = [
  "reth-consensus",
  "reth-execution-errors",
  "reth-fs-util",
- "reth-network-api",
  "reth-network-p2p",
  "reth-storage-errors",
  "thiserror",

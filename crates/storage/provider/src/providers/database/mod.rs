@@ -7,7 +7,10 @@ use crate::{
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_db::{
+    database::Database, init_db, mdbx::DatabaseArguments, models::StoredBlockBodyIndices,
+    DatabaseEnv,
+};
 use reth_evm::ConfigureEvmEnv;
 use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
@@ -17,6 +20,7 @@ use reth_primitives::{
     SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
     TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -29,8 +33,6 @@ mod metrics;
 mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
-use reth_db::mdbx::DatabaseArguments;
-use reth_storage_errors::provider::ProviderResult;
 
 /// A common provider that fetches data from a database or static file.
 ///
@@ -87,7 +89,7 @@ impl ProviderFactory<DatabaseEnv> {
         static_files_path: PathBuf,
     ) -> RethResult<Self> {
         Ok(ProviderFactory::<DatabaseEnv> {
-            db: Arc::new(init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?),
+            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider: StaticFileProvider::new(static_files_path)?,
         })
