@@ -1,0 +1,15 @@
+[package]
+name = "devp2p"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+eyre.workspace = true
+
+reth-primitives.workspace = true
+reth-network.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+
+clap = { workspace = true, features = ["derive", "env"] }
