@@ -37,7 +37,7 @@ tracing.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand = { workspace = true, optional = true }
-generic-array = "0.14"
+generic-array.workspace = true
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
