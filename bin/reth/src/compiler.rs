@@ -8,7 +8,7 @@ use reth_revm::{
     handler::register::EvmHandler,
     interpreter::{InterpreterAction, SharedMemory},
     primitives::SpecId,
-    Database, Evm, Frame,
+    Context, Database, Evm, Frame,
 };
 use std::{
     path::PathBuf,
@@ -160,17 +160,12 @@ impl CompilerEvmConfigInner {
 }
 
 impl ConfigureEvmEnv for CompilerEvmConfig {
-    type TxMeta = <EthEvmConfig as ConfigureEvmEnv>::TxMeta;
-
-    fn fill_tx_env<T>(
+    fn fill_tx_env(
         tx_env: &mut reth_revm::primitives::TxEnv,
-        transaction: T,
+        transaction: &reth_primitives::TransactionSigned,
         sender: reth_primitives::Address,
-        meta: Self::TxMeta,
-    ) where
-        T: AsRef<reth_primitives::Transaction>,
-    {
-        <EthEvmConfig as ConfigureEvmEnv>::fill_tx_env(tx_env, transaction, sender, meta)
+    ) {
+        <EthEvmConfig as ConfigureEvmEnv>::fill_tx_env(tx_env, transaction, sender)
     }
 
     fn fill_cfg_env(
@@ -230,15 +225,22 @@ impl<'a> CompilerEvmContext<'a> {
 fn register_compiler_handler<DB: Database>(
     handler: &mut EvmHandler<'_, CompilerEvmContext<'_>, DB>,
 ) {
-    handler.execution.execute_frame = Some(Arc::new(execute_frame));
+    let previous = handler.execution.execute_frame.clone();
+    handler.execution.execute_frame = Arc::new(move |frame, memory, table, context| {
+        if let Some(action) = execute_frame(frame, memory, context) {
+            Ok(action)
+        } else {
+            previous(frame, memory, table, context)
+        }
+    });
 }
 
 fn execute_frame<DB: Database>(
     frame: &mut Frame,
     memory: &mut SharedMemory,
-    evm: &mut Evm<'_, CompilerEvmContext<'_>, DB>,
+    context: &mut Context<CompilerEvmContext<'_>, DB>,
 ) -> Option<InterpreterAction> {
-    let library = evm.context.external.get_or_load_library(evm.spec_id())?;
+    let library = context.external.get_or_load_library(context.evm.spec_id())?;
     let interpreter = frame.interpreter_mut();
     let hash = match interpreter.contract.hash {
         Some(hash) => hash,
@@ -256,7 +258,7 @@ fn execute_frame<DB: Database>(
 
     interpreter.shared_memory =
         std::mem::replace(memory, reth_revm::interpreter::EMPTY_SHARED_MEMORY);
-    let result = unsafe { f.call_with_interpreter(interpreter, evm) };
+    let result = unsafe { f.call_with_interpreter(interpreter, context) };
     *memory = interpreter.take_memory();
     Some(result)
 }

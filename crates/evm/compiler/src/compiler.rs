@@ -246,7 +246,9 @@ impl EvmParCompiler {
                     .collect::<EvmCompilerResult<()>>()
             })?;
 
-            info!(elapsed=?stopwatch.elapsed(), "compiled {} contracts", to_compile.len());
+            if !self.background_tasks {
+                info!(elapsed=?stopwatch.elapsed(), "compiled {} contracts", to_compile.len());
+            }
         }
 
         // This is a bit more complicated.
@@ -403,6 +405,8 @@ impl EvmParCompiler {
                 }
                 let elapsed = start.elapsed();
 
+                let min = durations.iter().min().copied().unwrap_or_default();
+                let max = durations.iter().max().copied().unwrap_or_default();
                 let mean = durations.iter().sum::<Duration>() / durations.len() as u32;
                 durations.sort_unstable();
                 let median = if durations.len() % 2 == 0 {
@@ -410,7 +414,10 @@ impl EvmParCompiler {
                 } else {
                     durations[durations.len() / 2]
                 };
-                info!("compiled {n} contracts in {elapsed:?} (μ: {mean:?}, ~: {median:?})");
+                info!(
+                    "compiled {n} contracts in {elapsed:.3?} \
+                     (min: {min:.3?}, max: {max:.3?}, μ: {mean:.3?}, ~: {median:.3?})"
+                );
 
                 Ok(())
             })?;

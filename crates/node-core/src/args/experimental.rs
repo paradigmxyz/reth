@@ -49,6 +49,7 @@ pub struct CompilerArgs {
     pub cflags: Vec<String>,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for CompilerArgs {
     fn default() -> Self {
         Self {
