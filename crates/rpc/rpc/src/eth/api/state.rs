@@ -45,7 +45,7 @@ where
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
-        if block_id == Some(BlockId::Number(BlockNumberOrTag::Pending)) {
+        if block_id == Some(BlockId::pending()) {
             let address_txs = self.pool().get_transactions_by_sender(address);
             if let Some(highest_nonce) =
                 address_txs.iter().map(|item| item.transaction.nonce()).max()
