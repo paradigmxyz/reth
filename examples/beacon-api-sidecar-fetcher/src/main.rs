@@ -14,6 +14,7 @@
 use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr},
+    ops::ControlFlow,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -27,7 +28,7 @@ use reqwest::{Error, StatusCode};
 use reth::{
     builder::NodeHandle,
     cli::Cli,
-    primitives::{BlobTransaction, SealedBlock, B256},
+    primitives::{BlobTransaction, SealedBlock, SealedBlockWithSenders, B256},
     providers::{CanonStateNotification, CanonStateSubscriptions},
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
@@ -170,85 +171,36 @@ where
                 {
                     match notification {
                         CanonStateNotification::Commit { new } => {
-                            let mut all_blobs_available = true;
-                            let mut actions_to_queue: Vec<BlockEvent> = Vec::new();
-
-                            // Collect only the EIP4844 transcations.
-                            let txs: Vec<_> = new
-                                .tip()
-                                .transactions()
-                                .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
-                                .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
-                                .collect();
-
-                            if txs.is_empty() {
-                                continue;
+                            for (_, block) in new.blocks().iter() {
+                                process_block(block, this);
                             }
-
-                            // Retrieves all blobs in the order in which we requested them
-                            match this
-                                .pool
-                                .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect())
-                            {
-                                Ok(blobs) => {
-                                    // Match the corresponding BlobTransaction with its Transcation
-                                    for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
-                                        let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
-                                            .expect("should not fail to convert blob tx if it is already eip4844");
-
+                        }
+                        CanonStateNotification::Reorg { old, new } => {
+                            for (_, block) in old.blocks().iter() {
+                                let txs: Vec<BlockEvent> = block
+                                    .transactions()
+                                    .filter(|tx: &&reth::primitives::TransactionSigned| {
+                                        tx.is_eip4844()
+                                    })
+                                    .map(|tx| {
+                                        let transaction_hash = tx.hash();
                                         let block_metadata = BlockMetadata {
                                             block_hash: new.tip().block.hash(),
                                             block_number: new.tip().block.number,
                                             gas_used: new.tip().block.gas_used,
                                         };
-                                        actions_to_queue.push(BlockEvent::Mined(MinedBlob {
-                                            transaction,
+                                        BlockEvent::Reorged(ReorgedBlob {
+                                            transaction_hash,
                                             block_metadata,
-                                        }));
-                                    }
-                                }
-                                Err(_err) => {
-                                    // If a single BlobTransaction is missing we skip the queue.
-                                    all_blobs_available = false;
-                                }
-                            };
-
-                            if all_blobs_available {
-                                this.queued_actions.extend(actions_to_queue);
-                            } else {
-                                let client_clone = this.client.clone();
-                                let block = new.tip().block.clone();
-                                let block_root = new.tip().block.hash();
-                                let sidecar_url = this.beacon_config.sidecar_url(block_root);
-                                let query = Box::pin(fetch_blobs_from_consensus_layer(
-                                    client_clone,
-                                    sidecar_url,
-                                    block,
-                                    txs,
-                                ));
-                                this.pending_requests.push(query);
-                            }
-                        }
-                        CanonStateNotification::Reorg { old, new } => {
-                            let txs: Vec<BlockEvent> = new
-                                .tip()
-                                .transactions()
-                                .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
-                                .map(|tx| {
-                                    let transaction_hash = tx.hash();
-                                    let block_metadata = BlockMetadata {
-                                        block_hash: new.tip().block.hash(),
-                                        block_number: new.tip().block.number,
-                                        gas_used: new.tip().block.gas_used,
-                                    };
-                                    BlockEvent::Reorged(ReorgedBlob {
-                                        transaction_hash,
-                                        block_metadata,
+                                        })
                                     })
-                                })
-                                .collect();
+                                    .collect();
+                                this.queued_actions.extend(txs);
+                            }
 
-                            this.queued_actions.extend(txs);
+                            for (_, block) in new.blocks().iter() {
+                                process_block(block, this);
+                            }
                         }
                     }
                 }
@@ -257,11 +209,61 @@ where
     }
 }
 
+fn process_block<St, P>(block: &SealedBlockWithSenders, this: &mut MinedSidecarStream<St, P>)
+where
+    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    P: TransactionPoolExt + Unpin + 'static,
+{
+    let txs: Vec<_> = block
+        .transactions()
+        .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
+        .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
+        .collect();
+    let mut all_blobs_available = true;
+    let mut actions_to_queue: Vec<BlockEvent> = Vec::new();
+    if txs.is_empty() {
+        return;
+    }
+    match this.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
+        Ok(blobs) => {
+            // Match the corresponding BlobTransaction with its
+            // Transcation
+            for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
+                let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
+                    .expect("should not fail to convert blob tx if it is already eip4844");
+
+                let block_metadata = BlockMetadata {
+                    block_hash: block.hash(),
+                    block_number: block.number,
+                    gas_used: block.gas_used,
+                };
+                actions_to_queue.push(BlockEvent::Mined(MinedBlob { transaction, block_metadata }));
+            }
+        }
+        Err(_err) => {
+            // If a single BlobTransaction is missing we skip the queue.
+            all_blobs_available = false;
+        }
+    };
+
+    // if any blob is missing we must instead query the consensus layer.
+    if all_blobs_available {
+        this.queued_actions.extend(actions_to_queue);
+    } else {
+        let client_clone = this.client.clone();
+        let block_root = block.hash();
+        let block_clone = block.clone();
+        let sidecar_url = this.beacon_config.sidecar_url(block_root);
+        let query = Box::pin(fetch_blobs_for_block(client_clone, sidecar_url, block_clone, txs));
+        this.pending_requests.push(query);
+    }
+}
+
 /// Query the Beacon Layer for missing BlobTransactions
-async fn fetch_blobs_from_consensus_layer(
+async fn fetch_blobs_for_block(
     client: reqwest::Client,
     url: String,
-    block: SealedBlock,
+    block: SealedBlockWithSenders,
     txs: Vec<(reth::primitives::TransactionSigned, usize)>,
 ) -> Result<Vec<BlockEvent>, SideCarError> {
     let response = match client.get(url).header("Accept", "application/json").send().await {

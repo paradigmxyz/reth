@@ -1,13 +1,10 @@
 use std::{collections::VecDeque, pin::Pin};
 
 use eyre::Result;
-use futures_util::{stream::FuturesUnordered, Future, Stream};
+use futures_util::{stream::FuturesUnordered, Future};
 
 use crate::{BeaconSidecarConfig, SideCarError};
-use reth::{
-    primitives::{BlobTransaction, B256},
-    providers::CanonStateNotification,
-};
+use reth::primitives::{BlobTransaction, B256};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,19 +32,15 @@ pub enum BlockEvent {
     Reorged(ReorgedBlob),
 }
 
-/// Tracks the futures associated with retrieving blob data from the beacon client
-type BeaconFutures =
-    FuturesUnordered<Pin<Box<dyn Future<Output = Result<Vec<BlockEvent>, SideCarError>> + Send>>>;
+/// Futures associated with retrieving blob data from the beacon client
+type SidecarsFuture = Pin<Box<dyn Future<Output = Result<Vec<BlockEvent>, SideCarError>> + Send>>;
 
 /// Wrapper struct for CanonStateNotifications
-pub struct MinedSidecarStream<St, P>
-where
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-{
+pub struct MinedSidecarStream<St, P> {
     pub events: St,
     pub pool: P,
     pub beacon_config: BeaconSidecarConfig,
     pub client: reqwest::Client,
-    pub pending_requests: BeaconFutures,
+    pub pending_requests: FuturesUnordered<SidecarsFuture>,
     pub queued_actions: VecDeque<BlockEvent>,
 }
