@@ -138,7 +138,7 @@ impl Command {
         let mut network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
             noop_db,
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RO)?,
+            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
         )?));
 
         if !self.discovery.disable_discovery &&
