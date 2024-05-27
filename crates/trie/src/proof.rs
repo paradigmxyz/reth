@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
-use reth_interfaces::trie::{StateRootError, StorageRootError};
+use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
@@ -168,9 +168,9 @@ mod tests {
     use crate::StateRoot;
     use once_cell::sync::Lazy;
     use reth_db::database::Database;
-    use reth_interfaces::RethResult;
     use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
+    use reth_storage_errors::provider::ProviderResult;
     use std::{str::FromStr, sync::Arc};
 
     /*
@@ -201,7 +201,7 @@ mod tests {
     fn insert_genesis<DB: Database>(
         provider_factory: &ProviderFactory<DB>,
         chain_spec: Arc<ChainSpec>,
-    ) -> RethResult<B256> {
+    ) -> ProviderResult<B256> {
         let mut provider = provider_factory.provider_rw()?;
 
         // Hash accounts and insert them into hashing table.
