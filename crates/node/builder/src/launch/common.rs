@@ -322,7 +322,9 @@ impl<DB> LaunchContextWith<Attached<WithConfigs, DB>>
 where
     DB: Database + Clone + 'static,
 {
-    /// Returns the [ProviderFactory] for the attached database.
+    /// Returns the [ProviderFactory] for the attached storage after executing a consistent check
+    /// between the database and static files. **It may execute a pipeline unwind if it fails this
+    /// check.**
     pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
         let factory = ProviderFactory::new(
             self.right().clone(),
