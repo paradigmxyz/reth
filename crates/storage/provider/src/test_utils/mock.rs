@@ -9,7 +9,6 @@ use crate::{
 use parking_lot::Mutex;
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
     BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
@@ -17,6 +16,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::updates::TrieUpdates;
 use revm::{
     db::BundleState,

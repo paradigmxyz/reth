@@ -29,7 +29,7 @@ pub use providers::{
 pub mod test_utils;
 
 /// Re-export provider error.
-pub use reth_interfaces::provider::ProviderError;
+pub use reth_storage_errors::provider::ProviderError;
 
 pub mod chain;
 pub use chain::{Chain, DisplayBlocksChain};

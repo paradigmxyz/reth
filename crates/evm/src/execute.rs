@@ -1,6 +1,5 @@
 //! Traits for execution.
 
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
 use reth_primitives::{
     BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, Request, Requests, U256,
 };

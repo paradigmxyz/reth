@@ -1,7 +1,7 @@
 //! EIP-6110 deposit requests parsing
 use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
 use alloy_sol_types::{sol, SolEvent};
-use reth_interfaces::executor::BlockValidationError;
+use reth_evm::execute::BlockValidationError;
 use reth_primitives::{ChainSpec, Receipt, Request};
 use revm_primitives::Log;
 

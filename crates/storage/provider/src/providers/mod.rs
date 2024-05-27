@@ -7,20 +7,16 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
+use reth_blockchain_tree_api::{
+    error::{CanonicalError, InsertBlockError},
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
+};
 use reth_db::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
-    provider::ProviderResult,
-    RethResult,
-};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
@@ -29,6 +25,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -682,18 +679,20 @@ where
         self.tree.finalize_block(finalized_block)
     }
 
-    fn update_block_hashes_and_clear_buffered(&self) -> RethResult<BTreeMap<BlockNumber, B256>> {
-        self.tree.update_block_hashes_and_clear_buffered()
-    }
-
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         self.tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block)
     }
 
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> Result<BTreeMap<BlockNumber, B256>, CanonicalError> {
+        self.tree.update_block_hashes_and_clear_buffered()
+    }
+
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 

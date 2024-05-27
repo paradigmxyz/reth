@@ -1656,7 +1656,7 @@ where
                         self.blockchain.connect_buffered_blocks_to_canonical_hashes()
                     {
                         error!(target: "consensus::engine", %error, "Error connecting buffered blocks to canonical hashes on hook result");
-                        return Err(error.into())
+                        return Err(RethError::Canonical(error).into())
                     }
                 }
             }

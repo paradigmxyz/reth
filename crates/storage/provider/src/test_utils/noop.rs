@@ -8,7 +8,6 @@ use crate::{
 };
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,
@@ -18,6 +17,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     MAINNET, U256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie::updates::TrieUpdates;
 use revm::{
     db::BundleState,

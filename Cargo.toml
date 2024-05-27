@@ -2,6 +2,7 @@
 members = [
     "bin/reth/",
     "crates/blockchain-tree/",
+    "crates/blockchain-tree-api/",
     "crates/cli/runner/",
     "crates/config/",
     "crates/consensus/auto-seal/",
@@ -66,6 +67,7 @@ members = [
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
     "crates/storage/db/",
+    "crates/storage/db-common",
     "crates/storage/errors/",
     "crates/storage/libmdbx-rs/",
     "crates/storage/libmdbx-rs/mdbx-sys/",
@@ -215,6 +217,7 @@ reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
+reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
@@ -222,6 +225,7 @@ reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
 reth-db = { path = "crates/storage/db" }
+reth-db-common = { path = "crates/storage/db-common" }
 reth-discv4 = { path = "crates/net/discv4" }
 reth-discv5 = { path = "crates/net/discv5" }
 reth-dns-discovery = { path = "crates/net/dns" }
@@ -329,6 +333,7 @@ dashmap = "5.5"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"
 eyre = "0.6"
+generic-array = "0.14"
 tracing = "0.1.0"
 tracing-appender = "0.2"
 thiserror = "1.0"

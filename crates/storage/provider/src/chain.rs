@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::bundle_state::BundleStateWithReceipts;
-use reth_interfaces::{executor::BlockExecutionError, RethResult};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, TransactionSigned, TransactionSignedEcRecovered, TxHash,
@@ -79,6 +79,11 @@ impl Chain {
     /// Get cached trie updates for this chain.
     pub fn trie_updates(&self) -> Option<&TrieUpdates> {
         self.trie_updates.as_ref()
+    }
+
+    /// Remove cached trie updates for this chain.
+    pub fn clear_trie_updates(&mut self) {
+        self.trie_updates.take();
     }
 
     /// Get post state of this chain
@@ -235,15 +240,14 @@ impl Chain {
     /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, other: Chain) -> RethResult<()> {
+    pub fn append_chain(&mut self, other: Chain) -> Result<(), BlockExecutionError> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
             return Err(BlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: Box::new(chain_tip.num_hash()),
                 other_chain_fork: Box::new(other_fork_block),
-            }
-            .into())
+            })
         }
 
         // Insert blocks from other chain

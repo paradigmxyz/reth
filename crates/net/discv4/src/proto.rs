@@ -72,7 +72,7 @@ pub enum Message {
 
 impl Message {
     /// Returns the id for this type
-    pub fn msg_type(&self) -> MessageId {
+    pub const fn msg_type(&self) -> MessageId {
         match self {
             Message::Ping(_) => MessageId::Ping,
             Message::Pong(_) => MessageId::Pong,

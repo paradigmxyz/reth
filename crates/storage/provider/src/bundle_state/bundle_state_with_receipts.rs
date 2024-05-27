@@ -8,13 +8,13 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_evm::execute::BatchBlockExecutionOutput;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
     Account, Address, BlockHash, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts,
     StaticFileSegment, StorageEntry, B256, U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::HashedPostState;
 pub use revm::db::states::OriginalValuesKnown;
 use revm::{

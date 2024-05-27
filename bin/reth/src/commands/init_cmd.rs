@@ -9,7 +9,7 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::init_db;
-use reth_node_core::init::init_genesis;
+use reth_db_common::init::init_genesis;
 use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::sync::Arc;

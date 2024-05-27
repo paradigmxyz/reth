@@ -10,8 +10,8 @@ use reth_primitives::{
 use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
-    node_iter::{AccountNode, AccountNodeIter},
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    node_iter::{TrieElement, TrieNodeIter},
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     walker::TrieWalker,
@@ -131,23 +131,24 @@ where
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_state_sorted);
         let trie_cursor_factory = tx;
 
-        let trie_cursor =
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?;
+        let walker = TrieWalker::new(
+            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+            prefix_sets.account_prefix_set,
+        )
+        .with_updates(retain_updates);
+        let mut account_node_iter = TrieNodeIter::new(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+        );
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
-        let walker = TrieWalker::new(trie_cursor, prefix_sets.account_prefix_set)
-            .with_updates(retain_updates);
-        let mut account_node_iter =
-            AccountNodeIter::from_factory(walker, hashed_cursor_factory.clone())
-                .map_err(ProviderError::Database)?;
-
         let mut account_rlp = Vec::with_capacity(128);
         while let Some(node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
             match node {
-                AccountNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                AccountNode::Leaf(hashed_address, account) => {
+                TrieElement::Leaf(hashed_address, account) => {
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.await.map_err(|_| {
                             AsyncStateRootError::StorageRootChannelClosed { hashed_address }
