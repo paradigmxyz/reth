@@ -124,7 +124,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         Ok((data_file, offsets_file, is_created))
     }
 
-    /// Performs consistency checks on the [`NippyJar`] file and acts upon any issues if
+    /// Performs consistency checks on the [`NippyJar`] file and heals upon any issues if
     /// `read_only` is set to false:
     /// * Is the offsets file size expected?
     /// * Is the data file size expected?
