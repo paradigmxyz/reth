@@ -1,10 +1,9 @@
 //! Error handling for the blockchain tree
 
-use crate::RethError;
 use reth_consensus::ConsensusError;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
-use reth_storage_errors::provider::ProviderError;
+pub use reth_storage_errors::provider::ProviderError;
 
 /// Various error cases that can occur when a block violates tree assumptions.
 #[derive(Debug, Clone, Copy, thiserror::Error, Eq, PartialEq)]
@@ -131,11 +130,6 @@ impl InsertBlockError {
     /// Create a new InsertInvalidBlockError from an execution error
     pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
         Self::new(block, InsertBlockErrorKind::Execution(error))
-    }
-
-    /// Create a new InsertBlockError from a RethError and block.
-    pub fn from_reth_error(error: RethError, block: SealedBlock) -> Self {
-        Self::new(block, error.into())
     }
 
     /// Consumes the error and returns the block that resulted in the error
@@ -380,21 +374,6 @@ impl InsertBlockErrorKind {
         match self {
             InsertBlockErrorKind::Execution(err) => Some(err),
             _ => None,
-        }
-    }
-}
-
-// This is a convenience impl to convert from crate::Error to InsertBlockErrorKind
-impl From<RethError> for InsertBlockErrorKind {
-    fn from(err: RethError) -> Self {
-        match err {
-            RethError::Execution(err) => InsertBlockErrorKind::Execution(err),
-            RethError::Consensus(err) => InsertBlockErrorKind::Consensus(err),
-            RethError::Database(err) => InsertBlockErrorKind::Internal(Box::new(err)),
-            RethError::Provider(err) => InsertBlockErrorKind::Internal(Box::new(err)),
-            RethError::Network(err) => InsertBlockErrorKind::Internal(Box::new(err)),
-            RethError::Custom(err) => InsertBlockErrorKind::Internal(err.into()),
-            RethError::Canonical(err) => InsertBlockErrorKind::Canonical(err),
         }
     }
 }
