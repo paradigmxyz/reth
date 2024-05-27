@@ -928,7 +928,7 @@ impl StaticFileWriter for StaticFileProvider {
         }
 
         tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
-        let mut writer = match self.writers.entry(segment) {
+        Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
             DashMapEntry::Vacant(entry) => {
                 let writer = StaticFileProviderRW::new(
@@ -939,12 +939,7 @@ impl StaticFileWriter for StaticFileProvider {
                 )?;
                 entry.insert(writer)
             }
-        };
-
-        writer.ensure_file_consistency(false)?;
-        writer.commit()?;
-
-        Ok(writer)
+        })
     }
 
     fn latest_writer(
