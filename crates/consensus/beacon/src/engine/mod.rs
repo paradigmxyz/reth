@@ -393,8 +393,8 @@ where
         match make_canonical_result {
             Ok(outcome) => {
                 let should_update_head = match &outcome {
-                    CanonicalOutcome::AlreadyCanonical { header } => {
-                        self.on_head_already_canonical(header, &mut attrs)
+                    CanonicalOutcome::AlreadyCanonical { head, header } => {
+                        self.on_head_already_canonical(head, header, &mut attrs)
                     }
                     CanonicalOutcome::Committed { head } => {
                         // new VALID update that moved the canonical chain forward
@@ -448,6 +448,7 @@ where
     /// Returns `true` if the head needs to be updated.
     fn on_head_already_canonical(
         &self,
+        head: &BlockNumHash,
         header: &SealedHeader,
         attrs: &mut Option<EngineT::PayloadAttributes>,
     ) -> bool {
@@ -457,7 +458,7 @@ where
             debug!(
                 target: "consensus::engine",
                 fcu_head_num=?header.number,
-                current_head_num=?self.blockchain.canonical_tip().number,
+                current_head_num=?head.number,
                 "[Optimism] Allowing beacon reorg to old head"
             );
             return true
@@ -469,14 +470,14 @@ where
         //    and deemed `VALID`. In the case of such an event, client software MUST return
         //    `{payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash,
         //    validationError: null}, payloadId: null}`
-        if self.blockchain.canonical_tip() != header.num_hash() {
+        if head != &header.num_hash() {
             attrs.take();
         }
 
         debug!(
             target: "consensus::engine",
             fcu_head_num=?header.number,
-            current_head_num=?self.blockchain.canonical_tip().number,
+            current_head_num=?head.number,
             "Ignoring beacon update to old head"
         );
         false
@@ -1285,12 +1286,11 @@ where
         &mut self,
         downloaded_block: BlockNumHash,
         missing_parent: BlockNumHash,
+        head: BlockNumHash,
     ) {
         // compare the missing parent with the canonical tip
-        let canonical_tip_num = self.blockchain.canonical_tip().number;
-
         if let Some(target) = self.can_pipeline_sync_to_finalized(
-            canonical_tip_num,
+            head.number,
             missing_parent.number,
             Some(downloaded_block),
         ) {
@@ -1310,9 +1310,7 @@ where
         //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
         //    less than the pipeline threshold
         //    * this case represents a potentially long range of blocks to download and execute
-        if let Some(distance) =
-            self.distance_from_local_tip(canonical_tip_num, missing_parent.number)
-        {
+        if let Some(distance) = self.distance_from_local_tip(head.number, missing_parent.number) {
             self.sync.download_block_range(missing_parent.hash, distance)
         } else {
             // This happens when the missing parent is on an outdated
@@ -1753,11 +1751,16 @@ where
                                 }
                             }
                             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                                head,
                                 missing_ancestor: missing_parent,
                             }) => {
                                 // block is not connected to the canonical head, we need to download
                                 // its missing branch first
-                                self.on_disconnected_block(downloaded_num_hash, missing_parent);
+                                self.on_disconnected_block(
+                                    downloaded_num_hash,
+                                    missing_parent,
+                                    head,
+                                );
                             }
                             _ => (),
                         }

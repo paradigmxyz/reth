@@ -162,7 +162,10 @@ impl std::fmt::Display for BlockValidationKind {
 pub enum CanonicalOutcome {
     /// The block is already canonical.
     AlreadyCanonical {
-        /// The corresponding [SealedHeader] that is already canonical.
+        /// Block number and hash of current head.
+        head: BlockNumHash,
+        /// The corresponding [SealedHeader] that was attempted to be made a current head and
+        /// is already canonical.
         header: SealedHeader,
     },
     /// Committed the block to the database.
@@ -176,7 +179,7 @@ impl CanonicalOutcome {
     /// Returns the header of the block that was made canonical.
     pub fn header(&self) -> &SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header } => header,
+            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
             CanonicalOutcome::Committed { head } => head,
         }
     }
@@ -184,7 +187,7 @@ impl CanonicalOutcome {
     /// Consumes the outcome and returns the header of the block that was made canonical.
     pub fn into_header(self) -> SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header } => header,
+            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
             CanonicalOutcome::Committed { head } => head,
         }
     }
@@ -209,6 +212,8 @@ pub enum BlockStatus {
     /// If block is valid and block forks off canonical chain.
     /// If blocks is not connected to canonical chain.
     Disconnected {
+        /// Current canonical head.
+        head: BlockNumHash,
         /// The lowest ancestor block that is not connected to the canonical chain.
         missing_ancestor: BlockNumHash,
     },
