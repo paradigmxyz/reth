@@ -1192,6 +1192,23 @@ where
             "Canonicalization finished"
         );
 
+        // clear trie updates for other childs
+        self.block_indices()
+            .fork_to_child()
+            .get(&old_tip.hash)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .for_each(|child| {
+                if let Some(chain_id) = self.block_indices().get_blocks_chain_id(&child) {
+                    if let Some(chain) = self.state.chains.get_mut(&chain_id) {
+                        chain.clear_trie_updates();
+                    }
+                }
+            });
+
+        durations_recorder.record_relative(MakeCanonicalAction::ClearTrieUpdatesForOtherChilds);
+
         // Send notification about new canonical chain and return outcome of canonicalization.
         let outcome = CanonicalOutcome::Committed { head: chain_notification.tip().header.clone() };
         let _ = self.canon_state_notification_sender.send(chain_notification);
