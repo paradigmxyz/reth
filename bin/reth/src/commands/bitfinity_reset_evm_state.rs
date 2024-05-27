@@ -301,16 +301,20 @@ fn split_add_account_request_data(
     let mut current_map = AccountInfoMap::new();
 
     for (address, account) in data.data {
-        let current_size = current_map.estimate_byte_size();
-        let address_size = H160::BYTE_SIZE;
-        let account_size = account.estimate_byte_size();
 
-        let available_size = max_byte_size - current_size;
-        if address_size + account_size > available_size {
-            result.push(std::mem::replace(&mut current_map, AccountInfoMap::new()));
+        for account in split_single_account_data(max_byte_size, account) {
+           
+            let current_size = current_map.estimate_byte_size();
+            let address_size = H160::BYTE_SIZE;
+            let account_size = account.estimate_byte_size();
+            
+            let available_size = max_byte_size.saturating_sub(current_size);
+            if address_size + account_size > available_size {
+                result.push(std::mem::replace(&mut current_map, AccountInfoMap::new()));
+            }
+            
+            current_map.data.insert(address.clone(), account);
         }
-
-        current_map.data.insert(address, account);
     }
 
     if !current_map.data.is_empty() {
@@ -353,7 +357,7 @@ fn split_single_account_data(
         let key_size = H256::BYTE_SIZE;
         let value_size = H256::BYTE_SIZE;
 
-        let available_size = max_byte_size - current_size;
+        let available_size = max_byte_size.saturating_sub(current_size);
         if key_size + value_size > available_size {
             result.push(std::mem::replace(&mut current_account, RawAccountInfo {
                 nonce: nonce.clone(),
@@ -374,48 +378,6 @@ fn split_single_account_data(
 
     result
 }
-
-
-
-// /// Receive an account and split it into two pieces with the first piece having a size of `max_byte_size`
-// fn split_single_account_data(
-//     max_byte_size: usize,
-//     data: RawAccountInfo,
-// ) -> (RawAccountInfo, Option<RawAccountInfo>) {
-//     if data.estimate_byte_size() <= max_byte_size {
-//         return (data, None);
-//     }
-//     warn!(target: "reth::cli", "Single account data size exceeds max byte size, splitting it into multiple requests");
-
-//     let mut current_account = RawAccountInfo {
-//         nonce: data.nonce.clone(),
-//         balance: data.balance.clone(),
-//         bytecode: None,
-//         storage: vec![],
-//     };
-
-//     let mut remaining_account = RawAccountInfo {
-//         nonce: data.nonce,
-//         balance: data.balance,
-//         bytecode: data.bytecode,
-//         storage: vec![],
-//     };
-
-//     for (key, value) in data.storage {
-//         let current_size = current_account.estimate_byte_size();
-//         let key_size = H256::BYTE_SIZE;
-//         let value_size = H256::BYTE_SIZE;
-
-//         let available_size = max_byte_size - current_size;
-//         if key_size + value_size > available_size {
-//             remaining_account.storage.push((key, value));
-//         }
-
-//         current_account.storage.push((key, value));
-//     }
-
-//     (current_account, Some(remaining_account))
-// }
 
 #[cfg(test)]
 mod test {
@@ -479,6 +441,11 @@ mod test {
             }
         }
         result
+    }
+
+    #[test]
+    fn bitfinity_split_info_map_should_split_a_single_account_in_multiple_calls() {
+        todo!()
     }
 
     #[test]
