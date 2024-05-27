@@ -46,7 +46,9 @@ where
 /// for iterating over hashed storage.
 #[derive(Debug)]
 pub struct DatabaseHashedStorageCursor<C> {
+    /// Database hashed storage cursor.
     cursor: C,
+    /// Target hashed address of the account that the storage belongs to.
     hashed_address: B256,
 }
 

@@ -31,6 +31,7 @@ pub trait HashedCursor {
     type Value;
 
     /// Seek an entry greater or equal to the given key and position the cursor there.
+    /// Returns the first entry with the key greater or equal to the sought key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError>;
 
     /// Move the cursor to the next entry and return it.

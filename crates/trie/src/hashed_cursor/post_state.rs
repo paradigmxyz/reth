@@ -194,7 +194,7 @@ pub struct HashedPostStateStorageCursor<'b, C> {
 }
 
 impl<'b, C> HashedPostStateStorageCursor<'b, C> {
-    /// Create new instance of [HashedPostStateStorageCursor].
+    /// Create new instance of [HashedPostStateStorageCursor] for the given hashed address.
     pub fn new(cursor: C, post_state: &'b HashedPostStateSorted, hashed_address: B256) -> Self {
         Self { cursor, post_state, hashed_address, last_slot: None, post_state_storage_index: 0 }
     }
