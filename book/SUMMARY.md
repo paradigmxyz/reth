@@ -73,8 +73,5 @@
       - [`reth debug replay-engine`](./cli/reth/debug/replay-engine.md)
     - [`reth recover`](./cli/reth/recover.md)
       - [`reth recover storage-tries`](./cli/reth/recover/storage-tries.md)
-  - [`op-reth`](./cli/op-reth.md)
-    - [`op-reth import-op`](./cli/reth/import-op.md)
-    - [`op-reth import-receipts-op`](./cli/reth/import-receipts-op.md)
 - [Developers](./developers/developers.md) <!-- CLI_REFERENCE END -->
    - [Contribute](./developers/contribute.md)

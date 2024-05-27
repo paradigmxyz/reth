@@ -44,7 +44,4 @@
     - [`reth debug replay-engine`](./reth/debug/replay-engine.md)
   - [`reth recover`](./reth/recover.md)
     - [`reth recover storage-tries`](./reth/recover/storage-tries.md)
-- [`op-reth`](./op-reth.md)
-  - [`op-reth import-op`](./reth/import-op.md)
-  - [`op-reth import-receipts-op`](./reth/import-receipts-op.md)
 

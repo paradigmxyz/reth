@@ -36,7 +36,16 @@ Options:
       --chunk-len <CHUNK_LEN>
           Chunk byte length to read from file.
 
-          [default: 1GB]
+      --instance <INSTANCE>
+          Add a new instance of a node.
+
+          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
+
+          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+
+          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+
+          [default: 1]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -61,10 +70,10 @@ Database:
           [possible values: true, false]
 
   <IMPORT_PATH>
-          The path to a `.rlp` block file for import.
+          The path to a block file for import.
 
-          The online sync pipeline stages (headers and bodies) are replaced by a file import, after which the
-          remaining stages are executed (unless disabled, see '--no-state').
+          The online stages (headers and bodies) are replaced by a file import, after which the
+          remaining stages are executed.
 
 Logging:
       --log.stdout.format <FORMAT>
