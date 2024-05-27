@@ -32,7 +32,7 @@ pub use reth_execution_errors::trie;
 pub use reth_network_p2p::sync;
 
 /// BlockchainTree related traits.
-pub mod blockchain_tree;
+pub use reth_blockchain_tree_api as blockchain_tree;
 
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 #[cfg(feature = "test-utils")]
