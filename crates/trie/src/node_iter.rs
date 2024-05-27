@@ -1,10 +1,10 @@
 use crate::{
-    hashed_cursor::{HashedAccountCursor, HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor},
     trie_cursor::TrieCursor,
     walker::TrieWalker,
 };
 use reth_db::DatabaseError;
-use reth_primitives::{trie::Nibbles, Account, StorageEntry, B256, U256};
+use reth_primitives::{trie::Nibbles, Account, B256, U256};
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -90,7 +90,7 @@ impl<C, H> AccountNodeIter<C, H> {
 impl<C, H> AccountNodeIter<C, H>
 where
     C: TrieCursor,
-    H: HashedAccountCursor,
+    H: HashedCursor<Value = Account>,
 {
     /// Return the next account trie node to be added to the hash builder.
     ///
@@ -168,7 +168,7 @@ pub struct StorageNodeIter<C, H> {
     pub hashed_storage_cursor: H,
 
     /// Current hashed storage entry.
-    current_hashed_entry: Option<StorageEntry>,
+    current_hashed_entry: Option<(B256, U256)>,
     /// Flag indicating whether we should check the current walker key.
     current_walker_key_checked: bool,
 }
@@ -188,7 +188,7 @@ impl<C, H> StorageNodeIter<C, H> {
 impl<C, H> StorageNodeIter<C, H>
 where
     C: TrieCursor,
-    H: HashedStorageCursor,
+    H: HashedStorageCursor<Value = U256>,
 {
     /// Return the next storage trie node to be added to the hash builder.
     ///
@@ -219,8 +219,7 @@ where
             }
 
             // Check for a current hashed storage entry.
-            if let Some(StorageEntry { key: hashed_key, value }) = self.current_hashed_entry.take()
-            {
+            if let Some((hashed_key, value)) = self.current_hashed_entry.take() {
                 // Compare keys and proceed accordingly.
                 if self.walker.key().map_or(false, |key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
@@ -233,14 +232,15 @@ where
             }
 
             // Attempt to get the next unprocessed key from the walker.
-            if let Some(seek_key) = self.walker.next_unprocessed_key() {
-                // Seek and update the current hashed entry based on the new seek key.
-                self.current_hashed_entry = self.hashed_storage_cursor.seek(seek_key)?;
-                self.walker.advance()?;
-            } else {
+            match self.walker.next_unprocessed_key() {
+                Some(seek_key) => {
+                    // Seek and update the current hashed entry based on the new seek key.
+                    self.current_hashed_entry = self.hashed_storage_cursor.seek(seek_key)?;
+                    self.walker.advance()?;
+                }
                 // No more keys to process, break the loop.
-                break
-            }
+                None => break,
+            };
         }
 
         Ok(None) // Return None if no more nodes are available.
