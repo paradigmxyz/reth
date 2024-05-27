@@ -146,7 +146,7 @@ impl EvmParCompiler {
         fs::create_dir_all(&out_dir)?;
         let evm_versions = EvmVersions::enabled();
         for evm_version in evm_versions {
-            fs::create_dir_all(&out_dir.join(format!("{evm_version:?}")))?;
+            fs::create_dir_all(out_dir.join(format!("{evm_version:?}")))?;
         }
         let metadata_path = out_dir.join("meta.json");
         let mut metadata = if metadata_path.exists() {
