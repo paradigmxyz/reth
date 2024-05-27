@@ -135,12 +135,12 @@ impl StaticFileSegment {
     }
 
     /// Returns `true` if the segment is `StaticFileSegment::Headers`.
-    pub fn is_headers(&self) -> bool {
+    pub const fn is_headers(&self) -> bool {
         matches!(self, StaticFileSegment::Headers)
     }
 
     /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
-    pub fn is_receipts(&self) -> bool {
+    pub const fn is_receipts(&self) -> bool {
         matches!(self, StaticFileSegment::Receipts)
     }
 }
