@@ -10,7 +10,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, ProviderError, ProviderFactory, ReceiptProvider,
-    TransactionsProvider, TransactionsProviderExt,
+    StaticFileEnv, TransactionsProvider, TransactionsProviderExt,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -43,7 +43,7 @@ impl Command {
             .filename_with_configuration(filters, compression, &block_range)
             .into();
 
-        let provider = StaticFileProvider::new(PathBuf::default())?;
+        let provider = StaticFileProvider::new(PathBuf::default(), StaticFileEnv::RO)?;
         let jar_provider = provider.get_segment_provider_from_block(
             StaticFileSegment::Receipts,
             self.from,

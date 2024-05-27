@@ -90,7 +90,7 @@ impl StaticFileProviderRW {
             Err(err) => return Err(err),
         };
 
-        let result = match NippyJarWriter::new(jar) {
+        let result = match NippyJarWriter::new(jar, false) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This static file has been frozen, so we should
@@ -110,14 +110,23 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
-    /// Checks the consistency of the file and heals it if necessary.
+    /// Checks the consistency of the file and heals it if necessary and `read_only` is set to
+    /// false. If the check fails, it will return an error.
     ///
-    /// Healing will update the end range on the [SegmentHeader]. However, for transaction based
-    /// segments, the block end range has to be found and healed externally.
-    pub fn ensure_file_consistency(&mut self) -> ProviderResult<()> {
+    /// If healing does happen, it will update the end range on the [SegmentHeader]. However, for
+    /// transaction based segments, the block end range has to be found and healed externally.
+    pub fn ensure_file_consistency(&mut self, read_only: bool) -> ProviderResult<()> {
         let err = |err: NippyJarError| ProviderError::NippyJar(err.to_string());
         let initial_rows = self.writer.rows();
-        self.writer.check_consistency_and_heal().map_err(err)?;
+        self.writer.ensure_file_consistency(read_only).map_err(|error| {
+            if matches!(error, NippyJarError::InconsistentState) {
+                return ProviderError::NippyJar(
+                    "Inconsistent state found. Start the node to heal or run a manual unwind."
+                        .to_string(),
+                )
+            }
+            err(error)
+        })?;
 
         // If we have lost rows, we need to the [SegmentHeader]
         let pruned_rows = initial_rows - self.writer.rows();

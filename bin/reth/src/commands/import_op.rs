@@ -22,7 +22,10 @@ use reth_downloaders::file_client::{
 use reth_node_core::init::init_genesis;
 
 use reth_primitives::{hex, stage::StageId, PruneModes, TxHash};
-use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
+use reth_provider::{
+    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader, StaticFileEnv,
+    StaticFileProviderFactory,
+};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 
@@ -94,8 +97,11 @@ impl ImportOpCommand {
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
 
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), chain_spec.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            chain_spec.clone(),
+            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
+        )?;
 
         debug!(target: "reth::cli", chain=%chain_spec.chain, genesis=?chain_spec.genesis_hash(), "Initializing genesis");
 

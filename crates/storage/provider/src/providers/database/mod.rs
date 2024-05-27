@@ -20,7 +20,7 @@ use reth_primitives::{
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 use tracing::trace;
@@ -49,13 +49,9 @@ impl<DB> ProviderFactory<DB> {
     pub fn new(
         db: DB,
         chain_spec: Arc<ChainSpec>,
-        static_files_path: PathBuf,
+        static_file_provider: StaticFileProvider,
     ) -> RethResult<ProviderFactory<DB>> {
-        Ok(Self {
-            db: Arc::new(db),
-            chain_spec,
-            static_file_provider: StaticFileProvider::new(static_files_path)?,
-        })
+        Ok(Self { db: Arc::new(db), chain_spec, static_file_provider })
     }
 
     /// Enables metrics on the static file provider.
@@ -83,12 +79,12 @@ impl ProviderFactory<DatabaseEnv> {
         path: P,
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
-        static_files_path: PathBuf,
+        static_file_provider: StaticFileProvider,
     ) -> RethResult<Self> {
         Ok(ProviderFactory::<DatabaseEnv> {
             db: Arc::new(init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?),
             chain_spec,
-            static_file_provider: StaticFileProvider::new(static_files_path)?,
+            static_file_provider,
         })
     }
 }
@@ -571,8 +567,10 @@ impl<DB> Clone for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        providers::StaticFileWriter, test_utils::create_test_provider_factory, BlockHashReader,
-        BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        providers::{static_file::StaticFileEnv, StaticFileProvider, StaticFileWriter},
+        test_utils::create_test_provider_factory,
+        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode,
+        TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -631,7 +629,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
-            static_dir_path,
+            StaticFileProvider::new(static_dir_path, StaticFileEnv::RW).unwrap(),
         )
         .unwrap();
 

@@ -23,7 +23,8 @@ use reth_primitives::{
     stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, PruneModes, B256,
 };
 use reth_provider::{
-    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileEnv,
+    StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_rpc_layer::JwtSecret;
@@ -329,7 +330,7 @@ where
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
-            self.data_dir().static_files(),
+            StaticFileProvider::new(self.data_dir().static_files(), StaticFileEnv::RW)?,
         )?
         .with_static_files_metrics();
 
@@ -340,11 +341,10 @@ where
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
-        if let Some(unwind_target) = factory.static_file_provider().check_consistency(
-            &factory.provider()?,
-            has_receipt_pruning,
-            false,
-        )? {
+        if let Some(unwind_target) = factory
+            .static_file_provider()
+            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
             if PipelineTarget::Unwind(0) == unwind_target {

@@ -21,9 +21,9 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec, Receipts};
 use reth_provider::{
-    AccountExtReader, BundleStateWithReceipts, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StorageReader,
+    providers::StaticFileProvider, AccountExtReader, BundleStateWithReceipts, HashingWriter,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StaticFileEnv, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::TaskExecutor;
@@ -96,7 +96,10 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+                StaticFileProvider::new(
+                    self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+                    StaticFileEnv::RO,
+                )?,
             )?)
             .start_network()
             .await?;
@@ -116,7 +119,11 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
+        let factory = ProviderFactory::new(
+            &db,
+            self.chain.clone(),
+            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RO)?,
+        )?;
         let provider = factory.provider()?;
 
         // Look up merkle checkpoint

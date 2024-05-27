@@ -17,7 +17,7 @@ use reth_db::create_db;
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileEnv};
 use std::{
     net::{SocketAddrV4, SocketAddrV6},
     path::PathBuf,
@@ -138,7 +138,7 @@ impl Command {
         let mut network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
             noop_db,
             self.chain.clone(),
-            data_dir.static_files(),
+            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RO)?,
         )?));
 
         if !self.discovery.disable_discovery &&

@@ -16,8 +16,8 @@ use reth_downloaders::{
 use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::{stage::StageId, ChainSpec, StaticFileSegment};
 use reth_provider::{
-    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StaticFileWriter,
+    providers::StaticFileProvider, BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StaticFileEnv, StaticFileProviderFactory, StaticFileWriter,
 };
 use tracing::{debug, error, info};
 
@@ -81,8 +81,11 @@ impl ImportReceiptsCommand {
 
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            self.chain.clone(),
+            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RW)?,
+        )?;
 
         let provider = provider_factory.provider_rw()?;
         let static_file_provider = provider_factory.static_file_provider();

@@ -43,8 +43,8 @@ pub use database::*;
 
 mod static_file;
 pub use static_file::{
-    StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW, StaticFileProviderRWRefMut,
-    StaticFileWriter,
+    StaticFileEnv, StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW,
+    StaticFileProviderRWRefMut, StaticFileWriter,
 };
 
 mod state;

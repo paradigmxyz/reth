@@ -35,8 +35,9 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
-    BundleStateWithReceipts, ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockHashReader, BlockReader, BlockWriter, BundleStateWithReceipts, ProviderFactory,
+    StageCheckpointReader, StateProviderFactory, StaticFileEnv,
 };
 use reth_revm::database::StateProviderDatabase;
 #[cfg(feature = "optimism")]
@@ -115,7 +116,10 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+            StaticFileProvider::new(
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+                StaticFileEnv::RO,
+            )?,
         )?;
         let provider = factory.provider()?;
 
@@ -157,7 +161,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
             Arc::clone(&self.chain),
-            data_dir.static_files(),
+            StaticFileProvider::new(data_dir.static_files(), StaticFileEnv::RO)?,
         )?;
 
         let consensus: Arc<dyn Consensus> =
