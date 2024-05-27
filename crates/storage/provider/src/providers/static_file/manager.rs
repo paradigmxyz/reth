@@ -911,7 +911,7 @@ impl StaticFileWriter for StaticFileProvider {
         };
 
         writer.ensure_file_consistency(false)?;
-        self.commit()?;
+        writer.commit()?;
 
         Ok(writer)
     }
@@ -931,16 +931,24 @@ impl StaticFileWriter for StaticFileProvider {
     }
 
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
-        let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
+        match self.env {
+            StaticFileEnv::RO => {
+                let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
 
-        let mut writer = StaticFileProviderRW::new(
-            segment,
-            latest_block,
-            Arc::downgrade(&self.0),
-            self.metrics.clone(),
-        )?;
+                let mut writer = StaticFileProviderRW::new(
+                    segment,
+                    latest_block,
+                    Arc::downgrade(&self.0),
+                    self.metrics.clone(),
+                )?;
 
-        writer.ensure_file_consistency(self.env.is_read_only())?;
+                writer.ensure_file_consistency(self.env.is_read_only())?;
+            }
+            StaticFileEnv::RW => {
+                self.latest_writer(segment)?;
+            }
+        }
+
         Ok(())
     }
 }
