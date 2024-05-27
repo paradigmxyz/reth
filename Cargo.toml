@@ -74,6 +74,7 @@ members = [
     "crates/trie/",
     "crates/trie-parallel/",
     "examples/node-custom-rpc/",
+    "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/node-event-hooks/",
     "examples/custom-evm/",

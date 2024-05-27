@@ -18,21 +18,22 @@ use std::{
     task::{Context, Poll},
 };
 
+use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use clap::Parser;
 use eyre::Result;
-use reth_node_ethereum::EthereumNode;
-use thiserror::Error;
-
-use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
-use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
+use futures_util::{stream::FuturesUnordered, Stream, StreamExt};
+use mined_sidecar::{BlockEvent, BlockMetadata, MinedBlob, MinedSidecarStream, ReorgedBlob};
 use reqwest::{Error, StatusCode};
 use reth::{
     builder::NodeHandle,
     cli::Cli,
-    primitives::{BlobTransaction, B256},
+    primitives::{BlobTransaction, SealedBlock, B256},
     providers::{CanonStateNotification, CanonStateSubscriptions},
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
+use reth_node_ethereum::EthereumNode;
+use thiserror::Error;
+pub mod mined_sidecar;
 
 fn main() {
     Cli::<BeaconSidecarConfig>::parse()
@@ -74,7 +75,7 @@ fn main() {
 
 /// Our custom cli args extension that adds one flag to reth default CLI.
 #[derive(Debug, Clone, clap::Parser)]
-struct BeaconSidecarConfig {
+pub struct BeaconSidecarConfig {
     /// Beacon Node http server address
     #[arg(long = "cl.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub cl_addr: IpAddr,
@@ -133,23 +134,6 @@ pub enum SideCarError {
     UnknownError(u16, String),
 }
 
-/// tracks the futures associated with retrieving blob data from the beacon client
-type BeaconFutures =
-    FuturesUnordered<Pin<Box<dyn Future<Output = Result<Vec<BlobTransaction>, SideCarError>>>>>;
-
-/// Wrapper struct for CanonStateNotifications
-pub struct MinedSidecarStream<St, P>
-where
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-{
-    events: St,
-    pool: P,
-    beacon_config: BeaconSidecarConfig,
-    client: reqwest::Client,
-    pending_requests: BeaconFutures,
-    queued_actions: VecDeque<BlobTransaction>,
-}
-
 /// First checks if the Blobtranscation for a given EIP4844 is stored locally, if not attempts to
 /// retrieve it from the CL Layer
 impl<St, P> Stream for MinedSidecarStream<St, P>
@@ -157,18 +141,18 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
-    type Item = Result<BlobTransaction, SideCarError>;
+    type Item = Result<BlockEvent, SideCarError>;
 
     /// Attempt to pull the next BlobTransaction from the stream.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this: &mut MinedSidecarStream<St, P> = self.get_mut();
-
-        if let Some(mined_sidecar) = this.queued_actions.pop_front() {
-            return Poll::Ready(Some(Ok(mined_sidecar)));
-        }
+        let this = self.get_mut();
 
         // Request locally first, otherwise request from CL
         loop {
+            if let Some(mined_sidecar) = this.queued_actions.pop_front() {
+                return Poll::Ready(Some(Ok(mined_sidecar)));
+            }
+
             // Check if any pending reqwests are ready and append to buffer
             while let Poll::Ready(Some(pending_result)) = this.pending_requests.poll_next_unpin(cx)
             {
@@ -184,114 +168,152 @@ where
 
             while let Poll::Ready(Some(notification)) = this.events.poll_next_unpin(cx) {
                 {
-                    let mut all_blobs_available = true;
-                    let mut actions_to_queue: Vec<BlobTransaction> = Vec::new();
+                    match notification {
+                        CanonStateNotification::Commit { new } => {
+                            let mut all_blobs_available = true;
+                            let mut actions_to_queue: Vec<BlockEvent> = Vec::new();
 
-                    // Collect only the EIP4844 transcations.
-                    let txs: Vec<_> = notification
-                        .tip()
-                        .transactions()
-                        .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
-                        .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
-                        .collect();
+                            // Collect only the EIP4844 transcations.
+                            let txs: Vec<_> = new
+                                .tip()
+                                .transactions()
+                                .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
+                                .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
+                                .collect();
 
-                    if txs.is_empty() {
-                        continue;
-                    }
-
-                    // Retrieves all blobs in the order in which we requested them
-                    match this
-                        .pool
-                        .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect())
-                    {
-                        Ok(blobs) => {
-                            // Match the corresponding BlobTransaction with its Transcation
-                            for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
-                                actions_to_queue.push(BlobTransaction::try_from_signed(tx.clone(), sidecar.clone()).expect(
-                                    "should not fail to convert blob tx if it is already eip4844",
-                                ));
+                            if txs.is_empty() {
+                                continue;
                             }
-                        }
-                        Err(_err) => {
-                            // If a single BlobTransaction is missing we skip the queue.
-                            all_blobs_available = false;
-                        }
-                    };
 
-                    if all_blobs_available {
-                        this.queued_actions.extend(actions_to_queue);
-                    } else {
-                        let client_clone = this.client.clone();
-
-                        let block_root = notification.tip().block.hash();
-
-                        let sidecar_url = this.beacon_config.sidecar_url(block_root);
-
-                        // Query the Beacon Layer for missing BlobTransactions
-                        let query = Box::pin(async move {
-                            let response = match client_clone
-                                .get(sidecar_url)
-                                .header("Accept", "application/json")
-                                .send()
-                                .await
+                            // Retrieves all blobs in the order in which we requested them
+                            match this
+                                .pool
+                                .get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect())
                             {
-                                Ok(response) => response,
-                                Err(err) => return Err(SideCarError::ReqwestError(err)),
+                                Ok(blobs) => {
+                                    // Match the corresponding BlobTransaction with its Transcation
+                                    for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
+                                        let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
+                                            .expect("should not fail to convert blob tx if it is already eip4844");
+
+                                        let block_metadata = BlockMetadata {
+                                            block_hash: new.tip().block.hash(),
+                                            block_number: new.tip().block.number,
+                                            gas_used: new.tip().block.gas_used,
+                                        };
+                                        actions_to_queue.push(BlockEvent::Mined(MinedBlob {
+                                            transaction,
+                                            block_metadata,
+                                        }));
+                                    }
+                                }
+                                Err(_err) => {
+                                    // If a single BlobTransaction is missing we skip the queue.
+                                    all_blobs_available = false;
+                                }
                             };
 
-                            if !response.status().is_success() {
-                                return match response.status() {
-                                    StatusCode::BAD_REQUEST => Err(SideCarError::InvalidBlockID(
-                                        "Invalid request to server.".to_string(),
-                                    )),
-                                    StatusCode::NOT_FOUND => Err(SideCarError::BlockNotFound(
-                                        "Requested block not found.".to_string(),
-                                    )),
-                                    StatusCode::INTERNAL_SERVER_ERROR => {
-                                        Err(SideCarError::InternalError(
-                                            "Server encountered an error.".to_string(),
-                                        ))
-                                    }
-                                    _ => Err(SideCarError::UnknownError(
-                                        response.status().as_u16(),
-                                        "Unhandled HTTP status.".to_string(),
-                                    )),
-                                };
+                            if all_blobs_available {
+                                this.queued_actions.extend(actions_to_queue);
+                            } else {
+                                let client_clone = this.client.clone();
+                                let block = new.tip().block.clone();
+                                let block_root = new.tip().block.hash();
+                                let sidecar_url = this.beacon_config.sidecar_url(block_root);
+                                let query = Box::pin(fetch_blobs_from_consensus_layer(
+                                    client_clone,
+                                    sidecar_url,
+                                    block,
+                                    txs,
+                                ));
+                                this.pending_requests.push(query);
                             }
-
-                            let bytes = match response.bytes().await {
-                                Ok(b) => b,
-                                Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
-                            };
-
-                            let blobs_bundle: BeaconBlobBundle =
-                                match serde_json::from_slice(&bytes) {
-                                    Ok(b) => b,
-                                    Err(e) => {
-                                        return Err(SideCarError::DeserializationError(
-                                            e.to_string(),
-                                        ))
-                                    }
-                                };
-
-                            let mut sidecar_iterator = SidecarIterator::new(blobs_bundle);
-
-                            let sidecars: Vec<BlobTransaction> = txs.iter()
-                            .filter_map(|(tx, blob_len)| {
-                                sidecar_iterator.next_sidecar(*blob_len).map(|sidecar| {
-                                    BlobTransaction::try_from_signed(tx.clone(), sidecar)
-                                        .expect("should not fail to convert blob tx if it is already eip4844")
+                        }
+                        CanonStateNotification::Reorg { old, new } => {
+                            let txs: Vec<BlockEvent> = new
+                                .tip()
+                                .transactions()
+                                .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
+                                .map(|tx| {
+                                    let transaction_hash = tx.hash();
+                                    let block_metadata = BlockMetadata {
+                                        block_hash: new.tip().block.hash(),
+                                        block_number: new.tip().block.number,
+                                        gas_used: new.tip().block.gas_used,
+                                    };
+                                    BlockEvent::Reorged(ReorgedBlob {
+                                        transaction_hash,
+                                        block_metadata,
+                                    })
                                 })
-                            })
-                            .collect();
+                                .collect();
 
-                            Ok(sidecars)
-                        });
-
-                        this.pending_requests.push(query);
+                            this.queued_actions.extend(txs);
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/// Query the Beacon Layer for missing BlobTransactions
+async fn fetch_blobs_from_consensus_layer(
+    client: reqwest::Client,
+    url: String,
+    block: SealedBlock,
+    txs: Vec<(reth::primitives::TransactionSigned, usize)>,
+) -> Result<Vec<BlockEvent>, SideCarError> {
+    let response = match client.get(url).header("Accept", "application/json").send().await {
+        Ok(response) => response,
+        Err(err) => return Err(SideCarError::ReqwestError(err)),
+    };
+
+    if !response.status().is_success() {
+        return match response.status() {
+            StatusCode::BAD_REQUEST => {
+                Err(SideCarError::InvalidBlockID("Invalid request to server.".to_string()))
+            }
+            StatusCode::NOT_FOUND => {
+                Err(SideCarError::BlockNotFound("Requested block not found.".to_string()))
+            }
+            StatusCode::INTERNAL_SERVER_ERROR => {
+                Err(SideCarError::InternalError("Server encountered an error.".to_string()))
+            }
+            _ => Err(SideCarError::UnknownError(
+                response.status().as_u16(),
+                "Unhandled HTTP status.".to_string(),
+            )),
+        };
+    }
+
+    let bytes = match response.bytes().await {
+        Ok(b) => b,
+        Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
+    };
+
+    let blobs_bundle: BeaconBlobBundle = match serde_json::from_slice(&bytes) {
+        Ok(b) => b,
+        Err(e) => return Err(SideCarError::DeserializationError(e.to_string())),
+    };
+
+    let mut sidecar_iterator = SidecarIterator::new(blobs_bundle);
+
+    let sidecars: Vec<BlockEvent> = txs
+        .iter()
+        .filter_map(|(tx, blob_len)| {
+            sidecar_iterator.next_sidecar(*blob_len).map(|sidecar| {
+                let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar)
+                    .expect("should not fail to convert blob tx if it is already eip4844");
+                let block_metadata = BlockMetadata {
+                    block_hash: block.hash(),
+                    block_number: block.number,
+                    gas_used: block.gas_used,
+                };
+                BlockEvent::Mined(MinedBlob { transaction, block_metadata })
+            })
+        })
+        .collect();
+
+    Ok(sidecars)
 }
