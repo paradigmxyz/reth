@@ -13,11 +13,11 @@ use crate::{
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
 };
+use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
     ops::Deref,
@@ -272,7 +272,7 @@ impl DatabaseEnv {
             // We grow the database in increments of 4 gigabytes
             growth_step: Some(4 * GIGABYTE as isize),
             // The database never shrinks
-            shrink_threshold: None,
+            shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
         });
         #[cfg(not(windows))]
@@ -455,9 +455,9 @@ mod tests {
         test_utils::*,
         AccountChangeSets,
     };
-    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
+    use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
 

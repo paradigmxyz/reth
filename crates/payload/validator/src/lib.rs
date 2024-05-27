@@ -84,8 +84,8 @@ impl ExecutionPayloadValidator {
     ///    - invalid extra data
     ///    - invalid transactions
     ///    - incorrect hash
-    ///    - the versioned hashes passed with the payload do not exactly match transaction
-    ///    versioned hashes
+    ///    - the versioned hashes passed with the payload do not exactly match transaction versioned
+    ///      hashes
     ///    - the block does not contain blob transactions if it is pre-cancun
     ///
     /// The checks are done in the order that conforms with the engine-API specification.
@@ -155,7 +155,7 @@ impl ExecutionPayloadValidator {
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
         if !shanghai_active && sealed_block.withdrawals.is_some() {
             // shanghai not active but withdrawals present
-            return Err(PayloadError::PreShanghaiBlockWithWitdrawals);
+            return Err(PayloadError::PreShanghaiBlockWithWitdrawals)
         }
 
         // EIP-4844 checks

@@ -1,6 +1,6 @@
 use auto_impl::auto_impl;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
+use reth_storage_errors::provider::ProviderResult;
 
 /// Client trait for fetching block hashes by number.
 #[auto_impl(&, Arc, Box)]

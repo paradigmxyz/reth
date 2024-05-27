@@ -4,8 +4,9 @@ use crate::execute::{
     BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
     BlockExecutorProvider, Executor,
 };
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
+use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 
 // re-export Either
@@ -89,10 +90,10 @@ where
     type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         match self {
-            Either::Left(a) => a.execute_one(input),
-            Either::Right(b) => b.execute_one(input),
+            Either::Left(a) => a.execute_and_verify_one(input),
+            Either::Right(b) => b.execute_and_verify_one(input),
         }
     }
 

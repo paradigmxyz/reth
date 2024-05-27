@@ -81,7 +81,7 @@ pub mod mdbx {
 }
 
 pub use abstraction::*;
-pub use reth_interfaces::db::{DatabaseError, DatabaseWriteOperation};
+pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
 pub use tables::*;
 pub use utils::is_database_empty;
 
@@ -99,7 +99,7 @@ pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Resu
 
     let rpath = path.as_ref();
     if is_database_empty(rpath) {
-        reth_primitives::fs::create_dir_all(rpath)
+        reth_fs_util::create_dir_all(rpath)
             .wrap_err_with(|| format!("Could not create database directory {}", rpath.display()))?;
         create_db_version_file(rpath)?;
     } else {
@@ -175,8 +175,8 @@ pub mod test_utils {
         database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
         models::client_version::ClientVersion,
     };
+    use reth_fs_util;
     use reth_libmdbx::MaxReadTransactionDuration;
-    use reth_primitives::fs;
     use std::{path::PathBuf, sync::Arc};
     use tempfile::TempDir;
 
@@ -202,7 +202,7 @@ pub mod test_utils {
         fn drop(&mut self) {
             if let Some(db) = self.db.take() {
                 drop(db);
-                let _ = fs::remove_dir_all(&self.path);
+                let _ = reth_fs_util::remove_dir_all(&self.path);
             }
         }
     }
@@ -318,7 +318,6 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_libmdbx::MaxReadTransactionDuration;
-    use reth_primitives::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -342,7 +341,8 @@ mod tests {
 
         // Database is not empty, version file is malformed
         {
-            fs::write(path.path().join(db_version_file_path(&path)), "invalid-version").unwrap();
+            reth_fs_util::write(path.path().join(db_version_file_path(&path)), "invalid-version")
+                .unwrap();
             let db = init_db(&path, args.clone());
             assert!(db.is_err());
             assert_matches!(
@@ -353,7 +353,7 @@ mod tests {
 
         // Database is not empty, version file contains not matching version
         {
-            fs::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
+            reth_fs_util::write(path.path().join(db_version_file_path(&path)), "0").unwrap();
             let db = init_db(&path, args);
             assert!(db.is_err());
             assert_matches!(

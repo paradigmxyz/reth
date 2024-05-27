@@ -1,7 +1,8 @@
 use crate::{is_evm_version, EvmCompilerError, EvmCompilerResult, EvmVersions, SymbolBuffer};
 use indexmap::{map::Entry, IndexMap};
 use rayon::prelude::*;
-use reth_primitives::{fs, keccak256, Bytes, B256};
+use reth_fs_util as fs;
+use reth_primitives::{keccak256, Bytes, B256};
 use revm::primitives::SpecId;
 use revm_jit::{debug_time, llvm, EvmCompiler, EvmLlvmBackend, Linker};
 use serde::{Deserialize, Serialize};

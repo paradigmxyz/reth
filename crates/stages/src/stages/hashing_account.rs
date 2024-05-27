@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use reth_config::config::EtlConfig;
+use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -44,47 +44,13 @@ pub struct AccountHashingStage {
 
 impl AccountHashingStage {
     /// Create new instance of [AccountHashingStage].
-    pub fn new(clean_threshold: u64, commit_threshold: u64, etl_config: EtlConfig) -> Self {
-        Self { clean_threshold, commit_threshold, etl_config }
-    }
-
-    /// Set the ETL configuration to use.
-    pub fn with_etl_config(mut self, etl_config: EtlConfig) -> Self {
-        self.etl_config = etl_config;
-        self
-    }
-}
-
-impl Default for AccountHashingStage {
-    fn default() -> Self {
+    pub fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
         Self {
-            clean_threshold: 500_000,
-            commit_threshold: 100_000,
-            etl_config: EtlConfig::default(),
+            clean_threshold: config.clean_threshold,
+            commit_threshold: config.commit_threshold,
+            etl_config,
         }
     }
-}
-
-// TODO: Rewrite this
-/// `SeedOpts` provides configuration parameters for calling `AccountHashingStage::seed`
-/// in unit tests or benchmarks to generate an initial database state for running the
-/// stage.
-///
-/// In order to check the "full hashing" mode of the stage you want to generate more
-/// transitions than `AccountHashingStage.clean_threshold`. This requires:
-/// 1. Creating enough blocks so there's enough transactions to generate
-/// the required transition keys in the `BlockTransitionIndex` (which depends on the
-/// `TxTransitionIndex` internally)
-/// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually
-/// take the 2nd codepath
-#[derive(Clone, Debug)]
-pub struct SeedOpts {
-    /// The range of blocks to be generated
-    pub blocks: RangeInclusive<u64>,
-    /// The number of accounts to be generated
-    pub accounts: usize,
-    /// The range of transactions to be generated per block.
-    pub txs: Range<u8>,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -144,6 +110,16 @@ impl AccountHashingStage {
         }
 
         Ok(accounts)
+    }
+}
+
+impl Default for AccountHashingStage {
+    fn default() -> Self {
+        Self {
+            clean_threshold: 500_000,
+            commit_threshold: 100_000,
+            etl_config: EtlConfig::default(),
+        }
     }
 }
 
@@ -281,6 +257,27 @@ fn collect(
     info!(target: "sync::stages::hashing_account", "Hashed {} entries", collector.len());
     channels.clear();
     Ok(())
+}
+
+// TODO: Rewrite this
+/// `SeedOpts` provides configuration parameters for calling `AccountHashingStage::seed`
+/// in unit tests or benchmarks to generate an initial database state for running the
+/// stage.
+///
+/// In order to check the "full hashing" mode of the stage you want to generate more
+/// transitions than `AccountHashingStage.clean_threshold`. This requires:
+/// 1. Creating enough blocks so there's enough transactions to generate the required transition
+///    keys in the `BlockTransitionIndex` (which depends on the `TxTransitionIndex` internally)
+/// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually take the
+///    2nd codepath
+#[derive(Clone, Debug)]
+pub struct SeedOpts {
+    /// The range of blocks to be generated
+    pub blocks: RangeInclusive<u64>,
+    /// The number of accounts to be generated
+    pub accounts: usize,
+    /// The range of transactions to be generated per block.
+    pub txs: Range<u8>,
 }
 
 fn stage_checkpoint_progress<DB: Database>(

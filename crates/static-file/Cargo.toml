@@ -21,6 +21,7 @@ reth-nippy-jar.workspace = true
 reth-tokio-util.workspace = true
 
 # async
+tokio.workspace = true
 tokio-stream.workspace = true
 
 # misc

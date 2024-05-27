@@ -77,7 +77,7 @@ pub const MIN_LENGTH_EIP2930_TX_ENCODED: usize = 14;
 /// Minimum length of a rlp-encoded eip1559 transaction.
 pub const MIN_LENGTH_EIP1559_TX_ENCODED: usize = 15;
 /// Minimum length of a rlp-encoded eip4844 transaction.
-pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 17;
+pub const MIN_LENGTH_EIP4844_TX_ENCODED: usize = 37;
 /// Minimum length of a rlp-encoded deposit transaction.
 #[cfg(feature = "optimism")]
 pub const MIN_LENGTH_DEPOSIT_TX_ENCODED: usize = 65;
@@ -174,14 +174,14 @@ impl Transaction {
 
     /// Gets the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> &TxKind {
+    pub fn kind(&self) -> TxKind {
         match self {
             Transaction::Legacy(TxLegacy { to, .. }) |
             Transaction::Eip2930(TxEip2930 { to, .. }) |
-            Transaction::Eip1559(TxEip1559 { to, .. }) |
-            Transaction::Eip4844(TxEip4844 { to, .. }) => to,
+            Transaction::Eip1559(TxEip1559 { to, .. }) => *to,
+            Transaction::Eip4844(TxEip4844 { to, .. }) => TxKind::Call(*to),
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { to, .. }) => to,
+            Transaction::Deposit(TxDeposit { to, .. }) => *to,
         }
     }
 
@@ -612,110 +612,6 @@ impl From<TxEip4844> for Transaction {
     }
 }
 
-#[cfg(feature = "alloy-compat")]
-impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        use alloy_eips::eip2718::Eip2718Error;
-        use alloy_rpc_types::ConversionError;
-
-        match tx.transaction_type.map(TryInto::try_into).transpose().map_err(|_| {
-            ConversionError::Eip2718Error(Eip2718Error::UnexpectedType(
-                tx.transaction_type.unwrap(),
-            ))
-        })? {
-            None | Some(TxType::Legacy) => {
-                // legacy
-                if tx.max_fee_per_gas.is_some() || tx.max_priority_fee_per_gas.is_some() {
-                    return Err(ConversionError::Eip2718Error(
-                        RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
-                            .into(),
-                    ))
-                }
-                Ok(Transaction::Legacy(TxLegacy {
-                    chain_id: tx.chain_id,
-                    nonce: tx.nonce,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                }))
-            }
-            Some(TxType::Eip2930) => {
-                // eip2930
-                Ok(Transaction::Eip2930(TxEip2930 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    input: tx.input,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
-                }))
-            }
-            Some(TxType::Eip1559) => {
-                // EIP-1559
-                Ok(Transaction::Eip1559(TxEip1559 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                }))
-            }
-            Some(TxType::Eip4844) => {
-                // EIP-4844
-                Ok(Transaction::Eip4844(TxEip4844 {
-                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                    nonce: tx.nonce,
-                    max_priority_fee_per_gas: tx
-                        .max_priority_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                    max_fee_per_gas: tx
-                        .max_fee_per_gas
-                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                    gas_limit: tx
-                        .gas
-                        .try_into()
-                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                    value: tx.value,
-                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                    input: tx.input,
-                    blob_versioned_hashes: tx
-                        .blob_versioned_hashes
-                        .ok_or(ConversionError::MissingBlobVersionedHashes)?,
-                    max_fee_per_blob_gas: tx
-                        .max_fee_per_blob_gas
-                        .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
-                }))
-            }
-            #[cfg(feature = "optimism")]
-            Some(TxType::Deposit) => todo!(),
-        }
-    }
-}
-
 impl Compact for Transaction {
     // Serializes the TxType to the buffer if necessary, returning 2 bits of the type as an
     // identifier instead of the length.
@@ -748,6 +644,11 @@ impl Compact for Transaction {
     // For backwards compatibility purposes, only 2 bits of the type are encoded in the identifier
     // parameter. In the case of a 3, the full transaction type is read from the buffer as a
     // single byte.
+    //
+    // # Panics
+    //
+    // A panic will be triggered if an identifier larger than 3 is passed from the database. For
+    // optimism a identifier with value 126 is allowed.
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         match identifier {
             0 => {
@@ -1352,7 +1253,7 @@ impl TransactionSigned {
 
     /// Decodes en enveloped EIP-2718 typed transaction.
     ///
-    /// This should be used _only_ be used internally in general transaction decoding methods,
+    /// This should _only_ be used internally in general transaction decoding methods,
     /// which have already ensured that the input is a typed transaction with the following format:
     /// `tx-type || rlp(tx-data)`
     ///
@@ -1428,18 +1329,27 @@ impl TransactionSigned {
     ///
     /// For EIP-2718 typed transactions, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type || rlp(tx-data)`.
-    pub fn decode_enveloped(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        if data.is_empty() {
+    ///
+    /// Both for legacy and EIP-2718 transactions, an error will be returned if there is an excess
+    /// of bytes in input data.
+    pub fn decode_enveloped(input_data: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        if input_data.is_empty() {
             return Err(RlpError::InputTooShort)
         }
 
         // Check if the tx is a list
-        if data[0] >= EMPTY_LIST_CODE {
+        let output_data = if input_data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            TransactionSigned::decode_rlp_legacy_transaction(data)
+            TransactionSigned::decode_rlp_legacy_transaction(input_data)?
         } else {
-            TransactionSigned::decode_enveloped_typed_transaction(data)
+            TransactionSigned::decode_enveloped_typed_transaction(input_data)?
+        };
+
+        if !input_data.is_empty() {
+            return Err(RlpError::UnexpectedLength)
         }
+
+        Ok(output_data)
     }
 
     /// Returns the length without an RLP header - this is used for eth/68 sizes.
@@ -1514,7 +1424,7 @@ impl Decodable for TransactionSigned {
     /// header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
-            return Err(RlpError::InputTooShort);
+            return Err(RlpError::InputTooShort)
         }
 
         // decode header
@@ -1565,6 +1475,11 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                     .is_deposit()
                     .then(Signature::optimism_deposit_tx_signature)
                     .unwrap_or(sig);
+
+                if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
+                    tx_eip_4844.placeholder =
+                        if tx_eip_4844.to != Address::default() { Some(()) } else { None };
+                }
 
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
@@ -1716,42 +1631,6 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     #[inline]
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.clone()
-    }
-}
-
-#[cfg(feature = "alloy-compat")]
-impl TryFrom<alloy_rpc_types::Transaction> for TransactionSignedEcRecovered {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(tx: alloy_rpc_types::Transaction) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-
-        let transaction: Transaction = tx.try_into()?;
-
-        TransactionSigned::from_transaction_and_signature(
-            transaction.clone(),
-            Signature {
-                r: signature.r,
-                s: signature.s,
-                odd_y_parity: if let Some(y_parity) = signature.y_parity {
-                    y_parity.0
-                } else {
-                    match transaction.tx_type() {
-                        // If the transaction type is Legacy, adjust the v component of the
-                        // signature according to the Ethereum specification
-                        TxType::Legacy => {
-                            extract_chain_id(signature.v.to())
-                                .map_err(|_| ConversionError::InvalidSignature)?
-                                .0
-                        }
-                        _ => !signature.v.is_zero(),
-                    }
-                },
-            },
-        )
-        .try_into_ecrecovered()
-        .map_err(|_| ConversionError::InvalidSignature)
     }
 }
 
@@ -2175,7 +2054,10 @@ mod tests {
         );
 
         let encoded = alloy_rlp::encode(signed_tx);
-        assert_eq!(hex!("9003ce8080808080808080c080c0808080"), encoded[..]);
+        assert_eq!(
+            hex!("a403e280808080809400000000000000000000000000000000000000008080c080c0808080"),
+            encoded[..]
+        );
         assert_eq!(MIN_LENGTH_EIP4844_TX_ENCODED, encoded.len());
 
         TransactionSigned::decode(&mut &encoded[..]).unwrap();
@@ -2289,5 +2171,34 @@ mod tests {
         let mut buff: Vec<u8> = Vec::new();
         let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
         from_compact_zstd_unaware(&buff, written_bytes);
+    }
+
+    #[test]
+    fn create_txs_disallowed_for_eip4844() {
+        let data =
+            [3, 208, 128, 128, 123, 128, 120, 128, 129, 129, 128, 192, 129, 129, 192, 128, 128, 9];
+        let res = TransactionSigned::decode_enveloped(&mut &data[..]);
+
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn decode_envelope_fails_on_trailing_bytes_legacy() {
+        let data = [201, 3, 56, 56, 128, 43, 36, 27, 128, 3, 192];
+
+        let result = TransactionSigned::decode_enveloped(&mut data.as_ref());
+
+        assert!(result.is_err());
+        assert_eq!(result, Err(RlpError::UnexpectedLength));
+    }
+
+    #[test]
+    fn decode_envelope_fails_on_trailing_bytes_eip2718() {
+        let data = hex!("02f872018307910d808507204d2cb1827d0094388c818ca8b9251b393131c08a736a67ccb19297880320d04823e2701c80c001a0cf024f4815304df2867a1a74e9d2707b6abda0337d2d54a4438d453f4160f190a07ac0e6b3bc9395b5b9c8b9e6d77204a236577a5b18467b9175c01de4faa208d900");
+
+        let result = TransactionSigned::decode_enveloped(&mut data.as_ref());
+
+        assert!(result.is_err());
+        assert_eq!(result, Err(RlpError::UnexpectedLength));
     }
 }

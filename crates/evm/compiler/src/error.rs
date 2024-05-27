@@ -1,4 +1,5 @@
-use reth_primitives::{fs, B256};
+use reth_fs_util as fs;
+use reth_primitives::B256;
 use revm::primitives::SpecId;
 use std::io;
 use thiserror::Error;

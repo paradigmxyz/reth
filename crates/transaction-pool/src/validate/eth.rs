@@ -195,11 +195,14 @@ where
         };
 
         // Reject transactions over defined size to prevent DOS attacks
-        if transaction.size() > self.max_tx_input_bytes {
-            let size = transaction.size();
+        let transaction_size = transaction.size();
+        if transaction_size > self.max_tx_input_bytes {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::OversizedData(size, self.max_tx_input_bytes),
+                InvalidPoolTransactionError::OversizedData(
+                    transaction_size,
+                    self.max_tx_input_bytes,
+                ),
             )
         }
 
@@ -211,11 +214,14 @@ where
         }
 
         // Checks for gas limit
-        if transaction.gas_limit() > self.block_gas_limit {
-            let gas_limit = transaction.gas_limit();
+        let transaction_gas_limit = transaction.gas_limit();
+        if transaction_gas_limit > self.block_gas_limit {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
+                InvalidPoolTransactionError::ExceedsGasLimit(
+                    transaction_gas_limit,
+                    self.block_gas_limit,
+                ),
             )
         }
 
@@ -473,7 +479,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Whether to allow exemptions for local transaction exemptions.
-    pub fn set_local_transactions_config(
+    pub fn with_local_transactions_config(
         mut self,
         local_transactions_config: LocalTransactionConfig,
     ) -> Self {
@@ -702,7 +708,7 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     if transaction.gas_limit() <
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
-            transaction.kind(),
+            &transaction.kind(),
             &access_list,
             is_shanghai,
         )

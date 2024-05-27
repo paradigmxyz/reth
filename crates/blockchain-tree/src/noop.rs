@@ -1,19 +1,16 @@
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
-    provider::ProviderError,
-    RethResult,
+use reth_blockchain_tree_api::{
+    self,
+    error::{BlockchainTreeError, CanonicalError, InsertBlockError, ProviderError},
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateNotificationSender,
-    CanonStateNotifications, CanonStateSubscriptions,
+    BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
+    CanonStateSubscriptions, FullBundleStateDataProvider,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -57,11 +54,11 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         _last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         Ok(())
     }
 
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         Ok(())
     }
 
@@ -71,7 +68,7 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
 
     fn update_block_hashes_and_clear_buffered(
         &self,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError> {
         Ok(BTreeMap::new())
     }
 }
@@ -138,7 +135,7 @@ impl BlockchainTreePendingStateProvider for NoopBlockchainTree {
     fn find_pending_state_provider(
         &self,
         _block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
         None
     }
 }

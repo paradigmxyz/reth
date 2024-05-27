@@ -52,22 +52,29 @@ pub enum BeaconForkChoiceUpdateError {
     /// Thrown when a forkchoice update resulted in an error.
     #[error("forkchoice update error: {0}")]
     ForkchoiceUpdateError(#[from] ForkchoiceUpdateError),
-    /// Internal errors, for example, error while reading from the database.
-    #[error(transparent)]
-    Internal(Box<RethError>),
     /// Thrown when the engine task is unavailable/stopped.
     #[error("beacon consensus engine task stopped")]
     EngineUnavailable,
+    /// An internal error occurred, not necessarily related to the update.
+    #[error(transparent)]
+    Internal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl BeaconForkChoiceUpdateError {
+    /// Create a new internal error.
+    pub fn internal<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
+        Self::Internal(Box::new(e))
+    }
 }
 
 impl From<RethError> for BeaconForkChoiceUpdateError {
     fn from(e: RethError) -> Self {
-        Self::Internal(Box::new(e))
+        Self::internal(e)
     }
 }
 impl From<reth_interfaces::db::DatabaseError> for BeaconForkChoiceUpdateError {
     fn from(e: reth_interfaces::db::DatabaseError) -> Self {
-        Self::Internal(Box::new(e.into()))
+        Self::internal(e)
     }
 }
 
@@ -86,4 +93,11 @@ pub enum BeaconOnNewPayloadError {
     /// An internal error occurred, not necessarily related to the payload.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl BeaconOnNewPayloadError {
+    /// Create a new internal error.
+    pub fn internal<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
+        Self::Internal(Box::new(e))
+    }
 }

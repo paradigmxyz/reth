@@ -1,12 +1,9 @@
-use crate::{
-    blockchain_tree::error::{BlockchainTreeError, CanonicalError},
-    db::DatabaseError,
-    executor::BlockExecutionError,
-    provider::ProviderError,
-};
+use crate::blockchain_tree::error::{BlockchainTreeError, CanonicalError};
 use reth_consensus::ConsensusError;
-use reth_network_api::NetworkError;
-use reth_primitives::fs::FsPathError;
+use reth_execution_errors::BlockExecutionError;
+use reth_fs_util::FsPathError;
+use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
+use std::fmt::Display;
 
 /// Result alias for [`RethError`].
 pub type RethResult<T> = Result<T, RethError>;
@@ -34,17 +31,28 @@ pub enum RethError {
     #[error(transparent)]
     Provider(#[from] ProviderError),
 
-    /// Errors related to networking.
-    #[error(transparent)]
-    Network(#[from] NetworkError),
-
     /// Canonical errors encountered.
     #[error(transparent)]
     Canonical(#[from] CanonicalError),
 
-    /// Custom error message.
-    #[error("{0}")]
-    Custom(String),
+    /// Any other error.
+    #[error(transparent)]
+    Other(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl RethError {
+    /// Create a new `RethError` from a given error.
+    pub fn other<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        RethError::Other(Box::new(error))
+    }
+
+    /// Create a new `RethError` from a given message.
+    pub fn msg(msg: impl Display) -> Self {
+        RethError::Other(msg.to_string().into())
+    }
 }
 
 impl From<BlockchainTreeError> for RethError {
@@ -55,7 +63,7 @@ impl From<BlockchainTreeError> for RethError {
 
 impl From<FsPathError> for RethError {
     fn from(err: FsPathError) -> Self {
-        RethError::Custom(err.to_string())
+        RethError::other(err)
     }
 }
 
@@ -75,6 +83,5 @@ mod size_asserts {
     static_assert_size!(ConsensusError, 48);
     static_assert_size!(DatabaseError, 40);
     static_assert_size!(ProviderError, 48);
-    static_assert_size!(NetworkError, 0);
     static_assert_size!(CanonicalError, 56);
 }

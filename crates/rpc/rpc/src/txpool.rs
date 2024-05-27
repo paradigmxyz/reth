@@ -87,10 +87,9 @@ where
             inspect: &mut BTreeMap<Address, BTreeMap<String, TxpoolInspectSummary>>,
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
-            let key = tx.nonce().to_string();
             let tx = tx.to_recovered_transaction();
             entry.insert(
-                key,
+                tx.nonce().to_string(),
                 TxpoolInspectSummary {
                     to: tx.to(),
                     value: tx.value(),
@@ -100,17 +99,18 @@ where
             );
         }
 
-        let mut inspect = TxpoolInspect::default();
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        for pending in pending {
-            insert(&pending.transaction, &mut inspect.pending);
-        }
-        for queued in queued {
-            insert(&queued.transaction, &mut inspect.queued);
-        }
-
-        Ok(inspect)
+        Ok(TxpoolInspect {
+            pending: pending.iter().fold(Default::default(), |mut acc, tx| {
+                insert(&tx.transaction, &mut acc);
+                acc
+            }),
+            queued: queued.iter().fold(Default::default(), |mut acc, tx| {
+                insert(&tx.transaction, &mut acc);
+                acc
+            }),
+        })
     }
 
     /// Retrieves the transactions contained within the txpool, returning pending as well as queued
@@ -127,9 +127,9 @@ where
     /// block(s), as well as the ones that are being scheduled for future execution only.
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
-    /// Handler for `txpool_inspect`
+    /// Handler for `txpool_content`
     async fn txpool_content(&self) -> Result<TxpoolContent> {
-        trace!(target: "rpc::eth", "Serving txpool_inspect");
+        trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content())
     }
 }

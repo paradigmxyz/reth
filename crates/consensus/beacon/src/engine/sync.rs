@@ -14,14 +14,14 @@ use reth_interfaces::p2p::{
 use reth_primitives::{stage::PipelineTarget, BlockNumber, ChainSpec, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::EventSender;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Manages syncing under the control of the engine.
@@ -49,8 +49,8 @@ where
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
-    /// Listeners for engine events.
-    listeners: EventListeners<BeaconConsensusEngineEvent>,
+    /// Sender for engine events.
+    event_sender: EventSender<BeaconConsensusEngineEvent>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
@@ -76,7 +76,7 @@ where
         run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<ChainSpec>,
-        listeners: EventListeners<BeaconConsensusEngineEvent>,
+        event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(
@@ -90,7 +90,7 @@ where
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
             run_pipeline_continuously,
-            listeners,
+            event_sender,
             max_block,
             metrics: EngineSyncMetrics::default(),
         }
@@ -125,11 +125,6 @@ where
     /// Returns whether or not the sync controller is set to run the pipeline continuously.
     pub(crate) fn run_pipeline_continuously(&self) -> bool {
         self.run_pipeline_continuously
-    }
-
-    /// Pushes an [UnboundedSender] to the sync controller's listeners.
-    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
-        self.listeners.push_listener(listener);
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
@@ -169,7 +164,7 @@ where
             );
 
             // notify listeners that we're downloading a block range
-            self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+            self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
                 ConsensusEngineLiveSyncProgress::DownloadingBlocks {
                     remaining_blocks: count,
                     target: hash,
@@ -198,7 +193,7 @@ where
         );
 
         // notify listeners that we're downloading a block
-        self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+        self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
             ConsensusEngineLiveSyncProgress::DownloadingBlocks {
                 remaining_blocks: 1,
                 target: hash,
@@ -434,7 +429,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
-    use reth_interfaces::{p2p::either::EitherDownloader, test_utils::TestFullBlockClient};
+    use reth_interfaces::{p2p::either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
         Header, PruneModes, SealedHeader, MAINNET,
@@ -543,15 +538,15 @@ mod tests {
             self,
             pipeline: Pipeline<DB>,
             chain_spec: Arc<ChainSpec>,
-        ) -> EngineSyncController<DB, EitherDownloader<Client, TestFullBlockClient>>
+        ) -> EngineSyncController<DB, Either<Client, TestFullBlockClient>>
         where
             DB: Database + 'static,
             Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
         {
             let client = self
                 .client
-                .map(EitherDownloader::Left)
-                .unwrap_or_else(|| EitherDownloader::Right(TestFullBlockClient::default()));
+                .map(Either::Left)
+                .unwrap_or_else(|| Either::Right(TestFullBlockClient::default()));
 
             EngineSyncController::new(
                 pipeline,

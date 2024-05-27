@@ -1,9 +1,7 @@
 //! Configuration files.
 
-use reth_discv4::Discv4Config;
-use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
+use reth_network::{PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
-use secp256k1::SecretKey;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     ffi::OsStr,
@@ -30,25 +28,17 @@ pub struct Config {
 }
 
 impl Config {
-    /// Initializes network config from read data
-    pub fn network_config(
+    /// Returns the [PeersConfig] for the node.
+    ///
+    /// If a peers file is provided, the basic nodes from the file are added to the configuration.
+    pub fn peers_config_with_basic_nodes_from_file(
         &self,
-        nat_resolution_method: reth_net_nat::NatResolver,
-        peers_file: Option<PathBuf>,
-        secret_key: SecretKey,
-    ) -> NetworkConfigBuilder {
-        let peer_config = self
-            .peers
+        peers_file: Option<&Path>,
+    ) -> PeersConfig {
+        self.peers
             .clone()
             .with_basic_nodes_from_file(peers_file)
-            .unwrap_or_else(|_| self.peers.clone());
-
-        let discv4 =
-            Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(secret_key)
-            .sessions_config(self.sessions.clone())
-            .peer_config(peer_config)
-            .discovery(discv4)
+            .unwrap_or_else(|_| self.peers.clone())
     }
 
     /// Save the configuration to toml file.
@@ -57,7 +47,7 @@ impl Config {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("reth config file extension must be '{EXTENSION}'"),
-            ));
+            ))
         }
         confy::store_path(path, self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
@@ -94,6 +84,19 @@ pub struct StageConfig {
     pub index_storage_history: IndexHistoryConfig,
     /// Common ETL related configuration.
     pub etl: EtlConfig,
+}
+
+impl StageConfig {
+    /// The highest threshold (in number of blocks) for switching between incremental and full
+    /// calculations across `MerkleStage`, `AccountHashingStage` and `StorageHashingStage`. This is
+    /// required to figure out if can prune or not changesets on subsequent pipeline runs during
+    /// `ExecutionStage`
+    pub fn execution_external_clean_threshold(&self) -> u64 {
+        self.merkle
+            .clean_threshold
+            .max(self.account_hashing.clean_threshold)
+            .max(self.storage_hashing.clean_threshold)
+    }
 }
 
 /// Header stage configuration.

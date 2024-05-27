@@ -1,13 +1,13 @@
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber};
 use std::collections::BTreeMap;
 
-/// This keeps track of all blocks of the canonical chain.
+/// This keeps track of (non-finalized) blocks of the canonical chain.
 ///
 /// This is a wrapper type around an ordered set of block numbers and hashes that belong to the
-/// canonical chain.
+/// canonical chain that is not yet finalized.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CanonicalChain {
-    /// All blocks of the canonical chain in order.
+    /// All blocks of the canonical chain in order of their block number.
     chain: BTreeMap<BlockNumber, BlockHash>,
 }
 
@@ -22,38 +22,24 @@ impl CanonicalChain {
         self.chain = chain;
     }
 
-    /// Returns the block hash of the canonical block with the given number.
+    /// Returns the block hash of the (non-finalized) canonical block with the given number.
     #[inline]
     pub(crate) fn canonical_hash(&self, number: &BlockNumber) -> Option<BlockHash> {
         self.chain.get(number).cloned()
     }
 
-    /// Returns the block number of the canonical block with the given hash.
+    /// Returns the block number of the (non-finalized) canonical block with the given hash.
     #[inline]
-    pub(crate) fn canonical_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
+    pub(crate) fn canonical_number(&self, block_hash: &BlockHash) -> Option<BlockNumber> {
         self.chain.iter().find_map(
             |(number, hash)| {
-                if *hash == block_hash {
+                if hash == block_hash {
                     Some(*number)
                 } else {
                     None
                 }
             },
         )
-    }
-
-    /// Returns the block number of the canonical block with the given hash.
-    ///
-    /// Returns `None` if no block could be found in the canonical chain.
-    #[inline]
-    pub(crate) fn get_canonical_block_number(
-        &self,
-        last_finalized_block: BlockNumber,
-        block_hash: &BlockHash,
-    ) -> Option<BlockNumber> {
-        self.chain
-            .range(last_finalized_block..)
-            .find_map(|(num, &h)| (h == *block_hash).then_some(*num))
     }
 
     /// Extends all items from the given iterator to the chain.

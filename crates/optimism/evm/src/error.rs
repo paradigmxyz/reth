@@ -1,6 +1,6 @@
 //! Error types for the Optimism EVM module.
 
-use reth_interfaces::executor::BlockExecutionError;
+use reth_evm::execute::BlockExecutionError;
 
 /// Optimism Block Executor Errors
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]

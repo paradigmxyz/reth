@@ -116,7 +116,7 @@ pub mod test_utils;
 
 mod budget;
 mod builder;
-mod cache;
+pub mod cache;
 pub mod config;
 mod discovery;
 pub mod error;

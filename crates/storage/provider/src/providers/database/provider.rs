@@ -27,11 +27,7 @@ use reth_db::{
     BlockNumberList, DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{
-    p2p::headers::downloader::SyncTarget,
-    provider::{ProviderResult, RootMismatch},
-    RethResult,
-};
+use reth_interfaces::p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
@@ -43,6 +39,7 @@ use reth_primitives::{
     StorageEntry, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
+use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
@@ -375,20 +372,20 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///
     /// If UNWIND is false we will just read the state/blocks and return them.
     ///
-    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
-    /// the transaction ids.
-    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table
-    /// and the [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to
-    /// reconstruct the changesets.
-    ///     - In order to have both the old and new values in the changesets, we also access the
-    ///       plain state tables.
+    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table and the
+    ///    [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to    reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
     /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
-    /// we:
+    ///    we:
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the plain state
     ///     3. Save the old value to the local state
     /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
-    /// have seen before we:
+    ///    have seen before we:
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
@@ -1095,7 +1092,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         &self,
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
-    ) -> RethResult<HeaderSyncGap> {
+    ) -> ProviderResult<HeaderSyncGap> {
         let static_file_provider = self.static_file_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
@@ -1119,7 +1116,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()).into())
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
             }
             Ordering::Equal => {}
         }

@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
+use reth_config::config::ExecutionConfig;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
@@ -58,8 +59,7 @@ use tracing::*;
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountsHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StoragesHistory] to remove change set and apply old
-///   values
-/// to [tables::PlainStorageState]
+///   values to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<E> {
@@ -107,6 +107,22 @@ impl<E> ExecutionStage<E> {
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             PruneModes::none(),
+            ExExManagerHandle::empty(),
+        )
+    }
+
+    /// Create new instance of [ExecutionStage] from configuration.
+    pub fn from_config(
+        executor_provider: E,
+        config: ExecutionConfig,
+        external_clean_threshold: u64,
+        prune_modes: PruneModes,
+    ) -> Self {
+        Self::new(
+            executor_provider,
+            config.into(),
+            external_clean_threshold,
+            prune_modes,
             ExExManagerHandle::empty(),
         )
     }
@@ -223,9 +239,11 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            executor.execute_one((&block, td).into()).map_err(|error| StageError::Block {
-                block: Box::new(block.header.clone().seal_slow()),
-                error: BlockErrorKind::Execution(error),
+            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
+                StageError::Block {
+                    block: Box::new(block.header.clone().seal_slow()),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
             execution_duration += execute_start.elapsed();
 
@@ -537,6 +555,17 @@ impl ExecutionStageThresholds {
             changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
             cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX) ||
             elapsed >= self.max_duration.unwrap_or(Duration::MAX)
+    }
+}
+
+impl From<ExecutionConfig> for ExecutionStageThresholds {
+    fn from(config: ExecutionConfig) -> Self {
+        ExecutionStageThresholds {
+            max_blocks: config.max_blocks,
+            max_changes: config.max_changes,
+            max_cumulative_gas: config.max_cumulative_gas,
+            max_duration: config.max_duration,
+        }
     }
 }
 

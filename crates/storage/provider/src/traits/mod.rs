@@ -18,8 +18,8 @@ pub use block_hash::BlockHashReader;
 mod block_id;
 pub use block_id::{BlockIdReader, BlockNumReader};
 
-mod evm_env;
-pub use evm_env::EvmEnvProvider;
+// Re-export for convenience
+pub use reth_evm::provider::EvmEnvProvider;
 
 mod chain_info;
 pub use chain_info::CanonChainTracker;
@@ -35,8 +35,9 @@ pub use receipts::{ReceiptProvider, ReceiptProviderIdExt};
 
 mod state;
 pub use state::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateWriter,
+    BlockchainTreePendingStateProvider, BundleStateDataProvider, BundleStateForkProvider,
+    FullBundleStateDataProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    StateWriter,
 };
 
 mod trie;

@@ -8,32 +8,20 @@ use crate::{
     cli::config::RethRpcConfig,
     utils::get_or_create_jwt_secret_from_path,
 };
+use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use rand::Rng;
-use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
-use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, HeaderProvider, StateProviderFactory,
-};
-use reth_rpc::{
-    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP},
-    JwtError, JwtSecret,
+use reth_rpc::eth::{
+    cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_builder::{
-    auth::{AuthServerConfig, AuthServerHandle},
-    constants,
-    error::RpcError,
-    EthConfig, Identity, IpcServerBuilder, RethRpcModule, RpcModuleConfig, RpcModuleSelection,
-    RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
+    auth::AuthServerConfig, constants, error::RpcError, EthConfig, Identity, IpcServerBuilder,
+    RethRpcModule, RpcModuleConfig, RpcModuleSelection, RpcServerConfig, ServerBuilder,
+    TransportRpcModuleConfig,
 };
-use reth_rpc_engine_api::EngineApi;
-use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -277,88 +265,6 @@ impl RpcServerArgs {
         self = self.with_ipc_random_path();
         self
     }
-
-    /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events, EvmConfig>(
-        &self,
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        executor: Tasks,
-        events: Events,
-        evm_config: EvmConfig,
-    ) -> Result<RpcServerHandle, RpcError>
-    where
-        Provider: BlockReaderIdExt
-            + AccountReader
-            + HeaderProvider
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: ConfigureEvm + 'static,
-    {
-        reth_rpc_builder::launch(
-            provider,
-            pool,
-            network,
-            self.transport_rpc_module_config(),
-            self.rpc_server_config(),
-            executor,
-            events,
-            evm_config,
-        )
-        .await
-    }
-
-    /// Create Engine API server.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT, EvmConfig>(
-        &self,
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        executor: Tasks,
-        engine_api: EngineApi<Provider, EngineT>,
-        jwt_secret: JwtSecret,
-        evm_config: EvmConfig,
-    ) -> Result<AuthServerHandle, RpcError>
-    where
-        Provider: BlockReaderIdExt
-            + ChainSpecProvider
-            + EvmEnvProvider
-            + HeaderProvider
-            + StateProviderFactory
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        EngineT: EngineTypes + 'static,
-        EvmConfig: ConfigureEvm + 'static,
-    {
-        let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
-
-        reth_rpc_builder::auth::launch(
-            provider,
-            pool,
-            network,
-            executor,
-            engine_api,
-            socket_address,
-            jwt_secret,
-            evm_config,
-        )
-        .await
-    }
 }
 
 impl RethRpcConfig for RpcServerArgs {
@@ -493,7 +399,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_secret_key(&self) -> Option<JwtSecret> {
-        self.rpc_jwtsecret.clone()
+        self.rpc_jwtsecret
     }
 }
 

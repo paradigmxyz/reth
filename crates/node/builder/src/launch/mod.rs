@@ -19,18 +19,19 @@ use reth_blockchain_tree::{
 };
 use reth_consensus::Consensus;
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
-use reth_interfaces::p2p::either::EitherDownloader;
 use reth_network::NetworkEvents;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     engine::EngineMessageStreamExt,
     exit::NodeExitFuture,
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
 use reth_rpc_engine_api::EngineApi;
+use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info, warn};
 use reth_transaction_pool::TransactionPool;
@@ -291,7 +292,7 @@ where
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
-        let (mut pipeline, client) = if ctx.is_dev() {
+        let (pipeline, client) = if ctx.is_dev() {
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
             for (idx, (address, alloc)) in ctx.chain_spec().genesis.alloc.iter().enumerate() {
@@ -314,7 +315,7 @@ where
             )
             .build();
 
-            let mut pipeline = crate::setup::build_networked_pipeline(
+            let pipeline = crate::setup::build_networked_pipeline(
                 ctx.node_config(),
                 &ctx.toml_config().stages,
                 client.clone(),
@@ -335,7 +336,7 @@ where
             debug!(target: "reth::cli", "Spawning auto mine task");
             ctx.task_executor().spawn(Box::pin(task));
 
-            (pipeline, EitherDownloader::Left(client))
+            (pipeline, Either::Left(client))
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
                 ctx.node_config(),
@@ -353,7 +354,7 @@ where
             )
             .await?;
 
-            (pipeline, EitherDownloader::Right(network_client.clone()))
+            (pipeline, Either::Right(network_client.clone()))
         };
 
         let pipeline_events = pipeline.events();
@@ -367,7 +368,7 @@ where
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
 
-        let mut pruner = pruner_builder.build(ctx.provider_factory().clone());
+        let pruner = pruner_builder.build(ctx.provider_factory().clone());
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
@@ -404,7 +405,7 @@ where
                 Either::Right(stream::empty())
             },
             pruner_events.map(Into::into),
-            static_file_producer_events.map(Into::into)
+            static_file_producer_events.map(Into::into),
         );
         ctx.task_executor().spawn_critical(
             "events task",
@@ -416,12 +417,19 @@ where
             ),
         );
 
+        let client = ClientVersionV1 {
+            code: CLIENT_CODE,
+            name: NAME_CLIENT.to_string(),
+            version: CARGO_PKG_VERSION.to_string(),
+            commit: VERGEN_GIT_SHA.to_string(),
+        };
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
             ctx.chain_spec(),
             beacon_engine_handle,
             node_adapter.components.payload_builder().clone().into(),
             Box::new(ctx.task_executor().clone()),
+            client,
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
