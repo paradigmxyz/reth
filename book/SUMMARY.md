@@ -32,7 +32,6 @@
     - [`reth init`](./cli/reth/init.md)
     - [`reth init-state`](./cli/reth/init-state.md)
     - [`reth import`](./cli/reth/import.md)
-    - [`reth import-receipts-op`](./cli/reth/import-receipts-op.md)
     - [`reth dump-genesis`](./cli/reth/dump-genesis.md)
     - [`reth db`](./cli/reth/db.md)
       - [`reth db stats`](./cli/reth/db/stats.md)
@@ -74,5 +73,8 @@
       - [`reth debug replay-engine`](./cli/reth/debug/replay-engine.md)
     - [`reth recover`](./cli/reth/recover.md)
       - [`reth recover storage-tries`](./cli/reth/recover/storage-tries.md)
+  - [`op-reth`](./cli/op-reth.md)
+    - [`op-reth import-op`](./cli/reth/import-op.md)
+    - [`op-reth import-receipts-op`](./cli/reth/import-receipts-op.md)
 - [Developers](./developers/developers.md) <!-- CLI_REFERENCE END -->
    - [Contribute](./developers/contribute.md)

@@ -1,70 +1,21 @@
-# reth import
+# op-reth
 
-This syncs RLP encoded blocks from a file
+Additional op-reth commands.
 
 ```bash
-$ reth import --help
-Usage: reth import [OPTIONS] <IMPORT_PATH>
+$ op-reth --help
+Usage: op-reth [OPTIONS] <COMMAND>
+
+Commands:
+  import-op           Imports the Bedrock datadir blocks from a file
+  import-receipts-op  Imports the Bedrock datadir receipts from a file
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
-      --no-state
-          Disables stages that require state.
-
-      --chunk-len <CHUNK_LEN>
-          Chunk byte length to read from file.
-
-          [default: 1GB]
-
   -h, --help
           Print help (see a summary with '-h')
 
-Database:
-      --db.log-level <LOG_LEVEL>
-          Database logging level. Levels higher than "notice" require a debug build
-
-          Possible values:
-          - fatal:   Enables logging for critical conditions, i.e. assertion failures
-          - error:   Enables logging for error conditions
-          - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
-          - verbose: Enables logging for verbose informational
-          - debug:   Enables logging for debug-level messages
-          - trace:   Enables logging for trace debug-level messages
-          - extra:   Enables logging for extra debug-level messages
-
-      --db.exclusive <EXCLUSIVE>
-          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
-
-          [possible values: true, false]
-
-  <IMPORT_PATH>
-          The path to a `.rlp` block file for import.
-
-          The online sync pipeline stages (headers and bodies) are replaced by a file import, after which the
-          remaining stages are executed (unless disabled, see '--no-state').
+  -V, --version
+          Print version
 
 Logging:
       --log.stdout.format <FORMAT>

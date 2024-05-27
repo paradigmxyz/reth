@@ -1,15 +1,15 @@
-# reth import
+# op-reth import-receipts-op
 
-This syncs RLP encoded blocks from a file
+This imports non-standard RLP encoded receipts from a file.
+The supported RLP encoding, is the non-standard encoding used
+for receipt export in <https://github.com/testinprod-io/op-geth/pull/1>.
+Supports import of OVM receipts from the Bedrock datadir.
 
 ```bash
-$ reth import --help
-Usage: reth import [OPTIONS] <IMPORT_PATH>
+$ op-reth import-receipts-op --help
+Usage: op-reth import-receipts-op [OPTIONS] <IMPORT_PATH>
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
 
@@ -20,18 +20,6 @@ Options:
           - macOS: `$HOME/Library/Application Support/reth/`
 
           [default: default]
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
-      --no-state
-          Disables stages that require state.
 
       --chunk-len <CHUNK_LEN>
           Chunk byte length to read from file.
@@ -61,10 +49,10 @@ Database:
           [possible values: true, false]
 
   <IMPORT_PATH>
-          The path to a `.rlp` block file for import.
+          The path to a receipts file for import. File must use `HackReceiptFileCodec` (used for
+          exporting OP chain segment below Bedrock block via testinprod/op-geth).
 
-          The online sync pipeline stages (headers and bodies) are replaced by a file import, after which the
-          remaining stages are executed (unless disabled, see '--no-state').
+          <https://github.com/testinprod-io/op-geth/pull/1>
 
 Logging:
       --log.stdout.format <FORMAT>
