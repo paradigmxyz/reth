@@ -1792,7 +1792,7 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
     }
 }
 
-/// Rate limits the number if incoming packets from individual IPs to 1 packet/second
+/// Rate limits the number of incoming packets from individual IPs to 1 packet/second
 const MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP: usize = 60usize;
 
 /// Continuously awaits new incoming messages and sends them back through the channel.
