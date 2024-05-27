@@ -221,7 +221,10 @@ where
 
         // check if block is disconnected
         if let Some(block) = self.state.buffered_blocks.block(&block.hash) {
-            return Ok(Some(BlockStatus::Disconnected { missing_ancestor: block.parent_num_hash() }))
+            return Ok(Some(BlockStatus::Disconnected {
+                head: self.state.block_indices.canonical_tip(),
+                missing_ancestor: block.parent_num_hash(),
+            }))
         }
 
         Ok(None)
@@ -388,7 +391,10 @@ where
             .lowest_ancestor(&block_hash)
             .ok_or(BlockchainTreeError::BlockBufferingFailed { block_hash })?;
 
-        Ok(BlockStatus::Disconnected { missing_ancestor: lowest_ancestor.parent_num_hash() })
+        Ok(BlockStatus::Disconnected {
+            head: self.state.block_indices.canonical_tip(),
+            missing_ancestor: lowest_ancestor.parent_num_hash(),
+        })
     }
 
     /// This tries to append the given block to the canonical chain.
@@ -1064,7 +1070,9 @@ where
                     hash: block_hash,
                 }))
             }
-            return Ok(CanonicalOutcome::AlreadyCanonical { header })
+
+            let head = self.state.block_indices.canonical_tip();
+            return Ok(CanonicalOutcome::AlreadyCanonical { header, head })
         }
 
         let Some(chain_id) = self.block_indices().get_block_chain_id(&block_hash) else {
@@ -2001,18 +2009,20 @@ mod tests {
 
         let mut canon_notif = tree.subscribe_canon_state();
         // genesis block 10 is already canonical
-        tree.make_canonical(B256::ZERO).unwrap();
+        let head = BlockNumHash::new(10, B256::ZERO);
+        tree.make_canonical(head.hash).unwrap();
 
         // make sure is_block_hash_canonical returns true for genesis block
         tree.is_block_hash_canonical(&B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(head.number);
 
         // block 2 parent is not known, block2 is buffered.
         assert_eq!(
             tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                head,
                 missing_ancestor: block2.parent_num_hash()
             })
         );
@@ -2029,7 +2039,7 @@ mod tests {
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),
-            Some(BlockStatus::Disconnected { missing_ancestor: block2.parent_num_hash() })
+            Some(BlockStatus::Disconnected { head, missing_ancestor: block2.parent_num_hash() })
         );
 
         // check if random block is known
@@ -2328,6 +2338,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2b.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                head: block2.header.num_hash(),
                 missing_ancestor: block2b.parent_num_hash()
             })
         );
