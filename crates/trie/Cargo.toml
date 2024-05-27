@@ -14,8 +14,9 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
+reth-execution-errors.workspace = true
 reth-db.workspace = true
+
 revm.workspace = true
 
 # alloy
@@ -41,6 +42,7 @@ triehash = { version = "0.8", optional = true }
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-errors.workspace = true
 
 # trie
 triehash = "0.8"
