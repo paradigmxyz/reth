@@ -27,7 +27,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::Arc,
 };
@@ -411,7 +411,7 @@ impl NodeConfig {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number);
+            return Ok(header.number)
         }
 
         Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
@@ -434,7 +434,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header);
+                    return Ok(tip_header)
                 }
                 Err(error) => {
                     fetch_failures += 1;
@@ -456,8 +456,7 @@ impl NodeConfig {
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<C> {
-        let cfg_builder = self
-            .network
+        self.network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
@@ -471,39 +470,30 @@ impl NodeConfig {
                 self.network.discovery.addr,
                 // set discovery port based on instance number
                 self.network.discovery.port + self.instance - 1,
-            ));
+            ))
+            .map_discv5_config_builder(|builder| {
+                let DiscoveryArgs {
+                    discv5_addr,
+                    discv5_addr_ipv6,
+                    discv5_port,
+                    discv5_port_ipv6,
+                    ..
+                } = self.network.discovery;
 
-        let config = cfg_builder.build(client);
+                // Use rlpx address if none given
+                let discv5_addr_ipv4 = discv5_addr.or(match self.network.addr {
+                    IpAddr::V4(ip) => Some(ip),
+                    IpAddr::V6(_) => None,
+                });
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or(match self.network.addr {
+                    IpAddr::V4(_) => None,
+                    IpAddr::V6(ip) => Some(ip),
+                });
 
-        if self.network.discovery.disable_discovery ||
-            !self.network.discovery.enable_discv5_discovery &&
-                !config.chain_spec.chain.is_optimism()
-        {
-            return config
-        }
+                let discv5_port_ipv4 = discv5_port + self.instance - 1;
+                let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
 
-        let rlpx_addr = config.listener_addr().ip();
-        // work around since discv5 config builder can't be integrated into network config builder
-        // due to unsatisfied trait bounds
-        config.discovery_v5_with_config_builder(|builder| {
-            let DiscoveryArgs {
-                discv5_addr,
-                discv5_addr_ipv6,
-                discv5_port,
-                discv5_port_ipv6,
-                discv5_lookup_interval,
-                discv5_bootstrap_lookup_interval,
-                discv5_bootstrap_lookup_countdown,
-                ..
-            } = self.network.discovery;
-
-            let discv5_addr_ipv4 = discv5_addr.or_else(|| ipv4(rlpx_addr));
-            let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| ipv6(rlpx_addr));
-            let discv5_port_ipv4 = discv5_port + self.instance - 1;
-            let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
-
-            builder
-                .discv5_config(
+                builder.discv5_config(
                     discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
                         discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
                         discv5_addr_ipv6
@@ -511,11 +501,8 @@ impl NodeConfig {
                     ))
                     .build(),
                 )
-                .lookup_interval(discv5_lookup_interval)
-                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
-                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
-                .build()
-        })
+            })
+            .build(client)
     }
 
     /// Change rpc port numbers based on the instance number, using the inner
@@ -549,21 +536,5 @@ impl Default for NodeConfig {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
         }
-    }
-}
-
-/// Returns the address if this is an [`Ipv4Addr`].
-pub fn ipv4(ip: IpAddr) -> Option<Ipv4Addr> {
-    match ip {
-        IpAddr::V4(ip) => Some(ip),
-        IpAddr::V6(_) => None,
-    }
-}
-
-/// Returns the address if this is an [`Ipv6Addr`].
-pub fn ipv6(ip: IpAddr) -> Option<Ipv6Addr> {
-    match ip {
-        IpAddr::V4(_) => None,
-        IpAddr::V6(ip) => Some(ip),
     }
 }

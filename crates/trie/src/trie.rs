@@ -483,10 +483,11 @@ where
     ) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
         trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
 
-        let mut hashed_storage_cursor = self.hashed_cursor_factory.hashed_storage_cursor()?;
+        let mut hashed_storage_cursor =
+            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
         // short circuit on empty storage
-        if hashed_storage_cursor.is_storage_empty(self.hashed_address)? {
+        if hashed_storage_cursor.is_storage_empty()? {
             return Ok((
                 EMPTY_ROOT_HASH,
                 0,
@@ -500,8 +501,7 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
-        let mut storage_node_iter =
-            StorageNodeIter::new(walker, hashed_storage_cursor, self.hashed_address);
+        let mut storage_node_iter = StorageNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 StorageNode::Branch(node) => {

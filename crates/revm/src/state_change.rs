@@ -1,8 +1,8 @@
 use reth_consensus_common::calc;
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::SYSTEM_ADDRESS, revm::env::fill_tx_env_with_beacon_root_contract_call, Address,
-    ChainSpec, Header, Withdrawal, B256, U256,
+    revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header, Withdrawal,
+    B256, U256,
 };
 use revm::{interpreter::Host, Database, DatabaseCommit, Evm};
 use std::collections::HashMap;
@@ -87,7 +87,7 @@ where
     }
 
     // get previous env
-    let previous_env = Box::new(evm.env().clone());
+    let previous_env = Box::new(evm.context.env().clone());
 
     // modify env for pre block call
     fill_tx_env_with_beacon_root_contract_call(&mut evm.context.evm.env, parent_beacon_block_root);
@@ -104,7 +104,7 @@ where
         }
     };
 
-    state.remove(&SYSTEM_ADDRESS);
+    state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
     state.remove(&evm.block().coinbase);
 
     evm.context.evm.db.commit(state);

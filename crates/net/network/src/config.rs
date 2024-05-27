@@ -8,7 +8,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
@@ -104,43 +104,6 @@ impl<C> NetworkConfig<C> {
         self
     }
 
-    /// Sets the config to use for the discovery v5 protocol, with help of the
-    /// [`reth_discv5::ConfigBuilder`].
-    /// ```
-    /// use reth_network::NetworkConfigBuilder;
-    /// use secp256k1::{rand::thread_rng, SecretKey};
-    ///
-    /// let sk = SecretKey::new(&mut thread_rng());
-    /// let network_config = NetworkConfigBuilder::new(sk).build(());
-    /// let fork_id = network_config.status.forkid;
-    /// let network_config = network_config
-    ///     .discovery_v5_with_config_builder(|builder| builder.fork(b"eth", fork_id).build());
-    /// ```
-
-    pub fn discovery_v5_with_config_builder(
-        self,
-        f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::Config,
-    ) -> Self {
-        let network_stack_id = NetworkStackId::id(&self.chain_spec);
-        let fork_id = self.chain_spec.latest_fork_id();
-        let boot_nodes = self.boot_nodes.clone();
-
-        let mut builder = reth_discv5::Config::builder(self.listener_addr)
-            .add_unsigned_boot_nodes(boot_nodes.into_iter());
-
-        if let Some(id) = network_stack_id {
-            builder = builder.fork(id, fork_id)
-        }
-
-        self.set_discovery_v5(f(builder))
-    }
-
-    /// Sets the config to use for the discovery v5 protocol.
-    pub fn set_discovery_v5(mut self, discv5_config: reth_discv5::Config) -> Self {
-        self.discovery_v5_config = Some(discv5_config);
-        self
-    }
-
     /// Sets the address for the incoming RLPx connection listener.
     pub fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
@@ -180,6 +143,9 @@ pub struct NetworkConfigBuilder {
     dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// How to set up discovery version 4.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
+    /// How to set up discovery version 5.
+    #[serde(skip)]
+    discovery_v5_builder: Option<reth_discv5::ConfigBuilder>,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<NodeRecord>,
     /// Address to use for discovery
@@ -222,6 +188,7 @@ impl NetworkConfigBuilder {
             secret_key,
             dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
+            discovery_v5_builder: None,
             boot_nodes: Default::default(),
             discovery_addr: None,
             listener_addr: None,
@@ -347,10 +314,28 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the external ip resolver to use for discovery v4.
+    ///
+    /// If no [Discv4ConfigBuilder] is set via [Self::discovery], this will create a new one.
+    ///
+    /// This is a convenience function for setting the external ip resolver on the default
+    /// [Discv4Config] config.
+    pub fn external_ip_resolver(mut self, resolver: NatResolver) -> Self {
+        self.discovery_v4_builder
+            .get_or_insert_with(Discv4Config::builder)
+            .external_ip_resolver(Some(resolver));
+        self
+    }
+
     /// Sets the discv4 config to use.
-    //
     pub fn discovery(mut self, builder: Discv4ConfigBuilder) -> Self {
         self.discovery_v4_builder = Some(builder);
+        self
+    }
+
+    /// Sets the discv5 config to use.
+    pub fn discovery_v5(mut self, builder: reth_discv5::ConfigBuilder) -> Self {
+        self.discovery_v5_builder = Some(builder);
         self
     }
 
@@ -420,6 +405,36 @@ impl NetworkConfigBuilder {
         }
     }
 
+    /// Calls a closure on [`reth_discv5::ConfigBuilder`], if discv5 discovery is enabled and the
+    /// builder has been set.
+    /// ```
+    /// use reth_network::NetworkConfigBuilder;
+    /// use reth_primitives::MAINNET;
+    /// use reth_provider::test_utils::NoopProvider;
+    /// use secp256k1::{rand::thread_rng, SecretKey};
+    ///
+    /// let sk = SecretKey::new(&mut thread_rng());
+    /// let fork_id = MAINNET.latest_fork_id();
+    /// let network_config = NetworkConfigBuilder::new(sk)
+    ///     .map_discv5_config_builder(|builder| builder.fork(b"eth", fork_id))
+    ///     .build(NoopProvider::default());
+    /// ```
+    pub fn map_discv5_config_builder(
+        mut self,
+        f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::ConfigBuilder,
+    ) -> Self {
+        if let Some(mut builder) = self.discovery_v5_builder {
+            if let Some(network_stack_id) = NetworkStackId::id(&self.chain_spec) {
+                let fork_id = self.chain_spec.latest_fork_id();
+                builder = builder.fork(network_stack_id, fork_id);
+            }
+
+            self.discovery_v5_builder = Some(f(builder));
+        }
+
+        self
+    }
+
     /// Adds a new additional protocol to the RLPx sub-protocol list.
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
@@ -458,6 +473,7 @@ impl NetworkConfigBuilder {
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
+            discovery_v5_builder,
             boot_nodes,
             discovery_addr,
             listener_addr,
@@ -511,7 +527,7 @@ impl NetworkConfigBuilder {
             boot_nodes,
             dns_discovery_config,
             discovery_v4_config: discovery_v4_builder.map(|builder| builder.build()),
-            discovery_v5_config: None,
+            discovery_v5_config: discovery_v5_builder.map(|builder| builder.build()),
             discovery_v4_addr: discovery_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS),
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),

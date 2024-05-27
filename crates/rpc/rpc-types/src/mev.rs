@@ -755,7 +755,7 @@ mod u256_numeric_string {
         match val {
             serde_json::Value::String(s) => {
                 if let Ok(val) = s.parse::<u128>() {
-                    return Ok(U256::from(val));
+                    return Ok(U256::from(val))
                 }
                 U256::from_str(&s).map_err(de::Error::custom)
             }

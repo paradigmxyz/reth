@@ -4,7 +4,7 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, chain_spec_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DiscoveryArgs,
+        DatabaseArgs, DiscoveryArgs, NetworkArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
     utils::get_single_header,
@@ -14,12 +14,12 @@ use clap::{Parser, Subcommand};
 use discv5::ListenConfig;
 use reth_config::Config;
 use reth_db::create_db;
-use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
+use reth_network::NetworkConfigBuilder;
+use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use std::{
-    net::{SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::Arc,
 };
@@ -53,30 +53,13 @@ pub struct Command {
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
-    /// Secret key to use for this node.
-    ///
-    /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH")]
-    p2p_secret_key: Option<PathBuf>,
-
     /// Disable the discovery service.
     #[command(flatten)]
-    pub discovery: DiscoveryArgs,
-
-    /// Target trusted peer
-    #[arg(long)]
-    trusted_peer: Option<NodeRecord>,
-
-    /// Connect only to trusted peers
-    #[arg(long)]
-    trusted_only: bool,
+    pub network: NetworkArgs,
 
     /// The number of retries per request
     #[arg(long, default_value = "5")]
     retries: usize,
-
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
 
     #[command(flatten)]
     db: DatabaseArgs,
@@ -113,65 +96,76 @@ impl Command {
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
-        if let Some(peer) = self.trusted_peer {
+        for &peer in &self.network.trusted_peers {
             config.peers.trusted_nodes.insert(peer);
         }
 
-        if config.peers.trusted_nodes.is_empty() && self.trusted_only {
+        if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
         }
 
-        config.peers.trusted_nodes_only = self.trusted_only;
+        config.peers.trusted_nodes_only = self.network.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret();
-        let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+        let secret_key_path =
+            self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
+        let rlpx_socket = (self.network.addr, self.network.port).into();
+        let boot_nodes = self.chain.bootnodes().unwrap_or_default();
 
-        let mut network_config_builder = config
-            .network_config(self.nat, None, p2p_secret_key)
+        let mut network_config_builder = NetworkConfigBuilder::new(p2p_secret_key)
+            .peer_config(config.peers_config_with_basic_nodes_from_file(None))
+            .external_ip_resolver(self.network.nat)
             .chain_spec(self.chain.clone())
             .disable_discv4_discovery_if(self.chain.chain.is_optimism())
-            .boot_nodes(self.chain.bootnodes().unwrap_or_default());
+            .boot_nodes(boot_nodes.clone());
 
-        network_config_builder = self.discovery.apply_to_builder(network_config_builder);
-
-        let mut network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
-            noop_db,
-            self.chain.clone(),
-            data_dir.static_files(),
-        )?));
-
-        if !self.discovery.disable_discovery &&
-            (self.discovery.enable_discv5_discovery ||
-                network_config.chain_spec.chain.is_optimism())
-        {
-            network_config = network_config.discovery_v5_with_config_builder(|builder| {
+        network_config_builder = self
+            .network
+            .discovery
+            .apply_to_builder(network_config_builder, rlpx_socket)
+            .map_discv5_config_builder(|builder| {
                 let DiscoveryArgs {
-                    discv5_addr: discv5_addr_ipv4,
+                    discv5_addr,
                     discv5_addr_ipv6,
-                    discv5_port: discv5_port_ipv4,
+                    discv5_port,
                     discv5_port_ipv6,
                     discv5_lookup_interval,
                     discv5_bootstrap_lookup_interval,
                     discv5_bootstrap_lookup_countdown,
                     ..
-                } = self.discovery;
+                } = self.network.discovery;
+
+                // Use rlpx address if none given
+                let discv5_addr_ipv4 = discv5_addr.or(match self.network.addr {
+                    IpAddr::V4(ip) => Some(ip),
+                    IpAddr::V6(_) => None,
+                });
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or(match self.network.addr {
+                    IpAddr::V4(_) => None,
+                    IpAddr::V6(ip) => Some(ip),
+                });
 
                 builder
                     .discv5_config(
                         discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                            discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
+                            discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port)),
                             discv5_addr_ipv6
                                 .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
                         ))
                         .build(),
                     )
+                    .add_unsigned_boot_nodes(boot_nodes.into_iter())
                     .lookup_interval(discv5_lookup_interval)
                     .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
                     .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
-                    .build()
             });
-        }
+
+        let network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
+            noop_db,
+            self.chain.clone(),
+            data_dir.static_files(),
+        )?));
 
         let network = network_config.start_network().await?;
         let fetch_client = network.fetch_client().await?;

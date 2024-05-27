@@ -1,7 +1,7 @@
 //! Optimism-specific implementation and utilities for the executor
 
 use crate::OptimismBlockExecutionError;
-use reth_interfaces::{executor::BlockExecutionError, RethError};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, B256, U256};
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
@@ -190,7 +190,9 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
+            SpecId::ECOTONE
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
@@ -230,7 +232,7 @@ pub fn ensure_create2_deployer<DB>(
     chain_spec: Arc<ChainSpec>,
     timestamp: u64,
     db: &mut revm::State<DB>,
-) -> Result<(), RethError>
+) -> Result<(), DB::Error>
 where
     DB: revm::Database,
 {
@@ -244,9 +246,7 @@ where
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 
         // Load the create2 deployer account from the cache.
-        let acc = db
-            .load_cache_account(CREATE_2_DEPLOYER_ADDR)
-            .map_err(|_| RethError::Custom("Failed to load account".to_string()))?;
+        let acc = db.load_cache_account(CREATE_2_DEPLOYER_ADDR)?;
 
         // Update the account info with the create2 deployer codehash and bytecode.
         let mut acc_info = acc.account_info().unwrap_or_default();

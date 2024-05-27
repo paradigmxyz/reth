@@ -21,7 +21,6 @@ pub mod errors;
 mod ethstream;
 mod hello;
 pub mod multiplex;
-pub mod muxdemux;
 mod p2pstream;
 mod pinger;
 pub mod protocol;
@@ -39,7 +38,6 @@ pub use crate::{
     disconnect::{CanDisconnect, DisconnectReason},
     ethstream::{EthStream, UnauthedEthStream, MAX_MESSAGE_SIZE},
     hello::{HelloMessage, HelloMessageBuilder, HelloMessageWithProtocols},
-    muxdemux::{MuxDemuxStream, StreamClone},
     p2pstream::{
         DisconnectP2P, P2PMessage, P2PMessageID, P2PStream, ProtocolVersion, UnauthedP2PStream,
         MAX_RESERVED_MESSAGE_ID,

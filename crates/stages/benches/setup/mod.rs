@@ -14,13 +14,13 @@ use reth_interfaces::test_utils::{
         random_eoa_accounts,
     },
 };
-use reth_primitives::{fs, Account, Address, SealedBlock, B256, U256};
+use reth_primitives::{Account, Address, SealedBlock, B256, U256};
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::{StorageKind, TestStageDB},
 };
 use reth_trie::StateRoot;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 use tokio::runtime::Handle;
 
 mod constants;

@@ -1,6 +1,6 @@
 use crate::EthVersion;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_codecs::derive_arbitrary;
+use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{
     hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, NamedChain, B256, MAINNET, U256,
 };

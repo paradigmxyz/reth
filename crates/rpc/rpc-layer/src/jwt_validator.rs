@@ -26,7 +26,7 @@ impl AuthValidator for JwtAuthValidator {
 
     fn validate(&self, headers: &HeaderMap) -> Result<(), Response<Self::ResponseBody>> {
         match get_bearer(headers) {
-            Some(jwt) => match self.secret.validate(jwt) {
+            Some(jwt) => match self.secret.validate(&jwt) {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!(target: "engine::jwt-validator", "Invalid JWT: {e}");

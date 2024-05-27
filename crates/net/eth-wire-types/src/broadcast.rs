@@ -6,7 +6,7 @@ use alloy_rlp::{
 };
 
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
-use reth_codecs::derive_arbitrary;
+use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{
     Block, Bytes, PooledTransactionsElement, TransactionSigned, TxHash, B256, U128,
 };

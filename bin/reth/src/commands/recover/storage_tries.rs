@@ -9,7 +9,8 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
-use reth_node_core::{args::DatabaseArgs, init::init_genesis};
+use reth_db_common::init::init_genesis;
+use reth_node_core::args::DatabaseArgs;
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;

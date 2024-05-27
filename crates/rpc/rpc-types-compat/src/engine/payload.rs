@@ -42,6 +42,10 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         gas_used: payload.gas_used,
         timestamp: payload.timestamp,
         mix_hash: payload.prev_randao,
+        // WARNING: It’s allowed for a base fee in EIP1559 to increase unbounded. We assume that
+        // it will fit in an u64. This is not always necessarily true, although it is extremelly
+        // unlikely not to be the case, a u64 maximum would have 2^64 which equates to 18 ETH per
+        // gas.
         base_fee_per_gas: Some(
             payload
                 .base_fee_per_gas
@@ -93,18 +97,20 @@ pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, Pay
     try_payload_v3_to_block(payload.payload_inner)
 }
 
-/// Converts [SealedBlock] to [ExecutionPayload]
-pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
+/// Converts [SealedBlock] to [ExecutionPayload], returning additional data (the parent beacon block
+/// root) if the block is a V3 payload
+pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) {
     // todo(onbjerg): check for requests_root here and return payload v4
     if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
-        ExecutionPayload::V3(block_to_payload_v3(value))
+        let (payload, beacon_block_root) = block_to_payload_v3(value);
+        (ExecutionPayload::V3(payload), beacon_block_root)
     } else if value.withdrawals.is_some() {
         // block with withdrawals: V2
-        ExecutionPayload::V2(block_to_payload_v2(value))
+        (ExecutionPayload::V2(block_to_payload_v2(value)), None)
     } else {
         // otherwise V1
-        ExecutionPayload::V1(block_to_payload_v1(value))
+        (ExecutionPayload::V1(block_to_payload_v1(value)), None)
     }
 }
 
@@ -154,11 +160,12 @@ pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
     }
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadV3]
-pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
+/// Converts [SealedBlock] to [ExecutionPayloadV3], and returns the parent beacon block root.
+pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B256>) {
     let transactions = value.raw_transactions();
 
-    ExecutionPayloadV3 {
+    let parent_beacon_block_root = value.header.parent_beacon_block_root;
+    let payload = ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
         payload_inner: ExecutionPayloadV2 {
@@ -180,7 +187,9 @@ pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
             },
             withdrawals: value.withdrawals.unwrap_or_default().into_inner(),
         },
-    }
+    };
+
+    (payload, parent_beacon_block_root)
 }
 
 /// Converts [SealedBlock] to [ExecutionPayloadFieldV2]
@@ -370,7 +379,7 @@ mod tests {
         let converted_payload = block_to_payload_v3(block.seal_slow());
 
         // ensure the payloads are the same
-        assert_eq!(new_payload, converted_payload);
+        assert_eq!((new_payload, Some(parent_beacon_block_root.into())), converted_payload);
     }
 
     #[test]
