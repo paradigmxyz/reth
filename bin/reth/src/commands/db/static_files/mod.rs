@@ -16,9 +16,7 @@ use reth_primitives::{
     },
     BlockNumber, ChainSpec, StaticFileSegment,
 };
-use reth_provider::{
-    providers::StaticFileProvider, BlockNumReader, ProviderFactory,
-};
+use reth_provider::{providers::StaticFileProvider, BlockNumReader, ProviderFactory};
 use reth_static_file::{segments as static_file_segments, segments::Segment};
 use std::{
     path::{Path, PathBuf},

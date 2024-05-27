@@ -90,7 +90,11 @@ impl StaticFileProviderRW {
             Err(err) => return Err(err),
         };
 
-        let result = match NippyJarWriter::new(jar, false) {
+        let reader = Self::upgrade_provider_to_strong_reference(&reader);
+        let result = match NippyJarWriter::new(
+            jar,
+            !reader.is_read_only(),
+        ) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This static file has been frozen, so we should

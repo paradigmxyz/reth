@@ -25,7 +25,8 @@ use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
 use reth_primitives::ChainSpec;
 use reth_provider::{
-    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{

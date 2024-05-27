@@ -17,8 +17,7 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_primitives::{stage::StageId, ChainSpec, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileProvider, BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory,
-    StaticFileWriter,
+    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter,
 };
 use tracing::{debug, error, info, trace};
 

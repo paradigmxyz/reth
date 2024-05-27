@@ -6,9 +6,7 @@ use reth_db::{
 };
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::stage::StageCheckpoint;
-use reth_provider::{
-    providers::StaticFileProvider, ChainSpecProvider, ProviderFactory,
-};
+use reth_provider::{providers::StaticFileProvider, ChainSpecProvider, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use tracing::info;
 

@@ -10,7 +10,8 @@ use reth_primitives::{
     StaticFileSegment, TransactionSignedNoHash,
 };
 use reth_provider::{
-    providers::StaticFileProvider, BlockNumReader, ProviderError, ProviderFactory, TransactionsProvider, TransactionsProviderExt,
+    providers::StaticFileProvider, BlockNumReader, ProviderError, ProviderFactory,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use std::{path::PathBuf, sync::Arc};
 

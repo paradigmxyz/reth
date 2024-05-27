@@ -129,6 +129,10 @@ impl StaticFileProviderInner {
 
         Ok(provider)
     }
+
+    pub fn is_read_only(&self) -> bool {
+        self.env.is_read_only()
+    }
 }
 
 impl StaticFileProvider {

@@ -9,7 +9,8 @@ use reth_primitives::{
     Receipt, StaticFileSegment,
 };
 use reth_provider::{
-    providers::StaticFileProvider, BlockNumReader, ProviderError, ProviderFactory, ReceiptProvider, TransactionsProvider, TransactionsProviderExt,
+    providers::StaticFileProvider, BlockNumReader, ProviderError, ProviderFactory, ReceiptProvider,
+    TransactionsProvider, TransactionsProviderExt,
 };
 use std::{path::PathBuf, sync::Arc};
 
