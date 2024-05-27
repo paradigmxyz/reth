@@ -17,7 +17,7 @@ use reth_db::{
 };
 use reth_node_core::dirs::PlatformPath;
 use reth_primitives::ChainSpec;
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -108,7 +108,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         )?;
 
         info!(target: "reth::cli", "Database opened");

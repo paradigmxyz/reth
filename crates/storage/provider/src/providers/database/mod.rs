@@ -568,7 +568,7 @@ impl<DB> Clone for ProviderFactory<DB> {
 mod tests {
     use super::ProviderFactory;
     use crate::{
-        providers::{static_file::StaticFileAccess, StaticFileProvider, StaticFileWriter},
+        providers::{StaticFileProvider, StaticFileWriter},
         test_utils::create_test_provider_factory,
         BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode,
         TransactionsProvider,
@@ -630,7 +630,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
-            StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
         )
         .unwrap();
 

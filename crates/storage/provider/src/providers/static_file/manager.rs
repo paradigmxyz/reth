@@ -66,10 +66,20 @@ pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
     /// Creates a new [`StaticFileProvider`].
-    pub fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
+    fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self(Arc::new(StaticFileProviderInner::new(path, env)?));
         provider.initialize_index()?;
         Ok(provider)
+    }
+
+    /// Creates a new [`StaticFileProvider`] with read-only access.
+    pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        Self::new(path, StaticFileAccess::RO)
+    }
+
+    /// Creates a new [`StaticFileProvider`] with read-write access.
+    pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        Self::new(path, StaticFileAccess::RW)
     }
 }
 

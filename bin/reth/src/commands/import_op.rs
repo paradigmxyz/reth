@@ -20,7 +20,7 @@ use reth_downloaders::file_client::{
 };
 use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, PruneModes};
 use reth_provider::{
-    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader, StaticFileAccess,
+    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader,
     StaticFileProviderFactory,
 };
 use reth_static_file::StaticFileProducer;
@@ -96,7 +96,7 @@ impl ImportOpCommand {
         let provider_factory = ProviderFactory::new(
             db.clone(),
             chain_spec.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         )?;
 
         debug!(target: "reth::cli", chain=%chain_spec.chain, genesis=?chain_spec.genesis_hash(), "Initializing genesis");

@@ -17,7 +17,7 @@ use reth_db::create_db;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_network::NetworkConfigBuilder;
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{
     net::{IpAddr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
@@ -164,7 +164,7 @@ impl Command {
         let network_config = network_config_builder.build(Arc::new(ProviderFactory::new(
             noop_db,
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         )?));
 
         let network = network_config.start_network().await?;

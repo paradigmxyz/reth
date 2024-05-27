@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    HistoryWriter, ProviderError, ProviderFactory, StaticFileAccess, StaticFileProviderFactory,
+    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tempfile::TempDir;
@@ -39,7 +39,7 @@ impl Default for TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db(),
                 MAINNET.clone(),
-                StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
             )
             .unwrap(),
         }
@@ -55,7 +55,7 @@ impl TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                StaticFileProvider::new(static_dir_path, StaticFileAccess::RW).unwrap(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
             )
             .unwrap(),
         }

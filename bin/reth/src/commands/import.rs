@@ -30,7 +30,7 @@ use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, ChainSpecProvider, HeaderProvider,
-    HeaderSyncMode, ProviderError, ProviderFactory, StageCheckpointReader, StaticFileAccess,
+    HeaderSyncMode, ProviderError, ProviderFactory, StageCheckpointReader,
     StaticFileProviderFactory,
 };
 use reth_stages::{prelude::*, Pipeline, StageSet};
@@ -121,7 +121,7 @@ impl ImportCommand {
         let provider_factory = ProviderFactory::new(
             db.clone(),
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         )?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");

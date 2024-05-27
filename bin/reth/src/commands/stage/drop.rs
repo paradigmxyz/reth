@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    ProviderFactory, StaticFileAccess, StaticFileProviderFactory,
+    ProviderFactory, StaticFileProviderFactory,
 };
 use std::sync::Arc;
 
@@ -65,7 +65,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         )?;
         let static_file_provider = provider_factory.static_file_provider();
 

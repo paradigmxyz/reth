@@ -26,7 +26,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{ChainSpec, PruneModes};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
-    CanonStateSubscriptions, ProviderFactory, StaticFileAccess, StaticFileProviderFactory,
+    CanonStateSubscriptions, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
@@ -100,9 +100,8 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                StaticFileProvider::new(
+                StaticFileProvider::read_only(
                     self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-                    StaticFileAccess::RO,
                 )?,
             )?)
             .start_network()
@@ -126,7 +125,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             db.clone(),
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RO)?,
+            StaticFileProvider::read_only(data_dir.static_files())?,
         )?;
 
         let consensus: Arc<dyn Consensus> =

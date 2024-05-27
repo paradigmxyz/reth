@@ -14,7 +14,7 @@ use reth_db::{
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
 };
 use reth_primitives::ChainSpec;
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -96,11 +96,8 @@ pub enum Subcommands {
 macro_rules! db_ro_exec {
     ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
         let db = open_db_read_only($db_path, $db_args)?;
-        let provider_factory = ProviderFactory::new(
-            db,
-            $chain.clone(),
-            StaticFileProvider::new($sfp, StaticFileAccess::RO)?,
-        )?;
+        let provider_factory =
+            ProviderFactory::new(db, $chain.clone(), StaticFileProvider::read_only($sfp)?)?;
 
         let $tool = DbTool::new(provider_factory, $chain.clone())?;
         $command;
@@ -163,7 +160,7 @@ impl Command {
                 let provider_factory = ProviderFactory::new(
                     db,
                     self.chain.clone(),
-                    StaticFileProvider::new(&static_files_path, StaticFileAccess::RW)?,
+                    StaticFileProvider::read_write(&static_files_path)?,
                 )?;
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
@@ -174,7 +171,7 @@ impl Command {
                 let provider_factory = ProviderFactory::new(
                     db,
                     self.chain.clone(),
-                    StaticFileProvider::new(static_files_path, StaticFileAccess::RW)?,
+                    StaticFileProvider::read_write(static_files_path)?,
                 )?;
 
                 command.execute(provider_factory)?;

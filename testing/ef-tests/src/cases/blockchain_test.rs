@@ -10,7 +10,7 @@ use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    HashingWriter, ProviderFactory, StaticFileAccess,
+    HashingWriter, ProviderFactory,
 };
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -89,7 +89,7 @@ impl Case for BlockchainTestCase {
                 let provider = ProviderFactory::new(
                     db.as_ref(),
                     Arc::new(case.network.clone().into()),
-                    StaticFileProvider::new(static_files_dir_path, StaticFileAccess::RW).unwrap(),
+                    StaticFileProvider::read_write(static_files_dir_path).unwrap(),
                 )?
                 .provider_rw()
                 .unwrap();

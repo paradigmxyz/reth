@@ -32,7 +32,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockExecutionWriter, HeaderSyncMode, ProviderFactory,
-    StageCheckpointReader, StaticFileAccess, StaticFileProviderFactory,
+    StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -156,9 +156,8 @@ impl Command {
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
         let secret_key = get_secret_key(&network_secret_path)?;
-        let static_files = StaticFileProvider::new(
+        let static_files = StaticFileProvider::read_only(
             self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-            StaticFileAccess::RO,
         )?;
         let network = self
             .network
@@ -213,7 +212,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             db.clone(),
             self.chain.clone(),
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         )?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");

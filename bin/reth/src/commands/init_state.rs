@@ -12,7 +12,7 @@ use reth_config::config::EtlConfig;
 use reth_db::{database::Database, init_db};
 use reth_db_common::init::init_from_state_dump;
 use reth_primitives::{ChainSpec, B256};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileAccess};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 
 use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc};
 use tracing::info;
@@ -81,7 +81,7 @@ impl InitStateCommand {
         let provider_factory = ProviderFactory::new(
             db,
             self.chain,
-            StaticFileProvider::new(data_dir.static_files(), StaticFileAccess::RW)?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         )?;
         let etl_config = EtlConfig::new(
             Some(EtlConfig::from_datadir(data_dir.data_dir())),
