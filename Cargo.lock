@@ -6689,6 +6689,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-tracing",
+ "schnellru",
  "secp256k1 0.28.2",
  "serde",
  "thiserror",

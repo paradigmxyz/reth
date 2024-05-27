@@ -45,7 +45,9 @@ use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
-    fmt, io,
+    fmt,
+    future::poll_fn,
+    io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
     rc::Rc,
@@ -1790,7 +1792,13 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
     }
 }
 
+/// Rate limits the number if incoming packets from individual IPs to 1 packet/second
+const MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP: usize = 60usize;
+
 /// Continuously awaits new incoming messages and sends them back through the channel.
+///
+/// The receive loop enforce primitive rate limiting for ips to prevent message spams from
+/// individual IPs
 pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
@@ -1802,6 +1810,12 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
         });
     };
 
+    let mut cache = ReceiveCache::default();
+
+    // tick at half the rate of the limit
+    let tick = MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP / 2;
+    let mut interval = tokio::time::interval(Duration::from_secs(tick as u64));
+
     let mut buf = [0; MAX_PACKET_SIZE];
     loop {
         let res = udp.recv_from(&mut buf).await;
@@ -1811,6 +1825,12 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                 send(IngressEvent::RecvError(err)).await;
             }
             Ok((read, remote_addr)) => {
+                // rate limit incoming packets by IP
+                if cache.inc_ip(remote_addr.ip()) > MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP {
+                    trace!(target: "discv4", ?remote_addr, "Too many incoming packets from IP.");
+                    continue
+                }
+
                 let packet = &buf[..read];
                 match Message::decode(packet) {
                     Ok(packet) => {
@@ -1819,6 +1839,13 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                             debug!(target: "discv4", ?remote_addr, "Received own packet.");
                             continue
                         }
+
+                        // skip if we've already received the same packet
+                        if cache.contains_packet(packet.hash) {
+                            debug!(target: "discv4", ?remote_addr, "Received duplicate packet.");
+                            continue
+                        }
+
                         send(IngressEvent::Packet(remote_addr, packet)).await;
                     }
                     Err(err) => {
@@ -1827,6 +1854,67 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                     }
                 }
             }
+        }
+
+        // reset the tracked ips if the interval has passed
+        if poll_fn(|cx| match interval.poll_tick(cx) {
+            Poll::Ready(_) => Poll::Ready(true),
+            Poll::Pending => Poll::Ready(false),
+        })
+        .await
+        {
+            cache.tick_ips(tick);
+        }
+    }
+}
+
+/// A cache for received packets and their source address.
+///
+/// This is used to discard duplicated packets and rate limit messages from the same source.
+struct ReceiveCache {
+    /// keeps track of how many messages we've received from a given IP address since the last
+    /// tick.
+    ///
+    /// This is used to count the number of messages received from a given IP address within an
+    /// interval.
+    ip_messages: HashMap<IpAddr, usize>,
+    // keeps track of unique packet hashes
+    unique_packets: schnellru::LruMap<B256, ()>,
+}
+
+impl ReceiveCache {
+    /// Updates the counter for each IP address and removes IPs that have exceeded the limit.
+    ///
+    /// This will decrement the counter for each IP address and remove IPs that have reached 0.
+    fn tick_ips(&mut self, tick: usize) {
+        self.ip_messages.retain(|_, count| {
+            if let Some(reset) = count.checked_sub(tick) {
+                *count = reset;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// Increases the counter for the given IP address and returns the new count.
+    fn inc_ip(&mut self, ip: IpAddr) -> usize {
+        let ctn = self.ip_messages.entry(ip).or_default();
+        *ctn = ctn.saturating_add(1);
+        *ctn
+    }
+
+    /// Returns true if we previously received the packet
+    fn contains_packet(&mut self, hash: B256) -> bool {
+        !self.unique_packets.insert(hash, ())
+    }
+}
+
+impl Default for ReceiveCache {
+    fn default() -> Self {
+        Self {
+            ip_messages: Default::default(),
+            unique_packets: schnellru::LruMap::new(schnellru::ByLength::new(32)),
         }
     }
 }
