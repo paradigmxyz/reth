@@ -39,7 +39,7 @@ use discv5::{
 use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
-use reth_network_types::PeerId;
+use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{bytes::Bytes, hex, ForkId, B256};
 use secp256k1::SecretKey;
 use std::{
@@ -1238,6 +1238,12 @@ impl Discv4Service {
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
         trace!(target: "discv4", ?remote_addr, ?msg, "received ENR response");
         if let Some(resp) = self.pending_enr_requests.remove(&id) {
+            // ensure the ENR's public key matches the expected node id
+            let enr_id = pk2id(&msg.enr.public_key());
+            if id != enr_id {
+                return
+            }
+
             if resp.echo_hash == msg.request_hash {
                 let key = kad_key(id);
                 let fork_id = msg.eth_fork_id();
