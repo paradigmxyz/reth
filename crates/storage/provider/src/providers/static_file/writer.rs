@@ -6,13 +6,13 @@ use super::{
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db::codecs::CompactU256;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
     BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Weak},
@@ -522,7 +522,7 @@ impl StaticFileProviderRW {
         if self.prune_on_commit.is_some() {
             return Err(ProviderError::NippyJar(
                 "Pruning should be comitted before appending or pruning more data".to_string(),
-            ));
+            ))
         }
         Ok(())
     }

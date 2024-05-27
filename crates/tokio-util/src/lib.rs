@@ -8,5 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod event_listeners;
-pub use event_listeners::EventListeners;
+mod event_sender;
+mod event_stream;
+pub use event_sender::EventSender;
+pub use event_stream::EventStream;

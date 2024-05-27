@@ -111,9 +111,7 @@ pub(crate) fn invalid_params_rpc_err(
 }
 
 /// Constructs an internal JSON-RPC error.
-pub(crate) fn internal_rpc_err(
-    msg: impl Into<String>,
-) -> jsonrpsee::types::error::ErrorObject<'static> {
+pub fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::types::error::ErrorObject<'static> {
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, None)
 }
 

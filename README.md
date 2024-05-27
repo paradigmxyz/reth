@@ -42,7 +42,7 @@ Reth is performant, feature-complete, [Cancun-ready](https://paradigmxyz.github.
 
 We actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
 
-While we are aware of parties running Reth staking nodes in production, we do *not* encourage usage in production staking environments by non-professionals until our audits are done, and the 1.0 version of Reth is released, but we are available to support without warranty or liability. 
+While we are aware of parties running Reth staking nodes in production, we do *not* encourage usage in production staking environments by non-professionals until our audits are done, and the 1.0 version of Reth is released, but we are available to support without warranty or liability.
 
 More historical context below:
 * We are releasing 1.0 "production-ready" stable Reth once our Reth & Revm audits are done. ETA ~May 2024.
@@ -154,6 +154,10 @@ None of this would have been possible without them, so big shoutout to the teams
 - [Geth](https://github.com/ethereum/go-ethereum/): We would like to express our heartfelt gratitude to the go-ethereum team for their outstanding contributions to Ethereum over the years. Their tireless efforts and dedication have helped to shape the Ethereum ecosystem and make it the vibrant and innovative community it is today. Thank you for your hard work and commitment to the project.
 - [Erigon](https://github.com/ledgerwatch/erigon) (fka Turbo-Geth): Erigon pioneered the ["Staged Sync" architecture](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) that Reth is using, as well as [introduced MDBX](https://github.com/ledgerwatch/erigon/wiki/Choice-of-storage-engine) as the database of choice. We thank Erigon for pushing the state of the art research on the performance limits of Ethereum nodes.
 - [Akula](https://github.com/akula-bft/akula/): Reth uses forks of the Apache versions of Akula's [MDBX Bindings](https://github.com/paradigmxyz/reth/pull/132), [FastRLP](https://github.com/paradigmxyz/reth/pull/63) and [ECIES](https://github.com/paradigmxyz/reth/pull/80) . Given that these packages were already released under the Apache License, and they implement standardized solutions, we decided not to reimplement them to iterate faster. We thank the Akula team for their contributions to the Rust Ethereum ecosystem and for publishing these packages.
+
+## Warning
+
+The `NippyJar` and `Compact` encoding formats and their implementations are designed for storing and retrieving data internally. They are not hardened to safely read potentially malicious data.
 
 [book]: https://paradigmxyz.github.io/reth/
 [tg-url]: https://t.me/paradigm_reth

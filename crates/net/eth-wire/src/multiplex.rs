@@ -479,9 +479,9 @@ where
                         if let Err(disconnect_err) =
                             this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
                         {
-                            return Poll::Ready(Some(Err(disconnect_err.into())));
+                            return Poll::Ready(Some(Err(disconnect_err.into())))
                         }
-                        return Poll::Ready(Some(Err(err.into())));
+                        return Poll::Ready(Some(Err(err.into())))
                     }
                     Poll::Pending => {
                         conn_ready = false;

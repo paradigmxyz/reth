@@ -1,12 +1,10 @@
 //! Error handling for the blockchain tree
 
-use crate::{
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
-    RethError,
-};
+use crate::RethError;
 use reth_consensus::ConsensusError;
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
+use reth_storage_errors::provider::ProviderError;
 
 /// Various error cases that can occur when a block violates tree assumptions.
 #[derive(Debug, Clone, Copy, thiserror::Error, Eq, PartialEq)]
@@ -297,7 +295,7 @@ impl InsertBlockErrorKind {
             // other execution errors that are considered internal errors
             InsertBlockErrorKind::Execution(err) => {
                 match err {
-                    BlockExecutionError::Validation(_) => {
+                    BlockExecutionError::Validation(_) | BlockExecutionError::Consensus(_) => {
                         // this is caused by an invalid block
                         true
                     }

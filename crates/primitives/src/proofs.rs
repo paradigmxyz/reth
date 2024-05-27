@@ -8,7 +8,6 @@ use crate::{
     B256, U256,
 };
 use alloy_rlp::Encodable;
-use bytes::BufMut;
 use itertools::Itertools;
 
 /// Adjust the index of an item for rlp encoding.
@@ -30,9 +29,8 @@ pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> B256 {
 /// Compute a trie root of the collection of items with a custom encoder.
 pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
 where
-    F: FnMut(&T, &mut dyn BufMut),
+    F: FnMut(&T, &mut Vec<u8>),
 {
-    let mut index_buffer = Vec::new();
     let mut value_buffer = Vec::new();
 
     let mut hb = HashBuilder::default();
@@ -40,8 +38,7 @@ where
     for i in 0..items_len {
         let index = adjust_index_for_rlp(i, items_len);
 
-        index_buffer.clear();
-        index.encode(&mut index_buffer);
+        let index_buffer = alloy_rlp::encode_fixed_size(&index);
 
         value_buffer.clear();
         encode(&items[index], &mut value_buffer);
@@ -104,10 +101,15 @@ pub fn calculate_receipt_root_optimism(
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
+/// Calculates the receipt root for a header.
+pub fn calculate_receipt_root_ref(receipts: &[ReceiptWithBloomRef<'_>]) -> B256 {
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
-/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
+/// NOTE: Prefer [`calculate_receipt_root`] if you have log blooms memoized.
+pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| {
         ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
     })
@@ -115,9 +117,9 @@ pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
-/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
+/// NOTE: Prefer [`calculate_receipt_root_optimism`] if you have log blooms memoized.
 #[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_ref_optimism(
+pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&Receipt],
     chain_spec: &crate::ChainSpec,
     timestamp: u64,

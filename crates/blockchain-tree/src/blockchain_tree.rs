@@ -8,14 +8,10 @@ use crate::{
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
-        BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
-    },
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::RootMismatch,
-    RethResult,
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_interfaces::blockchain_tree::{
+    error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
+    BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
@@ -29,6 +25,7 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
+use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -120,7 +117,7 @@ where
         externals: TreeExternals<DB, E>,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
-    ) -> RethResult<Self> {
+    ) -> ProviderResult<Self> {
         let max_reorg_depth = config.max_reorg_depth() as usize;
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
         // depth at least N blocks must be sent at once.
@@ -307,7 +304,7 @@ where
                     *key_value.0
                 } else {
                     debug!(target: "blockchain_tree", ?chain_id, "No blockhashes stored");
-                    return None;
+                    return None
                 };
             let canonical_chain = canonical_chain
                 .iter()
@@ -730,7 +727,7 @@ where
             return Err(e)
         }
 
-        if let Err(e) = self.externals.consensus.validate_block(block) {
+        if let Err(e) = self.externals.consensus.validate_block_pre_execution(block) {
             error!(?block, "Failed to validate block {}: {e}", block.header.hash());
             return Err(e)
         }
@@ -843,7 +840,7 @@ where
     pub fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &mut self,
         last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         self.finalize_block(last_finalized_block);
 
         let last_canonical_hashes = self.update_block_hashes()?;
@@ -855,7 +852,7 @@ where
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
     /// them. Remove all mismatches, disconnect them and removes all chains.
-    pub fn update_block_hashes(&mut self) -> RethResult<BTreeMap<BlockNumber, B256>> {
+    pub fn update_block_hashes(&mut self) -> ProviderResult<BTreeMap<BlockNumber, B256>> {
         let last_canonical_hashes = self
             .externals
             .fetch_latest_canonical_hashes(self.config.num_of_canonical_hashes() as usize)?;
@@ -878,7 +875,7 @@ where
     /// blocks before the tip.
     pub fn update_block_hashes_and_clear_buffered(
         &mut self,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+    ) -> ProviderResult<BTreeMap<BlockNumber, BlockHash>> {
         let chain = self.update_block_hashes()?;
 
         if let Some((block, _)) = chain.last_key_value() {
@@ -893,7 +890,7 @@ where
     ///
     /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
-    pub fn connect_buffered_blocks_to_canonical_hashes(&mut self) -> RethResult<()> {
+    pub fn connect_buffered_blocks_to_canonical_hashes(&mut self) -> ProviderResult<()> {
         let last_canonical_hashes = self
             .externals
             .fetch_latest_canonical_hashes(self.config.num_of_canonical_hashes() as usize)?;
@@ -905,7 +902,7 @@ where
     fn connect_buffered_blocks_to_hashes(
         &mut self,
         hashes: impl IntoIterator<Item = impl Into<BlockNumHash>>,
-    ) -> RethResult<()> {
+    ) -> ProviderResult<()> {
         // check unconnected block buffer for children of the canonical hashes
         for added_block in hashes.into_iter() {
             self.try_connect_buffered_blocks(added_block.into())
@@ -1264,7 +1261,7 @@ where
     }
 
     /// Unwind tables and put it inside state
-    pub fn unwind(&mut self, unwind_to: BlockNumber) -> RethResult<()> {
+    pub fn unwind(&mut self, unwind_to: BlockNumber) -> Result<(), CanonicalError> {
         // nothing to be done if unwind_to is higher then the tip
         if self.block_indices().canonical_tip().number <= unwind_to {
             return Ok(())
