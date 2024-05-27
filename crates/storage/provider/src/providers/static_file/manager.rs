@@ -971,7 +971,7 @@ impl StaticFileWriter for StaticFileProvider {
                 writer.ensure_file_consistency(self.env.is_read_only())?;
             }
             StaticFileAccess::RW => {
-                self.latest_writer(segment)?;
+                self.latest_writer(segment)?.ensure_file_consistency(self.env.is_read_only())?;
             }
         }
 
