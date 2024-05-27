@@ -1400,7 +1400,7 @@ where
             EngineSyncEvent::FetchedFullBlock(block) => {
                 trace!(target: "consensus::engine", hash=?block.hash(), number=%block.number, "Downloaded full block");
                 // Insert block only if the block's parent is not marked as invalid
-                if !self.check_invalid_ancestor_with_head(block.parent_hash, block.hash()).is_some()
+                if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash()).is_none()
                 {
                     let previous_action = self
                         .blockchain_tree_action
