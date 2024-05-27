@@ -51,7 +51,7 @@ impl<DB> ProviderFactory<DB> {
         db: DB,
         chain_spec: Arc<ChainSpec>,
         static_files_path: PathBuf,
-    ) -> RethResult<ProviderFactory<DB>> {
+    ) -> ProviderResult<ProviderFactory<DB>> {
         Ok(Self {
             db: Arc::new(db),
             chain_spec,
@@ -169,7 +169,7 @@ impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
         &self,
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
-    ) -> RethResult<HeaderSyncGap> {
+    ) -> ProviderResult<HeaderSyncGap> {
         self.provider()?.sync_gap(mode, highest_uninterrupted_block)
     }
 }
@@ -570,7 +570,7 @@ impl<DB> Clone for ProviderFactory<DB> {
 }
 #[cfg(test)]
 mod tests {
-    use super::ProviderFactory;
+    use super::*;
     use crate::{
         providers::StaticFileWriter, test_utils::create_test_provider_factory, BlockHashReader,
         BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
@@ -583,12 +583,9 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_interfaces::{
-        test_utils::{
-            generators,
-            generators::{random_block, random_header},
-        },
-        RethError,
+    use reth_interfaces::test_utils::{
+        generators,
+        generators::{random_block, random_header},
     };
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
@@ -740,7 +737,7 @@ mod tests {
         // Empty database
         assert_matches!(
             provider.sync_gap(mode.clone(), checkpoint),
-            Err(RethError::Provider(ProviderError::HeaderNotFound(block_number)))
+            Err(ProviderError::HeaderNotFound(block_number))
                 if block_number.as_number().unwrap() == checkpoint
         );
 
