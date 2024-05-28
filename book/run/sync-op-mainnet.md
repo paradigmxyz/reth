@@ -45,7 +45,7 @@ Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 mi
 ### 3. Import State
 
 Imports a `.jsonl` state dump. The block at which the state dump is made, must be the latest block in
-reth's database. This should be block 105 235 063, the first Bedrock block.
+reth's database. This should be block 105 235 063, the first Bedrock block (see [step 1](#1-import-blocks)).
 
 Import of >4 million OP mainnet accounts at Bedrock, completes in 10 minutes.
 

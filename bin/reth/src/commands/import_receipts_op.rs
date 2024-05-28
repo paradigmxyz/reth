@@ -1,4 +1,4 @@
-//! Command that imports OP mainnet receipts from Bedrock datadir, exported via 
+//! Command that imports OP mainnet receipts from Bedrock datadir, exported via
 //! <https://github.com/testinprod-io/op-geth/pull/1>.
 
 use std::{
