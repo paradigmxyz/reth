@@ -7055,6 +7055,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-execution-types"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-evm",
+ "reth-primitives",
+ "reth-trie",
+ "revm",
+]
+
+[[package]]
 name = "reth-exex"
 version = "0.2.0-beta.7"
 dependencies = [
@@ -7661,12 +7671,13 @@ dependencies = [
  "reth-db",
  "reth-evm",
  "reth-execution-errors",
+ "reth-execution-types",
  "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
- "reth-revm",
+ "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",
  "revm",
@@ -7708,6 +7719,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-execution-errors",
  "reth-primitives",
+ "reth-provider",
  "reth-storage-errors",
  "reth-trie",
  "revm",
@@ -7989,6 +8001,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-stages",
+ "reth-storage-errors",
  "reth-tokio-util",
  "tempfile",
  "tokio",
@@ -8005,6 +8018,19 @@ dependencies = [
  "derive_more",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-storage-api"
+version = "0.2.0-beta.7"
+dependencies = [
+ "auto_impl",
+ "reth-db",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-storage-errors",
+ "reth-trie",
+ "revm",
 ]
 
 [[package]]

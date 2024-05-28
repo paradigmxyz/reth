@@ -19,6 +19,7 @@ members = [
     "crates/etl/",
     "crates/evm/",
     "crates/evm/execution-errors",
+    "crates/evm/execution-types",
     "crates/exex/",
     "crates/interfaces/",
     "crates/metrics/",
@@ -73,6 +74,7 @@ members = [
     "crates/storage/libmdbx-rs/mdbx-sys/",
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
+    "crates/storage/storage-api/",
     "crates/tasks/",
     "crates/tokio-util/",
     "crates/tracing/",
@@ -245,6 +247,7 @@ reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
+reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-interfaces = { path = "crates/interfaces" }
@@ -286,6 +289,7 @@ reth-stages = { path = "crates/stages" }
 reth-stages-api = { path = "crates/stages-api" }
 reth-static-file = { path = "crates/static-file" }
 reth-static-file-types = { path = "crates/static-file-types" }
+reth-storage-api = { path = "crates/storage/storage-api" }
 reth-storage-errors = { path = "crates/storage/errors" }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
