@@ -10,3 +10,6 @@
 
 mod bundle;
 pub use bundle::*;
+
+mod chain;
+pub use chain::*;

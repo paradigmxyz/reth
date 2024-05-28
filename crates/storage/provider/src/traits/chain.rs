@@ -1,6 +1,6 @@
 //! Canonical chain state notification trait and types.
 
-use crate::{chain::BlockReceipts, Chain};
+use crate::{BlockReceipts, Chain};
 use auto_impl::auto_impl;
 use reth_primitives::SealedBlockWithSenders;
 use std::{

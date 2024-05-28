@@ -7066,6 +7066,7 @@ name = "reth-execution-types"
 version = "0.2.0-beta.7"
 dependencies = [
  "reth-evm",
+ "reth-execution-errors",
  "reth-primitives",
  "reth-trie",
  "revm",
@@ -7678,7 +7679,6 @@ dependencies = [
  "reth-codecs",
  "reth-db",
  "reth-evm",
- "reth-execution-errors",
  "reth-execution-types",
  "reth-fs-util",
  "reth-interfaces",
