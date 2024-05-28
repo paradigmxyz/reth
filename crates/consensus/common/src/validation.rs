@@ -52,6 +52,14 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
     }
 
+    if chain_spec.is_prague_active_at_timestamp(header.timestamp) {
+        if header.requests_root.is_none() {
+            return Err(ConsensusError::RequestsRootMissing)
+        }
+    } else if header.requests_root.is_some() {
+        return Err(ConsensusError::RequestsRootUnexpected)
+    }
+
     Ok(())
 }
 
@@ -105,6 +113,19 @@ pub fn validate_block_pre_execution(
                 got: header_blob_gas_used,
                 expected: total_blob_gas,
             }))
+        }
+    }
+
+    // EIP-7685: General purpose execution layer requests
+    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+        let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
+        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
+        let header_requests_root =
+            block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+        if requests_root != *header_requests_root {
+            return Err(ConsensusError::BodyRequestsRootDiff(
+                GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+            ))
         }
     }
 
@@ -326,6 +347,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None
         };
         // size: 0x9b5
 
@@ -339,7 +361,16 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
+        (
+            SealedBlock {
+                header: header.seal_slow(),
+                body,
+                ommers,
+                withdrawals: None,
+                requests: None,
+            },
+            parent,
+        )
     }
 
     #[test]
@@ -419,6 +450,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            requests: None,
         };
 
         let block = SealedBlock::new(header, body);

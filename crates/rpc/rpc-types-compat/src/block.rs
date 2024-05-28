@@ -90,9 +90,11 @@ pub fn from_block_full(
     ))
 }
 
-/// Converts from a [reth_primitives::SealedHeader] to a [reth_rpc_types::BlockNumberOrTag]
+/// Converts from a [reth_primitives::SealedHeader] to a [reth_rpc_types::Header]
 ///
-/// Note: This does not set the `totalDifficulty` field.
+/// # Note
+///
+/// This does not set the `totalDifficulty` field.
 pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader) -> Header {
     let (header, hash) = primitive_header.split();
     let PrimitiveHeader {
@@ -116,6 +118,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         blob_gas_used,
         excess_blob_gas,
         parent_beacon_block_root,
+        requests_root,
     } = header;
 
     Header {
@@ -141,7 +144,7 @@ pub fn from_primitive_with_hash(primitive_header: reth_primitives::SealedHeader)
         excess_blob_gas: excess_blob_gas.map(u128::from),
         parent_beacon_block_root,
         total_difficulty: None,
-        requests_root: None,
+        requests_root,
     }
 }
 

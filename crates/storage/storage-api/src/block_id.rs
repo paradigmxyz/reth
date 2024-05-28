@@ -1,4 +1,4 @@
-use super::BlockHashReader;
+use crate::BlockHashReader;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 

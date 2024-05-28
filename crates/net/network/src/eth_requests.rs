@@ -166,6 +166,7 @@ where
                     transactions: block.body,
                     ommers: block.ommers,
                     withdrawals: block.withdrawals,
+                    requests: block.requests,
                 };
 
                 total_bytes += body.length();
