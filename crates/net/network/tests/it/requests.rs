@@ -2,15 +2,15 @@
 //! Tests for eth related requests
 
 use rand::Rng;
-use reth_interfaces::p2p::{
-    bodies::client::BodiesClient,
-    headers::client::{HeadersClient, HeadersRequest},
-};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
     NetworkEvents,
 };
 use reth_network_api::{NetworkInfo, Peers};
+use reth_network_p2p::{
+    bodies::client::BodiesClient,
+    headers::client::{HeadersClient, HeadersRequest},
+};
 use reth_primitives::{
     Block, BlockBody, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionSigned,
     TxEip2930, TxKind, U256,
