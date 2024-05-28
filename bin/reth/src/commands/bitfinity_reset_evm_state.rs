@@ -198,16 +198,6 @@ impl BitfinityResetEvmStateCommand {
     }
 }
 
-async fn split_and_send_add_accout_request(
-    executor: &Arc<dyn ResetStateExecutor>,
-    accounts: AccountInfoMap,
-) -> eyre::Result<()> {
-    for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
-        executor.add_accounts(account).await?;
-    }
-    Ok(())
-}
-
 /// Trait for the reset state executor
 pub trait ResetStateExecutor: Send + Debug {
     /// Start the reset state process
@@ -284,6 +274,16 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
             Ok(())
         })
     }
+}
+
+async fn split_and_send_add_accout_request(
+    executor: &Arc<dyn ResetStateExecutor>,
+    accounts: AccountInfoMap,
+) -> eyre::Result<()> {
+    for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
+        executor.add_accounts(account).await?;
+    }
+    Ok(())
 }
 
 /// Split the account request data into multiple requests
@@ -433,18 +433,8 @@ mod test {
         }
     }
 
-    fn merge_account_info_maps(maps: Vec<AccountInfoMap>) -> AccountInfoMap {
-        let mut result = AccountInfoMap::new();
-        for map in maps {
-            for (address, account) in map.data {
-                result.data.insert(address, account);
-            }
-        }
-        result
-    }
-
     #[test]
-    fn bitfinity_split_info_map_should_split_a_single_account_in_multiple_calls() {
+    fn bitfinity_test_split_info_map_should_split_a_single_account_in_multiple_calls() {
         todo!()
     }
 
@@ -495,11 +485,34 @@ mod test {
         }
     }
 
-    /// Merge accouts into a single account. The nonce, balance and bytecode are taken from the first account
+    /// Merge accouts into a single account
     fn merge_accounts(accounts: Vec<RawAccountInfo>) -> RawAccountInfo {
         let mut result = accounts[0].clone();
         for account in accounts {
+            assert_eq!(result.nonce, account.nonce);
+            assert_eq!(result.balance, account.balance);
+
             result.storage.extend(account.storage);
+
+            if result.bytecode.is_none() {
+                result.bytecode = account.bytecode.clone();
+            }
+            assert_eq!(result.bytecode, account.bytecode);
+        }
+        result
+    }
+
+    fn merge_account_info_maps(maps: Vec<AccountInfoMap>) -> AccountInfoMap {
+        let mut result = AccountInfoMap::new();
+        for map in maps {
+            for (address, account) in map.data {
+                // If the account exists, merge the storage, otherwise insert the account
+                if let Some(old_account) = result.data.get_mut(&address) {
+                    *old_account = merge_accounts(vec![old_account.clone(), account]);
+                } else {
+                  result.data.insert(address, account);
+                }
+            }
         }
         result
     }

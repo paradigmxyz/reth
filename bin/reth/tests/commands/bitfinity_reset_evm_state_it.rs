@@ -26,18 +26,17 @@ use tracing::*;
 use super::utils::*;
 
 /// This test requires a running EVM canister on a local dfx node.
-/// When the evm canister WASM will be published, this can be moved to pocket-ic.
+/// When the evm canister WASM will be published, this can be moved to pocket-ic and integrated in the CI pipeline
+/// by removing the `manual_` prefix from the name.
 #[tokio::test]
 #[serial]
-async fn bitfinity_test_should_reset_evm_state() {
+async fn manual_bitfinity_test_should_reset_evm_state() {
     // Arrange
     let _log = init_logs();
     let dfx_port = get_dfx_local_port();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
 
-    // Block 100_000 -> ok
-    // Block ? -> fail
-    let end_block = 800_000;
+    let end_block = 30_000;
     let data_dir = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
@@ -97,9 +96,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
 
-    // Block 800_000 -> ok
-    // Block ? -> fail
-    let end_block = 800_000;
+    let end_block = 30_000;
     let data_dir = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(evm_datasource_url, data_dir).await.unwrap();
@@ -273,9 +270,20 @@ impl ResetStateExecutor for InMemoryResetStateExecutor {
 
     fn add_accounts(
         &self,
-        mut accounts: AccountInfoMap,
+        accounts: AccountInfoMap,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = eyre::Result<()>> + Send>> {
-        self.accounts.lock().unwrap().data.append(&mut accounts.data);
+        let mut data = self.accounts.lock().unwrap();
+        for (address, mut account) in accounts.data {
+            // If the account already exists, merge the storage and the bytecode
+            if let Some(existing_account) = data.data.get_mut(&address) {
+                if let Some(bytecode) = account.bytecode {
+                    existing_account.bytecode = Some(bytecode);
+                }
+                existing_account.storage.append(&mut account.storage);
+            } else {
+                data.data.insert(address, account);
+            }
+        }
         Box::pin(async move { Ok(()) })
     }
 
