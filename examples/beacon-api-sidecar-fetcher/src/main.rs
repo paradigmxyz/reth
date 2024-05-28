@@ -91,7 +91,7 @@ impl BeaconSidecarConfig {
         format!("http://{}:{}", self.cl_addr, self.cl_port)
     }
 
-    /// Returns the URL to the beacon sidecars endpoint (https://ethereum.github.io/beacon-APIs/#/Beacon/getBlobSidecars)
+    /// Returns the URL to the beacon sidecars endpoint <https://ethereum.github.io/beacon-APIs/#/Beacon/getBlobSidecars>
     pub fn sidecar_url(&self, block_root: B256) -> String {
         format!("{}/eth/v1/beacon/blob_sidecars/{}", self.http_base_url(), block_root)
     }
