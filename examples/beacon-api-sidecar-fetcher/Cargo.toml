@@ -17,4 +17,4 @@ clap.workspace = true
 futures-util.workspace = true
 eyre.workspace = true
 thiserror.workspace = true
-reqwest = "0.12.3"
+reqwest.workspace = true
