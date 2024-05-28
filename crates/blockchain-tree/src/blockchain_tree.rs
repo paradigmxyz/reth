@@ -149,9 +149,9 @@ where
             ),
             config,
             canon_state_notification_sender,
-            metrics: Default::default(),
-            sync_metrics_tx: None,
             prune_modes,
+            sync_metrics_tx: None,
+            metrics: Default::default(),
         })
     }
 
@@ -190,14 +190,14 @@ where
         &self,
         block: BlockNumHash,
     ) -> Result<Option<BlockStatus>, InsertBlockErrorKind> {
+        // check if block is canonical
+        if self.is_block_hash_canonical(&block.hash)? {
+            return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
+        }
+
         let last_finalized_block = self.block_indices().last_finalized_block();
         // check db if block is finalized.
         if block.number <= last_finalized_block {
-            // check if block is canonical
-            if self.is_block_hash_canonical(&block.hash)? {
-                return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
-            }
-
             // check if block is inside database
             if self.externals.provider_factory.provider()?.block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
@@ -207,11 +207,6 @@ where
                 last_finalized: last_finalized_block,
             }
             .into())
-        }
-
-        // check if block is part of canonical chain
-        if self.is_block_hash_canonical(&block.hash)? {
-            return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
         }
 
         // is block inside chain
@@ -240,7 +235,7 @@ where
     ///
     /// Caution: This will not return blocks from the canonical chain.
     #[inline]
-    pub fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
+    pub fn sidechain_block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         self.state.block_by_hash(block_hash)
     }
 
@@ -262,15 +257,10 @@ where
         self.state.receipts_by_block_hash(block_hash)
     }
 
-    /// Returns true if the block is included in a side-chain.
-    fn is_block_hash_inside_sidechain(&self, block_hash: BlockHash) -> bool {
-        self.block_by_hash(block_hash).is_some()
-    }
-
     /// Returns the block that's considered the `Pending` block, if it exists.
     pub fn pending_block(&self) -> Option<&SealedBlock> {
         let b = self.block_indices().pending_block_num_hash()?;
-        self.block_by_hash(b.hash)
+        self.sidechain_block_by_hash(b.hash)
     }
 
     /// Return items needed to execute on the pending state.
@@ -306,7 +296,7 @@ where
                 if let Some(key_value) = parent_block_hashes.first_key_value() {
                     *key_value.0
                 } else {
-                    debug!(target: "blockchain_tree", ?chain_id, "No blockhashes stored");
+                    debug!(target: "blockchain_tree", ?chain_id, "No block hashes stored");
                     return None
                 };
             let canonical_chain = canonical_chain
@@ -940,14 +930,11 @@ where
         let include_blocks = self.state.buffered_blocks.remove_block_with_children(&new_block.hash);
         // then try to reinsert them into the tree
         for block in include_blocks.into_iter() {
-            // dont fail on error, just ignore the block.
+            // don't fail on error, just ignore the block.
             let _ = self
                 .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
                 .map_err(|err| {
-                    debug!(
-                        target: "blockchain_tree", %err,
-                        "Failed to insert buffered block",
-                    );
+                    debug!(target: "blockchain_tree", %err, "Failed to insert buffered block");
                     err
                 });
         }
@@ -1004,7 +991,7 @@ where
             header = provider.header_by_number(num)?;
         }
 
-        if header.is_none() && self.is_block_hash_inside_sidechain(*hash) {
+        if header.is_none() && self.sidechain_block_by_hash(*hash).is_some() {
             return Ok(None)
         }
 
