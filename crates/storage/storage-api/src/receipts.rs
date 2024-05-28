@@ -1,9 +1,7 @@
-use std::ops::RangeBounds;
-
+use crate::BlockIdReader;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
 use reth_storage_errors::provider::ProviderResult;
-
-use crate::BlockIdReader;
+use std::ops::RangeBounds;
 
 /// Client trait for fetching [Receipt] data .
 #[auto_impl::auto_impl(&, Arc)]
