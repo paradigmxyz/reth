@@ -1,16 +1,12 @@
-use crate::{
-    providers::StaticFileProviderRWRefMut, BundleStateDataProvider, StateChanges, StateReverts,
-    StateWriter,
-};
+use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts, StateWriter};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
-
 pub use reth_execution_types::*;
+use reth_primitives::StaticFileSegment;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use revm::db::states::OriginalValuesKnown;
 
 impl StateWriter for BundleStateWithReceipts {
@@ -64,17 +60,6 @@ impl StateWriter for BundleStateWithReceipts {
         StateChanges(plain_state).write_to_db(tx)?;
 
         Ok(())
-    }
-}
-
-impl BundleStateDataProvider for BundleStateWithReceipts {
-    fn state(&self) -> &BundleStateWithReceipts {
-        self
-    }
-
-    /// Always returns [None] because we don't have any information about the block header.
-    fn block_hash(&self, _block_number: BlockNumber) -> Option<BlockHash> {
-        None
     }
 }
 
