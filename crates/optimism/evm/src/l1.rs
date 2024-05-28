@@ -190,7 +190,9 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+            SpecId::FJORD
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
             SpecId::ECOTONE
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
@@ -211,7 +213,9 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+            SpecId::FJORD
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
