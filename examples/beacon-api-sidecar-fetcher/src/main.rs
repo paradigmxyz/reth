@@ -9,31 +9,21 @@
 //! **NOTE**: This expects that the CL client is running an http server on `localhost:5052` and is
 //! configured to emit payload attributes events.
 //!
-//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
+//! See beacon Node API: <https://ethereum.github.io/beacon-APIs/>
+
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use std::{
     collections::VecDeque,
     net::{IpAddr, Ipv4Addr},
-    ops::ControlFlow,
-    pin::Pin,
-    task::{Context, Poll},
 };
 
-use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use clap::Parser;
-use eyre::Result;
-use futures_util::{stream::FuturesUnordered, Stream, StreamExt};
-use mined_sidecar::{BlockEvent, BlockMetadata, MinedBlob, MinedSidecarStream, ReorgedBlob};
-use reqwest::{Error, StatusCode};
-use reth::{
-    builder::NodeHandle,
-    cli::Cli,
-    primitives::{BlobTransaction, SealedBlock, SealedBlockWithSenders, B256},
-    providers::{CanonStateNotification, CanonStateSubscriptions},
-    transaction_pool::{BlobStoreError, TransactionPoolExt},
-};
+use futures_util::{stream::FuturesUnordered, StreamExt};
+use mined_sidecar::MinedSidecarStream;
+use reth::{builder::NodeHandle, cli::Cli, primitives::B256, providers::CanonStateSubscriptions};
 use reth_node_ethereum::EthereumNode;
-use thiserror::Error;
+
 pub mod mined_sidecar;
 
 fn main() {
@@ -105,217 +95,4 @@ impl BeaconSidecarConfig {
     pub fn sidecar_url(&self, block_root: B256) -> String {
         format!("{}/eth/v1/beacon/blob_sidecars/{}", self.http_base_url(), block_root)
     }
-}
-
-/// SideCarError Handles Errors from both EL and CL
-#[derive(Debug, Error)]
-pub enum SideCarError {
-    #[error("Reqwest encountered an error: {0}")]
-    ReqwestError(Error),
-
-    #[error("There was an error grabbing the blob from the tx pool: {0}")]
-    TransactionPoolError(BlobStoreError),
-
-    #[error("400: {0}")]
-    InvalidBlockID(String),
-
-    #[error("404: {0}")]
-    BlockNotFound(String),
-
-    #[error("500: {0}")]
-    InternalError(String),
-
-    #[error("Network error: {0}")]
-    NetworkError(String),
-
-    #[error("Data parsing error: {0}")]
-    DeserializationError(String),
-
-    #[error("{0} Error: {1}")]
-    UnknownError(u16, String),
-}
-
-/// First checks if the Blobtranscation for a given EIP4844 is stored locally, if not attempts to
-/// retrieve it from the CL Layer
-impl<St, P> Stream for MinedSidecarStream<St, P>
-where
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-    P: TransactionPoolExt + Unpin + 'static,
-{
-    type Item = Result<BlockEvent, SideCarError>;
-
-    /// Attempt to pull the next BlobTransaction from the stream.
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
-        // Request locally first, otherwise request from CL
-        loop {
-            if let Some(mined_sidecar) = this.queued_actions.pop_front() {
-                return Poll::Ready(Some(Ok(mined_sidecar)));
-            }
-
-            // Check if any pending reqwests are ready and append to buffer
-            while let Poll::Ready(Some(pending_result)) = this.pending_requests.poll_next_unpin(cx)
-            {
-                match pending_result {
-                    Ok(mined_sidecars) => {
-                        for sidecar in mined_sidecars {
-                            this.queued_actions.push_back(sidecar);
-                        }
-                    }
-                    Err(err) => return Poll::Ready(Some(Err(err))),
-                }
-            }
-
-            while let Poll::Ready(Some(notification)) = this.events.poll_next_unpin(cx) {
-                {
-                    match notification {
-                        CanonStateNotification::Commit { new } => {
-                            for (_, block) in new.blocks().iter() {
-                                process_block(block, this);
-                            }
-                        }
-                        CanonStateNotification::Reorg { old, new } => {
-                            for (_, block) in old.blocks().iter() {
-                                let txs: Vec<BlockEvent> = block
-                                    .transactions()
-                                    .filter(|tx: &&reth::primitives::TransactionSigned| {
-                                        tx.is_eip4844()
-                                    })
-                                    .map(|tx| {
-                                        let transaction_hash = tx.hash();
-                                        let block_metadata = BlockMetadata {
-                                            block_hash: new.tip().block.hash(),
-                                            block_number: new.tip().block.number,
-                                            gas_used: new.tip().block.gas_used,
-                                        };
-                                        BlockEvent::Reorged(ReorgedBlob {
-                                            transaction_hash,
-                                            block_metadata,
-                                        })
-                                    })
-                                    .collect();
-                                this.queued_actions.extend(txs);
-                            }
-
-                            for (_, block) in new.blocks().iter() {
-                                process_block(block, this);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn process_block<St, P>(block: &SealedBlockWithSenders, this: &mut MinedSidecarStream<St, P>)
-where
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-    P: TransactionPoolExt + Unpin + 'static,
-{
-    let txs: Vec<_> = block
-        .transactions()
-        .filter(|tx: &&reth::primitives::TransactionSigned| tx.is_eip4844())
-        .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
-        .collect();
-
-    let mut all_blobs_available = true;
-    let mut actions_to_queue: Vec<BlockEvent> = Vec::new();
-
-    if txs.is_empty() {
-        return;
-    }
-
-    match this.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
-        Ok(blobs) => {
-            for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
-                let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
-                    .expect("should not fail to convert blob tx if it is already eip4844");
-
-                let block_metadata = BlockMetadata {
-                    block_hash: block.hash(),
-                    block_number: block.number,
-                    gas_used: block.gas_used,
-                };
-                actions_to_queue.push(BlockEvent::Mined(MinedBlob { transaction, block_metadata }));
-            }
-        }
-        Err(_err) => {
-            all_blobs_available = false;
-        }
-    };
-
-    // if any blob is missing we must instead query the consensus layer.
-    if all_blobs_available {
-        this.queued_actions.extend(actions_to_queue);
-    } else {
-        let client_clone = this.client.clone();
-        let block_root = block.hash();
-        let block_clone = block.clone();
-        let sidecar_url = this.beacon_config.sidecar_url(block_root);
-        let query = Box::pin(fetch_blobs_for_block(client_clone, sidecar_url, block_clone, txs));
-        this.pending_requests.push(query);
-    }
-}
-
-/// Query the Beacon Layer for missing BlobTransactions
-async fn fetch_blobs_for_block(
-    client: reqwest::Client,
-    url: String,
-    block: SealedBlockWithSenders,
-    txs: Vec<(reth::primitives::TransactionSigned, usize)>,
-) -> Result<Vec<BlockEvent>, SideCarError> {
-    let response = match client.get(url).header("Accept", "application/json").send().await {
-        Ok(response) => response,
-        Err(err) => return Err(SideCarError::ReqwestError(err)),
-    };
-
-    if !response.status().is_success() {
-        return match response.status() {
-            StatusCode::BAD_REQUEST => {
-                Err(SideCarError::InvalidBlockID("Invalid request to server.".to_string()))
-            }
-            StatusCode::NOT_FOUND => {
-                Err(SideCarError::BlockNotFound("Requested block not found.".to_string()))
-            }
-            StatusCode::INTERNAL_SERVER_ERROR => {
-                Err(SideCarError::InternalError("Server encountered an error.".to_string()))
-            }
-            _ => Err(SideCarError::UnknownError(
-                response.status().as_u16(),
-                "Unhandled HTTP status.".to_string(),
-            )),
-        };
-    }
-
-    let bytes = match response.bytes().await {
-        Ok(b) => b,
-        Err(e) => return Err(SideCarError::NetworkError(e.to_string())),
-    };
-
-    let blobs_bundle: BeaconBlobBundle = match serde_json::from_slice(&bytes) {
-        Ok(b) => b,
-        Err(e) => return Err(SideCarError::DeserializationError(e.to_string())),
-    };
-
-    let mut sidecar_iterator = SidecarIterator::new(blobs_bundle);
-
-    let sidecars: Vec<BlockEvent> = txs
-        .iter()
-        .filter_map(|(tx, blob_len)| {
-            sidecar_iterator.next_sidecar(*blob_len).map(|sidecar| {
-                let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar)
-                    .expect("should not fail to convert blob tx if it is already eip4844");
-                let block_metadata = BlockMetadata {
-                    block_hash: block.hash(),
-                    block_number: block.number,
-                    gas_used: block.gas_used,
-                };
-                BlockEvent::Mined(MinedBlob { transaction, block_metadata })
-            })
-        })
-        .collect();
-
-    Ok(sidecars)
 }
