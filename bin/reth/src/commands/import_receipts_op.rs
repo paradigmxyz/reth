@@ -1,6 +1,5 @@
-//! Command that imports receipts from a file.
-
-//! Command that imports receipts from a file.
+//! Command that imports OP mainnet receipts from Bedrock datadir, exported via 
+//! <https://github.com/testinprod-io/op-geth/pull/1>.
 
 use std::{
     path::{Path, PathBuf},
