@@ -140,7 +140,7 @@ where
     // prepare the tx for `write_to_storage`
     let tx = provider.into_tx();
     let mut total_decoded_receipts = 0;
-    let mut total_filtered_out_txns = 0;
+    let mut total_filtered_out_dup_txns = 0;
 
     // open file
     let mut reader = ChunkedFileReader::new(path, chunk_len).await?;
@@ -153,7 +153,7 @@ where
         // mark these as decoded
         total_decoded_receipts += total_receipts_chunk;
 
-        total_filtered_out_txns += filter(first_block, &mut receipts);
+        total_filtered_out_dup_txns += filter(first_block, &mut receipts);
 
         info!(target: "reth::cli",
             first_receipts_block=?first_block,
@@ -191,11 +191,11 @@ where
         .count_entries::<tables::Receipts>()
         .expect("static files must exist after ensuring we decoded more than zero");
 
-    if total_imported_receipts + total_filtered_out_txns != total_decoded_receipts {
+    if total_imported_receipts + total_filtered_out_dup_txns != total_decoded_receipts {
         error!(target: "reth::cli",
             total_decoded_receipts,
             total_imported_receipts,
-            total_filtered_out_txns,
+            total_filtered_out_dup_txns,
             "Receipts were partially imported"
         );
     }
@@ -220,7 +220,12 @@ where
         );
     }
 
-    info!(target: "reth::cli", total_imported_receipts, "Receipt file imported");
+    info!(target: "reth::cli",
+        total_imported_receipts,
+        total_decoded_receipts,
+        total_filtered_out_dup_txns,
+        "Receipt file imported"
+    );
 
     Ok(())
 }

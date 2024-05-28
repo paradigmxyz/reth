@@ -188,6 +188,9 @@ impl ImportOpCommand {
         info!(target: "reth::cli",
             total_imported_blocks,
             total_imported_txns,
+            total_decoded_blocks,
+            total_decoded_txns,
+            total_filtered_out_dup_txns,
             "Chain file imported"
         );
 
