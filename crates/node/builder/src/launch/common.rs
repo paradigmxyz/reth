@@ -10,7 +10,7 @@ use reth_auto_seal_consensus::MiningMode;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
-use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_network_p2p::p2p::headers::client::HeadersClient;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
