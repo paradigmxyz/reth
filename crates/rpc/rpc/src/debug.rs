@@ -519,7 +519,7 @@ where
         env: EnvWithHandlerCfg,
         db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         transaction_context: Option<TransactionContext>,
-    ) -> EthResult<(GethTrace, revm_primitives::State)> {
+    ) -> EthResult<(GethTrace, revm_primitives::EvmState)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
         if let Some(tracer) = tracer {
