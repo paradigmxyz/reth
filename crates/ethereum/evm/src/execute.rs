@@ -429,22 +429,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{
-        eip2935::HISTORY_STORAGE_ADDRESS,
-        eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
-        eip7002::{
-            WithdrawalRequest, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
-            WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
-        },
-    };
-    use reth_interfaces::test_utils::generators::{self, sign_tx_with_key_pair};
-    use reth_primitives::{
-        constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        keccak256,
-        proofs::calculate_requests_root,
-        public_key_to_address, Account, Block, ChainSpecBuilder, ForkCondition, Transaction,
-        TxKind, TxLegacy, B256,
-    };
+    use alloy_eips::eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS};
+    use reth_primitives::{keccak256, Account, Block, ChainSpecBuilder, ForkCondition, B256};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
