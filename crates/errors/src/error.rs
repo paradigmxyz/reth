@@ -1,4 +1,4 @@
-use crate::blockchain_tree::error::{BlockchainTreeError, CanonicalError};
+use reth_blockchain_tree_api::error::{BlockchainTreeError, CanonicalError};
 use reth_consensus::ConsensusError;
 use reth_execution_errors::BlockExecutionError;
 use reth_fs_util::FsPathError;

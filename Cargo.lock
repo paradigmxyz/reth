@@ -6887,6 +6887,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-errors"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-blockchain-tree-api",
+ "reth-consensus",
+ "reth-execution-errors",
+ "reth-fs-util",
+ "reth-storage-errors",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-eth-wire"
 version = "0.2.0-beta.7"
 dependencies = [
@@ -7106,13 +7118,11 @@ name = "reth-interfaces"
 version = "0.2.0-beta.7"
 dependencies = [
  "reth-blockchain-tree-api",
- "reth-consensus",
+ "reth-errors",
  "reth-execution-errors",
- "reth-fs-util",
  "reth-network-p2p",
  "reth-storage-errors",
  "reth-testing-utils",
- "thiserror",
 ]
 
 [[package]]

@@ -19,8 +19,7 @@ pub use reth_storage_errors::{db, provider};
 pub use reth_execution_errors as executor;
 
 /// Possible errors when interacting with the chain.
-mod error;
-pub use error::{RethError, RethResult};
+pub use reth_errors::{RethError, RethResult};
 
 /// P2P traits.
 pub use reth_network_p2p as p2p;
