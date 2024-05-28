@@ -7,7 +7,7 @@ use reth_primitives::{
 };
 use revm::{
     interpreter::Host,
-    primitives::{Account, AccountInfo, Bytecode, EvmStorageSlot},
+    primitives::{Account, AccountInfo, Bytecode, StorageSlot},
     Database, DatabaseCommit, Evm,
 };
 use std::{collections::HashMap, ops::Rem};
@@ -162,12 +162,12 @@ where
 fn eip2935_block_hash_slot<DB: Database>(
     block_number: u64,
     db: &mut DB,
-) -> Result<(U256, EvmStorageSlot), DB::Error> {
+) -> Result<(U256, StorageSlot), DB::Error> {
     let slot = U256::from(block_number).rem(U256::from(HISTORY_SERVE_WINDOW));
     let current_hash = db.storage(HISTORY_STORAGE_ADDRESS, slot)?;
     let ancestor_hash = db.block_hash(U256::from(block_number))?;
 
-    Ok((slot, EvmStorageSlot::new_changed(current_hash, ancestor_hash.into())))
+    Ok((slot, StorageSlot::new_changed(current_hash, ancestor_hash.into())))
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
