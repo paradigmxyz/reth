@@ -55,7 +55,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
                 match result {
                     Ok(_) => EngineHookEvent::Finished(Ok(())),
-                    Err(err) => EngineHookEvent::Finished(Err(err.into())),
+                    Err(err) => EngineHookEvent::Finished(Err(EngineHookError::Common(err.into()))),
                 }
             }
             Err(_) => {
