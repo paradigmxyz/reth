@@ -760,7 +760,7 @@ impl EthPoolTransaction for MockTransaction {
     fn validate_blob(
         &self,
         _blob: &BlobTransactionSidecar,
-        _settings: &revm::primitives::KzgSettings,
+        _settings: &reth_primitives::kzg::KzgSettings,
     ) -> Result<(), reth_primitives::BlobTransactionValidationError> {
         match &self {
             Self::Eip4844 { .. } => Ok(()),
