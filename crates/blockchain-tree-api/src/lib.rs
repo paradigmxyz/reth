@@ -14,7 +14,7 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_storage_errors::provider::ProviderError;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 pub mod error;
 
