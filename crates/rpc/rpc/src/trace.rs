@@ -7,9 +7,7 @@ use crate::eth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
-};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, SealedHeader, B256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
@@ -133,7 +131,7 @@ where
         calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> EthResult<Vec<TraceResults>> {
-        let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
+        let at = block_id.unwrap_or(BlockId::pending());
         let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
 
         let gas_limit = self.inner.eth_api.call_gas_limit();

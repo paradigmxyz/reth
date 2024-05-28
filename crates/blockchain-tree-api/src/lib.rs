@@ -1,11 +1,20 @@
-use crate::{blockchain_tree::error::InsertBlockError, provider::ProviderError, RethResult};
+//! Interfaces and types for interacting with the blockchain tree.
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
+use self::error::CanonicalError;
+use crate::error::InsertBlockError;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
+use reth_storage_errors::provider::ProviderError;
 use std::collections::{BTreeMap, HashSet};
-
-use self::error::CanonicalError;
 
 pub mod error;
 
@@ -76,21 +85,21 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> RethResult<()>;
+    ) -> Result<(), CanonicalError>;
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
     /// them. Remove all mismatches, disconnect them, removes all chains and clears all buffered
     /// blocks before the tip.
     fn update_block_hashes_and_clear_buffered(
         &self,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>>;
+    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError>;
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
     ///
     /// `N` is the maximum of `max_reorg_depth` and the number of block hashes needed to satisfy the
     /// `BLOCKHASH` opcode in the EVM.
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()>;
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError>;
 
     /// Make a block and its parent chain part of the canonical chain by committing it to the
     /// database.
@@ -153,7 +162,10 @@ impl std::fmt::Display for BlockValidationKind {
 pub enum CanonicalOutcome {
     /// The block is already canonical.
     AlreadyCanonical {
-        /// The corresponding [SealedHeader] that is already canonical.
+        /// Block number and hash of current head.
+        head: BlockNumHash,
+        /// The corresponding [SealedHeader] that was attempted to be made a current head and
+        /// is already canonical.
         header: SealedHeader,
     },
     /// Committed the block to the database.
@@ -167,7 +179,7 @@ impl CanonicalOutcome {
     /// Returns the header of the block that was made canonical.
     pub fn header(&self) -> &SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header } => header,
+            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
             CanonicalOutcome::Committed { head } => head,
         }
     }
@@ -175,7 +187,7 @@ impl CanonicalOutcome {
     /// Consumes the outcome and returns the header of the block that was made canonical.
     pub fn into_header(self) -> SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header } => header,
+            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
             CanonicalOutcome::Committed { head } => head,
         }
     }
@@ -200,6 +212,8 @@ pub enum BlockStatus {
     /// If block is valid and block forks off canonical chain.
     /// If blocks is not connected to canonical chain.
     Disconnected {
+        /// Current canonical head.
+        head: BlockNumHash,
         /// The lowest ancestor block that is not connected to the canonical chain.
         missing_ancestor: BlockNumHash,
     },

@@ -786,9 +786,7 @@ where
             None => return Ok(None),
             Some(tx) => {
                 let res = match tx {
-                    tx @ TransactionSource::Pool(_) => {
-                        (tx, BlockId::Number(BlockNumberOrTag::Pending))
-                    }
+                    tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
                     TransactionSource::Block {
                         transaction,
                         index,
@@ -872,17 +870,14 @@ where
 
         // set nonce if not already set before
         if request.nonce.is_none() {
-            let nonce =
-                self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
+            let nonce = self.get_transaction_count(from, Some(BlockId::pending()))?;
             // note: `.to()` can't panic because the nonce is constructed from a `u64`
             request.nonce = Some(nonce.to::<u64>());
         }
 
         let chain_id = self.chain_id();
 
-        let estimated_gas = self
-            .estimate_gas_at(request.clone(), BlockId::Number(BlockNumberOrTag::Pending), None)
-            .await?;
+        let estimated_gas = self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
         let gas_limit = estimated_gas;
 
         let TransactionRequest {
@@ -1366,11 +1361,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + Clone + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    Self: Send + Sync + 'static,
 {
     /// Spawns the given closure on a new blocking tracing task
     async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
@@ -1389,11 +1380,11 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    Network: NetworkInfo + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.
@@ -1448,41 +1439,7 @@ where
             None => self.blob_base_fee().await,
         }
     }
-}
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + 'static,
-{
-    /// Helper function for `eth_getTransactionReceipt`
-    ///
-    /// Returns the receipt
-    pub(crate) async fn build_transaction_receipt(
-        &self,
-        tx: TransactionSigned,
-        meta: TransactionMeta,
-        receipt: Receipt,
-    ) -> EthResult<AnyTransactionReceipt> {
-        // get all receipts for the block
-        let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
-            Some(recpts) => recpts,
-            None => return Err(EthApiError::UnknownBlockNumber),
-        };
-
-        Ok(ReceiptResponseBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
-    }
-}
-
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Pool: TransactionPool + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
-{
     pub(crate) fn sign_request(
         &self,
         from: &Address,
@@ -1539,6 +1496,30 @@ where
         Ok(None)
     }
 }
+
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReaderIdExt + ChainSpecProvider,
+{
+    /// Helper function for `eth_getTransactionReceipt`
+    ///
+    /// Returns the receipt
+    pub(crate) async fn build_transaction_receipt(
+        &self,
+        tx: TransactionSigned,
+        meta: TransactionMeta,
+        receipt: Receipt,
+    ) -> EthResult<AnyTransactionReceipt> {
+        // get all receipts for the block
+        let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
+            Some(recpts) => recpts,
+            None => return Err(EthApiError::UnknownBlockNumber),
+        };
+
+        Ok(ReceiptResponseBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
+    }
+}
+
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TransactionSource {
