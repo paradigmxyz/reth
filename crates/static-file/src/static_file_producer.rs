@@ -246,21 +246,18 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{database::Database, test_utils::TempDatabase, transaction::DbTx, DatabaseEnv};
-    use reth_interfaces::{
-        provider::ProviderError,
-        test_utils::{
-            generators,
-            generators::{random_block_range, random_receipt},
-        },
-    };
     use reth_primitives::{
         static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
-        ProviderFactory, StaticFileProviderFactory,
+        ProviderError, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block_range, random_receipt},
+    };
     use std::{
         sync::{mpsc::channel, Arc},
         time::Duration,
