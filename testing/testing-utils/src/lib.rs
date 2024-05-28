@@ -11,3 +11,5 @@
 pub mod genesis_allocator;
 
 pub use genesis_allocator::GenesisAllocator;
+
+pub mod generators;
