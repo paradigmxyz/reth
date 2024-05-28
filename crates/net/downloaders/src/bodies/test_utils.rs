@@ -23,6 +23,7 @@ pub(crate) fn zip_blocks<'a>(
                     body: body.transactions,
                     ommers: body.ommers,
                     withdrawals: body.withdrawals,
+                    requests: body.requests,
                 })
             }
         })

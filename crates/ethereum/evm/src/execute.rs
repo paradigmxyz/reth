@@ -13,8 +13,8 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Withdrawals,
-    MAINNET, U256,
+    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Request,
+    Withdrawals, MAINNET, U256,
 };
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -98,6 +98,14 @@ where
     }
 }
 
+/// Helper type for the output of executing a block.
+#[derive(Debug, Clone)]
+struct EthExecuteOutput {
+    receipts: Vec<Receipt>,
+    requests: Vec<Request>,
+    gas_used: u64,
+}
+
 /// Helper container type for EVM with chain spec.
 #[derive(Debug, Clone)]
 struct EthEvmExecutor<EvmConfig> {
@@ -118,11 +126,11 @@ where
     /// # Note
     ///
     /// It does __not__ apply post-execution changes.
-    fn execute_pre_and_transactions<Ext, DB>(
+    fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
+    ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database<Error = ProviderError>,
     {
@@ -182,7 +190,7 @@ where
         }
         drop(evm);
 
-        Ok((receipts, cumulative_gas_used))
+        Ok(EthExecuteOutput { receipts, requests: vec![], gas_used: cumulative_gas_used })
     }
 }
 
@@ -250,22 +258,22 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+    ) -> Result<EthExecuteOutput, BlockExecutionError> {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
 
-        let (receipts, gas_used) = {
+        let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_pre_and_transactions(block, evm)
+            self.executor.execute_state_transitions(block, evm)
         }?;
 
         // 3. apply post execution changes
         self.post_execution(block, total_difficulty)?;
 
-        Ok((receipts, gas_used))
+        Ok(output)
     }
 
     /// Apply settings before a new block is executed.
@@ -333,12 +341,13 @@ where
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, gas_used) = self.execute_without_verification(block, total_difficulty)?;
+        let EthExecuteOutput { receipts, requests, gas_used } =
+            self.execute_without_verification(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 }
 
@@ -375,10 +384,10 @@ where
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, _gas_used) =
+        let EthExecuteOutput { receipts, requests, gas_used: _ } =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
-        validate_block_post_execution(block, self.executor.chain_spec(), &receipts)?;
+        validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &[])?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -386,6 +395,9 @@ where
 
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
+
+        // store requests in the set
+        self.batch_record.save_requests(requests);
 
         if self.batch_record.first_block().is_none() {
             self.batch_record.set_first_block(block.number);
@@ -400,6 +412,7 @@ where
         BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
+            self.batch_record.take_requests(),
             self.batch_record.first_block().unwrap_or_default(),
         )
     }
@@ -473,6 +486,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },
@@ -503,6 +517,7 @@ mod tests {
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        requests: None,
                     },
                     senders: vec![],
                 },
@@ -563,7 +578,13 @@ mod tests {
             .execute(
                 (
                     &BlockWithSenders {
-                        block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -609,7 +630,13 @@ mod tests {
         executor
             .execute_without_verification(
                 &BlockWithSenders {
-                    block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                    block: Block {
+                        header,
+                        body: vec![],
+                        ommers: vec![],
+                        withdrawals: None,
+                        requests: None,
+                    },
                     senders: vec![],
                 },
                 U256::ZERO,
@@ -653,6 +680,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },
@@ -674,7 +702,13 @@ mod tests {
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -733,6 +767,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },

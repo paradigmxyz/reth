@@ -273,7 +273,8 @@ where
             }
         }
         let time = Instant::now();
-        let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } =
+            executor.finalize();
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
