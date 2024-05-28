@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use reth_db::{database::Database, tables, transaction::DbTxMut, DatabaseEnv};
-use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
+use reth_network_p2p::bodies::response::BlockResponse;
 use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};
 use std::collections::HashMap;
 
@@ -45,13 +45,11 @@ pub(crate) fn create_raw_bodies<'a>(
 
 #[inline]
 pub(crate) fn insert_headers(db: &DatabaseEnv, headers: &[SealedHeader]) {
-    db.update(|tx| -> Result<(), db::DatabaseError> {
+    db.update(|tx| {
         for header in headers {
-            tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-            tx.put::<tables::Headers>(header.number, header.clone().unseal())?;
+            tx.put::<tables::CanonicalHeaders>(header.number, header.hash()).unwrap();
+            tx.put::<tables::Headers>(header.number, header.clone().unseal()).unwrap();
         }
-        Ok(())
     })
     .expect("failed to commit")
-    .expect("failed to insert headers");
 }

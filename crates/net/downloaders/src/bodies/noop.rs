@@ -1,5 +1,5 @@
 use futures::Stream;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{downloader::BodyDownloader, response::BlockResponse},
     error::{DownloadError, DownloadResult},
 };
