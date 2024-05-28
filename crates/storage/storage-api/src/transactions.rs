@@ -1,11 +1,23 @@
-use std::ops::{Range, RangeBounds, RangeInclusive};
-
 use crate::{BlockNumReader, BlockReader};
 use reth_primitives::{
     Address, BlockHashOrNumber, BlockNumber, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use std::ops::{Range, RangeBounds, RangeInclusive};
+
+/// Enum to control transaction hash inclusion.
+///
+/// This serves as a hint to the provider to include or omit exclude hashes because hashes are
+/// stored separately and are not always needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TransactionVariant {
+    /// Indicates that transactions should be processed without including their hashes.
+    NoHash,
+    /// Indicates that transactions should be processed along with their hashes.
+    #[default]
+    WithHash,
+}
 
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
