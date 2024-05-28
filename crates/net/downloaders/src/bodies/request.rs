@@ -1,7 +1,7 @@
 use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
 use futures::{Future, FutureExt};
 use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::{DownloadError, DownloadResult},
     priority::Priority,
@@ -255,7 +255,7 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::{generators, generators::random_header_range};
+    use reth_testing_utils::{generators, generators::random_header_range};
 
     /// Check if future returns empty bodies without dispatching any requests.
     #[tokio::test]

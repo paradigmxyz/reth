@@ -4,7 +4,7 @@ use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
 use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{
         client::BodiesClient,
         downloader::{BodyDownloader, BodyDownloaderResult},
@@ -606,9 +606,9 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
+    use reth_testing_utils::{generators, generators::random_block_range};
     use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
