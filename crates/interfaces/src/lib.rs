@@ -36,4 +36,7 @@ pub use reth_blockchain_tree_api as blockchain_tree;
 
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 #[cfg(feature = "test-utils")]
-pub use reth_network_p2p::test_utils;
+pub mod test_utils {
+    pub use reth_network_p2p::test_utils::*;
+    pub use reth_testing_utils::generators;
+}

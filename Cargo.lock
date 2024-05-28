@@ -7102,6 +7102,7 @@ dependencies = [
  "reth-fs-util",
  "reth-network-p2p",
  "reth-storage-errors",
+ "reth-testing-utils",
  "thiserror",
 ]
 
@@ -7291,7 +7292,6 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-storage-errors",
- "reth-testing-utils",
  "secp256k1 0.28.2",
  "thiserror",
  "tokio",
