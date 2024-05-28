@@ -11,6 +11,7 @@ members = [
     "crates/consensus/consensus/",
     "crates/e2e-test-utils/",
     "crates/engine-primitives/",
+    "crates/errors/",
     "crates/ethereum-forks/",
     "crates/ethereum/consensus/",
     "crates/ethereum/engine-primitives/",
@@ -236,6 +237,7 @@ reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-engine-primitives = { path = "crates/engine-primitives" }
+reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
