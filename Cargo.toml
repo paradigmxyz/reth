@@ -19,6 +19,7 @@ members = [
     "crates/etl/",
     "crates/evm/",
     "crates/evm/execution-errors",
+    "crates/evm/execution-types",
     "crates/exex/",
     "crates/interfaces/",
     "crates/metrics/",
@@ -79,6 +80,7 @@ members = [
     "crates/transaction-pool/",
     "crates/trie-parallel/",
     "crates/trie/",
+    "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
     "examples/custom-dev-node/",
@@ -244,6 +246,7 @@ reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
+reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-interfaces = { path = "crates/interfaces" }
