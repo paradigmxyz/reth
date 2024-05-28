@@ -27,10 +27,10 @@ use super::utils::*;
 
 /// This test requires a running EVM canister on a local dfx node.
 /// When the evm canister WASM will be published, this can be moved to pocket-ic and integrated in the CI pipeline
-/// by removing the `manual_` prefix from the name.
+/// by removing the `manual_` prefix from the test name.
 #[tokio::test]
 #[serial]
-async fn manual_bitfinity_test_should_reset_evm_state() {
+async fn bitfinity_manual_test_should_reset_evm_state() {
     // Arrange
     let _log = init_logs();
     let dfx_port = get_dfx_local_port();
