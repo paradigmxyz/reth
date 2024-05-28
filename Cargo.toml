@@ -79,6 +79,7 @@ members = [
     "crates/transaction-pool/",
     "crates/trie-parallel/",
     "crates/trie/",
+    "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
     "examples/custom-dev-node/",
