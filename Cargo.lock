@@ -2473,6 +2473,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "eyre",
+ "reth-fs-util",
  "reth-network",
  "reth-primitives",
  "secp256k1 0.28.2",

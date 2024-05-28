@@ -1,8 +1,5 @@
-pub mod cli;
-pub mod commands;
-
 fn main() {
-    use cli::Cli;
+    use devp2p::cli::Cli;
 
     let cli = Cli::parse_args();
 

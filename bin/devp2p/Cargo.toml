@@ -4,12 +4,19 @@ version = "0.0.0"
 publish = false
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Rust devp2p binary executable"
+default-run = "devp2p"
 
 [dependencies]
-eyre.workspace = true
-
+# reth
+reth-fs-util.workspace = true
 reth-primitives.workspace = true
 reth-network.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
+# misc
 clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
