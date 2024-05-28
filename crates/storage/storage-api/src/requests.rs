@@ -1,5 +1,5 @@
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, Requests};
+use reth_storage_errors::provider::ProviderResult;
 
 /// Client trait for fetching EIP-7685 [Requests] for blocks.
 #[auto_impl::auto_impl(&, Arc)]

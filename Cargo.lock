@@ -7685,6 +7685,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",
  "revm",
@@ -8024,6 +8025,19 @@ dependencies = [
  "derive_more",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-storage-api"
+version = "0.2.0-beta.7"
+dependencies = [
+ "auto_impl",
+ "reth-db",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-storage-errors",
+ "reth-trie",
+ "revm",
 ]
 
 [[package]]
