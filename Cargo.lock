@@ -7039,6 +7039,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-execution-types"
+version = "0.2.0-beta.7"
+dependencies = [
+ "reth-evm",
+ "reth-primitives",
+ "reth-trie",
+ "revm",
+]
+
+[[package]]
 name = "reth-exex"
 version = "0.2.0-beta.7"
 dependencies = [
@@ -7645,6 +7655,7 @@ dependencies = [
  "reth-db",
  "reth-evm",
  "reth-execution-errors",
+ "reth-execution-types",
  "reth-fs-util",
  "reth-interfaces",
  "reth-metrics",
