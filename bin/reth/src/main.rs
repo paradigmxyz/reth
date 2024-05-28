@@ -33,7 +33,7 @@ fn main() {
         // Init bitfinity import
         {
             let import = BitfinityImportCommand::new(config, datadir, chain, bitfinity, provider_factory, blockchain_provider);
-            let _import_handle = import.execute().await?;
+            let _import_handle = import.schedule_execution().await?;
         }
 
         handle.node_exit_future.await

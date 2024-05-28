@@ -59,7 +59,7 @@ docker compose build
 
 Then to start it:
 ```sh
-docker run -d -p 8080:8080 bitfinity/reth node --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://testnet.bitfinity.network -i 30 -b 10
+docker run -d -p 8080:8080 bitfinity/reth node --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://testnet.bitfinity.network -i 15 -b 1000
 ```
 
 Alternatively, you can use the prebuilt Docker image from `ghcr.io`:
@@ -85,7 +85,7 @@ dfx canister --network=ic call EVM_CANISTER_ID admin_disable_evm '(true)'
 
 3. Run the EVM reset command. For example:
 ```sh
-cargo run -p reth -- bitfinity-export-to-evm -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://orca-app-5yyst.ondigitalocean.app
+cargo run -p reth -- bitfinity-reset-evm-state -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://orca-app-5yyst.ondigitalocean.app
 ```
 
 4. Enable the EVM canister:

@@ -119,6 +119,7 @@ ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
 evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 rlp = { workspace = true }
+serial_test.workspace = true
 
 [dev-dependencies]
 jsonrpsee.workspace = true
@@ -128,6 +129,8 @@ assert_matches = "1.5.0"
 dirs.workspace = true
 revm-primitives.workspace = true
 tempfile.workspace = true
+reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-trie = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = ["jemalloc"]
