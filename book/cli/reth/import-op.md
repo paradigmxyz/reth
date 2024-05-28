@@ -1,10 +1,8 @@
 # op-reth import
 
 This syncs RLP encoded blocks from a file. Supports import of OVM blocks
-from the Bedrock datadir. Requires blocks up to same height, to already
-be imported.
-
-Warning! Currently only runs in debug mode (runtime ~12 hours).
+from the Bedrock datadir. Requires blocks, up to same height as receipts
+file, to already be imported.
 
 ```bash
 $ op-reth import-op --help
