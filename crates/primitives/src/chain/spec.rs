@@ -1,5 +1,8 @@
 use crate::{
-    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
+    constants::{
+        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS,
+    },
     holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
@@ -612,6 +615,13 @@ impl ChainSpec {
                 (None, None, None)
             };
 
+        // If Prague is activated at genesis we set requests root to an empty trie root.
+        let requests_root = if self.is_prague_active_at_timestamp(self.genesis.timestamp) {
+            Some(EMPTY_ROOT_HASH)
+        } else {
+            None
+        };
+
         Header {
             parent_hash: B256::ZERO,
             number: 0,
@@ -633,6 +643,7 @@ impl ChainSpec {
             parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
+            requests_root,
         }
     }
 
