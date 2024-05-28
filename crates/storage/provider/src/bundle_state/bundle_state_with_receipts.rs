@@ -946,7 +946,7 @@ mod tests {
                 info: into_revm_acc(account2.0),
                 storage: HashMap::from_iter([(
                     slot2,
-                    StorageSlot::new_changed(account2_slot2_old_value, account2_slot2_new_value),
+                    EvmStorageSlot::new_changed(account2_slot2_old_value, account2_slot2_new_value),
                 )]),
             },
         )]));
@@ -1014,7 +1014,7 @@ mod tests {
                 info: into_revm_acc(account1_new),
                 storage: HashMap::from_iter([(
                     slot20,
-                    StorageSlot::new_changed(U256::ZERO, account1_slot20_value),
+                    EvmStorageSlot::new_changed(U256::ZERO, account1_slot20_value),
                 )]),
             },
         )]));

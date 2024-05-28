@@ -537,13 +537,19 @@ where
                 account,
                 new_account_state
                     .into_iter()
-                    .map(|(slot, value)| (U256::from_be_bytes(slot.0), value))
+                    .map(|(slot, value)| {
+                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
+                    })
                     .collect(),
             )?;
         }
         (None, Some(account_state_diff)) => {
             for (slot, value) in account_state_diff {
-                db.insert_account_storage(account, U256::from_be_bytes(slot.0), value)?;
+                db.insert_account_storage(
+                    account,
+                    U256::from_be_bytes(slot.0),
+                    U256::from_be_bytes(value.0),
+                )?;
             }
         }
     };

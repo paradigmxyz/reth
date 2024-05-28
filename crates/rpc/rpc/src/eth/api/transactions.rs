@@ -39,8 +39,8 @@ use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{
-        db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult,
-        ResultAndState, SpecId, State,
+        db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState,
+        ExecutionResult, ResultAndState, SpecId,
     },
     GetInspector, Inspector,
 };
@@ -425,7 +425,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -462,7 +462,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 Insp,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -491,7 +491,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -529,7 +529,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 Insp,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -1278,7 +1278,7 @@ where
                 TransactionInfo,
                 Insp,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
