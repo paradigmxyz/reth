@@ -1,5 +1,5 @@
 [package]
-name = "reth-interfaces"
+name = "reth-errors"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,13 +12,10 @@ workspace = true
 
 [dependencies]
 reth-blockchain-tree-api.workspace = true
+reth-consensus.workspace = true
 reth-execution-errors.workspace = true
-reth-network-p2p.workspace = true
+reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
-reth-errors.workspace = true
 
-reth-testing-utils = { workspace = true, optional = true }
-
-[features]
-test-utils = ["reth-network-p2p/test-utils", "reth-testing-utils"]
-clap = ["reth-storage-errors/clap"]
+# misc
+thiserror.workspace = true
