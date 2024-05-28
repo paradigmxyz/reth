@@ -8000,6 +8000,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-stages",
+ "reth-storage-errors",
  "reth-tokio-util",
  "tempfile",
  "tokio",
