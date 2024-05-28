@@ -6509,7 +6509,6 @@ dependencies = [
  "futures-util",
  "metrics",
  "reth-engine-primitives",
- "reth-interfaces",
  "reth-metrics",
  "reth-payload-builder",
  "reth-primitives",
