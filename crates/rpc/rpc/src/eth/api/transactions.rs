@@ -542,11 +542,11 @@ pub trait EthTransactions: Send + Sync {
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    Network: NetworkInfo + 'static,
+    EvmConfig: ConfigureEvm,
 {
     fn transact<DB>(
         &self,
@@ -786,7 +786,9 @@ where
             None => return Ok(None),
             Some(tx) => {
                 let res = match tx {
-                    tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                    tx @ TransactionSource::Pool(_) => {
+                        (tx, BlockId::Number(BlockNumberOrTag::Pending))
+                    }
                     TransactionSource::Block {
                         transaction,
                         index,
@@ -821,21 +823,7 @@ where
     }
 
     async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>> {
-        let result = self
-            .on_blocking_task(|this| async move {
-                let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
-                    Some((tx, meta)) => (tx, meta),
-                    None => return Ok(None),
-                };
-
-                let receipt = match this.provider().receipt_by_hash(hash)? {
-                    Some(recpt) => recpt,
-                    None => return Ok(None),
-                };
-
-                Ok(Some((tx, meta, receipt)))
-            })
-            .await?;
+        let result = self.load_transaction_and_receipt(hash).await?;
 
         let (tx, meta, receipt) = match result {
             Some((tx, meta, receipt)) => (tx, meta, receipt),
@@ -870,14 +858,17 @@ where
 
         // set nonce if not already set before
         if request.nonce.is_none() {
-            let nonce = self.get_transaction_count(from, Some(BlockId::pending()))?;
+            let nonce =
+                self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
             // note: `.to()` can't panic because the nonce is constructed from a `u64`
             request.nonce = Some(nonce.to::<u64>());
         }
 
         let chain_id = self.chain_id();
 
-        let estimated_gas = self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
+        let estimated_gas = self
+            .estimate_gas_at(request.clone(), BlockId::Number(BlockNumberOrTag::Pending), None)
+            .await?;
         let gas_limit = estimated_gas;
 
         let TransactionRequest {
@@ -1361,7 +1352,11 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: Send + Sync + 'static,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Network: NetworkInfo + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Spawns the given closure on a new blocking tracing task
     async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
@@ -1376,16 +1371,7 @@ where
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)?
     }
-}
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Pool: TransactionPool + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm,
-{
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.
     pub(crate) async fn legacy_gas_price(&self, gas_price: Option<U256>) -> EthResult<U256> {
@@ -1499,12 +1485,14 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReaderIdExt + ChainSpecProvider,
+    Provider:
+        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: NetworkInfo + 'static,
 {
     /// Helper function for `eth_getTransactionReceipt`
     ///
     /// Returns the receipt
-    pub(crate) async fn build_transaction_receipt(
+    async fn build_transaction_receipt(
         &self,
         tx: TransactionSigned,
         meta: TransactionMeta,
@@ -1517,6 +1505,35 @@ where
         };
 
         Ok(ReceiptResponseBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
+    Pool: 'static,
+    Network: 'static,
+    EvmConfig: 'static,
+{
+    /// Loads a transaction and its receipt.
+    pub async fn load_transaction_and_receipt(
+        &self,
+        hash: B256,
+    ) -> EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>> {
+        self.on_blocking_task(|this| async move {
+            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
+                Some((tx, meta)) => (tx, meta),
+                None => return Ok(None),
+            };
+
+            let receipt = match this.provider().receipt_by_hash(hash)? {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
+
+            Ok(Some((tx, meta, receipt)))
+        })
+        .await
     }
 }
 

@@ -98,10 +98,19 @@ pub struct L2EthApi<Provider, Pool, Network, EvmConfig> {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-pub struct EthApi<Provider, Pool, Network, EvmConfig, N: NetworkEthApi> {
+pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-    network: N,
+}
+
+unsafe impl<Provider, Pool, Network, EvmConfig> Send
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
+}
+
+unsafe impl<Provider, Pool, Network, EvmConfig> Sync
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -281,9 +290,9 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Pool: TransactionPool + Clone + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + Clone + 'static,
+    Pool: TransactionPool + 'static,
+    Network: NetworkInfo + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
     ///

@@ -3,7 +3,7 @@
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, Receipt, TransactionMeta, TransactionSigned};
+use reth_primitives::{BlockId, Receipt, TransactionMeta, TransactionSigned, TxHash};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
     eth::{
@@ -70,9 +70,9 @@ where
     Ok(None)
 }
 
-/// Helper function for `eth_getTransactionReceipt`
+/// Helper function for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
 ///
-/// Returns the receipt
+/// Returns the receipt RPC response
 pub async fn build_transaction_receipt<Provider, Pool, Network, EvmConfig>(
     eth_api: &EthApi<Provider, Pool, Network, EvmConfig>,
     tx: TransactionSigned,
@@ -160,4 +160,27 @@ pub fn op_fields(
     }
 
     resp_builder.add_other_fields(op_fields.into())
+}
+
+/// Helper function for `eth_getTransactionReceipt`.
+///
+/// Returns the receipt for given transaction hash.
+pub async fn transaction_receipt<Provider, Pool, Network, EvmConfig>(
+    eth: &EthApi<Provider, Pool, Network, EvmConfig>,
+    hash: TxHash,
+) -> EthResult<Option<AnyTransactionReceipt>>
+where
+    Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
+    Pool: 'static,
+    Network: 'static,
+    EvmConfig: 'static,
+{
+    let result = eth.load_transaction_and_receipt(hash).await?;
+
+    let (tx, meta, receipt) = match result {
+        Some((tx, meta, receipt)) => (tx, meta, receipt),
+        None => return Ok(None),
+    };
+
+    build_transaction_receipt(eth, tx, meta, receipt).await.map(Some)
 }
