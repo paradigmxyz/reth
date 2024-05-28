@@ -65,13 +65,14 @@ pub struct BlockchainTree<DB, E> {
     externals: TreeExternals<DB, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
+    /// Prune modes.
+    prune_modes: Option<PruneModes>,
     /// Broadcast channel for canon state changes notifications.
     canon_state_notification_sender: CanonStateNotificationSender,
-    /// Metrics for the blockchain tree.
-    metrics: TreeMetrics,
     /// Metrics for sync stages.
     sync_metrics_tx: Option<MetricEventsSender>,
-    prune_modes: Option<PruneModes>,
+    /// Metrics for the blockchain tree.
+    metrics: TreeMetrics,
 }
 
 impl<DB, E> BlockchainTree<DB, E> {
@@ -148,8 +149,8 @@ where
                 config.max_unconnected_blocks(),
             ),
             config,
-            canon_state_notification_sender,
             prune_modes,
+            canon_state_notification_sender,
             sync_metrics_tx: None,
             metrics: Default::default(),
         })
@@ -906,8 +907,8 @@ where
         // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
         for (_, chain) in self.state.chains.iter() {
-            for (&number, blocks) in chain.blocks().iter() {
-                all_chain_blocks.push(BlockNumHash { number, hash: blocks.hash() })
+            for (&number, block) in chain.blocks().iter() {
+                all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
         }
         for block in all_chain_blocks.into_iter() {
