@@ -87,16 +87,6 @@ pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-unsafe impl<Provider, Pool, Network, EvmConfig> Send
-    for EthApi<Provider, Pool, Network, EvmConfig>
-{
-}
-
-unsafe impl<Provider, Pool, Network, EvmConfig> Sync
-    for EthApi<Provider, Pool, Network, EvmConfig>
-{
-}
-
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReaderIdExt + ChainSpecProvider,
