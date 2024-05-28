@@ -1,7 +1,7 @@
 use super::file_codec::BlockFileCodec;
 use futures::Future;
 use itertools::Either;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
@@ -483,7 +483,7 @@ mod tests {
     use futures_util::stream::StreamExt;
     use rand::Rng;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::p2p::{
+    use reth_network_p2p::{
         bodies::downloader::BodyDownloader,
         headers::downloader::{HeaderDownloader, SyncTarget},
     };
