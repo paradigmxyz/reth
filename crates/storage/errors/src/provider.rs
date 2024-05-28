@@ -122,6 +122,9 @@ pub enum ProviderError {
     /// Trying to insert data from an unexpected block number.
     #[error("trying to append data to {0} as block #{1} but expected block #{2}")]
     UnexpectedStaticFileBlockNumber(StaticFileSegment, BlockNumber, BlockNumber),
+    /// Static File Provider was initialized as read-only.
+    #[error("cannot get a writer on a read-only environment.")]
+    ReadOnlyStaticFileAccess,
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),

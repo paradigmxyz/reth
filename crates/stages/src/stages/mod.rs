@@ -306,11 +306,8 @@ mod tests {
         }
 
         assert_eq!(
-            static_file_provider.check_consistency(
-                &db.factory.database_provider_ro().unwrap(),
-                is_full_node,
-                false
-            ),
+            static_file_provider
+                .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
             Ok(expected)
         );
     }
@@ -330,11 +327,9 @@ mod tests {
         provider_rw.commit().unwrap();
 
         assert_eq!(
-            db.factory.static_file_provider().check_consistency(
-                &db.factory.database_provider_ro().unwrap(),
-                false,
-                false
-            ),
+            db.factory
+                .static_file_provider()
+                .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
             Ok(Some(expected))
         );
     }
@@ -354,11 +349,9 @@ mod tests {
         provider_rw.commit().unwrap();
 
         assert_eq!(
-            db.factory.static_file_provider().check_consistency(
-                &db.factory.database_provider_ro().unwrap(),
-                false,
-                false
-            ),
+            db.factory
+                .static_file_provider()
+                .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
             Ok(expected)
         );
     }
@@ -369,7 +362,7 @@ mod tests {
         let db_provider = db.factory.database_provider_ro().unwrap();
 
         assert_eq!(
-            db.factory.static_file_provider().check_consistency(&db_provider, false, false),
+            db.factory.static_file_provider().check_consistency(&db_provider, false),
             Ok(None)
         );
     }

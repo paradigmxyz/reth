@@ -43,16 +43,43 @@ use tracing::warn;
 /// range.
 type SegmentRanges = HashMap<StaticFileSegment, BTreeMap<TxNumber, SegmentRangeInclusive>>;
 
+/// Access mode on a static file provider. RO/RW.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum StaticFileAccess {
+    /// Read-only access.
+    #[default]
+    RO,
+    /// Read-write access.
+    RW,
+}
+
+impl StaticFileAccess {
+    /// Returns `true` if read-only access.
+    pub const fn is_read_only(&self) -> bool {
+        matches!(self, StaticFileAccess::RO)
+    }
+}
+
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
 #[derive(Debug, Default, Clone)]
 pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
     /// Creates a new [`StaticFileProvider`].
-    pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
-        let provider = Self(Arc::new(StaticFileProviderInner::new(path)?));
+    fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
+        let provider = Self(Arc::new(StaticFileProviderInner::new(path, env)?));
         provider.initialize_index()?;
         Ok(provider)
+    }
+
+    /// Creates a new [`StaticFileProvider`] with read-only access.
+    pub fn read_only(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        Self::new(path, StaticFileAccess::RO)
+    }
+
+    /// Creates a new [`StaticFileProvider`] with read-write access.
+    pub fn read_write(path: impl AsRef<Path>) -> ProviderResult<Self> {
+        Self::new(path, StaticFileAccess::RW)
     }
 }
 
@@ -82,11 +109,13 @@ pub struct StaticFileProviderInner {
     /// Maintains a map of StaticFile writers for each [`StaticFileSegment`]
     writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
+    /// Whether the provider should operate on a read-only access.
+    env: StaticFileAccess,
 }
 
 impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
-    fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
+    fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -95,9 +124,14 @@ impl StaticFileProviderInner {
             path: path.as_ref().to_path_buf(),
             load_filters: false,
             metrics: None,
+            env,
         };
 
         Ok(provider)
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.env.is_read_only()
     }
 }
 
@@ -459,8 +493,10 @@ impl StaticFileProvider {
     /// 1) When a static file fails to commit but the underlying data was changed.
     /// 2) When a static file was committed, but the required database transaction was not.
     ///
-    /// For 1) it can self-heal if `read_only` is set to `false`.
-    /// For 2) the invariants below are checked, and if broken, require a pipeline unwind to heal.
+    /// For 1) it can self-heal if `read_only` is set to `false`. Otherwise, it will return an
+    /// error.
+    /// For 2) the invariants below are checked, and if broken, require a pipeline unwind
+    /// to heal.
     ///
     /// For each static file segment:
     /// * the corresponding database table should overlap or have continuity in their keys
@@ -476,7 +512,6 @@ impl StaticFileProvider {
         &self,
         provider: &DatabaseProvider<TX>,
         has_receipt_pruning: bool,
-        read_only: bool,
     ) -> ProviderResult<Option<PipelineTarget>> {
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: Option<BlockNumber>| {
@@ -504,9 +539,7 @@ impl StaticFileProvider {
             // * pruning data was interrupted before a config commit, then we have deleted data that
             //   we are expected to still have. We need to check the Database and unwind everything
             //   accordingly.
-            if !read_only {
-                self.ensure_file_consistency(segment)?;
-            }
+            self.ensure_file_consistency(segment)?;
 
             // Only applies to block-based static files. (Headers)
             //
@@ -880,7 +913,7 @@ pub trait StaticFileWriter {
     /// Commits all changes of all [`StaticFileProviderRW`] of all [`StaticFileSegment`].
     fn commit(&self) -> ProviderResult<()>;
 
-    /// Checks consistency of the segment latest file and heals if necessary.
+    /// Checks consistency of the segment latest file and heals if possible.
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()>;
 }
 
@@ -890,6 +923,10 @@ impl StaticFileWriter for StaticFileProvider {
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
+        if self.env.is_read_only() {
+            return Err(ProviderError::ReadOnlyStaticFileAccess)
+        }
+
         tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
         Ok(match self.writers.entry(segment) {
             DashMapEntry::Occupied(entry) => entry.into_ref(),
@@ -920,7 +957,25 @@ impl StaticFileWriter for StaticFileProvider {
     }
 
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
-        self.latest_writer(segment)?.ensure_file_consistency()
+        match self.env {
+            StaticFileAccess::RO => {
+                let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
+
+                let mut writer = StaticFileProviderRW::new(
+                    segment,
+                    latest_block,
+                    Arc::downgrade(&self.0),
+                    self.metrics.clone(),
+                )?;
+
+                writer.ensure_file_consistency(self.env.is_read_only())?;
+            }
+            StaticFileAccess::RW => {
+                self.latest_writer(segment)?.ensure_file_consistency(self.env.is_read_only())?;
+            }
+        }
+
+        Ok(())
     }
 }
 

@@ -17,7 +17,7 @@ use reth_primitives::{
     StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{
-    providers::{StaticFileProviderRWRefMut, StaticFileWriter},
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
@@ -36,8 +36,12 @@ impl Default for TestStageDB {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
         Self {
             temp_static_files_dir: static_dir,
-            factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone(), static_dir_path)
-                .unwrap(),
+            factory: ProviderFactory::new(
+                create_test_rw_db(),
+                MAINNET.clone(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            )
+            .unwrap(),
         }
     }
 }
@@ -51,7 +55,7 @@ impl TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                static_dir_path,
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
             )
             .unwrap(),
         }

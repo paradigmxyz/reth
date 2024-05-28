@@ -583,7 +583,7 @@ mod tests {
             ProviderFactory::new(
                 factory.into_db(),
                 MAINNET.clone(),
-                static_file_provider.path().into(),
+                StaticFileProvider::read_write(static_file_provider.path()).unwrap(),
             )
             .unwrap(),
         );
