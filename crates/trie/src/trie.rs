@@ -1,6 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
+    node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetLoader, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
@@ -10,7 +10,7 @@ use crate::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::transaction::DbTx;
-use reth_interfaces::trie::{StateRootError, StorageRootError};
+use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
@@ -216,6 +216,7 @@ where
 
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
+        let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
@@ -225,17 +226,15 @@ where
                     self.prefix_sets.account_prefix_set,
                 )
                 .with_updates(retain_updates);
-                let node_iter =
-                    AccountNodeIter::from_factory(walker, self.hashed_cursor_factory.clone())?
-                        .with_last_account_key(state.last_account_key);
+                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor)
+                    .with_last_hashed_key(state.last_account_key);
                 (hash_builder, node_iter)
             }
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
                     .with_updates(retain_updates);
-                let node_iter =
-                    AccountNodeIter::from_factory(walker, self.hashed_cursor_factory.clone())?;
+                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }
         };
@@ -244,11 +243,11 @@ where
         let mut hashed_entries_walked = 0;
         while let Some(node) = account_node_iter.try_next()? {
             match node {
-                AccountNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                AccountNode::Leaf(hashed_address, account) => {
+                TrieElement::Leaf(hashed_address, account) => {
                     tracker.inc_leaf();
                     hashed_entries_walked += 1;
 
@@ -483,10 +482,11 @@ where
     ) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
         trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
 
-        let mut hashed_storage_cursor = self.hashed_cursor_factory.hashed_storage_cursor()?;
+        let mut hashed_storage_cursor =
+            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
         // short circuit on empty storage
-        if hashed_storage_cursor.is_storage_empty(self.hashed_address)? {
+        if hashed_storage_cursor.is_storage_empty()? {
             return Ok((
                 EMPTY_ROOT_HASH,
                 0,
@@ -500,15 +500,14 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
-        let mut storage_node_iter =
-            StorageNodeIter::new(walker, hashed_storage_cursor, self.hashed_address);
+        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
-                StorageNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                StorageNode::Leaf(hashed_slot, value) => {
+                TrieElement::Leaf(hashed_slot, value) => {
                     tracker.inc_leaf();
                     hash_builder.add_leaf(
                         Nibbles::unpack(hashed_slot),

@@ -29,6 +29,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
         ommers: transformed.ommers,
         withdrawals: transformed.withdrawals,
     })
+    .0
 }
 
 #[test]

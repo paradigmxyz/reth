@@ -1,5 +1,5 @@
 use reth_consensus_common::calc;
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header, Withdrawal,
     B256, U256,

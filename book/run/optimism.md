@@ -92,7 +92,7 @@ op-node \
     --l1.trustrpc
 ```
 
-If you opted to build the `op-node` with the `rethdb` build tag, this "`RPCKind`" can be enabled via appending two extra flags to the `op-node` invocation:
+If you opted to build the `op-node` with the `rethdb` build tag, this feature can be enabled by appending one extra flag to the `op-node` invocation:
 
 > Note, the `reth_db_path` is the path to the `db` folder inside of the reth datadir, not the `mdbx.dat` file itself. This can be fetched from `op-reth db path [--chain <chain-name>]`, or if you are using a custom datadir location via the `--datadir` flag,
 > by appending `/db` to the end of the path.
@@ -100,7 +100,6 @@ If you opted to build the `op-node` with the `rethdb` build tag, this "`RPCKind`
 ```sh
 op-node \
     # ...
-    --l1.rpckind=reth_db \
     --l1.rethdb=<your_L1_reth_db_path>
 ```
 

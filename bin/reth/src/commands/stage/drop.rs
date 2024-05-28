@@ -11,9 +11,10 @@ use crate::{
 use clap::Parser;
 use itertools::Itertools;
 use reth_db::{open_db, static_file::iter_static_files, tables, transaction::DbTxMut, DatabaseEnv};
-use reth_node_core::init::{insert_genesis_header, insert_genesis_history, insert_genesis_state};
+use reth_db_common::init::{insert_genesis_header, insert_genesis_history, insert_genesis_state};
+use reth_fs_util as fs;
 use reth_primitives::{
-    fs, stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
+    stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
 };
 use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
 use std::sync::Arc;

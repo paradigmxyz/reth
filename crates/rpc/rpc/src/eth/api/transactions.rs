@@ -787,9 +787,7 @@ where
             None => return Ok(None),
             Some(tx) => {
                 let res = match tx {
-                    tx @ TransactionSource::Pool(_) => {
-                        (tx, BlockId::Number(BlockNumberOrTag::Pending))
-                    }
+                    tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
                     TransactionSource::Block {
                         transaction,
                         index,
@@ -873,17 +871,14 @@ where
 
         // set nonce if not already set before
         if request.nonce.is_none() {
-            let nonce =
-                self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
+            let nonce = self.get_transaction_count(from, Some(BlockId::pending()))?;
             // note: `.to()` can't panic because the nonce is constructed from a `u64`
             request.nonce = Some(nonce.to::<u64>());
         }
 
         let chain_id = self.chain_id();
 
-        let estimated_gas = self
-            .estimate_gas_at(request.clone(), BlockId::Number(BlockNumberOrTag::Pending), None)
-            .await?;
+        let estimated_gas = self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
         let gas_limit = estimated_gas;
 
         let TransactionRequest {
@@ -979,7 +974,11 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
+                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
+                    to: match to {
+                        Some(RpcTransactionKind::Call(to)) => to,
+                        _ => Address::default(),
+                    },
                     access_list: access_list.unwrap_or_default(),
 
                     // eip-4844 specific.
@@ -1363,11 +1362,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + Clone + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    Self: Send + Sync + 'static,
 {
     /// Spawns the given closure on a new blocking tracing task
     async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
@@ -1386,11 +1381,11 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    Network: NetworkInfo + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.
@@ -1445,13 +1440,67 @@ where
             None => self.blob_base_fee().await,
         }
     }
+
+    pub(crate) fn sign_request(
+        &self,
+        from: &Address,
+        request: TypedTransactionRequest,
+    ) -> EthResult<TransactionSigned> {
+        for signer in self.inner.signers.read().iter() {
+            if signer.is_signer_for(from) {
+                return match signer.sign_transaction(request, from) {
+                    Ok(tx) => Ok(tx),
+                    Err(e) => Err(e.into()),
+                }
+            }
+        }
+        Err(EthApiError::InvalidTransactionSignature)
+    }
+
+    /// Get Transaction by [BlockId] and the index of the transaction within that Block.
+    ///
+    /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
+    pub(crate) async fn transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId>,
+        index: Index,
+    ) -> EthResult<Option<Transaction>> {
+        if let Some(block) = self.block_with_senders(block_id.into()).await? {
+            let block_hash = block.hash();
+            let block_number = block.number;
+            let base_fee_per_gas = block.base_fee_per_gas;
+            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
+                return Ok(Some(from_recovered_with_block_context(
+                    tx,
+                    block_hash,
+                    block_number,
+                    base_fee_per_gas,
+                    index.into(),
+                )))
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub(crate) async fn raw_transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId>,
+        index: Index,
+    ) -> EthResult<Option<Bytes>> {
+        if let Some(block) = self.block_with_senders(block_id.into()).await? {
+            if let Some(tx) = block.transactions().nth(index.into()) {
+                return Ok(Some(tx.envelope_encoded()))
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + 'static,
+    Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     /// Helper function for `eth_getTransactionReceipt`
     ///
@@ -1541,70 +1590,6 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Pool: TransactionPool + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
-{
-    pub(crate) fn sign_request(
-        &self,
-        from: &Address,
-        request: TypedTransactionRequest,
-    ) -> EthResult<TransactionSigned> {
-        for signer in self.inner.signers.read().iter() {
-            if signer.is_signer_for(from) {
-                return match signer.sign_transaction(request, from) {
-                    Ok(tx) => Ok(tx),
-                    Err(e) => Err(e.into()),
-                }
-            }
-        }
-        Err(EthApiError::InvalidTransactionSignature)
-    }
-
-    /// Get Transaction by [BlockId] and the index of the transaction within that Block.
-    ///
-    /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
-    pub(crate) async fn transaction_by_block_and_tx_index(
-        &self,
-        block_id: impl Into<BlockId>,
-        index: Index,
-    ) -> EthResult<Option<Transaction>> {
-        if let Some(block) = self.block_with_senders(block_id.into()).await? {
-            let block_hash = block.hash();
-            let block_number = block.number;
-            let base_fee_per_gas = block.base_fee_per_gas;
-            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
-                return Ok(Some(from_recovered_with_block_context(
-                    tx,
-                    block_hash,
-                    block_number,
-                    base_fee_per_gas,
-                    index.into(),
-                )))
-            }
-        }
-
-        Ok(None)
-    }
-
-    pub(crate) async fn raw_transaction_by_block_and_tx_index(
-        &self,
-        block_id: impl Into<BlockId>,
-        index: Index,
-    ) -> EthResult<Option<Bytes>> {
-        if let Some(block) = self.block_with_senders(block_id.into()).await? {
-            if let Some(tx) = block.transactions().nth(index.into()) {
-                return Ok(Some(tx.envelope_encoded()))
-            }
-        }
-
-        Ok(None)
-    }
-}
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TransactionSource {
@@ -1802,7 +1787,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
             res_receipt.contract_address = Some(from.create(transaction.transaction.nonce()));
         }
         Call(addr) => {
-            res_receipt.to = Some(*addr);
+            res_receipt.to = Some(Address(*addr));
         }
     }
 

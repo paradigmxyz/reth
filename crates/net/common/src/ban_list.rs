@@ -1,6 +1,7 @@
 //! Support for banning peers.
 
-use reth_network_types::PeerId;
+type PeerId = alloy_primitives::B512;
+
 use std::{collections::HashMap, net::IpAddr, time::Instant};
 
 /// Determines whether or not the IP is globally routable.

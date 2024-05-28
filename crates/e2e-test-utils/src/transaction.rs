@@ -12,15 +12,20 @@ use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, B256};
 pub struct TransactionTestContext;
 
 impl TransactionTestContext {
-    /// Creates a static transfer and signs it
-    pub async fn transfer_tx(chain_id: u64, wallet: LocalWallet) -> Bytes {
+    /// Creates a static transfer and signs it, returning bytes
+    pub async fn transfer_tx(chain_id: u64, wallet: LocalWallet) -> TxEnvelope {
         let tx = tx(chain_id, None, 0);
-        let signer = EthereumSigner::from(wallet);
-        tx.build(&signer).await.unwrap().encoded_2718().into()
+        Self::sign_tx(wallet, tx).await
+    }
+
+    /// Creates a static transfer and signs it, returning bytes
+    pub async fn transfer_tx_bytes(chain_id: u64, wallet: LocalWallet) -> Bytes {
+        let signed = Self::transfer_tx(chain_id, wallet).await;
+        signed.encoded_2718().into()
     }
 
     /// Creates a tx with blob sidecar and sign it
-    pub async fn tx_with_blobs(chain_id: u64, wallet: LocalWallet) -> eyre::Result<Bytes> {
+    pub async fn tx_with_blobs(chain_id: u64, wallet: LocalWallet) -> eyre::Result<TxEnvelope> {
         let mut tx = tx(chain_id, None, 0);
 
         let mut builder = SidecarBuilder::<SimpleCoder>::new();
@@ -30,8 +35,19 @@ impl TransactionTestContext {
         tx.set_blob_sidecar(sidecar);
         tx.set_max_fee_per_blob_gas(15e9 as u128);
 
+        let signed = Self::sign_tx(wallet, tx).await;
+        Ok(signed)
+    }
+
+    /// Signs an arbitrary TransactionRequest using the provided wallet
+    pub async fn sign_tx(wallet: LocalWallet, tx: TransactionRequest) -> TxEnvelope {
         let signer = EthereumSigner::from(wallet);
-        let signed = tx.clone().build(&signer).await.unwrap();
+        tx.build(&signer).await.unwrap()
+    }
+
+    /// Creates a tx with blob sidecar and sign it, returning bytes
+    pub async fn tx_with_blobs_bytes(chain_id: u64, wallet: LocalWallet) -> eyre::Result<Bytes> {
+        let signed = Self::tx_with_blobs(chain_id, wallet).await?;
 
         Ok(signed.encoded_2718().into())
     }

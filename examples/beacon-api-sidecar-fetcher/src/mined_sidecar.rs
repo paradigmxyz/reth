@@ -36,7 +36,7 @@ pub struct ReorgedBlob {
 }
 
 #[derive(Debug, Clone)]
-pub enum BlockEvent {
+pub enum BlobTransactionEvent {
     Mined(MinedBlob),
     Reorged(ReorgedBlob),
 }
@@ -69,7 +69,8 @@ pub enum SideCarError {
     UnknownError(u16, String),
 }
 /// Futures associated with retrieving blob data from the beacon client
-type SidecarsFuture = Pin<Box<dyn Future<Output = Result<Vec<BlockEvent>, SideCarError>> + Send>>;
+type SidecarsFuture =
+    Pin<Box<dyn Future<Output = Result<Vec<BlobTransactionEvent>, SideCarError>> + Send>>;
 
 /// A Stream that processes CanonStateNotifications and retrieves BlobTransactions from the beacon
 /// client.
@@ -83,7 +84,7 @@ pub struct MinedSidecarStream<St, P> {
     pub beacon_config: BeaconSidecarConfig,
     pub client: reqwest::Client,
     pub pending_requests: FuturesUnordered<SidecarsFuture>,
-    pub queued_actions: VecDeque<BlockEvent>,
+    pub queued_actions: VecDeque<BlobTransactionEvent>,
 }
 
 impl<St, P> MinedSidecarStream<St, P>
@@ -99,7 +100,7 @@ where
             .collect();
 
         let mut all_blobs_available = true;
-        let mut actions_to_queue: Vec<BlockEvent> = Vec::new();
+        let mut actions_to_queue: Vec<BlobTransactionEvent> = Vec::new();
 
         if txs.is_empty() {
             return;
@@ -116,8 +117,10 @@ where
                         block_number: block.number,
                         gas_used: block.gas_used,
                     };
-                    actions_to_queue
-                        .push(BlockEvent::Mined(MinedBlob { transaction, block_metadata }));
+                    actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
+                        transaction,
+                        block_metadata,
+                    }));
                 }
             }
             Err(_err) => {
@@ -145,7 +148,7 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
-    type Item = Result<BlockEvent, SideCarError>;
+    type Item = Result<BlobTransactionEvent, SideCarError>;
 
     /// Attempt to pull the next BlobTransaction from the stream.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -181,7 +184,7 @@ where
                         CanonStateNotification::Reorg { old, new } => {
                             // handle reorged blocks
                             for (_, block) in old.blocks().iter() {
-                                let txs: Vec<BlockEvent> = block
+                                let txs: Vec<BlobTransactionEvent> = block
                                     .transactions()
                                     .filter(|tx: &&reth::primitives::TransactionSigned| {
                                         tx.is_eip4844()
@@ -193,7 +196,7 @@ where
                                             block_number: new.tip().block.number,
                                             gas_used: new.tip().block.gas_used,
                                         };
-                                        BlockEvent::Reorged(ReorgedBlob {
+                                        BlobTransactionEvent::Reorged(ReorgedBlob {
                                             transaction_hash,
                                             block_metadata,
                                         })
@@ -219,7 +222,7 @@ async fn fetch_blobs_for_block(
     url: String,
     block: SealedBlockWithSenders,
     txs: Vec<(reth::primitives::TransactionSigned, usize)>,
-) -> Result<Vec<BlockEvent>, SideCarError> {
+) -> Result<Vec<BlobTransactionEvent>, SideCarError> {
     let response = match client.get(url).header("Accept", "application/json").send().await {
         Ok(response) => response,
         Err(err) => return Err(SideCarError::ReqwestError(err)),
@@ -255,7 +258,7 @@ async fn fetch_blobs_for_block(
 
     let mut sidecar_iterator = SidecarIterator::new(blobs_bundle);
 
-    let sidecars: Vec<BlockEvent> = txs
+    let sidecars: Vec<BlobTransactionEvent> = txs
         .iter()
         .filter_map(|(tx, blob_len)| {
             sidecar_iterator.next_sidecar(*blob_len).map(|sidecar| {
@@ -266,7 +269,7 @@ async fn fetch_blobs_for_block(
                     block_number: block.number,
                     gas_used: block.gas_used,
                 };
-                BlockEvent::Mined(MinedBlob { transaction, block_metadata })
+                BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata })
             })
         })
         .collect();

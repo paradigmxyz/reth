@@ -31,12 +31,11 @@ type SortedStaticFiles =
 pub fn iter_static_files(path: impl AsRef<Path>) -> Result<SortedStaticFiles, NippyJarError> {
     let path = path.as_ref();
     if !path.exists() {
-        reth_primitives::fs::create_dir_all(path)
-            .map_err(|err| NippyJarError::Custom(err.to_string()))?;
+        reth_fs_util::create_dir_all(path).map_err(|err| NippyJarError::Custom(err.to_string()))?;
     }
 
     let mut static_files = SortedStaticFiles::default();
-    let entries = reth_primitives::fs::read_dir(path)
+    let entries = reth_fs_util::read_dir(path)
         .map_err(|err| NippyJarError::Custom(err.to_string()))?
         .filter_map(Result::ok)
         .collect::<Vec<_>>();

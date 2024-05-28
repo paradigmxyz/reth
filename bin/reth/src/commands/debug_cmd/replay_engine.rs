@@ -18,11 +18,12 @@ use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{init_db, DatabaseEnv};
+use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_core::engine::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{fs, ChainSpec, PruneModes};
+use reth_primitives::{ChainSpec, PruneModes};
 use reth_provider::{
     providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory,
     StaticFileProviderFactory,

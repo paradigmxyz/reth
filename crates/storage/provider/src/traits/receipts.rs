@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
+use reth_storage_errors::provider::ProviderResult;
 
 use crate::BlockIdReader;
 

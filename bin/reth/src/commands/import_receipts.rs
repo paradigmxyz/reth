@@ -19,7 +19,7 @@ use reth_provider::{
     BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StateWriter, StaticFileProviderFactory, StaticFileWriter,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -89,7 +89,7 @@ impl ImportReceiptsCommand {
 
         for stage in StageId::ALL {
             let checkpoint = provider.get_stage_checkpoint(stage)?;
-            debug!(target: "reth::cli",
+            trace!(target: "reth::cli",
                 ?stage,
                 ?checkpoint,
                 "Read stage checkpoints from db"
