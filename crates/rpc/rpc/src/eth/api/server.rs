@@ -435,7 +435,6 @@ mod tests {
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_interfaces::test_utils::{generators, generators::Rng};
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams, Block, BlockNumberOrTag, Header,
@@ -448,6 +447,7 @@ mod tests {
     use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
     use reth_tasks::pool::BlockingTaskPool;
+    use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     fn build_test_eth_api<

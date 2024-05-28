@@ -18,7 +18,8 @@ use reth_db_common::init::init_genesis;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
-use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, PruneModes};
+use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_primitives::{stage::StageId, PruneModes};
 use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -41,7 +42,7 @@ pub struct ImportOpCommand {
     #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
     datadir: MaybePlatformPath<DataDirPath>,
 
-    /// Chunk byte length.
+    /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
 
@@ -187,6 +188,9 @@ impl ImportOpCommand {
         info!(target: "reth::cli",
             total_imported_blocks,
             total_imported_txns,
+            total_decoded_blocks,
+            total_decoded_txns,
+            total_filtered_out_dup_txns,
             "Chain file imported"
         );
 

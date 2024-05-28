@@ -1,10 +1,13 @@
-# reth import-receipts
+# op-reth import-receipts-op
 
-This imports RLP encoded receipts from a file
+This imports non-standard RLP encoded receipts from a file.
+The supported RLP encoding, is the non-standard encoding used
+for receipt export in <https://github.com/testinprod-io/op-geth/pull/1>.
+Supports import of OVM receipts from the Bedrock datadir.
 
 ```bash
-$ reth import-receipts --help
-Usage: reth import-receipts [OPTIONS] <IMPORT_PATH>
+$ op-reth import-receipts-op --help
+Usage: op-reth import-receipts-op [OPTIONS] <IMPORT_PATH>
 
 Options:
       --datadir <DATA_DIR>
@@ -18,28 +21,10 @@ Options:
 
           [default: default]
 
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
       --chunk-len <CHUNK_LEN>
-          Chunk byte length.
+          Chunk byte length to read from file.
 
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
-
-          [default: 1]
+          [default: 1GB]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -64,7 +49,7 @@ Database:
           [possible values: true, false]
 
   <IMPORT_PATH>
-          The path to a receipts file for import. File must use `HackReceiptCodec` (used for
+          The path to a receipts file for import. File must use `HackReceiptFileCodec` (used for
           exporting OP chain segment below Bedrock block via testinprod/op-geth).
 
           <https://github.com/testinprod-io/op-geth/pull/1>

@@ -1,7 +1,7 @@
 use crate::eth::error::{EthApiError, EthResult};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_primitives::{Address, BlockId, U256};
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;

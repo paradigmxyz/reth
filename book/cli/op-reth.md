@@ -1,47 +1,16 @@
-# reth
+# op-reth
 
-Reth
+Additional op-reth commands.
 
 ```bash
-$ reth --help
-Usage: reth [OPTIONS] <COMMAND>
+$ op-reth --help
+Usage: op-reth [OPTIONS] <COMMAND>
 
 Commands:
-  node          Start the node
-  init          Initialize the database from a genesis file
-  init-state    Initialize the database from a state dump file
-  import        This syncs RLP encoded blocks from a file
-  dump-genesis  Dumps genesis block JSON configuration to stdout
-  db            Database debugging utilities
-  stage         Manipulate individual stages
-  p2p           P2P Debugging utilities
-  test-vectors  Generate Test Vectors
-  config        Write config to stdout
-  debug         Various debug routines
-  recover       Scripts for node recovery
-  help          Print this message or the help of the given subcommand(s)
+  import-op           Imports the Bedrock datadir blocks from a file
+  import-receipts-op  Imports the Bedrock datadir receipts from a file
 
 Options:
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
-
-          [default: 1]
-
   -h, --help
           Print help (see a summary with '-h')
 

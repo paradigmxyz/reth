@@ -8,8 +8,7 @@ use crate::{
     AllTransactionsEvents,
 };
 use futures_util::{ready, Stream};
-use reth_eth_wire::HandleMempoolData;
-use reth_network_types::PeerId;
+use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
@@ -28,6 +27,9 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::Receiver;
+
+/// The PeerId type.
+pub type PeerId = reth_primitives::B512;
 
 /// General purpose abstraction of a transaction-pool.
 ///

@@ -28,7 +28,7 @@ use reth_primitives::{
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
@@ -705,10 +705,6 @@ impl<DB> BlockchainTreeViewer for BlockchainProvider<DB>
 where
     DB: Send + Sync,
 {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        self.tree.blocks()
-    }
-
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         self.tree.header_by_hash(hash)
     }
@@ -721,16 +717,8 @@ where
         self.tree.block_with_senders_by_hash(block_hash)
     }
 
-    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
-        self.tree.buffered_block_by_hash(block_hash)
-    }
-
     fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
         self.tree.buffered_header_by_hash(block_hash)
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        self.tree.canonical_blocks()
     }
 
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
@@ -743,10 +731,6 @@ where
 
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        self.tree.pending_blocks()
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
