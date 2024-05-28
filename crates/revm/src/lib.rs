@@ -13,7 +13,6 @@ pub mod database;
 
 pub mod batch;
 
-
 /// State changes that are not related to transactions.
 pub mod state_change;
 

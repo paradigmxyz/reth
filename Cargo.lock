@@ -7719,7 +7719,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-execution-errors",
  "reth-primitives",
- "reth-provider",
+ "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",
  "revm",
