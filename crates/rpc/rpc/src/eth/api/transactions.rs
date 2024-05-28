@@ -83,9 +83,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(
-        &self,
-    ) -> &(impl BlockIdReader + BlockReader + TransactionsProvider + ReceiptProvider);
+    fn provider(&self) -> &(impl BlockIdReader + BlockReader);
 
     /// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state
     /// changes.
@@ -263,7 +261,7 @@ pub trait EthTransactions: Send + Sync {
     /// Note: The tx receipt is not available for pending transactions.
     async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>
     where
-        Self: BuildReceipt + Clone + Send + 'static,
+        Self: BuildReceipt + Clone + 'static,
     {
         let result = self.load_transaction_and_receipt(hash).await?;
 
@@ -281,7 +279,7 @@ pub trait EthTransactions: Send + Sync {
         hash: TxHash,
     ) -> EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>>
     where
-        Self: Clone + Send + 'static,
+        Self: Clone + 'static,
     {
         let this = self.clone();
         self.spawn_blocking_future(async move {
@@ -600,9 +598,7 @@ where
     Network: NetworkInfo + 'static,
     EvmConfig: ConfigureEvm,
 {
-    fn provider(
-        &self,
-    ) -> &(impl BlockIdReader + BlockReader + TransactionsProvider + ReceiptProvider) {
+    fn provider(&self) -> &(impl BlockIdReader + BlockReader) {
         &self.inner.provider
     }
 

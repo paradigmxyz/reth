@@ -74,22 +74,6 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     fn sync_status(&self) -> RethResult<SyncStatus>;
 }
 
-// move to crates/optimism/rpc
-pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
-    /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-}
-
-pub struct EthereumApi<Provider, Pool, Network, EvmConfig> {
-    /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-}
-
-pub struct L2EthApi<Provider, Pool, Network, EvmConfig> {
-    /// reuse eth server
-    inner: Arc<EthereumApi<Provider, Pool, Network, EvmConfig>>,
-}
-
 /// `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -517,4 +501,18 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
     raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
+    /// Returns a handle to data on disk.
+    #[inline]
+    pub fn provider(&self) -> &Provider {
+        &self.provider
+    }
+
+    /// Returns a handle to data in memory.
+    #[inline]
+    pub fn cache(&self) -> &EthStateCache {
+        &self.eth_cache
+    }
 }

@@ -4,10 +4,10 @@ use jsonrpsee::types::ErrorObject;
 use reth_rpc::{eth::error::EthApiError, result::internal_rpc_err};
 use reth_rpc_types::ToRpcError;
 
-/// Eth Optimism Api Error
+/// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
 pub enum OptimismEthApiError {
-    /// Thrown when calculating L1 gas fee
+    /// Thrown when calculating L1 gas fee.
     #[error("failed to calculate l1 gas fee")]
     L1BlockFeeError,
     /// Thrown when calculating L1 gas used

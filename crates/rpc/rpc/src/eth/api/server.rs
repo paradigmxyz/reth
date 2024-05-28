@@ -21,7 +21,7 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{EthApi, EthTransactions},
+        api::{block::EthBlocks, EthApi, EthTransactions},
         error::EthApiError,
         revm_utils::EvmOverrides,
     },
@@ -132,7 +132,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<Vec<AnyTransactionReceipt>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
-        Ok(EthApi::block_receipts(self, block_id).await?)
+        Ok(EthBlocks::block_receipts(self, block_id).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
