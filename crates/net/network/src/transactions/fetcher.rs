@@ -40,7 +40,7 @@ use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
-use reth_interfaces::p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_types::PeerId;
 use reth_primitives::{PooledTransactionsElement, TxHash};
 use schnellru::ByLength;
