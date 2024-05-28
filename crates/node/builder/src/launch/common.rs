@@ -1,16 +1,12 @@
 //! Helper types that can be used by launchers.
 
-use std::{cmp::max, sync::Arc, thread::available_parallelism};
-
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use tokio::sync::mpsc::Receiver;
-
 use reth_auto_seal_consensus::MiningMode;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
-use reth_network_p2p::p2p::headers::client::HeadersClient;
+use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -23,6 +19,8 @@ use reth_rpc_layer::JwtSecret;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{error, info, warn};
+use std::{cmp::max, sync::Arc, thread::available_parallelism};
+use tokio::sync::mpsc::Receiver;
 
 /// Reusable setup for launching a node.
 ///
