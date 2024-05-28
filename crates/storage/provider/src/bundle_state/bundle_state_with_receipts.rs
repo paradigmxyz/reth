@@ -65,21 +65,8 @@ impl StateWriter for BundleStateWithReceipts {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
-
-    use revm::{
-        db::{
-            states::{
-                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
-            },
-            BundleState, EmptyDB,
-        },
-        primitives::{
-            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot,
-        },
-        DatabaseCommit, State,
-    };
-
+    use super::*;
+    use crate::{test_utils::create_test_provider_factory, AccountReader};
     use reth_db::{
         cursor::DbDupCursorRO,
         database::Database,
@@ -92,10 +79,19 @@ mod tests {
         Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::{test_utils::state_root, StateRoot};
-
-    use crate::{test_utils::create_test_provider_factory, AccountReader};
-
-    use super::*;
+    use revm::{
+        db::{
+            states::{
+                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
+            },
+            BundleState, EmptyDB,
+        },
+        primitives::{
+            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot,
+        },
+        DatabaseCommit, State,
+    };
+    use std::collections::{BTreeMap, HashMap};
 
     #[test]
     fn write_to_db_account_info() {
