@@ -1,14 +1,39 @@
-use reth_primitives::{Address, B256, KECCAK_EMPTY, U256};
-use reth_provider::StateProvider;
-use reth_storage_errors::provider::ProviderError;
+use reth_primitives::{Account, Address, B256, KECCAK_EMPTY, U256};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{
     db::DatabaseRef,
     primitives::{AccountInfo, Bytecode},
     Database,
 };
 use std::ops::{Deref, DerefMut};
+use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 
-/// Wrapper around StateProvider that implements revm database trait
+/// A helper trait responsible for providing that necessary state for the EVM execution.
+///
+/// This servers as the data layer for [Database].
+pub trait EvmStateProvider: Send + Sync {
+
+    /// Get basic account information.
+    ///
+    /// Returns `None` if the account doesn't exist.
+    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
+
+    /// Get the hash of the block with the given number. Returns `None` if no block with this number
+    /// exists.
+    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
+
+    /// Get account code by its hash
+    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<reth_primitives::Bytecode>>;
+
+    /// Get storage of given account.
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>>;
+}
+
+/// A [Database] and [DatabaseRef] implementation that uses [EvmStateProvider] as the underlying data source.
 #[derive(Debug, Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 
@@ -38,7 +63,7 @@ impl<DB> DerefMut for StateProviderDatabase<DB> {
     }
 }
 
-impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
+impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     type Error = ProviderError;
 
     /// Retrieves basic account information for a given address.
@@ -72,7 +97,7 @@ impl<DB: StateProvider> Database for StateProviderDatabase<DB> {
     }
 }
 
-impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
+impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     type Error = <Self as Database>::Error;
 
     /// Retrieves basic account information for a given address.
