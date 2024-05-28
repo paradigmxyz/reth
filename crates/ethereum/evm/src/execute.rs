@@ -436,7 +436,9 @@ mod tests {
         eip2935::HISTORY_STORAGE_ADDRESS,
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
     };
-    use reth_primitives::{keccak256, Account, Block, ChainSpecBuilder, ForkCondition, B256};
+    use reth_primitives::{
+        keccak256, trie::EMPTY_ROOT_HASH, Account, Block, ChainSpecBuilder, ForkCondition, B256,
+    };
     use reth_revm::{
         database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,
         test_utils::StateProviderTest, TransitionState,
@@ -935,7 +937,12 @@ mod tests {
                 .build(),
         );
 
-        let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
         let provider = executor_provider(chain_spec);
         let mut executor =
             provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
@@ -999,7 +1006,12 @@ mod tests {
         let mut executor =
             provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
-        let header = Header { timestamp: 1, number: fork_activation_block, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
 
         // attempt to execute the fork activation block, this should not fail
         executor
@@ -1048,7 +1060,9 @@ mod tests {
                 .build(),
         );
 
-        let header = chain_spec.genesis_header();
+        let mut header = chain_spec.genesis_header();
+        header.requests_root = Some(EMPTY_ROOT_HASH);
+
         let provider = executor_provider(chain_spec);
         let mut executor =
             provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
@@ -1084,7 +1098,12 @@ mod tests {
             .is_zero());
 
         // attempt to execute block 1, this should not fail
-        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
         executor
             .execute_and_verify_one(
                 (
@@ -1119,7 +1138,12 @@ mod tests {
             .is_zero());
 
         // attempt to execute block 2, this should not fail
-        let header = Header { timestamp: 1, number: 2, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: 2,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
         executor
             .execute_and_verify_one(
                 (

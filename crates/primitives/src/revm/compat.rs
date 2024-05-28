@@ -36,7 +36,5 @@ pub fn calculate_intrinsic_gas_after_merge(
     is_shanghai: bool,
 ) -> u64 {
     let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
-    // TODO(EOF)
-    let initcodes = &[];
-    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list, initcodes)
+    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list)
 }
