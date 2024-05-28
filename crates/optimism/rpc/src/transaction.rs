@@ -6,7 +6,7 @@ use revm::L1BlockInfo;
 ///
 /// Includes the L1 fee and data gas for the tx along with the L1
 /// block info. In order to pass the [OptimismTxMeta] into the
-/// async colored [ReceiptResponseBuilder], a reference counter
+/// async colored [ReceiptBuilder], a reference counter
 /// for the L1 block info is used so the L1 block info can be
 /// shared between receipts.
 #[derive(Debug, Default, Clone)]

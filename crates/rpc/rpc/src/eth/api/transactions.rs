@@ -2,6 +2,7 @@
 use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
+        cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
         revm_utils::{prepare_call_env, EvmOverrides},
         utils::recover_raw_transaction,
@@ -17,12 +18,13 @@ use reth_primitives::{
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredPooledTransaction, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered,
+    TransactionSigned, TransactionSignedEcRecovered, TxHash,
     TxKind::{Call, Create},
     B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
+    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -78,6 +80,13 @@ pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Returns a handle for reading data from disk.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn provider(
+        &self,
+    ) -> &(impl BlockIdReader + BlockReader + TransactionsProvider + ReceiptProvider);
+
     /// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state
     /// changes.
     fn transact<DB>(
@@ -252,7 +261,44 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// Returns None if the transaction does not exist or is pending
     /// Note: The tx receipt is not available for pending transactions.
-    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>;
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>
+    where
+        Self: BuildReceipt + Clone + Send + 'static,
+    {
+        let result = self.load_transaction_and_receipt(hash).await?;
+
+        let (tx, meta, receipt) = match result {
+            Some((tx, meta, receipt)) => (tx, meta, receipt),
+            None => return Ok(None),
+        };
+
+        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+    }
+
+    /// Helper method that loads a transaction and its receipt.
+    async fn load_transaction_and_receipt(
+        &self,
+        hash: TxHash,
+    ) -> EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>>
+    where
+        Self: Clone + Send + 'static,
+    {
+        let this = self.clone();
+        self.spawn_blocking_future(async move {
+            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
+                Some((tx, meta)) => (tx, meta),
+                None => return Ok(None),
+            };
+
+            let receipt = match this.provider().receipt_by_hash(hash)? {
+                Some(recpt) => recpt,
+                None => return Ok(None),
+            };
+
+            Ok(Some((tx, meta, receipt)))
+        })
+        .await
+    }
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
@@ -543,11 +589,23 @@ impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Pool: TransactionPool + 'static,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: BlockReaderIdExt
+        + BlockReader
+        + TransactionsProvider
+        + ReceiptProvider
+        + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
     Network: NetworkInfo + 'static,
     EvmConfig: ConfigureEvm,
 {
+    fn provider(
+        &self,
+    ) -> &(impl BlockIdReader + BlockReader + TransactionsProvider + ReceiptProvider) {
+        &self.inner.provider
+    }
+
     fn transact<DB>(
         &self,
         db: DB,
@@ -822,7 +880,10 @@ where
         }
     }
 
-    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>> {
+    async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>
+    where
+        Self: BuildReceipt + Clone + Send + 'static,
+    {
         let result = self.load_transaction_and_receipt(hash).await?;
 
         let (tx, meta, receipt) = match result {
@@ -1348,6 +1409,43 @@ where
     }
 }
 
+/// Assembles transaction receipt data w.r.t to network.
+pub trait BuildReceipt {
+    /// Returns a handle for reading data from memory.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn cache(&self) -> &EthStateCache;
+
+    /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
+    fn build_transaction_receipt(
+        &self,
+        tx: TransactionSigned,
+        meta: TransactionMeta,
+        receipt: Receipt,
+    ) -> impl Future<Output = EthResult<AnyTransactionReceipt>> + Send
+    where
+        Self: Send + Sync,
+    {
+        async move {
+            // get all receipts for the block
+            let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
+                Some(recpts) => recpts,
+                None => return Err(EthApiError::UnknownBlockNumber),
+            };
+
+            Ok(ReceiptBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
+        }
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> BuildReceipt
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
+    fn cache(&self) -> &EthStateCache {
+        &self.inner.eth_cache
+    }
+}
+
 // === impl EthApi ===
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -1483,60 +1581,6 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: NetworkInfo + 'static,
-{
-    /// Helper function for `eth_getTransactionReceipt`
-    ///
-    /// Returns the receipt
-    async fn build_transaction_receipt(
-        &self,
-        tx: TransactionSigned,
-        meta: TransactionMeta,
-        receipt: Receipt,
-    ) -> EthResult<AnyTransactionReceipt> {
-        // get all receipts for the block
-        let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {
-            Some(recpts) => recpts,
-            None => return Err(EthApiError::UnknownBlockNumber),
-        };
-
-        Ok(ReceiptResponseBuilder::new(&tx, meta, &receipt, &all_receipts)?.build())
-    }
-}
-
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
-    Pool: 'static,
-    Network: 'static,
-    EvmConfig: 'static,
-{
-    /// Loads a transaction and its receipt.
-    pub async fn load_transaction_and_receipt(
-        &self,
-        hash: B256,
-    ) -> EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>> {
-        self.on_blocking_task(|this| async move {
-            let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
-                Some((tx, meta)) => (tx, meta),
-                None => return Ok(None),
-            };
-
-            let receipt = match this.provider().receipt_by_hash(hash)? {
-                Some(recpt) => recpt,
-                None => return Ok(None),
-            };
-
-            Ok(Some((tx, meta, receipt)))
-        })
-        .await
-    }
-}
-
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TransactionSource {
@@ -1628,14 +1672,14 @@ impl From<TransactionSource> for Transaction {
 
 /// Receipt response builder.
 #[derive(Debug)]
-pub struct ReceiptResponseBuilder {
+pub struct ReceiptBuilder {
     /// The base response body, contains L1 fields.
     base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
     /// Additional L2 fields.
     other: OtherFields,
 }
 
-impl ReceiptResponseBuilder {
+impl ReceiptBuilder {
     /// Returns a new builder with the base response body (L1 fields) set.
     ///
     /// Note: This requires _all_ block receipts because we need to calculate the gas used by the

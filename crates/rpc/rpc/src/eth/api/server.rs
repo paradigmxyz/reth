@@ -28,12 +28,12 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
 };
 
-use super::EthApiSpec;
+use super::{BuildReceipt, EthApiSpec};
 
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EthApiSpec + EthTransactions,
+    Self: EthApiSpec + EthTransactions + BuildReceipt,
     Pool: TransactionPool + 'static,
     Provider: BlockReader
         + BlockIdReader

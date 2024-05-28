@@ -7,7 +7,7 @@ use reth_primitives::{BlockId, Receipt, TransactionMeta, TransactionSigned, TxHa
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
     eth::{
-        api::transactions::ReceiptResponseBuilder,
+        api::transactions::ReceiptBuilder,
         error::{EthApiError, EthResult},
     },
     EthApi,
@@ -60,7 +60,7 @@ where
                 let optimism_tx_meta =
                     build_op_tx_meta(eth_api, tx, l1_block_info.clone(), timestamp)?;
 
-                ReceiptResponseBuilder::new(tx, meta, receipt, &receipts)
+                ReceiptBuilder::new(tx, meta, receipt, &receipts)
                     .map(|builder| op_fields(builder, tx, receipt, optimism_tx_meta).build())
             })
             .collect::<EthResult<Vec<_>>>();
@@ -92,7 +92,7 @@ where
     let l1_block_info = reth_evm_optimism::extract_l1_info(&block).ok();
     let optimism_tx_meta = build_op_tx_meta(eth_api, &tx, l1_block_info, block.timestamp)?;
 
-    let resp_builder = ReceiptResponseBuilder::new(&tx, meta, &receipt, &receipts)?;
+    let resp_builder = ReceiptBuilder::new(&tx, meta, &receipt, &receipts)?;
     let resp_builder = op_fields(resp_builder, &tx, &receipt, optimism_tx_meta);
 
     Ok(resp_builder.build())
@@ -139,11 +139,11 @@ where
 
 /// Applies OP specific fields to a receipts response.
 pub fn op_fields(
-    resp_builder: ReceiptResponseBuilder,
+    resp_builder: ReceiptBuilder,
     tx: &TransactionSigned,
     receipt: &Receipt,
     optimism_tx_meta: OptimismTxMeta,
-) -> ReceiptResponseBuilder {
+) -> ReceiptBuilder {
     let mut op_fields = OptimismTransactionReceiptFields::default();
 
     if tx.is_deposit() {

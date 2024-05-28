@@ -48,7 +48,7 @@ mod state;
 pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
-pub use transactions::{EthTransactions, TransactionSource};
+pub use transactions::{BuildReceipt, EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
 ///
