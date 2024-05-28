@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::bundle_state::BundleStateWithReceipts;
+use crate::BundleStateWithReceipts;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
