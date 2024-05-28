@@ -293,16 +293,14 @@ where
 
             // get parent hashes
             let mut parent_block_hashes = self.all_chain_hashes(chain_id);
-            let first_pending_block_number =
-                if let Some(key_value) = parent_block_hashes.first_key_value() {
-                    *key_value.0
-                } else {
-                    debug!(target: "blockchain_tree", ?chain_id, "No block hashes stored");
-                    return None
-                };
+            let Some((first_pending_block_number, _)) = parent_block_hashes.first_key_value()
+            else {
+                debug!(target: "blockchain_tree", ?chain_id, "No block hashes stored");
+                return None
+            };
             let canonical_chain = canonical_chain
                 .iter()
-                .filter(|&(key, _)| key < first_pending_block_number)
+                .filter(|&(key, _)| &key < first_pending_block_number)
                 .collect::<Vec<_>>();
             parent_block_hashes.extend(canonical_chain);
 
