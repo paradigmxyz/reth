@@ -11,10 +11,9 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
-
 use async_trait::async_trait;
+use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
-use reth_interfaces::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
