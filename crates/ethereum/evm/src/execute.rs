@@ -927,7 +927,7 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_within_window_bounds() {
-        let fork_activation_block = (HISTORY_SERVE_WINDOW - 10) as u64;
+        let fork_activation_block = HISTORY_SERVE_WINDOW - 10;
         let db = create_state_provider_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(
@@ -992,7 +992,7 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_outside_window_bounds() {
-        let fork_activation_block = (HISTORY_SERVE_WINDOW + 256) as u64;
+        let fork_activation_block = HISTORY_SERVE_WINDOW + 256;
         let db = create_state_provider_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(

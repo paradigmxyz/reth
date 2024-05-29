@@ -10,7 +10,7 @@ use revm::{
     primitives::{Account, AccountInfo, Bytecode, StorageSlot},
     Database, DatabaseCommit, Evm,
 };
-use std::{collections::HashMap, ops::Rem};
+use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
 ///
@@ -57,7 +57,7 @@ pub fn post_block_balance_increments(
 }
 
 /// todo: temporary move over of constants from revm until we've migrated to the latest version
-pub const HISTORY_SERVE_WINDOW: usize = 8192;
+pub const HISTORY_SERVE_WINDOW: u64 = 8192;
 
 /// Applies the pre-block state change outlined in [EIP-2935] to store historical blockhashes in a
 /// system contract.
@@ -65,11 +65,7 @@ pub const HISTORY_SERVE_WINDOW: usize = 8192;
 /// If Prague is not activated, or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
 ///
-/// If the provided block is the fork activation block, this will generate multiple state changes,
-/// as it inserts multiple historical blocks, as outlined in the EIP.
-///
-/// If the provided block is after Prague has been activated, this will only insert a single block
-/// hash.
+/// If the provided block is after Prague has been activated, the parent hash will be inserted.
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
@@ -88,10 +84,10 @@ where
     }
     assert!(block_number > 0);
 
-    // We load the `HISTORY_STORAGE_ADDRESS` account because REVM expects this to be loaded in order
-    // to access any storage, which we will do below.
-    // If the account does not exist, we create it with the EIP-2935 bytecode and a nonce of 1, so
-    // it does not get deleted.
+    // Account is expected to exist either in genesis (for tests) or redeployed on mainnet or
+    // testnets.
+    // If the account for any reason does not exist, we create it with the EIP-2935 bytecode and a
+    // nonce of 1, so it does not get deleted.
     let mut account: Account = db
         .basic(HISTORY_STORAGE_ADDRESS)
         .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?
@@ -106,46 +102,6 @@ where
     let (slot, value) = eip2935_block_hash_slot(block_number - 1, db)
         .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
     account.storage.insert(slot, value);
-
-    // If the first slot in the ring is `U256::ZERO`, then we can assume the ring has not been
-    // filled before, and this is the activation block.
-    //
-    // Reasoning:
-    // - If `block_number <= HISTORY_SERVE_WINDOW`, then the ring will be filled with as many blocks
-    //   as possible, down to slot 0.
-    //
-    //   For example, if it is activated at block 100, then slots `0..100` will be filled.
-    //
-    // - If the fork is activated at genesis, then this will only run at block 1, which will fill
-    //   the ring with the hash of block 0 at slot 0.
-    //
-    // - If the activation block is above `HISTORY_SERVE_WINDOW`, then `0..HISTORY_SERVE_WINDOW`
-    //   will be filled.
-    let is_activation_block = db
-        .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?
-        .is_zero();
-
-    // If this is the activation block, then we backfill the storage of the account with up to
-    // `HISTORY_SERVE_WINDOW - 1` ancestors' blockhashes as well, per the EIP.
-    //
-    // Note: The -1 is because the ancestor itself was already inserted up above.
-    if is_activation_block {
-        let mut ancestor_block_number = block_number - 1;
-        for _ in 0..HISTORY_SERVE_WINDOW - 1 {
-            // Stop at genesis
-            if ancestor_block_number == 0 {
-                break
-            }
-            ancestor_block_number -= 1;
-
-            let (slot, value) =
-                eip2935_block_hash_slot(ancestor_block_number, db).map_err(|err| {
-                    BlockValidationError::Eip2935StateTransition { message: err.to_string() }
-                })?;
-            account.storage.insert(slot, value);
-        }
-    }
 
     // Mark the account as touched and commit the state change
     account.mark_touch();
@@ -163,7 +119,7 @@ fn eip2935_block_hash_slot<DB: Database>(
     block_number: u64,
     db: &mut DB,
 ) -> Result<(U256, StorageSlot), DB::Error> {
-    let slot = U256::from(block_number).rem(U256::from(HISTORY_SERVE_WINDOW));
+    let slot = U256::from(block_number % HISTORY_SERVE_WINDOW);
     let current_hash = db.storage(HISTORY_STORAGE_ADDRESS, slot)?;
     let ancestor_hash = db.block_hash(U256::from(block_number))?;
 
