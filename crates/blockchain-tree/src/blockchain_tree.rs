@@ -2371,15 +2371,23 @@ mod tests {
     }
 
     #[test]
-    fn last_finalized_block_initialiation() {
+    fn last_finalized_block_initialization() {
         let data = BlockchainTestData::default_from_number(11);
         let (block1, exec1) = data.blocks[0].clone();
         let (block2, exec2) = data.blocks[1].clone();
+        let (block3, exec3) = data.blocks[2].clone();
         let genesis = data.genesis;
 
+        println!("block1 number: {}", block1.number);
         // test pops execution results from vector, so order is from last to first.
-        let externals =
-            setup_externals(vec![exec2.clone(), exec1.clone(), exec2.clone(), exec1.clone()]);
+        let externals = setup_externals(vec![
+            exec3.clone(),
+            exec2.clone(),
+            exec1.clone(),
+            exec3.clone(),
+            exec2.clone(),
+            exec1.clone(),
+        ]);
         let cloned_externals = TreeExternals {
             provider_factory: externals.provider_factory.clone(),
             executor_factory: externals.executor_factory.clone(),
@@ -2402,6 +2410,12 @@ mod tests {
             tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
         );
+
+        assert_eq!(
+            tree.insert_block(block3.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
         tree.make_canonical(block2.hash()).unwrap();
 
         // restart
@@ -2409,10 +2423,16 @@ mod tests {
         let mut tree =
             BlockchainTree::new(cloned_externals, config, None).expect("failed to create tree");
 
+        let mut block1a = block1.clone();
+        let block1a_hash = B256::new([0x33; 32]);
+        block1a.set_hash(block1a_hash);
+
         assert_eq!(
-            tree.make_canonical(block2.hash()).unwrap(),
-            CanonicalOutcome::AlreadyCanonical { header: block2.header.clone() }
+            tree.insert_block(block1a.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
         );
-        //tree.finalize_block(12);
+
+        tree.make_canonical(block1a.hash()).unwrap();
+        tree.finalize_block(block1a.number);
     }
 }
