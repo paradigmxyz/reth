@@ -69,12 +69,12 @@ pub struct NetworkMetrics {
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) holds this handle.
     ///
     /// Duration in seconds.
-    pub(crate) duration_poll_network_handle: Gauge,
+    pub(crate) acc_duration_poll_network_handle: Gauge,
     /// Time spent polling [`Swarm`](crate::swarm::Swarm), in one call to poll the
     /// [`NetworkManager`](crate::NetworkManager) future.
     ///
     /// Duration in seconds.
-    pub(crate) duration_poll_swarm: Gauge,
+    pub(crate) acc_duration_poll_swarm: Gauge,
 }
 
 /// Metrics for SessionManager
