@@ -198,16 +198,6 @@ impl BitfinityResetEvmStateCommand {
     }
 }
 
-async fn split_and_send_add_accout_request(
-    executor: &Arc<dyn ResetStateExecutor>,
-    accounts: AccountInfoMap,
-) -> eyre::Result<()> {
-    for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
-        executor.add_accounts(account).await?;
-    }
-    Ok(())
-}
-
 /// Trait for the reset state executor
 pub trait ResetStateExecutor: Send + Debug {
     /// Start the reset state process
@@ -286,6 +276,16 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
     }
 }
 
+async fn split_and_send_add_accout_request(
+    executor: &Arc<dyn ResetStateExecutor>,
+    accounts: AccountInfoMap,
+) -> eyre::Result<()> {
+    for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
+        executor.add_accounts(account).await?;
+    }
+    Ok(())
+}
+
 /// Split the account request data into multiple requests
 fn split_add_account_request_data(
     max_byte_size: usize,
@@ -301,19 +301,78 @@ fn split_add_account_request_data(
     let mut current_map = AccountInfoMap::new();
 
     for (address, account) in data.data {
-        let current_size = current_map.estimate_byte_size();
-        let address_size = H160::BYTE_SIZE;
-        let account_size = account.estimate_byte_size();
+        for account in split_single_account_data(max_byte_size, account) {
+            let current_size = current_map.estimate_byte_size();
+            let address_size = H160::BYTE_SIZE;
+            let account_size = account.estimate_byte_size();
 
-        if current_size + address_size + account_size > max_byte_size {
-            result.push(std::mem::replace(&mut current_map, AccountInfoMap::new()));
+            let available_size = max_byte_size.saturating_sub(current_size);
+            if address_size + account_size > available_size {
+                result.push(std::mem::replace(&mut current_map, AccountInfoMap::new()));
+            }
+
+            current_map.data.insert(address.clone(), account);
         }
-
-        current_map.data.insert(address, account);
     }
 
     if !current_map.data.is_empty() {
         result.push(current_map);
+    }
+
+    result
+}
+
+/// Receive an account and split it into a list of pieces having a size of `max_byte_size`
+fn split_single_account_data(
+    max_byte_size: usize,
+    mut data: RawAccountInfo,
+) -> Vec<RawAccountInfo> {
+    if data.estimate_byte_size() <= max_byte_size {
+        return vec![data];
+    }
+
+    warn!(target: "reth::cli", "Single account data size exceeds max byte size, splitting it into multiple requests");
+
+    let mut result = vec![];
+
+    let mut current_account = RawAccountInfo {
+        nonce: data.nonce.clone(),
+        balance: data.balance.clone(),
+        bytecode: None,
+        storage: vec![],
+    };
+
+    let storage = std::mem::take(&mut data.storage);
+    let nonce = data.nonce.clone();
+    let balance = data.balance.clone();
+
+    // We push data that contains the bytecode.
+    // This works in the case where the bytecode is not larger than the max_byte_size, but this should always be the case
+    result.push(data);
+
+    for (key, value) in storage {
+        let current_size = current_account.estimate_byte_size();
+        let key_size = H256::BYTE_SIZE;
+        let value_size = H256::BYTE_SIZE;
+
+        let available_size = max_byte_size.saturating_sub(current_size);
+        if key_size + value_size > available_size {
+            result.push(std::mem::replace(
+                &mut current_account,
+                RawAccountInfo {
+                    nonce: nonce.clone(),
+                    balance: balance.clone(),
+                    bytecode: None,
+                    storage: vec![],
+                },
+            ));
+        }
+
+        current_account.storage.push((key, value));
+    }
+
+    if !current_account.storage.is_empty() {
+        result.push(current_account);
     }
 
     result
@@ -373,11 +432,141 @@ mod test {
         }
     }
 
+    #[test]
+    fn bitfinity_test_split_info_map_should_split_a_single_account_in_multiple_calls() {
+        let mut data = AccountInfoMap::new();
+
+        // Add some accounts
+        for i in 0u64..1000 {
+            let address = Address::random().into();
+            let account = RawAccountInfo {
+                nonce: U256::from(i),
+                balance: U256::from(i),
+                bytecode: None,
+                storage: vec![],
+            };
+            data.data.insert(address, account);
+        }
+
+        // Add a big account to be split
+        let (big_account_address, big_account_size) = {
+            let big_account_address: H160 = Address::random().into();
+            let mut account = RawAccountInfo {
+                nonce: U256::from(1u64),
+                balance: U256::from(1u64),
+                bytecode: None,
+                storage: vec![],
+            };
+
+            for i in 0u64..1000 {
+                account.storage.push((U256::from(i), U256::from(i)));
+            }
+
+            let current_size = account.estimate_byte_size();
+            data.data.insert(big_account_address.clone(), account);
+            (big_account_address, current_size)
+        };
+
+        // Add other accounts
+        for i in 0u64..1000 {
+            let address = Address::random().into();
+            let account = RawAccountInfo {
+                nonce: U256::from(i),
+                balance: U256::from(i),
+                bytecode: None,
+                storage: vec![],
+            };
+            data.data.insert(address, account);
+        }
+
+        // Act - split at a size smaller than the big account
+        let max_size = big_account_size / 2;
+        let result = split_add_account_request_data(max_size, data.clone());
+
+        // Assert
+        for map in &result {
+            assert!(map.estimate_byte_size() <= max_size);
+        }
+        let result = merge_account_info_maps(result);
+        assert!(result.data.contains_key(&big_account_address));
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn bitfinity_test_split_single_account_data() {
+        let mut account = RawAccountInfo {
+            nonce: U256::from(1u64),
+            balance: U256::from(1u64),
+            bytecode: None,
+            storage: vec![],
+        };
+
+        for i in 0u64..1000 {
+            account.storage.push((U256::from(i), U256::from(i)));
+        }
+
+        let current_size = account.estimate_byte_size();
+
+        {
+            let max_size = current_size;
+            let result = split_single_account_data(max_size, account.clone());
+            assert_eq!(result.len(), 1);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(result[0], account);
+        }
+
+        {
+            let max_size = current_size - 1;
+            let result = split_single_account_data(max_size, account.clone());
+            assert_eq!(result.len(), 3);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(merge_accounts(result), account);
+        }
+
+        {
+            let max_size = (current_size / 3) - 1;
+            let result = split_single_account_data(max_size, account.clone());
+            assert_eq!(result.len(), 5);
+            for map in &result {
+                assert!(map.estimate_byte_size() <= max_size);
+            }
+            assert_eq!(merge_accounts(result), account);
+        }
+    }
+
+    /// Merge accouts into a single account
+    fn merge_accounts(accounts: Vec<RawAccountInfo>) -> RawAccountInfo {
+        let mut result = accounts[0].clone();
+        for account in accounts {
+            assert_eq!(result.nonce, account.nonce);
+            assert_eq!(result.balance, account.balance);
+
+            result.storage.extend(account.storage);
+
+            if result.bytecode.is_none() {
+                result.bytecode = account.bytecode.clone();
+            }
+            assert_eq!(result.bytecode, account.bytecode);
+        }
+        result
+    }
+
     fn merge_account_info_maps(maps: Vec<AccountInfoMap>) -> AccountInfoMap {
         let mut result = AccountInfoMap::new();
         for map in maps {
-            for (address, account) in map.data {
-                result.data.insert(address, account);
+            for (address, mut account) in map.data {
+                if let Some(existing_account) = result.data.get_mut(&address) {
+                    if let Some(bytecode) = account.bytecode {
+                        existing_account.bytecode = Some(bytecode);
+                    }
+                    existing_account.storage.append(&mut account.storage);
+                } else {
+                    result.data.insert(address, account);
+                }
             }
         }
         result
