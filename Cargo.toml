@@ -46,8 +46,8 @@ members = [
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
-    "crates/payload/validator/",
     "crates/payload/primitives/",
+    "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
     "crates/revm/",
@@ -265,8 +265,8 @@ reth-node-optimism = { path = "crates/optimism/node" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-payload-builder = { path = "crates/payload/builder" }
-reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
+reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune" }
