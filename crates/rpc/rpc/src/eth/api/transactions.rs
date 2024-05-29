@@ -974,10 +974,10 @@ where
                     gas_limit: U256::from(gas.unwrap_or_default()),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    to: if let Some(RpcTransactionKind::Call(to)) = to {
-                        to
-                    } else {
-                        Address::default()
+                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
+                    to: match to {
+                        Some(RpcTransactionKind::Call(to)) => to,
+                        _ => Address::default(),
                     },
                     access_list: access_list.unwrap_or_default(),
 
