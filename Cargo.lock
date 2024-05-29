@@ -6696,7 +6696,6 @@ dependencies = [
  "reth-config",
  "reth-db",
  "reth-etl",
- "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-trie",
