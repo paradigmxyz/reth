@@ -66,8 +66,8 @@ pub struct StaticFileProvider(pub(crate) Arc<StaticFileProviderInner>);
 
 impl StaticFileProvider {
     /// Creates a new [`StaticFileProvider`].
-    fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
-        let provider = Self(Arc::new(StaticFileProviderInner::new(path, env)?));
+    fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
+        let provider = Self(Arc::new(StaticFileProviderInner::new(path, access)?));
         provider.initialize_index()?;
         Ok(provider)
     }
@@ -109,13 +109,13 @@ pub struct StaticFileProviderInner {
     /// Maintains a map of StaticFile writers for each [`StaticFileSegment`]
     writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
-    /// Whether the provider should operate on a read-only access.
-    env: StaticFileAccess,
+    /// Access rights of the provider.
+    access: StaticFileAccess,
 }
 
 impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
-    fn new(path: impl AsRef<Path>, env: StaticFileAccess) -> ProviderResult<Self> {
+    fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -124,14 +124,14 @@ impl StaticFileProviderInner {
             path: path.as_ref().to_path_buf(),
             load_filters: false,
             metrics: None,
-            env,
+            access,
         };
 
         Ok(provider)
     }
 
     pub fn is_read_only(&self) -> bool {
-        self.env.is_read_only()
+        self.access.is_read_only()
     }
 }
 
@@ -968,7 +968,7 @@ impl StaticFileWriter for StaticFileProvider {
         block: BlockNumber,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
-        if self.env.is_read_only() {
+        if self.access.is_read_only() {
             return Err(ProviderError::ReadOnlyStaticFileAccess)
         }
 
@@ -1002,7 +1002,7 @@ impl StaticFileWriter for StaticFileProvider {
     }
 
     fn ensure_file_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
-        match self.env {
+        match self.access {
             StaticFileAccess::RO => {
                 let latest_block = self.get_highest_static_file_block(segment).unwrap_or_default();
 
@@ -1013,10 +1013,10 @@ impl StaticFileWriter for StaticFileProvider {
                     self.metrics.clone(),
                 )?;
 
-                writer.ensure_file_consistency(self.env.is_read_only())?;
+                writer.ensure_file_consistency(self.access.is_read_only())?;
             }
             StaticFileAccess::RW => {
-                self.latest_writer(segment)?.ensure_file_consistency(self.env.is_read_only())?;
+                self.latest_writer(segment)?.ensure_file_consistency(self.access.is_read_only())?;
             }
         }
 
