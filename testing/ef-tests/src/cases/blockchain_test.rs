@@ -87,8 +87,7 @@ impl Case for BlockchainTestCase {
                     db.as_ref(),
                     Arc::new(case.network.clone().into()),
                     static_files_dir_path,
-                )
-                .map_err(|err| Error::RethError(err.into()))?
+                )?
                 .provider_rw()
                 .unwrap();
 
@@ -102,8 +101,7 @@ impl Case for BlockchainTestCase {
                         .try_seal_with_senders()
                         .unwrap(),
                         None,
-                    )
-                    .map_err(|err| Error::RethError(err.into()))?;
+                    )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
                 // Initialize receipts static file with genesis
@@ -123,8 +121,7 @@ impl Case for BlockchainTestCase {
                         .insert_historical_block(
                             decoded.clone().try_seal_with_senders().unwrap(),
                             None,
-                        )
-                        .map_err(|err| Error::RethError(err.into()))?;
+                        )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
@@ -162,8 +159,7 @@ impl Case for BlockchainTestCase {
                                 0..=last_block.number,
                                 last_block.hash(),
                                 *expected_state_root,
-                            )
-                            .map_err(|err| Error::RethError(err.into()))?;
+                            )?;
                     }
                     _ => return Err(Error::MissingPostState),
                 }
