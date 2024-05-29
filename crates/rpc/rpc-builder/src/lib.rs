@@ -469,26 +469,14 @@ where
         EngineT: EngineTypes + 'static,
         EngineApi: EngineApiServer<EngineT>,
     {
-        let mut modules = TransportRpcModules::default();
-
         let Self { provider, pool, network, executor, events, evm_config } = self;
 
-        let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
+        let config = module_config.config.clone().unwrap_or_default();
 
-        let mut registry = RethModuleRegistry::new(
-            provider,
-            pool,
-            network,
-            executor,
-            events,
-            config.unwrap_or_default(),
-            evm_config,
-        );
+        let mut registry =
+            RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config);
 
-        modules.config = module_config;
-        modules.http = registry.maybe_module(http.as_ref());
-        modules.ws = registry.maybe_module(ws.as_ref());
-        modules.ipc = registry.maybe_module(ipc.as_ref());
+        let modules = registry.create_transport_rpc_modules(module_config);
 
         let auth_module = registry.create_auth_module(engine);
 
@@ -1138,11 +1126,28 @@ where
         self
     }
 
-    /// Helper function to create a [RpcModule] if it's not `None`
+    /// Helper function to create a [`RpcModule`] if it's not `None`
     fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule<()>> {
-        let config = config?;
-        let module = self.module_for(config);
-        Some(module)
+        config.map(|config| self.module_for(config))
+    }
+
+    /// Configure a [`TransportRpcModules`] using the current registry. This
+    /// creates [`RpcModule`] instances for the modules selected by the
+    /// `config`.
+    pub fn create_transport_rpc_modules(
+        &mut self,
+        config: TransportRpcModuleConfig,
+    ) -> TransportRpcModules<()> {
+        let mut modules = TransportRpcModules::default();
+        let http = self.maybe_module(config.http.as_ref());
+        let ws = self.maybe_module(config.ws.as_ref());
+        let ipc = self.maybe_module(config.ipc.as_ref());
+
+        modules.config = config;
+        modules.http = http;
+        modules.ws = ws;
+        modules.ipc = ipc;
+        modules
     }
 
     /// Populates a new [RpcModule] based on the selected [RethRpcModule]s in the given
