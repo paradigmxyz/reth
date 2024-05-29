@@ -1168,7 +1168,7 @@ where
         config.map(|config| self.module_for(config))
     }
 
-    /// Configure a [`TransportRpcModule`] using the current registry. This
+    /// Configure a [`TransportRpcModules`] using the current registry. This
     /// creates [`RpcModule`] instances for the modules selected by the
     /// `config`.
     pub fn create_transport_rpc_modules(
