@@ -1,5 +1,4 @@
-use auto_impl::auto_impl;
-use reth_interfaces::p2p::headers::downloader::SyncTarget;
+use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader, B256};
 use reth_storage_errors::provider::ProviderResult;
 use tokio::sync::watch;
@@ -37,7 +36,7 @@ impl HeaderSyncGap {
 }
 
 /// Client trait for determining the current headers sync gap.
-#[auto_impl(&, Arc)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait HeaderSyncGapProvider: Send + Sync {
     /// Find a current sync gap for the headers depending on the [HeaderSyncMode] and the last
     /// uninterrupted block number. Last uninterrupted block represents the block number before
