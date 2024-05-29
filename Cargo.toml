@@ -17,6 +17,7 @@ members = [
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
+    "crates/ethereum/payload/",
     "crates/etl/",
     "crates/evm/",
     "crates/evm/execution-errors",
@@ -48,7 +49,6 @@ members = [
     "crates/optimism/primitives/",
     "crates/payload/basic/",
     "crates/payload/builder/",
-    "crates/payload/ethereum/",
     "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
@@ -243,7 +243,7 @@ reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
-reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
+reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
