@@ -8,7 +8,6 @@ use reth_db::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId},
@@ -16,6 +15,7 @@ use reth_primitives::{
 };
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
@@ -65,12 +65,12 @@ impl AccountHashingStage {
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db::models::AccountBeforeTx;
-        use reth_interfaces::test_utils::{
+        use reth_primitives::U256;
+        use reth_provider::providers::StaticFileWriter;
+        use reth_testing_utils::{
             generators,
             generators::{random_block_range, random_eoa_accounts},
         };
-        use reth_primitives::U256;
-        use reth_provider::providers::StaticFileWriter;
 
         let mut rng = generators::rng();
 

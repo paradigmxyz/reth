@@ -157,12 +157,12 @@ mod tests {
         transaction::DbTx,
         BlockNumberList,
     };
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{address, BlockNumber, B256};
+    use reth_provider::providers::StaticFileWriter;
+    use reth_testing_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{address, BlockNumber, B256};
-    use reth_provider::providers::StaticFileWriter;
     use std::collections::BTreeMap;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");

@@ -285,10 +285,6 @@ struct FailedSenderRecoveryError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_db::cursor::DbCursorRO;
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block, random_block_range},
-    };
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
@@ -296,6 +292,10 @@ mod tests {
     use reth_provider::{
         providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
         TransactionsProvider,
+    };
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block, random_block_range},
     };
 
     use super::*;

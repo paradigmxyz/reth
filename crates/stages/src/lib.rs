@@ -15,7 +15,7 @@
 //! # use std::sync::Arc;
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
-//! # use reth_interfaces::test_utils::{TestBodiesClient, TestHeadersClient};
+//! # use reth_network_p2p::test_utils::{TestBodiesClient, TestHeadersClient};
 //! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! # use reth_primitives::{MAINNET, B256, PruneModes};
 //! # use reth_network_types::PeerId;
