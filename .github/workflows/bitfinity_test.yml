@@ -1,0 +1,30 @@
+name: 'Bitfinity - Tests'
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: Build and Test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Configure Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: test
+        run: |
+          cargo test bitfinity_test -- --nocapture
