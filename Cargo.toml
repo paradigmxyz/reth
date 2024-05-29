@@ -83,6 +83,11 @@ members = [
     "crates/transaction-pool/",
     "crates/trie-parallel/",
     "crates/trie/",
+    "testing/ef-tests/",
+    "testing/testing-utils",
+]
+default-members = ["bin/reth"]
+exclude = [
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -102,10 +107,7 @@ members = [
     "examples/polygon-p2p/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
-    "testing/ef-tests/",
-    "testing/testing-utils",
 ]
-default-members = ["bin/reth"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html

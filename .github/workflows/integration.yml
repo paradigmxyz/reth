@@ -78,11 +78,31 @@ jobs:
             -- db get static-file headers 100000 \
             | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
 
+  examples:
+    name: test / examples
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Run example tests
+        run: |
+          cargo nextest run \
+            --locked --features "asm-keccak" \
+            --exclude ef-tests \
+            -E "kind(test)" \
+            --manifest-path examples/Cargo.toml
+
   integration-success:
     name: integration success
     runs-on: ubuntu-latest
     if: always()
-    needs: [test]
+    needs: [test, examples]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
