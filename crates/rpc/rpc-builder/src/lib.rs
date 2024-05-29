@@ -715,43 +715,6 @@ impl RpcModuleSelection {
         }
     }
 
-    /// Creates a new [RpcModule] based on the configured reth modules.
-    ///
-    /// Note: This will always create new instance of the module handlers and is therefore only
-    /// recommended for launching standalone transports. If multiple transports need to be
-    /// configured it's recommended to use the [RpcModuleBuilder].
-    #[allow(clippy::too_many_arguments)]
-    pub fn standalone_module<Provider, Pool, Network, Tasks, Events, EvmConfig>(
-        &self,
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        executor: Tasks,
-        events: Events,
-        config: RpcModuleConfig,
-        evm_config: EvmConfig,
-    ) -> RpcModule<()>
-    where
-        Provider: BlockReaderIdExt
-            + AccountReader
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: ConfigureEvm + 'static,
-    {
-        let mut registry =
-            RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config);
-        registry.module_for(self)
-    }
-
     /// Returns an iterator over all configured [RethRpcModule]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
