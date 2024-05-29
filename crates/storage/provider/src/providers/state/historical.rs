@@ -420,7 +420,7 @@ mod tests {
     const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
     const STORAGE: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn assert_state_provider<T: StateProvider>() {}
+    const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
     fn assert_historical_state_provider<T: DbTx>() {
         assert_state_provider::<HistoricalStateProvider<T>>();

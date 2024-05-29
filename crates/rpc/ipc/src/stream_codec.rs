@@ -67,7 +67,7 @@ impl StreamCodec {
 }
 
 #[inline]
-fn is_whitespace(byte: u8) -> bool {
+const fn is_whitespace(byte: u8) -> bool {
     matches!(byte, 0x0D | 0x0A | 0x20 | 0x09)
 }
 

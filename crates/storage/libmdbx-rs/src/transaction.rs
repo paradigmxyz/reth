@@ -690,7 +690,7 @@ unsafe impl Sync for TransactionPtr {}
 mod tests {
     use super::*;
 
-    fn assert_send_sync<T: Send + Sync>() {}
+    const fn assert_send_sync<T: Send + Sync>() {}
 
     #[allow(dead_code)]
     fn test_txn_send_sync() {

@@ -41,7 +41,7 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
     }
 
     #[cfg(test)]
-    pub(crate) fn root(&self) -> &TreeRootEntry {
+    pub(crate) const fn root(&self) -> &TreeRootEntry {
         &self.root
     }
 

@@ -54,7 +54,7 @@ mod proto {
 
     impl PingPongProtoMessage {
         /// Returns the capability for the `ping` protocol.
-        pub fn capability() -> Capability {
+        pub const fn capability() -> Capability {
             Capability::new_static("ping", 1)
         }
 
@@ -64,7 +64,7 @@ mod proto {
         }
 
         /// Creates a ping message
-        pub fn ping() -> Self {
+        pub const fn ping() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Ping,
                 message: PingPongProtoMessageKind::Ping,
@@ -72,7 +72,7 @@ mod proto {
         }
 
         /// Creates a pong message
-        pub fn pong() -> Self {
+        pub const fn pong() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Pong,
                 message: PingPongProtoMessageKind::Pong,

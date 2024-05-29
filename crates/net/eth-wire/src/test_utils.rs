@@ -93,7 +93,7 @@ pub mod proto {
 
     impl TestProtoMessage {
         /// Returns the capability for the `test` protocol.
-        pub fn capability() -> Capability {
+        pub const fn capability() -> Capability {
             Capability::new_static("test", 1)
         }
 
@@ -103,12 +103,12 @@ pub mod proto {
         }
 
         /// Creates a ping message
-        pub fn ping() -> Self {
+        pub const fn ping() -> Self {
             Self { message_type: TestProtoMessageId::Ping, message: TestProtoMessageKind::Ping }
         }
 
         /// Creates a pong message
-        pub fn pong() -> Self {
+        pub const fn pong() -> Self {
             Self { message_type: TestProtoMessageId::Pong, message: TestProtoMessageKind::Pong }
         }
 

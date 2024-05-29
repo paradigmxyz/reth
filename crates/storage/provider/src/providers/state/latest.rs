@@ -148,7 +148,7 @@ delegate_provider_impls!(LatestStateProvider<TX> where [TX: DbTx]);
 mod tests {
     use super::*;
 
-    fn assert_state_provider<T: StateProvider>() {}
+    const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
     fn assert_latest_state_provider<T: DbTx>() {
         assert_state_provider::<LatestStateProvider<T>>();

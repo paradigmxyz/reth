@@ -224,7 +224,7 @@ impl PrivacyHint {
     }
 
     /// Calculates the number of hints set within the PrivacyHint instance.
-    fn num_hints(&self) -> usize {
+    const fn num_hints(&self) -> usize {
         let mut num_hints = 0;
         if self.calldata {
             num_hints += 1;

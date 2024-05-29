@@ -167,7 +167,7 @@ pub struct ExecOutput {
 
 impl ExecOutput {
     /// Mark the stage as done, checkpointing at the given place.
-    pub fn done(checkpoint: StageCheckpoint) -> Self {
+    pub const fn done(checkpoint: StageCheckpoint) -> Self {
         Self { checkpoint, done: true }
     }
 }

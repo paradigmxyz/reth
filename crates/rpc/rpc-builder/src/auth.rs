@@ -170,12 +170,12 @@ pub struct AuthServerConfig {
 
 impl AuthServerConfig {
     /// Convenience function to create a new `AuthServerConfig`.
-    pub fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
+    pub const fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
         AuthServerConfigBuilder::new(secret)
     }
 
     /// Returns the address the server will listen on.
-    pub fn address(&self) -> SocketAddr {
+    pub const fn address(&self) -> SocketAddr {
         self.socket_addr
     }
 
@@ -231,7 +231,7 @@ pub struct AuthServerConfigBuilder {
 
 impl AuthServerConfigBuilder {
     /// Create a new `AuthServerConfigBuilder` with the given `secret`.
-    pub fn new(secret: JwtSecret) -> Self {
+    pub const fn new(secret: JwtSecret) -> Self {
         Self {
             socket_addr: None,
             secret,
@@ -242,19 +242,19 @@ impl AuthServerConfigBuilder {
     }
 
     /// Set the socket address for the server.
-    pub fn socket_addr(mut self, socket_addr: SocketAddr) -> Self {
+    pub const fn socket_addr(mut self, socket_addr: SocketAddr) -> Self {
         self.socket_addr = Some(socket_addr);
         self
     }
 
     /// Set the socket address for the server.
-    pub fn maybe_socket_addr(mut self, socket_addr: Option<SocketAddr>) -> Self {
+    pub const fn maybe_socket_addr(mut self, socket_addr: Option<SocketAddr>) -> Self {
         self.socket_addr = socket_addr;
         self
     }
 
     /// Set the secret for the server.
-    pub fn secret(mut self, secret: JwtSecret) -> Self {
+    pub const fn secret(mut self, secret: JwtSecret) -> Self {
         self.secret = secret;
         self
     }
@@ -379,7 +379,7 @@ pub struct AuthServerHandle {
 
 impl AuthServerHandle {
     /// Returns the [`SocketAddr`] of the http server if started.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 

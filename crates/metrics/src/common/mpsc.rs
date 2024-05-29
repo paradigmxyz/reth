@@ -283,7 +283,7 @@ impl<T: Send + 'static> MeteredPollSender<T> {
     }
 
     /// Returns the underlying [PollSender].
-    pub fn inner(&self) -> &PollSender<T> {
+    pub const fn inner(&self) -> &PollSender<T> {
         &self.sender
     }
 

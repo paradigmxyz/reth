@@ -17,7 +17,7 @@ pub enum ServerKind {
 
 impl ServerKind {
     /// Returns the appropriate flags for each variant.
-    pub fn flags(&self) -> &'static str {
+    pub const fn flags(&self) -> &'static str {
         match self {
             Self::Http(_) => "--http.port",
             Self::WS(_) => "--ws.port",

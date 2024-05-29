@@ -142,7 +142,7 @@ impl Sink<EthMessage> for EthRlpxConnection {
 mod tests {
     use super::*;
 
-    fn assert_eth_stream<St>()
+    const fn assert_eth_stream<St>()
     where
         St: Stream<Item = Result<EthMessage, EthStreamError>> + Sink<EthMessage>,
     {

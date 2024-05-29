@@ -451,12 +451,12 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     #[cfg(test)]
-    pub fn max_row_size(&self) -> usize {
+    pub const fn max_row_size(&self) -> usize {
         self.jar.max_row_size
     }
 
     #[cfg(test)]
-    pub fn column(&self) -> usize {
+    pub const fn column(&self) -> usize {
         self.column
     }
 
