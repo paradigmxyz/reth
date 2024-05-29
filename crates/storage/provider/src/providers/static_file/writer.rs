@@ -120,7 +120,7 @@ impl StaticFileProviderRW {
     /// Check [NippyJarWriter::ensure_file_consistency] for more on healing.
     pub fn ensure_file_consistency(&mut self, read_only: bool) -> ProviderResult<()> {
         let err = |err: NippyJarError| ProviderError::NippyJar(err.to_string());
-        let initial_rows = self.writer.rows();
+
         self.writer.ensure_file_consistency(read_only).map_err(|error| {
             if matches!(error, NippyJarError::InconsistentState) {
                 return ProviderError::NippyJar(
@@ -131,8 +131,13 @@ impl StaticFileProviderRW {
             err(error)
         })?;
 
-        // If we have lost rows, we need to the [SegmentHeader]
-        let pruned_rows = initial_rows - self.writer.rows();
+        // If we have lost rows, we need to update the [SegmentHeader]
+        let expected_rows = if self.user_header().segment().is_headers() {
+            self.user_header().block_len().unwrap_or_default()
+        } else {
+            self.user_header().tx_len().unwrap_or_default()
+        };
+        let pruned_rows = expected_rows - self.writer.rows() as u64;
         if pruned_rows > 0 {
             self.user_header_mut().prune(pruned_rows as u64);
         }
