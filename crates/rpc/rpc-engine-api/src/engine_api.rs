@@ -6,9 +6,9 @@ use reth_engine_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
+use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
-use reth_provider::{BlockReader, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
@@ -19,6 +19,7 @@ use reth_rpc_types::engine::{
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
 };
+use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
@@ -836,7 +837,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
     use reth_ethereum_engine_primitives::EthEngineTypes;
-    use reth_interfaces::test_utils::generators::random_block;
+    use reth_testing_utils::generators::random_block;
 
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, B256, MAINNET};
@@ -908,7 +909,7 @@ mod tests {
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
         use super::*;
-        use reth_interfaces::test_utils::{generators, generators::random_block_range};
+        use reth_testing_utils::{generators, generators::random_block_range};
 
         #[tokio::test]
         async fn invalid_params() {
@@ -1022,8 +1023,8 @@ mod tests {
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
         use super::*;
-        use reth_interfaces::test_utils::generators;
         use reth_primitives::U256;
+        use reth_testing_utils::generators;
 
         #[tokio::test]
         async fn terminal_td_mismatch() {
