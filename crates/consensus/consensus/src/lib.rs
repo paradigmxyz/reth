@@ -15,6 +15,9 @@ use reth_primitives::{
 };
 use std::fmt::Debug;
 
+/// A consensus implementation that does nothing.
+pub mod noop;
+
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking consensus
 pub mod test_utils;
