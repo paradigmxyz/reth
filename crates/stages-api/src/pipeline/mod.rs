@@ -4,7 +4,6 @@ pub use crate::pipeline::ctrl::ControlFlow;
 pub use event::*;
 use futures_util::Future;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
     stage::{PipelineTarget, StageCheckpoint, StageId},
@@ -32,6 +31,7 @@ use crate::{
 };
 pub use builder::*;
 use progress::*;
+use reth_errors::RethResult;
 pub use set::*;
 
 /// A container for a queued stage.
@@ -589,12 +589,10 @@ mod tests {
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
-    use reth_interfaces::{
-        provider::ProviderError,
-        test_utils::{generators, generators::random_header},
-    };
+    use reth_errors::ProviderError;
     use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_testing_utils::{generators, generators::random_header};
     use tokio_stream::StreamExt;
 
     #[test]

@@ -65,7 +65,6 @@ pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct BlockchainProvider<DB> {
     /// Provider type used to access the database.
@@ -74,6 +73,16 @@ pub struct BlockchainProvider<DB> {
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
+}
+
+impl<DB> Clone for BlockchainProvider<DB> {
+    fn clone(&self) -> Self {
+        Self {
+            database: self.database.clone(),
+            tree: self.tree.clone(),
+            chain_info: self.chain_info.clone(),
+        }
+    }
 }
 
 impl<DB> BlockchainProvider<DB> {
