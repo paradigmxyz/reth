@@ -1,105 +1,22 @@
 //! Contains RPC handler implementations specific to blocks.
 
 use crate::{
-    eth::{
-        api::transactions::ReceiptBuilder,
-        error::{EthApiError, EthResult},
-    },
+    eth::error::{EthApiError, EthResult},
     EthApi,
 };
 
-use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, Receipt, SealedBlock, TransactionMeta};
+use reth_primitives::BlockId;
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
-    ReceiptProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ReceiptProvider,
+    StateProviderFactory,
 };
-use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
+use reth_rpc_types::{Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
-use std::sync::Arc;
 
-use super::transactions::BuildReceipt;
-
-/// Commonly used block related functions for the [EthApi] type in the `eth_` namespace.
-pub trait EthBlocks {
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &impl BlockReaderIdExt;
-
-    /// Helper function for `eth_getBlockReceipts`.
-    ///
-    /// Returns all transaction receipts in block, or `None` if block wasn't found.
-    fn block_receipts(
-        &self,
-        block_id: BlockId,
-    ) -> impl Future<Output = EthResult<Option<Vec<AnyTransactionReceipt>>>>
-    where
-        Self: BuildReceipt,
-    {
-        async move {
-            if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
-                let block_number = block.number;
-                let base_fee = block.base_fee_per_gas;
-                let block_hash = block.hash();
-                let excess_blob_gas = block.excess_blob_gas;
-                let timestamp = block.timestamp;
-                let block = block.unseal();
-
-                let receipts = block
-                    .body
-                    .into_iter()
-                    .zip(receipts.iter())
-                    .enumerate()
-                    .map(|(idx, (tx, receipt))| {
-                        let meta = TransactionMeta {
-                            tx_hash: tx.hash,
-                            index: idx as u64,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                            excess_blob_gas,
-                            timestamp,
-                        };
-
-                        ReceiptBuilder::new(&tx, meta, receipt, &receipts)
-                            .map(|builder| builder.build())
-                    })
-                    .collect::<EthResult<Vec<_>>>();
-                return receipts.map(Some)
-            }
-
-            Ok(None)
-        }
-    }
-
-    /// Helper method that loads a bock and all its receipts.
-    fn load_block_and_receipts(
-        &self,
-        block_id: BlockId,
-    ) -> impl Future<Output = EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>>>
-    where
-        Self: BuildReceipt,
-    {
-        async move {
-            if block_id.is_pending() {
-                return Ok(self
-                    .provider()
-                    .pending_block_and_receipts()?
-                    .map(|(sb, receipts)| (sb, Arc::new(receipts))))
-            }
-
-            if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
-                return Ok(self.cache().get_block_and_receipts(block_hash).await?)
-            }
-
-            Ok(None)
-        }
-    }
-}
+use crate::eth::api::EthBlocks;
 
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
 where

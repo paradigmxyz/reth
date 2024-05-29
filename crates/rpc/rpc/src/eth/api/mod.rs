@@ -41,15 +41,17 @@ pub(crate) mod fee_history;
 
 mod fees;
 mod pending_block;
+pub mod receipt;
 mod server;
 mod sign;
 mod state;
-pub mod transactions;
 pub mod traits;
+pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
-pub use transactions::{EthTransactions, TransactionSource};
-pub use traits::BuildReceipt;
+pub use receipt::ReceiptBuilder;
+pub use traits::{BuildReceipt, EthBlocks, EthTransactions, StateCacheDB};
+pub use transactions::TransactionSource;
 
 /// `Eth` API trait.
 ///

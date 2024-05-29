@@ -6,8 +6,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
-    HeaderProvider, StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
@@ -21,9 +20,10 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{block::EthBlocks, EthApi, EthTransactions},
+        api::{EthBlocks, EthTransactions},
         error::EthApiError,
         revm_utils::EvmOverrides,
+        EthApi,
     },
     result::{internal_rpc_err, ToRpcResult},
 };
@@ -35,9 +35,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool,
 where
     Self: EthApiSpec + EthTransactions + BuildReceipt,
     Pool: TransactionPool + 'static,
-    Provider: BlockReader
-        + BlockIdReader
-        + BlockReaderIdExt
+    Provider: BlockReaderIdExt
         + ChainSpecProvider
         + HeaderProvider
         + StateProviderFactory

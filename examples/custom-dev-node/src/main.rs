@@ -7,7 +7,7 @@ use futures_util::StreamExt;
 use reth::{
     builder::{NodeBuilder, NodeHandle},
     providers::CanonStateSubscriptions,
-    rpc::eth::EthTransactions,
+    rpc::eth::api::EthTransactions,
     tasks::TaskManager,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};

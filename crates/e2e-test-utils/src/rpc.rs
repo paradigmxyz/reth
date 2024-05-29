@@ -2,7 +2,7 @@ use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use reth::{api::FullNodeComponents, builder::rpc::RpcRegistry, rpc::api::DebugApiServer};
 use reth_primitives::{Bytes, B256};
-use reth_rpc::eth::{error::EthResult, EthTransactions};
+use reth_rpc::eth::{api::EthTransactions, error::EthResult};
 
 pub struct RpcTestContext<Node: FullNodeComponents> {
     pub inner: RpcRegistry<Node>,

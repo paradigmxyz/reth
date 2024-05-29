@@ -1,11 +1,15 @@
-//! Loads a receipt from database. Helper trait for `eth_` RPC methods by block and transaction, 
-//! that loads receipt data w.r.t. network.
+//! Loads a receipt from database. Helper trait for `eth_` block and transaction RPC methods, that
+//! loads receipt data w.r.t. network.
 
 use futures::Future;
-use reth_primitives::{TransactionMeta, TransactionSigned, Receipt};
+use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_rpc_types::AnyTransactionReceipt;
 
-use crate::eth::{api::transactions::ReceiptBuilder, cache::EthStateCache, error::{EthApiError, EthResult}};
+use crate::eth::{
+    api::ReceiptBuilder,
+    cache::EthStateCache,
+    error::{EthApiError, EthResult},
+};
 
 /// Assembles transaction receipt data w.r.t to network.
 pub trait BuildReceipt {

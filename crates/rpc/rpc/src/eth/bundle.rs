@@ -1,10 +1,10 @@
 //! `Eth` bundle implementation and helpers.
 
 use crate::eth::{
+    api::EthTransactions,
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
     revm_utils::FillableTransaction,
     utils::recover_raw_transaction,
-    EthTransactions,
 };
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{

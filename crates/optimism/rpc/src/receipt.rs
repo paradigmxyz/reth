@@ -4,7 +4,7 @@ use crate::{transaction::OptimismTxMeta, OptimismApi};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_provider::{BlockIdReader, ChainSpecProvider};
 use reth_rpc::eth::{
-    api::transactions::{BuildReceipt, ReceiptBuilder},
+    api::{BuildReceipt, ReceiptBuilder},
     cache::EthStateCache,
     error::{EthApiError, EthResult},
 };

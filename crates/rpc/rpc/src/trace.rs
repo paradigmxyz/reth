@@ -1,8 +1,8 @@
 use crate::eth::{
+    api::EthTransactions,
     error::{EthApiError, EthResult},
     revm_utils::{prepare_call_env, EvmOverrides},
     utils::recover_raw_transaction,
-    EthTransactions,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;

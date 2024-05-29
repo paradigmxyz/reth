@@ -1,8 +1,8 @@
 use crate::{
     eth::{
+        api::EthTransactions,
         error::{EthApiError, EthResult},
         revm_utils::{prepare_call_env, EvmOverrides},
-        EthTransactions,
     },
     result::{internal_rpc_err, ToRpcResult},
     EthApiSpec,
