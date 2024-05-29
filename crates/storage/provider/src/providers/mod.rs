@@ -684,7 +684,7 @@ where
         self.tree.insert_block(block, validation_kind)
     }
 
-    fn finalize_block(&self, finalized_block: BlockNumber) {
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {
         self.tree.finalize_block(finalized_block)
     }
 

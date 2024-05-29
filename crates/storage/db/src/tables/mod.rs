@@ -406,6 +406,9 @@ tables! {
 
     /// Stores EIP-7685 EL -> CL requests, indexed by block number.
     table BlockRequests<Key = BlockNumber, Value = Requests>;
+
+    /// Stores the last finalized block.
+    table FinalizedBlocks<Key = BlockNumber, Value = BlockNumber>;
 }
 
 // Alias types.

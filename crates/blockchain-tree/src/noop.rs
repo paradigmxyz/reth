@@ -12,7 +12,8 @@ use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions, FullBundleStateDataProvider,
 };
-use std::collections::BTreeMap;
+use reth_storage_errors::provider::ProviderResult;
+use std::collections::{BTreeMap, HashSet};
 
 /// A `BlockchainTree` that does nothing.
 ///
@@ -49,7 +50,9 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
         ))
     }
 
-    fn finalize_block(&self, _finalized_block: BlockNumber) {}
+    fn finalize_block(&self, _finalized_block: BlockNumber) -> ProviderResult<()> {
+        Ok(())
+    }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,

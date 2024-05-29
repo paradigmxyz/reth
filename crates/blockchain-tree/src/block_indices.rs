@@ -342,6 +342,7 @@ impl BlockIndices {
 
         // set last finalized block.
         self.last_finalized_block = finalized_block;
+
         lose_chains
     }
 
