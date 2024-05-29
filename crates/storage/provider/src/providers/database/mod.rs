@@ -54,8 +54,8 @@ impl<DB> ProviderFactory<DB> {
         db: DB,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
-    ) -> ProviderResult<ProviderFactory<DB>> {
-        Ok(Self { db: Arc::new(db), chain_spec, static_file_provider })
+    ) -> ProviderFactory<DB> {
+        Self { db: Arc::new(db), chain_spec, static_file_provider }
     }
 
     /// Enables metrics on the static file provider.

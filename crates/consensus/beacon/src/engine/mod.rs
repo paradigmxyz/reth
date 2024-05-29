@@ -2214,8 +2214,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis, &block1].into_iter(),
             );
             env.db
@@ -2275,8 +2274,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2300,8 +2298,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&next_head].into_iter(),
             );
 
@@ -2345,8 +2342,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2401,8 +2397,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
 
@@ -2451,8 +2446,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(temp_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2557,8 +2551,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis, &block1, &block2].into_iter(),
             );
 
@@ -2630,8 +2623,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2678,8 +2670,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&genesis].into_iter(),
             );
 
@@ -2746,8 +2737,7 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .expect("create provider factory with static_files"),
+                ),
                 [&data.genesis, &block1].into_iter(),
             );
 

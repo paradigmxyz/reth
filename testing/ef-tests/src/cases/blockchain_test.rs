@@ -91,7 +91,6 @@ impl Case for BlockchainTestCase {
                     Arc::new(case.network.clone().into()),
                     StaticFileProvider::read_write(static_files_dir_path).unwrap(),
                 )
-                .map_err(|err| Error::RethError(err.into()))?
                 .provider_rw()
                 .unwrap();
 

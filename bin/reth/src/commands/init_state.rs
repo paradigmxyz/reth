@@ -82,7 +82,7 @@ impl InitStateCommand {
             db,
             self.chain,
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
         let etl_config = EtlConfig::new(
             Some(EtlConfig::from_datadir(data_dir.data_dir())),
             EtlConfig::default_file_size(),

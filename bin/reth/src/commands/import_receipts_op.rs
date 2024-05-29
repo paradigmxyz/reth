@@ -81,7 +81,7 @@ impl ImportReceiptsOpCommand {
             db.clone(),
             chain_spec.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
 
         import_receipts_from_file(
             provider_factory,

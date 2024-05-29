@@ -60,7 +60,7 @@ impl InitCommand {
             db,
             self.chain,
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
 
         info!(target: "reth::cli", "Writing genesis block");
 

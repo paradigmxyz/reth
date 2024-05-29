@@ -122,7 +122,7 @@ impl ImportCommand {
             db.clone(),
             self.chain.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 

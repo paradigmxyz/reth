@@ -633,8 +633,7 @@ mod tests {
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
-            )
-            .unwrap(),
+            ),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
@@ -684,8 +683,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .unwrap(),
+                ),
             );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
@@ -719,8 +717,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .unwrap(),
+                ),
             );
 
         let mut range_start = 0;
@@ -756,8 +753,7 @@ mod tests {
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
-            )
-            .unwrap(),
+            ),
         );
 
         // Set and download the first range
@@ -803,8 +799,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .unwrap(),
+                ),
             );
 
         // Set and download the entire range
@@ -841,8 +836,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                )
-                .unwrap(),
+                ),
             );
 
         // Download the requested range

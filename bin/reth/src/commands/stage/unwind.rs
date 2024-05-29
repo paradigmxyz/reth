@@ -85,7 +85,7 @@ impl Command {
             db,
             self.chain.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {

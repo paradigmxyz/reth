@@ -98,7 +98,7 @@ impl ImportOpCommand {
             db.clone(),
             chain_spec.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
 
         debug!(target: "reth::cli", chain=%chain_spec.chain, genesis=?chain_spec.genesis_hash(), "Initializing genesis");
 

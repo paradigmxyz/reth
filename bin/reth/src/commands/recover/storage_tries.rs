@@ -61,7 +61,7 @@ impl Command {
             &db,
             self.chain.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(factory.clone())?;

@@ -328,7 +328,7 @@ where
             self.right().clone(),
             self.chain_spec(),
             StaticFileProvider::read_write(self.data_dir().static_files())?,
-        )?
+        )
         .with_static_files_metrics();
 
         let has_receipt_pruning =

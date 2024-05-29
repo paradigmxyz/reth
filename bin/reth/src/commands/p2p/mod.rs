@@ -165,7 +165,7 @@ impl Command {
             noop_db,
             self.chain.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?));
+        )));
 
         let network = network_config.start_network().await?;
         let fetch_client = network.fetch_client().await?;

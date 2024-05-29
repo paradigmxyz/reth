@@ -508,6 +508,7 @@ impl StaticFileProvider {
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
+    #[allow(clippy::while_let_loop)]
     pub fn check_consistency<TX: DbTx>(
         &self,
         provider: &DatabaseProvider<TX>,

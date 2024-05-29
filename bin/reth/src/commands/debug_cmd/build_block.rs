@@ -119,7 +119,7 @@ impl Command {
             StaticFileProvider::read_only(
                 self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
             )?,
-        )?;
+        );
         let provider = factory.provider()?;
 
         let best_number =
@@ -161,7 +161,7 @@ impl Command {
             Arc::clone(&db),
             Arc::clone(&self.chain),
             StaticFileProvider::read_only(data_dir.static_files())?,
-        )?;
+        );
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));

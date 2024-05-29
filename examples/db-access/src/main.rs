@@ -28,7 +28,7 @@ fn main() -> eyre::Result<()> {
         db,
         spec.into(),
         StaticFileProvider::read_only(db_path.join("static_files"))?,
-    )?;
+    );
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.

@@ -109,7 +109,7 @@ impl Command {
             db,
             self.chain.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
 
         info!(target: "reth::cli", "Database opened");
 

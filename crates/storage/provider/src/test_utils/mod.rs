@@ -31,5 +31,4 @@ pub fn create_test_provider_factory_with_chain_spec(
         chain_spec,
         StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
     )
-    .expect("create provider factory with static_files")
 }

@@ -66,7 +66,7 @@ impl Command {
             db,
             self.chain.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
         let static_file_provider = provider_factory.static_file_provider();
 
         let tool = DbTool::new(provider_factory, self.chain.clone())?;

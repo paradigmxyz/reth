@@ -49,7 +49,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
                 output_db,
                 db_tool.chain.clone(),
                 StaticFileProvider::read_only(output_datadir.static_files())?,
-            )?,
+            ),
             to,
             from,
         )

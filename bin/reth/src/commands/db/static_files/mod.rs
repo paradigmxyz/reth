@@ -103,7 +103,7 @@ impl Command {
             db,
             chain,
             StaticFileProvider::read_only(data_dir.static_files())?,
-        )?);
+        ));
 
         {
             if !self.only_bench {

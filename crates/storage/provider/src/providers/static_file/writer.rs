@@ -139,7 +139,7 @@ impl StaticFileProviderRW {
         };
         let pruned_rows = expected_rows - self.writer.rows() as u64;
         if pruned_rows > 0 {
-            self.user_header_mut().prune(pruned_rows as u64);
+            self.user_header_mut().prune(pruned_rows);
         }
 
         self.writer.commit().map_err(err)?;

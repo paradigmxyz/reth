@@ -25,7 +25,7 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
                 output_db,
                 db_tool.chain.clone(),
                 StaticFileProvider::read_only(output_datadir.static_files())?,
-            )?,
+            ),
             to,
             from,
         )

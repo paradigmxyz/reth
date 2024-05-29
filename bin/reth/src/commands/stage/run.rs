@@ -150,7 +150,7 @@ impl Command {
             Arc::clone(&db),
             self.chain.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
-        )?;
+        );
         let mut provider_rw = factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
@@ -200,7 +200,7 @@ impl Command {
                         db.clone(),
                         self.chain.clone(),
                         StaticFileProvider::read_write(data_dir.static_files())?,
-                    )?);
+                    ));
 
                     let network = self
                         .network
