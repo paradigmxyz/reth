@@ -316,7 +316,7 @@ where
                 continue
             }
 
-            debug!(
+            info!(
                 target: "sync::pipeline",
                 from = %checkpoint.block_number,
                 %to,
