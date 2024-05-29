@@ -119,6 +119,7 @@ where
         prune_modes: Option<PruneModes>,
     ) -> ProviderResult<Self> {
         let max_reorg_depth = config.max_reorg_depth() as usize;
+        println!("in BlochainTree::new, max_reorg_depth: {max_reorg_depth}");
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
         // depth at least N blocks must be sent at once.
         let (canon_state_notification_sender, _receiver) =
@@ -126,6 +127,14 @@ where
 
         let last_canonical_hashes =
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
+        println!(
+            "in BlochainTree::new, num_of_canonical_hashes: {}",
+            config.num_of_canonical_hashes()
+        );
+        println!(
+            "in BlochainTree::new, last_canonical_hashes.keys(): {:?}",
+            last_canonical_hashes.keys()
+        );
 
         // TODO(rakita) save last finalized block inside database but for now just take
         // `tip - max_reorg_depth`
@@ -139,11 +148,6 @@ where
         }
         .copied()
         .unwrap_or_default();
-        println!(
-            "in BlochainTree::new, last_canonical_hashes.len(): {}",
-            last_canonical_hashes.len()
-        );
-        println!("in BlochainTree::new, max_reorg_depth: {max_reorg_depth}");
         println!(
             "in BlochainTree::new, last_finalized_block_number: {last_finalized_block_number}"
         );
