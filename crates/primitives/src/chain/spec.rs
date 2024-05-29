@@ -1668,15 +1668,15 @@ impl OptimismGenesisInfo {
                 .extra_fields
                 .get("regolithTime")
                 .and_then(|value| value.as_u64()),
-            ecotone_time: genesis
-                .config
-                .extra_fields
-                .get("ecotoneTime")
-                .and_then(|value| value.as_u64()),
             canyon_time: genesis
                 .config
                 .extra_fields
                 .get("canyonTime")
+                .and_then(|value| value.as_u64()),
+            ecotone_time: genesis
+                .config
+                .extra_fields
+                .get("ecotoneTime")
                 .and_then(|value| value.as_u64()),
             base_fee_params,
         }
