@@ -944,6 +944,7 @@ mod tests {
         );
 
         let header = Header {
+            parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
             requests_root: Some(EMPTY_ROOT_HASH),
@@ -975,18 +976,15 @@ mod tests {
                 "Executing a block with no transactions while Prague is active should not fail",
             );
 
-        // since this is the activation block, the hashes of all ancestors for the block (up to
-        // `HISTORY_SERVE_WINDOW`) must be present.
-        //
-        // our fork activation check depends on checking slot 0, so we also check that slot 0 was
-        // indeed set if the fork activation block was within `HISTORY_SERVE_WINDOW`
+        // the hash for the ancestor of the fork activation block should be present
         assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
-        for slot in 0..fork_activation_block {
-            assert_ne!(
-                executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
-                U256::ZERO
-            );
-        }
+        assert_ne!(
+            executor
+                .state_mut()
+                .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block - 1))
+                .unwrap(),
+            U256::ZERO
+        );
 
         // the hash of the block itself should not be in storage
         assert!(executor
@@ -1013,6 +1011,7 @@ mod tests {
             provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         let header = Header {
+            parent_hash: B256::random(),
             timestamp: 1,
             number: fork_activation_block,
             requests_root: Some(EMPTY_ROOT_HASH),
@@ -1041,18 +1040,18 @@ mod tests {
                 "Executing a block with no transactions while Prague is active should not fail",
             );
 
-        // since this is the activation block, the hashes of all ancestors for the block (up to
-        // `HISTORY_SERVE_WINDOW`) must be present.
-        //
-        // our fork activation check depends on checking slot 0, so we also check that slot 0 was
-        // indeed set if the fork activation block was within `HISTORY_SERVE_WINDOW`
+        // the hash for the ancestor of the fork activation block should be present
         assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
-        for slot in 0..HISTORY_SERVE_WINDOW {
-            assert_ne!(
-                executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(slot)).unwrap(),
-                U256::ZERO
-            );
-        }
+        assert_ne!(
+            executor
+                .state_mut()
+                .storage(
+                    HISTORY_STORAGE_ADDRESS,
+                    U256::from(fork_activation_block % HISTORY_SERVE_WINDOW - 1)
+                )
+                .unwrap(),
+            U256::ZERO
+        );
     }
 
     #[test]
@@ -1068,6 +1067,7 @@ mod tests {
 
         let mut header = chain_spec.genesis_header();
         header.requests_root = Some(EMPTY_ROOT_HASH);
+        let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
         let mut executor =
@@ -1105,11 +1105,14 @@ mod tests {
 
         // attempt to execute block 1, this should not fail
         let header = Header {
+            parent_hash: header_hash,
             timestamp: 1,
             number: 1,
             requests_root: Some(EMPTY_ROOT_HASH),
             ..Header::default()
         };
+        let header_hash = header.hash_slow();
+
         executor
             .execute_and_verify_one(
                 (
@@ -1145,11 +1148,13 @@ mod tests {
 
         // attempt to execute block 2, this should not fail
         let header = Header {
+            parent_hash: header_hash,
             timestamp: 1,
             number: 2,
             requests_root: Some(EMPTY_ROOT_HASH),
             ..Header::default()
         };
+
         executor
             .execute_and_verify_one(
                 (
