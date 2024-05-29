@@ -1,5 +1,5 @@
 use reth_db::DatabaseError;
-use reth_interfaces::RethError;
+use reth_errors::RethError;
 use reth_primitives::PruneSegmentError;
 use reth_provider::ProviderError;
 use thiserror::Error;
