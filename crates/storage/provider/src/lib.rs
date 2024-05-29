@@ -16,6 +16,8 @@
 mod traits;
 pub use traits::*;
 
+pub mod storage;
+
 /// Provider trait implementations.
 pub mod providers;
 pub use providers::{

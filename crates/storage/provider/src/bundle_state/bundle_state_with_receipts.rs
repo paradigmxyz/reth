@@ -9,6 +9,8 @@ use reth_primitives::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use revm::db::states::OriginalValuesKnown;
 
+
+
 impl StateWriter for BundleStateWithReceipts {
     fn write_to_storage<TX>(
         self,
