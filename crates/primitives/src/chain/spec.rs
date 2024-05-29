@@ -574,6 +574,14 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Optimism configuration.
     #[inline]
+    #[cfg(feature = "optimism")]
+    pub fn is_optimism(&self) -> bool {
+        self.chain.is_optimism() || self.hardforks.contains_key(&Hardfork::Bedrock)
+    }
+
+    /// Returns `true` if this chain contains Optimism configuration.
+    #[inline]
+    #[cfg(not(feature = "optimism"))]
     pub const fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
     }
@@ -1041,9 +1049,9 @@ impl From<Genesis> for ChainSpec {
             #[cfg(feature = "optimism")]
             (Hardfork::Regolith, optimism_genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
-            (Hardfork::Ecotone, optimism_genesis_info.ecotone_time),
-            #[cfg(feature = "optimism")]
             (Hardfork::Canyon, optimism_genesis_info.canyon_time),
+            #[cfg(feature = "optimism")]
+            (Hardfork::Ecotone, optimism_genesis_info.ecotone_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -1070,6 +1078,8 @@ impl From<Genesis> for ChainSpec {
             hardforks,
             paris_block_and_final_difficulty,
             deposit_contract,
+            #[cfg(feature = "optimism")]
+            base_fee_params: optimism_genesis_info.base_fee_params.into(),
             ..Default::default()
         }
     }
@@ -1623,11 +1633,30 @@ struct OptimismGenesisInfo {
     regolith_time: Option<u64>,
     ecotone_time: Option<u64>,
     canyon_time: Option<u64>,
+    base_fee_params: BaseFeeParams,
 }
 
 #[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
+        let eip1559_elasticity = genesis.config.extra_fields.get("optimism").and_then(|value| {
+            value
+                .as_object()
+                .and_then(|obj| obj.get("eip1559Elasticity").and_then(|value| value.as_u64()))
+        });
+        let eip1559_denominator = genesis.config.extra_fields.get("optimism").and_then(|value| {
+            value
+                .as_object()
+                .and_then(|obj| obj.get("eip1559Denominator").and_then(|value| value.as_u64()))
+        });
+        let base_fee_params = if eip1559_elasticity.is_some() && eip1559_denominator.is_some() {
+            BaseFeeParams::new(
+                eip1559_denominator.unwrap() as u128,
+                eip1559_elasticity.unwrap() as u128,
+            )
+        } else {
+            BaseFeeParams::ethereum()
+        };
         Self {
             bedrock_block: genesis
                 .config
@@ -1649,6 +1678,7 @@ impl OptimismGenesisInfo {
                 .extra_fields
                 .get("canyonTime")
                 .and_then(|value| value.as_u64()),
+            base_fee_params,
         }
     }
 }
