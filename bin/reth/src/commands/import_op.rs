@@ -11,8 +11,8 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
+use reth_consensus::noop::NoopConsensus;
 use reth_db::{init_db, tables, transaction::DbTx};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::file_client::{
@@ -98,8 +98,8 @@ impl ImportOpCommand {
 
         init_genesis(provider_factory.clone())?;
 
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
-        info!(target: "reth::cli", "Consensus engine initialized");
+        // we use noop here because we expect the inputs to be valid
+        let consensus = Arc::new(NoopConsensus::default());
 
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;

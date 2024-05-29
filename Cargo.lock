@@ -6643,7 +6643,6 @@ dependencies = [
  "mockall",
  "reth-consensus",
  "reth-interfaces",
- "reth-optimism-primitives",
  "reth-primitives",
  "reth-provider",
 ]

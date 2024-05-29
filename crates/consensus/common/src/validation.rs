@@ -1,7 +1,6 @@
 //! Collection of methods for block validation.
 
 use reth_consensus::ConsensusError;
-use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{
     constants::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
@@ -82,10 +81,8 @@ pub fn validate_block_pre_execution(
     }
 
     // Check transaction root
-    if !chain_spec.is_optimism_mainnet() || !is_dup_tx(block.number) {
-        if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
-        }
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
