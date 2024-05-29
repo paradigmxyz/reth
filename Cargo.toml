@@ -9,7 +9,7 @@ exclude = [".github/"]
 
 [workspace]
 members = [
-    "bin/reth-benchmark/",
+    "bin/reth-bench/",
     "bin/reth/",
     "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
@@ -123,7 +123,7 @@ members = [
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
-default-members = ["bin/reth", "bin/reth-benchmark"]
+default-members = ["bin/reth", "bin/reth-bench"]
 
 # Explicitly set the resolver to version 2, which is the default for packages with edition >= 2021
 # https://doc.rust-lang.org/edition-guide/rust-2021/default-cargo-resolver.html
@@ -239,7 +239,7 @@ incremental = false
 [workspace.dependencies]
 # reth
 reth = { path = "bin/reth" }
-reth-benchmark = { path = "bin/reth-benchmark" }
+reth-bench = { path = "bin/reth-bench" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }

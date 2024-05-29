@@ -9,11 +9,11 @@
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 pub mod authenticated_transport;
-pub mod benchmark;
-pub mod benchmark_mode;
-pub mod block_fetcher;
+pub mod bench;
+pub mod bench_mode;
 pub mod valid_payload;
-use benchmark::BenchmarkCommand;
+
+use bench::BenchmarkCommand;
 use clap::Parser;
 use reth_cli_runner::CliRunner;
 

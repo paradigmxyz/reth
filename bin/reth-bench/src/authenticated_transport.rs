@@ -84,18 +84,17 @@ impl AuthenticatedTransport {
         // Add the JWT it to the headers if we can decode it.
         let (auth, claims) =
             build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
-
-        let token_value = match auth {
-            Authorization::Bearer(ref token) => token,
-            Authorization::Basic(_) => {
-                return Err(AuthenticatedTransportError::InvalidJwt(
-                    "Basic auth is not supported for HTTP".to_string(),
-                ))
-            }
-        };
+        // let token_value = match auth {
+        //     Authorization::Bearer(ref token) => token,
+        //     Authorization::Basic(_) => {
+        //         return Err(AuthenticatedTransportError::InvalidJwt(
+        //             "Basic auth is not supported for HTTP".to_string(),
+        //         ))
+        //     }
+        // };
 
         // we have to format this ourselves because alloy will not print secrets
-        let auth = format!("{} {}", auth, token_value);
+        let auth = format!("{}", auth);
 
         let mut auth_value: HeaderValue =
             HeaderValue::from_str(&auth).expect("Header should be valid string");

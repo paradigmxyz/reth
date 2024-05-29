@@ -82,7 +82,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
-alloy-provider = { workspace = true, features = ["reqwest-rustls-tls"], default-features = false }
+alloy-provider.workspace = true
 
 # misc
 serial_test.workspace = true

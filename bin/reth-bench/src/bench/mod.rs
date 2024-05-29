@@ -5,9 +5,11 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
 
-mod rpc;
+mod building;
+mod new_payload_fcu;
+mod new_payload_only;
 
-/// `reth benchmark` command
+/// `reth bench` command
 #[derive(Debug, Parser)]
 pub struct BenchmarkCommand {
     #[command(subcommand)]
@@ -20,8 +22,14 @@ pub struct BenchmarkCommand {
 /// `reth benchmark` subcommands
 #[derive(Subcommand, Debug)]
 pub enum Subcommands {
-    /// Generated benchmark data will come from a remote RPC API.
-    FromRpc(rpc::Command),
+    /// Benchmark which calls `newPayload`, then `forkchoiceUpdated`.
+    NewPayloadFcu(new_payload_fcu::Command),
+
+    /// Benchmark which only calls subsequent `newPayload` calls.
+    NewPayloadOnly(new_payload_only::Command),
+
+    /// Benchmark which calls `forkchoiceUpdated`, then `getPayload`, then `newPayload`.
+    Building(building::Command),
 }
 
 impl BenchmarkCommand {
@@ -31,7 +39,9 @@ impl BenchmarkCommand {
         let _guard = self.init_tracing()?;
 
         match self.command {
-            Subcommands::FromRpc(command) => command.execute(ctx).await,
+            Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
+            Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
+            Subcommands::Building(command) => command.execute(ctx).await,
         }
     }
 

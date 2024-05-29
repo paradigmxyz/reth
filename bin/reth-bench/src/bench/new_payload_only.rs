@@ -1,24 +1,24 @@
-//! Runs the `reth benchmark` using a remote rpc api.
+//! Runs the `reth bench` command, sending only newPayload, without a forkchoiceUpdated call.
 
 use std::time::{Duration, Instant};
 
 use crate::{
-    authenticated_transport::AuthenticatedTransportConnect, benchmark_mode::BenchmarkMode,
-    block_fetcher::BlockStream, valid_payload::EngineApiValidWaitExt,
+    authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode,
+    valid_payload::EngineApiValidWaitExt,
 };
 use alloy_provider::{network::AnyNetwork, Provider, ProviderBuilder, RootProvider};
 use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{ForkchoiceState, JwtSecret};
+use alloy_rpc_types_engine::JwtSecret;
 use clap::Parser;
-use futures::StreamExt;
 use reqwest::Url;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::{Block, B256};
+use reth_rpc_types::BlockNumberOrTag;
 use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
 use tracing::{debug, info};
 
-/// `reth benchmark from-rpc` command
+/// `reth benchmark new-payload-only` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The RPC url to use for getting data.
@@ -30,7 +30,7 @@ pub struct Command {
 }
 
 impl Command {
-    /// Execute `benchmark from-rpc` command
+    /// Execute `benchmark new-payload-only` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         info!("Running benchmark using data from RPC URL: {}", self.rpc_url);
 
@@ -39,9 +39,9 @@ impl Command {
 
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
         // starting at the latest block.
-        let benchmark_mode = match (self.benchmark.from, self.benchmark.to) {
-            (Some(from), Some(to)) => BenchmarkMode::Range(from..=to),
-            (None, None) => BenchmarkMode::Continuous,
+        let mut benchmark_mode = match (self.benchmark.from, self.benchmark.to) {
+            (Some(from), Some(to)) => BenchMode::Range(from..=to),
+            (None, None) => BenchMode::Continuous,
             _ => {
                 // both or neither are allowed, everything else is ambiguous
                 return Err(eyre::eyre!(
@@ -70,44 +70,73 @@ impl Command {
         let client = ClientBuilder::default().connect_boxed(auth_transport).await?;
         let auth_provider = RootProvider::<_, AnyNetwork>::new(client);
 
-        // construct the stream
-        let mut block_stream = BlockStream::new(benchmark_mode, &block_provider, 1000)?;
+        let first_block = match benchmark_mode {
+            BenchMode::Continuous => {
+                // fetch Latest block
+                block_provider.get_block_by_number(BlockNumberOrTag::Latest, true).await?.unwrap()
+            }
+            BenchMode::Range(ref mut range) => {
+                match range.next() {
+                    Some(block_number) => {
+                        // fetch first block in range
+                        block_provider
+                            .get_block_by_number(block_number.into(), true)
+                            .await?
+                            .unwrap()
+                    }
+                    None => {
+                        // return an error
+                        panic!("RangeEmpty");
+                    }
+                }
+            }
+        };
+
+        let mut next_block = match first_block.header.number {
+            Some(number) => {
+                // fetch next block
+                number + 1
+            }
+            None => {
+                // this should never happen
+                // TODO: log or return error, we should probably not return the
+                // block here
+                panic!("BlockNumberNone");
+            }
+        };
+
+        info!(?next_block, "Starting benchmark");
+
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
+        tokio::task::spawn(async move {
+            info!("Starting block fetch loop");
+            while benchmark_mode.contains(next_block) {
+                info!(?next_block, "Fetching block");
+                let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
+                let block = block_res.unwrap().unwrap();
+                let block = match block.header.hash {
+                    Some(block_hash) => {
+                        // we can reuse the hash in the response
+                        Block::try_from(block).unwrap().seal(block_hash)
+                    }
+                    None => {
+                        // we don't have the hash, so let's just hash it
+                        Block::try_from(block).unwrap().seal_slow()
+                    }
+                };
+
+                next_block += 1;
+                sender.send(block).await.unwrap();
+            }
+        });
 
         // put results in a summary vec so they can be printed at the end
         // TODO: just accumulate on the fly
         let mut results = Vec::new();
 
-        while let Some(block_res) = block_stream.next().await {
-            let block = block_res?.ok_or(BlockResponseError::BlockStreamNone)?;
-            let block = match block.header.hash {
-                Some(block_hash) => {
-                    // we can reuse the hash in the response
-                    Block::try_from(block)?.seal(block_hash)
-                }
-                None => {
-                    // we don't have the hash, so let's just hash it
-                    Block::try_from(block)?.seal_slow()
-                }
-            };
-
-            // see the todo in the block fetcher for ways this can be improved
-            let head_block_hash = block.hash();
-            let safe_block_hash = block_provider
-                .get_block_by_number((block.number - 32).into(), false)
-                .await?
-                .expect("safe block exists")
-                .header
-                .hash
-                .expect("safe block has hash");
-
-            let finalized_block_hash = block_provider
-                .get_block_by_number((block.number - 64).into(), false)
-                .await?
-                .expect("finalized block exists")
-                .header
-                .hash
-                .expect("finalized block has hash");
-
+        info!("Starting payload loop");
+        while let Some(block) = receiver.recv().await {
+            info!(?block.header.number, "Processing block");
             // just put gas used here
             let gas_used = block.header.gas_used as f64;
 
@@ -125,27 +154,19 @@ impl Command {
             let parent_beacon_block_root =
                 parent_beacon_block_root.expect("this is a valid v3 payload");
             let start = Instant::now();
+
+            info!(?payload.payload_inner.payload_inner.block_number, "Sending payload to engine");
             auth_provider
                 .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
                 .await?;
             let new_payload_duration = start.elapsed();
-
-            // construct fcu to call
-            let forkchoice_state =
-                ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash };
-
-            // TODO: allow the user to configure what to do when they get the output of the stream,
-            // ie, the block inside of this while loop should be configurable, along with the stream
-            // itself
-            auth_provider.fork_choice_updated_v3_wait(forkchoice_state, None).await?;
-            let fcu_duration = start.elapsed() - new_payload_duration;
+            info!(?new_payload_duration, "Payload processed");
 
             // convert gas used to gigagas, then compute gigagas per second
             let gigagas_used = gas_used / 1_000_000_000.0;
             let gigagas_per_second = gigagas_used / new_payload_duration.as_secs_f64();
             results.push((new_payload_duration, gas_used));
             info!(
-                ?fcu_duration,
                 ?new_payload_duration,
                 "New payload processed at {:.2} Ggas/s, used {} total gas",
                 gigagas_per_second,
@@ -164,14 +185,4 @@ impl Command {
         // correct engine method
         Ok(())
     }
-}
-
-/// An error that can occur when trying to convert or fetch a block.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum BlockResponseError {
-    /// The block stream returned a `None` value, meaning the block range provided may be invalid.
-    #[error(
-        "Block stream returned a None value, meaning the block range provided may be invalid."
-    )]
-    BlockStreamNone,
 }

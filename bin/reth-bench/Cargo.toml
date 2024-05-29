@@ -1,5 +1,5 @@
 [package]
-name = "reth-benchmark"
+name = "reth-bench"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 description = "Benchmarking for ethereum nodes"
-default-run = "reth-benchmark"
+default-run = "reth-bench"
 
 [lints]
 workspace = true
@@ -33,6 +33,8 @@ alloy-transport-ipc.workspace = true
 alloy-pubsub.workspace = true
 alloy-json-rpc.workspace = true
 alloy-rpc-client.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # reqwest
 reqwest = { workspace = true, default-features = false, features = [
@@ -97,5 +99,5 @@ optimism = [
 ethereum = []
 
 [[bin]]
-name = "reth-benchmark"
+name = "reth-bench"
 path = "src/main.rs"
