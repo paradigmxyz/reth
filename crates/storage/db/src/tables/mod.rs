@@ -408,7 +408,7 @@ tables! {
     table BlockRequests<Key = BlockNumber, Value = Requests>;
 
     /// Stores the last finalized block.
-    table FinalizedBlocks<Key = BlockNumber, Value = BlockNumber>;
+    table FinalizedBlocks<Key = u8, Value = BlockNumber>;
 }
 
 // Alias types.

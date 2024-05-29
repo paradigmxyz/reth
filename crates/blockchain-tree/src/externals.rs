@@ -15,7 +15,7 @@ use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// Table key used to read and write the last finalized block.
-const FINALIZED_BLOCKS_KEY: u64 = 0;
+const FINALIZED_BLOCKS_KEY: u8 = 0;
 
 /// A container for external components.
 ///
@@ -100,7 +100,7 @@ impl<DB: Database, E> TreeExternals<DB, E> {
             .cursor_read::<tables::FinalizedBlocks>()?
             .walk(Some(FINALIZED_BLOCKS_KEY))?
             .take(1)
-            .collect::<Result<BTreeMap<BlockNumber, BlockNumber>, _>>()?;
+            .collect::<Result<BTreeMap<u8, BlockNumber>, _>>()?;
 
         let last_finalized_block_number = finalized_blocks.pop_first().unwrap_or_default();
         Ok(last_finalized_block_number.1)
