@@ -2703,12 +2703,10 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-revm",
  "reth-stages",
  "serde",
  "serde_json",
  "thiserror",
- "tokio",
  "walkdir",
 ]
 
@@ -2949,11 +2947,8 @@ dependencies = [
  "reth",
  "reth-exex",
  "reth-node-api",
- "reth-node-core",
  "reth-node-ethereum",
- "reth-primitives",
  "reth-tracing",
- "tokio",
 ]
 
 [[package]]
@@ -2963,17 +2958,14 @@ dependencies = [
  "alloy-sol-types",
  "eyre",
  "futures",
- "itertools 0.12.1",
  "reth",
  "reth-exex",
  "reth-node-api",
- "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-tracing",
  "rusqlite",
- "tokio",
 ]
 
 [[package]]
@@ -2985,21 +2977,17 @@ dependencies = [
  "alloy-sol-types",
  "eyre",
  "foundry-blob-explorers",
- "futures",
  "once_cell",
  "reth",
- "reth-cli-runner",
  "reth-execution-errors",
  "reth-exex",
  "reth-node-api",
- "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
  "reth-testing-utils",
  "reth-tracing",
- "reth-trie",
  "rusqlite",
  "secp256k1 0.28.2",
  "serde_json",
@@ -3259,23 +3247,6 @@ name = "futures-task"
 version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38d84fa142264698cdce1a9f9172cf383a0c82de1bddcf3092901442c4097004"
-
-[[package]]
-name = "futures-test"
-version = "0.3.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce388237b32ac42eca0df1ba55ed3bbda4eaf005d7d4b5dbc0b20ab962928ac9"
-dependencies = [
- "futures-core",
- "futures-executor",
- "futures-io",
- "futures-macro",
- "futures-sink",
- "futures-task",
- "futures-util",
- "pin-project",
- "pin-utils",
-]
 
 [[package]]
 name = "futures-timer"
@@ -5231,7 +5202,6 @@ name = "node-custom-rpc"
 version = "0.0.0"
 dependencies = [
  "clap",
- "eyre",
  "jsonrpsee",
  "reth",
  "reth-node-ethereum",
@@ -6852,12 +6822,9 @@ dependencies = [
  "eyre",
  "futures-util",
  "jsonrpsee",
- "rand 0.8.5",
  "reth",
  "reth-db",
  "reth-node-builder",
- "reth-node-core",
- "reth-node-ethereum",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -6865,7 +6832,6 @@ dependencies = [
  "reth-rpc-layer",
  "reth-tokio-util",
  "reth-tracing",
- "secp256k1 0.28.2",
  "serde_json",
  "tokio",
  "tokio-stream",
@@ -6977,7 +6943,6 @@ dependencies = [
  "reth-net-common",
  "reth-primitives",
  "reth-tracing",
- "secp256k1 0.28.2",
  "serde",
  "test-fuzz",
  "thiserror",
@@ -7269,10 +7234,8 @@ dependencies = [
  "enr",
  "fnv",
  "futures",
- "futures-test",
  "humantime-serde",
  "itertools 0.12.1",
- "linked_hash_set",
  "metrics",
  "parking_lot 0.12.3",
  "pin-project",
@@ -7332,14 +7295,12 @@ dependencies = [
  "auto_impl",
  "futures",
  "parking_lot 0.12.3",
- "rand 0.8.5",
  "reth-consensus",
  "reth-eth-wire-types",
  "reth-network-api",
  "reth-network-types",
  "reth-primitives",
  "reth-storage-errors",
- "secp256k1 0.28.2",
  "thiserror",
  "tokio",
  "tracing",
@@ -7443,7 +7404,6 @@ name = "reth-node-core"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-rpc-types-engine",
- "assert_matches",
  "clap",
  "const-str",
  "derive_more",
@@ -7453,7 +7413,6 @@ dependencies = [
  "futures",
  "humantime",
  "hyper 0.14.28",
- "jsonrpsee",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",
@@ -7490,7 +7449,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
- "tempfile",
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
@@ -7581,7 +7539,6 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tracing",
  "reth-transaction-pool",
- "revm",
  "revm-primitives",
  "serde",
  "serde_json",
@@ -7746,7 +7703,6 @@ name = "reth-prune"
 version = "0.2.0-beta.7"
 dependencies = [
  "assert_matches",
- "derive_more",
  "itertools 0.12.1",
  "metrics",
  "rayon",
@@ -8058,8 +8014,6 @@ dependencies = [
  "reth-testing-utils",
  "reth-tokio-util",
  "tempfile",
- "tokio",
- "tokio-stream",
  "tracing",
 ]
 
@@ -8203,7 +8157,6 @@ dependencies = [
  "revm",
  "serde_json",
  "similar-asserts",
- "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
