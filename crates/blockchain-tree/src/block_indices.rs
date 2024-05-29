@@ -320,8 +320,14 @@ impl BlockIndices {
             .filter(|(number, _)| *number >= self.last_finalized_block && *number < finalized_block)
             .map(|(_, hash)| hash)
             .collect();
-        println!("self.last_finalized_block: {}", self.last_finalized_block);
-        println!("finalized_blocks.len(): {}", finalized_blocks.len());
+        println!(
+            "in BlockIndices::finalize_canonical_blocks, self.last_finalized_block: {} before",
+            self.last_finalized_block
+        );
+        println!(
+            "in BlockIndices::finalize_canonical_blocks finalized_blocks.len(): {}",
+            finalized_blocks.len()
+        );
 
         // remove unneeded canonical hashes.
         let remove_until =
@@ -344,7 +350,10 @@ impl BlockIndices {
 
         // set last finalized block.
         self.last_finalized_block = finalized_block;
-
+        println!(
+            "in BlockIndices::finalize_canonical_blocks, self.last_finalized_block: {} after",
+            self.last_finalized_block
+        );
         lose_chains
     }
 
