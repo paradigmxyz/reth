@@ -153,7 +153,7 @@ where
     #[inline]
     fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
-        let mut list = Vec::with_capacity(length);
+        let mut list = Self::with_capacity(length);
         for _ in 0..length {
             let len;
             (len, buf) = decode_varuint(buf);
@@ -184,7 +184,7 @@ where
     #[inline]
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
-        let mut list = Vec::with_capacity(length);
+        let mut list = Self::with_capacity(length);
 
         for _ in 0..length {
             let element;
@@ -274,13 +274,13 @@ impl Compact for U256 {
     #[inline]
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
-            return (U256::ZERO, buf)
+            return (Self::ZERO, buf)
         }
 
         let mut arr = [0; 32];
         arr[(32 - len)..].copy_from_slice(&buf[..len]);
         buf.advance(len);
-        (U256::from_be_bytes(arr), buf)
+        (Self::from_be_bytes(arr), buf)
     }
 }
 
@@ -573,7 +573,7 @@ mod tests {
 
     impl Default for TestStruct {
         fn default() -> Self {
-            TestStruct {
+            Self {
                 f_u64: 1u64,                                    // 4 bits | 1 byte
                 f_u256: U256::from(1u64),                       // 6 bits | 1 byte
                 f_bool_f: false,                                // 1 bit  | 0 bytes

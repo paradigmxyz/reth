@@ -189,7 +189,7 @@ impl TryFrom<&Enr<SecretKey>> for NodeRecord {
 
         let id = pk2id(&enr.public_key());
 
-        Ok(NodeRecord { address, tcp_port, udp_port, id }.into_ipv4_mapped())
+        Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }
 }
 

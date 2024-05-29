@@ -9,8 +9,8 @@ impl Compact for TxKind {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         match self {
-            TxKind::Create => 0,
-            TxKind::Call(address) => {
+            Self::Create => 0,
+            Self::Call(address) => {
                 address.to_compact(buf);
                 1
             }
@@ -18,7 +18,7 @@ impl Compact for TxKind {
     }
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         match identifier {
-            0 => (TxKind::Create, buf),
+            0 => (Self::Create, buf),
             1 => {
                 let (addr, buf) = Address::from_compact(buf, buf.len());
                 (addr.into(), buf)

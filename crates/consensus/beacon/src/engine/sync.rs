@@ -419,7 +419,7 @@ enum PipelineState<DB: Database> {
 impl<DB: Database> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
     fn is_idle(&self) -> bool {
-        matches!(self, PipelineState::Idle(_))
+        matches!(self, Self::Idle(_))
     }
 }
 

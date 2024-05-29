@@ -220,7 +220,7 @@ impl MetricsAttr {
     fn separator(&self) -> String {
         match &self.separator {
             Some(sep) => sep.value(),
-            None => MetricsAttr::DEFAULT_SEPARATOR.to_owned(),
+            None => Self::DEFAULT_SEPARATOR.to_owned(),
         }
     }
 }

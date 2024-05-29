@@ -64,7 +64,7 @@ impl CursorSubNode {
             CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8
         });
         let full_key = full_key(key.clone(), nibble);
-        CursorSubNode { key, node, nibble, full_key }
+        Self { key, node, nibble, full_key }
     }
 
     /// Returns the full key of the current node.

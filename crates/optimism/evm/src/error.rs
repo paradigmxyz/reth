@@ -24,6 +24,6 @@ pub enum OptimismBlockExecutionError {
 
 impl From<OptimismBlockExecutionError> for BlockExecutionError {
     fn from(err: OptimismBlockExecutionError) -> Self {
-        BlockExecutionError::other(err)
+        Self::other(err)
     }
 }

@@ -798,23 +798,23 @@ mod test {
         }
 
         impl<T> PartialEq for Key<T> {
-            fn eq(&self, other: &Key<T>) -> bool {
+            fn eq(&self, other: &Self) -> bool {
                 self.hash == other.hash
             }
         }
 
         impl<T> Eq for Key<T> {}
 
-        impl<TPeerId> AsRef<Key<TPeerId>> for Key<TPeerId> {
-            fn as_ref(&self) -> &Key<TPeerId> {
+        impl<TPeerId> AsRef<Self> for Key<TPeerId> {
+            fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl<T> Key<T> {
             /// Construct a new `Key` by providing the raw 32 byte hash.
-            pub fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Key<T> {
-                Key { preimage, hash }
+            pub fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Self {
+                Self { preimage, hash }
             }
 
             /// Borrows the preimage of the key.
@@ -846,7 +846,7 @@ mod test {
 
         impl From<NodeId> for Key<NodeId> {
             fn from(node_id: NodeId) -> Self {
-                Key { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
+                Self { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
             }
         }
 

@@ -631,7 +631,7 @@ impl ECIES {
         self.egress_mac.as_mut().unwrap().update_header(&header);
         let tag = self.egress_mac.as_mut().unwrap().digest();
 
-        out.reserve(ECIES::header_len());
+        out.reserve(Self::header_len());
         out.extend_from_slice(&header[..]);
         out.extend_from_slice(tag.as_slice());
     }

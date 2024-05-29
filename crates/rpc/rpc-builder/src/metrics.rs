@@ -185,9 +185,9 @@ impl RpcTransport {
     /// Returns the string representation of the transport protocol.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            RpcTransport::Http => "http",
-            RpcTransport::WebSocket => "ws",
-            RpcTransport::Ipc => "ipc",
+            Self::Http => "http",
+            Self::WebSocket => "ws",
+            Self::Ipc => "ipc",
         }
     }
 

@@ -19,11 +19,11 @@ pub trait PrefixSetAbstraction: Default {
 
 impl PrefixSetAbstraction for PrefixSetMut {
     fn insert(&mut self, key: Nibbles) {
-        PrefixSetMut::insert(self, key)
+        Self::insert(self, key)
     }
 
     fn contains(&mut self, key: Nibbles) -> bool {
-        PrefixSetMut::contains(self, &key)
+        Self::contains(self, &key)
     }
 }
 

@@ -505,7 +505,7 @@ impl BodiesDownloaderBuilder {
     /// Creates a new [BodiesDownloaderBuilder] with configurations based on the provided
     /// [BodiesConfig].
     pub fn new(config: BodiesConfig) -> Self {
-        BodiesDownloaderBuilder::default()
+        Self::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
             .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)

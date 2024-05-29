@@ -269,7 +269,7 @@ where
     /// Handler for `eth_getFilterChanges`
     async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges> {
         trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
-        Ok(EthFilter::filter_changes(self, id).await?)
+        Ok(Self::filter_changes(self, id).await?)
     }
 
     /// Returns an array of all logs matching filter with given id.
@@ -279,7 +279,7 @@ where
     /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
-        Ok(EthFilter::filter_logs(self, id).await?)
+        Ok(Self::filter_logs(self, id).await?)
     }
 
     /// Handler for `eth_uninstallFilter`
@@ -588,7 +588,7 @@ struct PendingTransactionsReceiver {
 
 impl PendingTransactionsReceiver {
     fn new(receiver: Receiver<TxHash>) -> Self {
-        PendingTransactionsReceiver { txs_receiver: Arc::new(Mutex::new(receiver)) }
+        Self { txs_receiver: Arc::new(Mutex::new(receiver)) }
     }
 
     /// Returns all new pending transactions received since the last poll.
@@ -617,7 +617,7 @@ where
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
-        FullTransactionsReceiver { txs_stream: Arc::new(Mutex::new(stream)) }
+        Self { txs_stream: Arc::new(Mutex::new(stream)) }
     }
 
     /// Returns all new pending transactions received since the last poll.
@@ -646,7 +646,7 @@ where
     T: PoolTransaction + 'static,
 {
     async fn drain(&self) -> FilterChanges {
-        FullTransactionsReceiver::drain(self).await
+        Self::drain(self).await
     }
 }
 
@@ -664,8 +664,8 @@ enum PendingTransactionKind {
 impl PendingTransactionKind {
     async fn drain(&self) -> FilterChanges {
         match self {
-            PendingTransactionKind::Hashes(receiver) => receiver.drain().await,
-            PendingTransactionKind::FullTransaction(receiver) => receiver.drain().await,
+            Self::Hashes(receiver) => receiver.drain().await,
+            Self::FullTransaction(receiver) => receiver.drain().await,
         }
     }
 }
@@ -717,7 +717,7 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 
 impl From<ProviderError> for FilterError {
     fn from(err: ProviderError) -> Self {
-        FilterError::EthAPIError(err.into())
+        Self::EthAPIError(err.into())
     }
 }
 

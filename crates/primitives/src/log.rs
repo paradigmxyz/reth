@@ -51,8 +51,8 @@ mod tests {
     }
 
     impl From<Log> for AlloyLog {
-        fn from(log: Log) -> AlloyLog {
-            AlloyLog::new_unchecked(log.address, log.topics, log.data)
+        fn from(log: Log) -> Self {
+            Self::new_unchecked(log.address, log.topics, log.data)
         }
     }
 
