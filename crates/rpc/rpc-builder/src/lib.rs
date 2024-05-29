@@ -471,17 +471,10 @@ where
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
 
-        let TransportRpcModuleConfig { config, .. } = module_config.clone();
+        let config = module_config.config.clone().unwrap_or_default();
 
-        let mut registry = RethModuleRegistry::new(
-            provider,
-            pool,
-            network,
-            executor,
-            events,
-            config.unwrap_or_default(),
-            evm_config,
-        );
+        let mut registry =
+            RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config);
 
         let modules = registry.create_transport_rpc_modules(module_config);
 
