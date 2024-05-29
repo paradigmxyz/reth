@@ -41,7 +41,6 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
-futures-test = "0.3.30"
 
 # io
 serde = { workspace = true, optional = true }
@@ -59,7 +58,6 @@ tracing.workspace = true
 fnv = "1.0"
 thiserror.workspace = true
 parking_lot.workspace = true
-linked_hash_set = "0.1"
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 derive_more.workspace = true
