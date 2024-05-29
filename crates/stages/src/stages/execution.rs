@@ -655,7 +655,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_interfaces::executor::BlockValidationError;
+    use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
