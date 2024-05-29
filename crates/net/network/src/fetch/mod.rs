@@ -3,12 +3,12 @@
 use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
-use reth_interfaces::p2p::{
+use reth_network_api::ReputationChangeKind;
+use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
 };
-use reth_network_api::ReputationChangeKind;
 use reth_network_types::PeerId;
 use reth_primitives::{BlockBody, Header, B256};
 use std::{

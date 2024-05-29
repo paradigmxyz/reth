@@ -50,7 +50,8 @@ pub struct Header {
     /// of each transaction in the transactions list portion of the block; formally He.
     pub receipts_root: B256,
     /// The Keccak 256-bit hash of the withdrawals list portion of this block.
-    /// <https://eips.ethereum.org/EIPS/eip-4895>
+    ///
+    /// See [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895).
     pub withdrawals_root: Option<B256>,
     /// The Bloom filter composed from indexable information (logger address and log topics)
     /// contained in each log entry from the receipt of each transaction in the transactions list;
@@ -98,6 +99,11 @@ pub struct Header {
     ///
     /// The beacon roots contract handles root storage, enhancing Ethereum's functionalities.
     pub parent_beacon_block_root: Option<B256>,
+    /// The Keccak 256-bit hash of the root node of the trie structure populated with each
+    /// [EIP-7685] request in the block body.
+    ///
+    /// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
+    pub requests_root: Option<B256>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
     pub extra_data: Bytes,
@@ -126,6 +132,7 @@ impl Default for Header {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None,
         }
     }
 }
@@ -343,6 +350,10 @@ impl Header {
             length += parent_beacon_block_root.length();
         }
 
+        if let Some(requests_root) = self.requests_root {
+            length += requests_root.length();
+        }
+
         length
     }
 }
@@ -396,15 +407,22 @@ impl Encodable for Header {
             U256::from(*excess_blob_gas).encode(out);
         }
 
-        // Encode parent beacon block root. If new fields are added, the above pattern will need to
+        // Encode parent beacon block root.
+        if let Some(ref parent_beacon_block_root) = self.parent_beacon_block_root {
+            parent_beacon_block_root.encode(out);
+        }
+
+        // Encode EIP-7685 requests root
+        //
+        // If new fields are added, the above pattern will need to
         // be repeated and placeholders added. Otherwise, it's impossible to tell _which_
         // fields are missing. This is mainly relevant for contrived cases where a header is
         // created at random, for example:
         //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
         //    post-London, so this is technically not valid. However, a tool like proptest would
         //    generate a block like this.
-        if let Some(ref parent_beacon_block_root) = self.parent_beacon_block_root {
-            parent_beacon_block_root.encode(out);
+        if let Some(ref requests_root) = self.requests_root {
+            requests_root.encode(out);
         }
     }
 
@@ -444,6 +462,7 @@ impl Decodable for Header {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None,
         };
         if started_len - buf.len() < rlp_head.payload_length {
             this.base_fee_per_gas = Some(u64::decode(buf)?);
@@ -463,7 +482,14 @@ impl Decodable for Header {
             this.excess_blob_gas = Some(u64::decode(buf)?);
         }
 
-        // Decode parent beacon block root. If new fields are added, the above pattern will need to
+        // Decode parent beacon block root.
+        if started_len - buf.len() < rlp_head.payload_length {
+            this.parent_beacon_block_root = Some(B256::decode(buf)?);
+        }
+
+        // Decode requests root.
+        //
+        // If new fields are added, the above pattern will need to
         // be repeated and placeholders decoded. Otherwise, it's impossible to tell _which_
         // fields are missing. This is mainly relevant for contrived cases where a header is
         // created at random, for example:
@@ -471,7 +497,7 @@ impl Decodable for Header {
         //    post-London, so this is technically not valid. However, a tool like proptest would
         //    generate a block like this.
         if started_len - buf.len() < rlp_head.payload_length {
-            this.parent_beacon_block_root = Some(B256::decode(buf)?);
+            this.requests_root = Some(B256::decode(buf)?);
         }
 
         let consumed = started_len - buf.len();
@@ -1059,6 +1085,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }
@@ -1183,6 +1210,7 @@ mod tests {
             blob_gas_used: Some(0x020000),
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
+            requests_root: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();
@@ -1228,6 +1256,7 @@ mod tests {
             parent_beacon_block_root: None,
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0x1600000),
+            requests_root: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();

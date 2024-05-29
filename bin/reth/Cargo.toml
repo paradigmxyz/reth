@@ -58,6 +58,7 @@ reth-db-common.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
+reth-optimism-primitives.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

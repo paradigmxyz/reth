@@ -1,11 +1,7 @@
 //! Helper types that can be used by launchers.
 
-use std::{cmp::max, sync::Arc, thread::available_parallelism};
-
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use tokio::sync::{mpsc::Receiver, oneshot};
-
 use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, PruneConfig};
@@ -13,7 +9,7 @@ use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
-use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -31,6 +27,8 @@ use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{error, info, warn};
+use std::{cmp::max, sync::Arc, thread::available_parallelism};
+use tokio::sync::{mpsc::Receiver, oneshot};
 
 /// Reusable setup for launching a node.
 ///

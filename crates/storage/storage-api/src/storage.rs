@@ -1,14 +1,12 @@
+use reth_primitives::{Address, BlockNumber, StorageEntry, B256};
+use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::RangeInclusive,
 };
 
-use auto_impl::auto_impl;
-use reth_primitives::{Address, BlockNumber, StorageEntry, B256};
-use reth_storage_errors::provider::ProviderResult;
-
 /// Storage reader
-#[auto_impl(&, Arc, Box)]
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageReader: Send + Sync {
     /// Get plainstate storages for addresses and storage keys.
     fn plain_state_storages(

@@ -19,8 +19,7 @@ pub use reth_storage_errors::{db, provider};
 pub use reth_execution_errors as executor;
 
 /// Possible errors when interacting with the chain.
-mod error;
-pub use error::{RethError, RethResult};
+pub use reth_errors::{RethError, RethResult};
 
 /// P2P traits.
 pub use reth_network_p2p as p2p;
@@ -36,4 +35,7 @@ pub use reth_blockchain_tree_api as blockchain_tree;
 
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 #[cfg(feature = "test-utils")]
-pub use reth_network_p2p::test_utils;
+pub mod test_utils {
+    pub use reth_network_p2p::test_utils::*;
+    pub use reth_testing_utils::generators;
+}

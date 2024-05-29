@@ -1,6 +1,7 @@
 use auto_impl::auto_impl;
-use reth_interfaces::{p2p::headers::downloader::SyncTarget, RethResult};
+use reth_interfaces::p2p::headers::downloader::SyncTarget;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader, B256};
+use reth_storage_errors::provider::ProviderResult;
 use tokio::sync::watch;
 
 /// The header sync mode.
@@ -46,5 +47,5 @@ pub trait HeaderSyncGapProvider: Send + Sync {
         &self,
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
-    ) -> RethResult<HeaderSyncGap>;
+    ) -> ProviderResult<HeaderSyncGap>;
 }

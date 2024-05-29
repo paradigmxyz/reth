@@ -14,7 +14,7 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_storage_errors::provider::ProviderError;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 pub mod error;
 
@@ -162,7 +162,10 @@ impl std::fmt::Display for BlockValidationKind {
 pub enum CanonicalOutcome {
     /// The block is already canonical.
     AlreadyCanonical {
-        /// The corresponding [SealedHeader] that is already canonical.
+        /// Block number and hash of current head.
+        head: BlockNumHash,
+        /// The corresponding [SealedHeader] that was attempted to be made a current head and
+        /// is already canonical.
         header: SealedHeader,
     },
     /// Committed the block to the database.
@@ -176,7 +179,7 @@ impl CanonicalOutcome {
     /// Returns the header of the block that was made canonical.
     pub fn header(&self) -> &SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header } => header,
+            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
             CanonicalOutcome::Committed { head } => head,
         }
     }
@@ -184,7 +187,7 @@ impl CanonicalOutcome {
     /// Consumes the outcome and returns the header of the block that was made canonical.
     pub fn into_header(self) -> SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header } => header,
+            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
             CanonicalOutcome::Committed { head } => head,
         }
     }
@@ -209,6 +212,8 @@ pub enum BlockStatus {
     /// If block is valid and block forks off canonical chain.
     /// If blocks is not connected to canonical chain.
     Disconnected {
+        /// Current canonical head.
+        head: BlockNumHash,
         /// The lowest ancestor block that is not connected to the canonical chain.
         missing_ancestor: BlockNumHash,
     },
@@ -261,11 +266,6 @@ pub enum InsertPayloadOk {
 /// * Pending blocks that extend the canonical chain but are not yet included.
 /// * Future pending blocks that extend the pending blocks.
 pub trait BlockchainTreeViewer: Send + Sync {
-    /// Returns both pending and side-chain block numbers and their hashes.
-    ///
-    /// Caution: This will not return blocks from the canonical chain.
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
-
     /// Returns the header with matching hash from the tree, if it exists.
     ///
     /// Caution: This will not return headers from the canonical chain.
@@ -283,13 +283,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// disconnected from the canonical chain.
     fn block_with_senders_by_hash(&self, hash: BlockHash) -> Option<SealedBlockWithSenders>;
 
-    /// Returns the _buffered_ (disconnected) block with matching hash from the internal buffer if
-    /// it exists.
-    ///
-    /// Caution: Unlike [Self::block_by_hash] this will only return blocks that are currently
-    /// disconnected from the canonical chain.
-    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock>;
-
     /// Returns the _buffered_ (disconnected) header with matching hash from the internal buffer if
     /// it exists.
     ///
@@ -302,9 +295,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
         self.block_by_hash(hash).is_some()
     }
 
-    /// Canonical block number and hashes best known by the tree.
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
-
     /// Return whether or not the block is known and in the canonical chain.
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError>;
 
@@ -316,11 +306,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
 
     /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
     fn canonical_tip(&self) -> BlockNumHash;
-
-    /// Return block hashes that extends the canonical chain tip by one.
-    /// This is used to fetch what is considered the pending blocks, blocks that
-    /// has best chance to become canonical.
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>);
 
     /// Return block number and hash that extends the canonical chain tip by one.
     ///

@@ -171,9 +171,6 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
             // enveloped tx size.
             enveloped_tx: Some(Bytes::default()),
         },
-        // TODO(EOF)
-        eof_initcodes: vec![],
-        eof_initcodes_hashed: Default::default(),
     };
 
     // ensure the block gas limit is >= the tx

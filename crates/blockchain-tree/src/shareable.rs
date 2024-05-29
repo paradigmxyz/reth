@@ -17,10 +17,7 @@ use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
     ProviderError,
 };
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::trace;
 
 /// Shareable blockchain tree that is behind a RwLock
@@ -111,19 +108,14 @@ where
     DB: Database + Clone,
     E: BlockExecutorProvider,
 {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        trace!(target: "blockchain_tree", "Returning all blocks in blockchain tree");
-        self.tree.read().block_indices().block_number_to_block_hashes().clone()
-    }
-
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
-        self.tree.read().block_by_hash(hash).map(|b| b.header.clone())
+        self.tree.read().sidechain_block_by_hash(hash).map(|b| b.header.clone())
     }
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         trace!(target: "blockchain_tree", ?block_hash, "Returning block by hash");
-        self.tree.read().block_by_hash(block_hash).cloned()
+        self.tree.read().sidechain_block_by_hash(block_hash).cloned()
     }
 
     fn block_with_senders_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlockWithSenders> {
@@ -131,17 +123,8 @@ where
         self.tree.read().block_with_senders_by_hash(block_hash).cloned()
     }
 
-    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
-        self.tree.read().get_buffered_block(&block_hash).map(|b| b.block.clone())
-    }
-
     fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
         self.tree.read().get_buffered_block(&block_hash).map(|b| b.header.clone())
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        trace!(target: "blockchain_tree", "Returning canonical blocks in tree");
-        self.tree.read().block_indices().canonical_chain().inner().clone()
     }
 
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
@@ -157,11 +140,6 @@ where
     fn canonical_tip(&self) -> BlockNumHash {
         trace!(target: "blockchain_tree", "Returning canonical tip");
         self.tree.read().block_indices().canonical_tip()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        trace!(target: "blockchain_tree", "Returning all pending blocks");
-        self.tree.read().block_indices().pending_blocks()
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {

@@ -72,7 +72,7 @@ pub struct ImportCommand {
     #[arg(long, verbatim_doc_comment)]
     no_state: bool,
 
-    /// Chunk byte length.
+    /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
 

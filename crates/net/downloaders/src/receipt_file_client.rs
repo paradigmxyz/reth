@@ -75,10 +75,10 @@ impl FromReader for ReceiptFileClient {
                     Err(err) => return Err(err),
                 };
 
-                total_receipts += 1;
-
                 match receipt {
                     Some(ReceiptWithBlockNumber { receipt, number }) => {
+                        total_receipts += 1;
+
                         if first_block.is_none() {
                             first_block = Some(number);
                             block_number = number;
@@ -202,7 +202,8 @@ mod test {
         let (ReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
             ReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
 
-        assert_eq!(4, total_receipts);
+        // 2 non-empty receipt objects
+        assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
         assert_eq!(op_mainnet_receipt_block_1().receipt, receipts[1][0].clone().unwrap());
@@ -229,7 +230,8 @@ mod test {
         let (ReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
             ReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
 
-        assert_eq!(4, total_receipts);
+        // 2 non-empty receipt objects
+        assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
         assert_eq!(op_mainnet_receipt_block_1().receipt, receipts[1][0].clone().unwrap());
@@ -257,7 +259,8 @@ mod test {
         let (ReceiptFileClient { receipts, first_block, total_receipts }, _remaining_bytes) =
             ReceiptFileClient::from_reader(reader, encoded_byte_len).await.unwrap();
 
-        assert_eq!(5, total_receipts);
+        // 4 non-empty receipt objects
+        assert_eq!(4, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
         assert_eq!(op_mainnet_receipt_block_1().receipt, receipts[1][0].clone().unwrap());

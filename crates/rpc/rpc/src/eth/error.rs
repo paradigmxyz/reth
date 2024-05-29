@@ -3,7 +3,7 @@
 use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use alloy_sol_types::decode_revert_reason;
 use jsonrpsee::types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject};
-use reth_interfaces::RethError;
+use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
 use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
@@ -193,9 +193,9 @@ impl From<RethError> for EthApiError {
     }
 }
 
-impl From<reth_interfaces::provider::ProviderError> for EthApiError {
-    fn from(error: reth_interfaces::provider::ProviderError) -> Self {
-        use reth_interfaces::provider::ProviderError;
+impl From<reth_errors::ProviderError> for EthApiError {
+    fn from(error: reth_errors::ProviderError) -> Self {
+        use reth_errors::ProviderError;
         match error {
             ProviderError::HeaderNotFound(_) |
             ProviderError::BlockHashNotFound(_) |
@@ -487,9 +487,6 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 OptimismInvalidTransactionError::HaltedDepositPostRegolith,
             ),
             // TODO(EOF)
-            InvalidTransaction::EofInitcodesNotSupported => todo!("EOF"),
-            InvalidTransaction::EofInitcodesNumberLimit => todo!("EOF"),
-            InvalidTransaction::EofInitcodesSizeLimit => todo!("EOF"),
             InvalidTransaction::EofCrateShouldHaveToAddress => todo!("EOF"),
         }
     }

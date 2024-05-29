@@ -1,3 +1,5 @@
+//! Generators for different data structures like block headers, block bodies and ranges of those.
+
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
@@ -157,6 +159,7 @@ pub fn random_block<R: Rng>(
         body: transactions,
         ommers,
         withdrawals: None,
+        requests: None,
     }
 }
 

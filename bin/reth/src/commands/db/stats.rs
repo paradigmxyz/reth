@@ -8,12 +8,12 @@ use human_bytes::human_bytes;
 use itertools::Itertools;
 use reth_db::{
     database::Database, mdbx, static_file::iter_static_files, AccountChangeSets, AccountsHistory,
-    AccountsTrie, BlockBodyIndices, BlockOmmers, BlockWithdrawals, Bytecodes, CanonicalHeaders,
-    DatabaseEnv, HashedAccounts, HashedStorages, HeaderNumbers, HeaderTerminalDifficulties,
-    Headers, PlainAccountState, PlainStorageState, PruneCheckpoints, Receipts,
-    StageCheckpointProgresses, StageCheckpoints, StorageChangeSets, StoragesHistory, StoragesTrie,
-    Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders, Transactions,
-    VersionHistory,
+    AccountsTrie, BlockBodyIndices, BlockOmmers, BlockRequests, BlockWithdrawals, Bytecodes,
+    CanonicalHeaders, DatabaseEnv, HashedAccounts, HashedStorages, HeaderNumbers,
+    HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState, PruneCheckpoints,
+    Receipts, StageCheckpointProgresses, StageCheckpoints, StorageChangeSets, StoragesHistory,
+    StoragesTrie, Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders,
+    Transactions, VersionHistory,
 };
 use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
@@ -333,6 +333,7 @@ impl Command {
                 Tables::BlockBodyIndices => viewer.get_checksum::<BlockBodyIndices>().unwrap(),
                 Tables::BlockOmmers => viewer.get_checksum::<BlockOmmers>().unwrap(),
                 Tables::BlockWithdrawals => viewer.get_checksum::<BlockWithdrawals>().unwrap(),
+                Tables::BlockRequests => viewer.get_checksum::<BlockRequests>().unwrap(),
                 Tables::Bytecodes => viewer.get_checksum::<Bytecodes>().unwrap(),
                 Tables::CanonicalHeaders => viewer.get_checksum::<CanonicalHeaders>().unwrap(),
                 Tables::HashedAccounts => viewer.get_checksum::<HashedAccounts>().unwrap(),

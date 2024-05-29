@@ -24,6 +24,10 @@ use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
 
+/// The list of additional V4 caps
+// TODO(mattsse): move to alloy
+const V4_CAPABILITIES: [&str; 2] = ["engine_getPayloadV4", "engine_newPayloadV4"];
+
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
@@ -331,7 +335,7 @@ where
     pub async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadV3> {
+    ) -> EngineApiResult<EngineT::ExecutionPayloadV4> {
         // First we fetch the payload attributes to check the timestamp
         let attributes = self.get_payload_attributes(payload_id).await?;
 
@@ -508,7 +512,7 @@ where
     ///   validated according to the Shanghai rules, as well as the validity changes from cancun:
     ///   <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/cancun.md#update-the-methods-of-previous-forks>
     ///
-    /// * If the version is [EngineApiMessageVersion::V3], then the payload attributes will be
+    /// * If the version above [EngineApiMessageVersion::V3], then the payload attributes will be
     ///   validated according to the Cancun rules.
     async fn validate_and_execute_forkchoice(
         &self,
@@ -591,6 +595,22 @@ where
             EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
                 .await;
         self.inner.metrics.latency.new_payload_v3.record(start.elapsed());
+        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        Ok(res?)
+    }
+
+    async fn new_payload_v4(
+        &self,
+        payload: ExecutionPayloadV4,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+    ) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
+        let start = Instant::now();
+        let res =
+            EngineApi::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root)
+                .await;
+        self.inner.metrics.latency.new_payload_v4.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
         Ok(res?)
     }
@@ -708,6 +728,26 @@ where
         Ok(res?)
     }
 
+    /// Handler for `engine_getPayloadV4`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    async fn get_payload_v4(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadV4> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
+        let start = Instant::now();
+        let res = EngineApi::get_payload_v4(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
+        Ok(res?)
+    }
+
     /// Handler for `engine_getPayloadBodiesByHashV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
@@ -777,7 +817,7 @@ where
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())
+        Ok(CAPABILITIES.into_iter().chain(V4_CAPABILITIES.into_iter()).map(str::to_owned).collect())
     }
 }
 

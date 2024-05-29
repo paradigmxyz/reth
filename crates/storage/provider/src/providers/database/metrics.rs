@@ -56,6 +56,7 @@ pub(crate) enum Action {
     InsertTransactions,
     InsertTransactionHashNumbers,
     InsertBlockWithdrawals,
+    InsertBlockRequests,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
 
@@ -83,6 +84,7 @@ impl Action {
             Action::InsertTransactions => "insert transactions",
             Action::InsertTransactionHashNumbers => "insert transaction hash numbers",
             Action::InsertBlockWithdrawals => "insert block withdrawals",
+            Action::InsertBlockRequests => "insert block withdrawals",
             Action::InsertBlockBodyIndices => "insert block body indices",
             Action::InsertTransactionBlocks => "insert transaction blocks",
             Action::GetNextTxNum => "get next tx num",

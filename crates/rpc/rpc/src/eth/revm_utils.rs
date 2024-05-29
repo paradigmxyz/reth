@@ -272,9 +272,6 @@ pub(crate) fn create_txn_env(
         max_fee_per_blob_gas,
         #[cfg(feature = "optimism")]
         optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
-        // TODO(EOF)
-        eof_initcodes: Default::default(),
-        eof_initcodes_hashed: Default::default(),
     };
 
     Ok(env)
@@ -540,13 +537,19 @@ where
                 account,
                 new_account_state
                     .into_iter()
-                    .map(|(slot, value)| (U256::from_be_bytes(slot.0), value))
+                    .map(|(slot, value)| {
+                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
+                    })
                     .collect(),
             )?;
         }
         (None, Some(account_state_diff)) => {
             for (slot, value) in account_state_diff {
-                db.insert_account_storage(account, U256::from_be_bytes(slot.0), value)?;
+                db.insert_account_storage(
+                    account,
+                    U256::from_be_bytes(slot.0),
+                    U256::from_be_bytes(value.0),
+                )?;
             }
         }
     };

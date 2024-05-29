@@ -413,8 +413,8 @@ mod tests {
         let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
         let client = HttpClientBuilder::default().build(url).unwrap();
 
-        let opts =
-            GethDebugTracingOptions::default().call_config(CallConfig::default().only_top_call());
+        let opts = GethDebugTracingOptions::default()
+            .with_call_config(CallConfig::default().only_top_call());
 
         let mut stream = client.debug_trace_transactions_in_block(block, opts).await.unwrap();
         while let Some(res) = stream.next().await {
