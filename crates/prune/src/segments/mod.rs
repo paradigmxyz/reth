@@ -15,12 +15,13 @@ pub use headers::Headers;
 pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 use reth_db::database::Database;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
     PruneSegment, TxNumber,
 };
-use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
+use reth_provider::{
+    errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+};
 pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
@@ -101,7 +102,7 @@ impl PruneInput {
                 let last_tx = body.last_tx_num();
                 if last_tx + body.tx_count() == 0 {
                     // Prevents a scenario where the pruner correctly starts at a finalized block,
-                    // but the first transaction (tx_num = 0) only appears on an unfinalized one.
+                    // but the first transaction (tx_num = 0) only appears on an non-finalized one.
                     // Should only happen on a test/hive scenario.
                     return Ok(None)
                 }
