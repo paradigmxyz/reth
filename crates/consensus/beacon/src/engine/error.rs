@@ -1,5 +1,5 @@
 use crate::engine::hooks::EngineHookError;
-use reth_interfaces::RethError;
+use reth_errors::{DatabaseError, RethError};
 use reth_rpc_types::engine::ForkchoiceUpdateError;
 use reth_stages_api::PipelineError;
 
@@ -37,8 +37,8 @@ impl From<PipelineError> for BeaconConsensusEngineError {
 }
 
 // for convenience in the beacon engine
-impl From<reth_interfaces::db::DatabaseError> for BeaconConsensusEngineError {
-    fn from(e: reth_interfaces::db::DatabaseError) -> Self {
+impl From<DatabaseError> for BeaconConsensusEngineError {
+    fn from(e: DatabaseError) -> Self {
         Self::Common(e.into())
     }
 }
@@ -72,8 +72,8 @@ impl From<RethError> for BeaconForkChoiceUpdateError {
         Self::internal(e)
     }
 }
-impl From<reth_interfaces::db::DatabaseError> for BeaconForkChoiceUpdateError {
-    fn from(e: reth_interfaces::db::DatabaseError) -> Self {
+impl From<DatabaseError> for BeaconForkChoiceUpdateError {
+    fn from(e: DatabaseError) -> Self {
         Self::internal(e)
     }
 }
