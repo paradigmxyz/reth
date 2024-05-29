@@ -137,9 +137,14 @@ where
         // setup the consensus instance
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
             Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
-        } else if cfg!(feature = "optimism") && ctx.chain_spec().is_optimism() {
-            Arc::new(OptimismBeaconConsensus::new(ctx.chain_spec()))
         } else {
+            #[cfg(feature = "optimism")]
+            if ctx.chain_spec().is_optimism() {
+                Arc::new(OptimismBeaconConsensus::new(ctx.chain_spec()))
+            } else {
+                Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
+            }
+            #[cfg(not(feature = "optimism"))]
             Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
         };
 
