@@ -7965,7 +7965,6 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-execution-errors",
  "reth-exex",
- "reth-interfaces",
  "reth-network-p2p",
  "reth-network-types",
  "reth-primitives",

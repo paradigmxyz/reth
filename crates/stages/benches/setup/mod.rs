@@ -7,17 +7,17 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv,
 };
-use reth_interfaces::test_utils::{
+use reth_primitives::{Account, Address, SealedBlock, B256, U256};
+use reth_stages::{
+    stages::{AccountHashingStage, StorageHashingStage},
+    test_utils::{StorageKind, TestStageDB},
+};
+use reth_testing_utils::{
     generators,
     generators::{
         random_block_range, random_changeset_range, random_contract_account_range,
         random_eoa_accounts,
     },
-};
-use reth_primitives::{Account, Address, SealedBlock, B256, U256};
-use reth_stages::{
-    stages::{AccountHashingStage, StorageHashingStage},
-    test_utils::{StorageKind, TestStageDB},
 };
 use reth_trie::StateRoot;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
