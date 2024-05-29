@@ -1,8 +1,7 @@
 use crate::PipelineEvent;
 use reth_consensus::ConsensusError;
-use reth_interfaces::{
-    db::DatabaseError as DbError, executor, p2p::error::DownloadError, RethError,
-};
+use reth_errors::{BlockExecutionError, DatabaseError, RethError};
+use reth_network_p2p::error::DownloadError;
 use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use reth_provider::ProviderError;
 use thiserror::Error;
@@ -16,7 +15,7 @@ pub enum BlockErrorKind {
     Validation(#[from] ConsensusError),
     /// The block encountered an execution error.
     #[error("execution error: {0}")]
-    Execution(#[from] executor::BlockExecutionError),
+    Execution(#[from] BlockExecutionError),
 }
 
 impl BlockErrorKind {
@@ -66,7 +65,7 @@ pub enum StageError {
     MissingSyncGap,
     /// The stage encountered a database error.
     #[error("internal database error occurred: {0}")]
-    Database(#[from] DbError),
+    Database(#[from] DatabaseError),
     /// Invalid pruning configuration
     #[error(transparent)]
     PruningConfiguration(#[from] reth_primitives::PruneSegmentError),
@@ -167,7 +166,7 @@ pub enum PipelineError {
     Stage(#[from] StageError),
     /// The pipeline encountered a database error.
     #[error(transparent)]
-    Database(#[from] DbError),
+    Database(#[from] DatabaseError),
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),
