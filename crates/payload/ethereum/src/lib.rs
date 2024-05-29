@@ -129,10 +129,11 @@ where
 
         // apply eip-2935 blockhashes update
         apply_blockhashes_update(
+            &mut db,
             &chain_spec,
             initialized_block_env.timestamp.to::<u64>(),
             block_number,
-            &mut db,
+            parent_block.hash(),
         ).map_err(|err| {
             warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
             PayloadBuilderError::Internal(err.into())
@@ -284,10 +285,11 @@ where
 
     // apply eip-2935 blockhashes update
     apply_blockhashes_update(
+        &mut db,
         &chain_spec,
         initialized_block_env.timestamp.to::<u64>(),
         block_number,
-        &mut db,
+        parent_block.hash(),
     )
     .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 

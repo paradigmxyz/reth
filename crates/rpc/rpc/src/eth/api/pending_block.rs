@@ -96,7 +96,13 @@ impl PendingBlockEnv {
         } else {
             None
         };
-        pre_block_blockhashes_update(&mut db, &block_env, chain_spec.as_ref(), block_number)?;
+        pre_block_blockhashes_update(
+            &mut db,
+            chain_spec.as_ref(),
+            &block_env,
+            block_number,
+            parent_hash,
+        )?;
 
         let mut receipts = Vec::new();
 
@@ -331,18 +337,20 @@ where
 /// This uses [apply_blockhashes_update].
 fn pre_block_blockhashes_update<DB: Database + DatabaseCommit>(
     db: &mut DB,
-    initialized_block_env: &BlockEnv,
     chain_spec: &ChainSpec,
+    initialized_block_env: &BlockEnv,
     block_number: u64,
+    parent_block_hash: B256,
 ) -> EthResult<()>
 where
     DB::Error: std::fmt::Display,
 {
     apply_blockhashes_update(
+        db,
         chain_spec,
         initialized_block_env.timestamp.to::<u64>(),
         block_number,
-        db,
+        parent_block_hash,
     )
     .map_err(|err| EthApiError::Internal(err.into()))
 }

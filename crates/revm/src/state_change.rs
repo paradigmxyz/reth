@@ -70,10 +70,11 @@ pub const HISTORY_SERVE_WINDOW: u64 = 8192;
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
 pub fn apply_blockhashes_update<DB: Database + DatabaseCommit>(
+    db: &mut DB,
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
-    db: &mut DB,
+    parent_block_hash: B256,
 ) -> Result<(), BlockExecutionError>
 where
     DB::Error: std::fmt::Display,
@@ -84,7 +85,7 @@ where
     }
     assert!(block_number > 0);
 
-    // Account is expected to exist either in genesis (for tests) or redeployed on mainnet or
+    // Account is expected to exist either in genesis (for tests) or deployed on mainnet or
     // testnets.
     // If the account for any reason does not exist, we create it with the EIP-2935 bytecode and a
     // nonce of 1, so it does not get deleted.
@@ -99,7 +100,7 @@ where
         .into();
 
     // Insert the state change for the slot
-    let (slot, value) = eip2935_block_hash_slot(block_number - 1, db)
+    let (slot, value) = eip2935_block_hash_slot(db, block_number - 1, parent_block_hash)
         .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
     account.storage.insert(slot, value);
 
@@ -116,14 +117,14 @@ where
 /// This calculates the correct storage slot in the `BLOCKHASH` history storage address, fetches the
 /// blockhash and creates a [`StorageSlot`] with appropriate previous and new values.
 fn eip2935_block_hash_slot<DB: Database>(
-    block_number: u64,
     db: &mut DB,
+    block_number: u64,
+    block_hash: B256,
 ) -> Result<(U256, StorageSlot), DB::Error> {
     let slot = U256::from(block_number % HISTORY_SERVE_WINDOW);
     let current_hash = db.storage(HISTORY_STORAGE_ADDRESS, slot)?;
-    let ancestor_hash = db.block_hash(U256::from(block_number))?;
 
-    Ok((slot, StorageSlot::new_changed(current_hash, ancestor_hash.into())))
+    Ok((slot, StorageSlot::new_changed(current_hash, block_hash.into())))
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
