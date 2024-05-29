@@ -1,0 +1,33 @@
+name: 'Deploy Bitfinity Reth to GHCR'
+
+on:
+  workflow_dispatch: {}
+
+  pull_request:
+    branches: [bitfinity-archive-node]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and Test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Configure Rust Cache
+        uses: Swatinem/rust-cache@v2
+        if: ${{ (github.event.pull_request.base.ref != 'main') && (github.ref_name != 'main') }}
+        with:
+          shared-key: ${{ github.repository }}
+          save-if: ${{ github.ref_type != 'tag' }}
+
+      - name: test
+        run: |
+          cargo test bitfinity_test -- --nocapture
