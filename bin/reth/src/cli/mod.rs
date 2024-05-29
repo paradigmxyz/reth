@@ -1,9 +1,5 @@
 //! CLI definition and entrypoint to executable
 
-#[cfg(feature = "optimism")]
-use crate::commands::import_op;
-#[cfg(feature = "optimism")]
-use crate::commands::import_receipts_op;
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
@@ -197,11 +193,11 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]
-    ImportOp(import_op::ImportOpCommand),
+    ImportOp(crate::commands::import_op::ImportOpCommand),
     /// This imports RLP encoded receipts from a file.
     #[cfg(feature = "optimism")]
     #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(import_receipts_op::ImportReceiptsOpCommand),
+    ImportReceiptsOp(crate::commands::import_receipts_op::ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
