@@ -148,7 +148,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
     fn mark_invalid(&mut self, tx: &Self::Item) {
-        BestTransactions::mark_invalid(self, tx)
+        Self::mark_invalid(self, tx)
     }
 
     fn no_updates(&mut self) {

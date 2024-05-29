@@ -560,7 +560,7 @@ impl TaskSpawner for TaskExecutor {
 
     fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.metrics.inc_critical_tasks();
-        TaskExecutor::spawn_critical(self, name, fut)
+        Self::spawn_critical(self, name, fut)
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
@@ -572,7 +572,7 @@ impl TaskSpawner for TaskExecutor {
         name: &'static str,
         fut: BoxFuture<'static, ()>,
     ) -> JoinHandle<()> {
-        TaskExecutor::spawn_critical_blocking(self, name, fut)
+        Self::spawn_critical_blocking(self, name, fut)
     }
 }
 
@@ -610,7 +610,7 @@ impl TaskSpawnerExt for TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        TaskExecutor::spawn_critical_with_graceful_shutdown_signal(self, name, f)
+        Self::spawn_critical_with_graceful_shutdown_signal(self, name, f)
     }
 
     fn spawn_with_graceful_shutdown_signal<F>(
@@ -620,7 +620,7 @@ impl TaskSpawnerExt for TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        TaskExecutor::spawn_with_graceful_shutdown_signal(self, f)
+        Self::spawn_with_graceful_shutdown_signal(self, f)
     }
 }
 

@@ -37,6 +37,5 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
-    "revm-primitives/optimism",
     "reth-optimism-consensus/optimism",
 ]

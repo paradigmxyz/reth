@@ -398,38 +398,38 @@ pub enum NodeEvent {
 }
 
 impl From<NetworkEvent> for NodeEvent {
-    fn from(event: NetworkEvent) -> NodeEvent {
-        NodeEvent::Network(event)
+    fn from(event: NetworkEvent) -> Self {
+        Self::Network(event)
     }
 }
 
 impl From<PipelineEvent> for NodeEvent {
-    fn from(event: PipelineEvent) -> NodeEvent {
-        NodeEvent::Pipeline(event)
+    fn from(event: PipelineEvent) -> Self {
+        Self::Pipeline(event)
     }
 }
 
 impl From<BeaconConsensusEngineEvent> for NodeEvent {
     fn from(event: BeaconConsensusEngineEvent) -> Self {
-        NodeEvent::ConsensusEngine(event)
+        Self::ConsensusEngine(event)
     }
 }
 
 impl From<ConsensusLayerHealthEvent> for NodeEvent {
     fn from(event: ConsensusLayerHealthEvent) -> Self {
-        NodeEvent::ConsensusLayerHealth(event)
+        Self::ConsensusLayerHealth(event)
     }
 }
 
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
-        NodeEvent::Pruner(event)
+        Self::Pruner(event)
     }
 }
 
 impl From<StaticFileProducerEvent> for NodeEvent {
     fn from(event: StaticFileProducerEvent) -> Self {
-        NodeEvent::StaticFileProducer(event)
+        Self::StaticFileProducer(event)
     }
 }
 

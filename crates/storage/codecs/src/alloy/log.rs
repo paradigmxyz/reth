@@ -23,7 +23,7 @@ impl Compact for LogData {
         let (topics, new_buf) = Vec::specialized_from_compact(buf, buf.len());
         buf = new_buf;
         let (data, buf) = Bytes::from_compact(buf, buf.len());
-        let log_data = LogData::new_unchecked(topics, data);
+        let log_data = Self::new_unchecked(topics, data);
         (log_data, buf)
     }
 }
@@ -46,7 +46,7 @@ impl Compact for Log {
         buf = new_buf;
         let (log_data, new_buf) = LogData::from_compact(buf, buf.len());
         buf = new_buf;
-        let log = Log { address, data: log_data };
+        let log = Self { address, data: log_data };
         (log, buf)
     }
 }

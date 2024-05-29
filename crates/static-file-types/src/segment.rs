@@ -40,9 +40,9 @@ impl StaticFileSegment {
     /// Returns the segment as a string.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            StaticFileSegment::Headers => "headers",
-            StaticFileSegment::Transactions => "transactions",
-            StaticFileSegment::Receipts => "receipts",
+            Self::Headers => "headers",
+            Self::Transactions => "transactions",
+            Self::Receipts => "receipts",
         }
     }
 
@@ -57,18 +57,18 @@ impl StaticFileSegment {
         };
 
         match self {
-            StaticFileSegment::Headers => default_config,
-            StaticFileSegment::Transactions => default_config,
-            StaticFileSegment::Receipts => default_config,
+            Self::Headers => default_config,
+            Self::Transactions => default_config,
+            Self::Receipts => default_config,
         }
     }
 
     /// Returns the number of columns for the segment
     pub const fn columns(&self) -> usize {
         match self {
-            StaticFileSegment::Headers => 3,
-            StaticFileSegment::Transactions => 1,
-            StaticFileSegment::Receipts => 1,
+            Self::Headers => 3,
+            Self::Transactions => 1,
+            Self::Receipts => 1,
         }
     }
 
@@ -134,12 +134,12 @@ impl StaticFileSegment {
 
     /// Returns `true` if the segment is `StaticFileSegment::Headers`.
     pub const fn is_headers(&self) -> bool {
-        matches!(self, StaticFileSegment::Headers)
+        matches!(self, Self::Headers)
     }
 
     /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
     pub const fn is_receipts(&self) -> bool {
-        matches!(self, StaticFileSegment::Receipts)
+        matches!(self, Self::Receipts)
     }
 }
 
@@ -349,7 +349,7 @@ impl std::fmt::Display for SegmentRangeInclusive {
 
 impl From<RangeInclusive<u64>> for SegmentRangeInclusive {
     fn from(value: RangeInclusive<u64>) -> Self {
-        SegmentRangeInclusive { start: *value.start(), end: *value.end() }
+        Self { start: *value.start(), end: *value.end() }
     }
 }
 

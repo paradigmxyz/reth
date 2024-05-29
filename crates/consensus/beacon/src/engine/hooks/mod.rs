@@ -1,4 +1,4 @@
-use reth_interfaces::{RethError, RethResult};
+use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use std::{
     fmt,

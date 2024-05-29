@@ -26,7 +26,6 @@ alloy-rlp.workspace = true
 tracing.workspace = true
 
 # misc
-thiserror.workspace = true
 derive_more.workspace = true
 auto_impl.workspace = true
 

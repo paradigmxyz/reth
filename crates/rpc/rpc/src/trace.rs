@@ -501,7 +501,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
-        Ok(TraceApi::trace_call(self, request).await?)
+        Ok(Self::trace_call(self, request).await?)
     }
 
     /// Handler for `trace_callMany`
@@ -511,7 +511,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_call_many(self, calls, block_id).await?)
+        Ok(Self::trace_call_many(self, calls, block_id).await?)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -522,7 +522,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_raw_transaction(self, data, trace_types, block_id).await?)
+        Ok(Self::trace_raw_transaction(self, data, trace_types, block_id).await?)
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -532,7 +532,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::replay_block_transactions(self, block_id, trace_types).await?)
+        Ok(Self::replay_block_transactions(self, block_id, trace_types).await?)
     }
 
     /// Handler for `trace_replayTransaction`
@@ -542,7 +542,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::replay_transaction(self, transaction, trace_types).await?)
+        Ok(Self::replay_transaction(self, transaction, trace_types).await?)
     }
 
     /// Handler for `trace_block`
@@ -551,7 +551,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_block(self, block_id).await?)
+        Ok(Self::trace_block(self, block_id).await?)
     }
 
     /// Handler for `trace_filter`
@@ -561,7 +561,7 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
-        Ok(TraceApi::trace_filter(self, filter).await?)
+        Ok(Self::trace_filter(self, filter).await?)
     }
 
     /// Returns transaction trace at given index.
@@ -572,7 +572,7 @@ where
         indices: Vec<Index>,
     ) -> Result<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_get(self, hash, indices.into_iter().map(Into::into).collect()).await?)
+        Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect()).await?)
     }
 
     /// Handler for `trace_transaction`
@@ -581,7 +581,7 @@ where
         hash: B256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_transaction(self, hash).await?)
+        Ok(Self::trace_transaction(self, hash).await?)
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -590,13 +590,13 @@ where
         tx_hash: B256,
     ) -> Result<Option<TransactionOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_transaction_opcode_gas(self, tx_hash).await?)
+        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await?)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> Result<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_block_opcode_gas(self, block_id).await?)
+        Ok(Self::trace_block_opcode_gas(self, block_id).await?)
     }
 }
 

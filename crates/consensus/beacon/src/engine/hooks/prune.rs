@@ -7,7 +7,7 @@ use crate::{
 use futures::FutureExt;
 use metrics::Counter;
 use reth_db::database::Database;
-use reth_interfaces::{RethError, RethResult};
+use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
@@ -167,7 +167,7 @@ impl From<PrunerError> for EngineHookError {
     fn from(err: PrunerError) -> Self {
         match err {
             PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
-                EngineHookError::Internal(Box::new(err))
+                Self::Internal(Box::new(err))
             }
             PrunerError::Database(err) => RethError::Database(err).into(),
             PrunerError::Provider(err) => RethError::Provider(err).into(),

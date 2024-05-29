@@ -152,7 +152,7 @@ where
 {
     /// Returns a new cache with default limiter and hash builder.
     pub fn new(max_length: u32) -> Self {
-        LruMap(schnellru::LruMap::new(ByLength::new(max_length)))
+        Self(schnellru::LruMap::new(ByLength::new(max_length)))
     }
 }
 
@@ -162,7 +162,7 @@ where
 {
     /// Returns a new cache with [`Unlimited`] limiter and default hash builder.
     pub fn new_unlimited() -> Self {
-        LruMap(schnellru::LruMap::new(Unlimited))
+        Self(schnellru::LruMap::new(Unlimited))
     }
 }
 

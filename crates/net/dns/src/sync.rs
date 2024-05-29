@@ -157,6 +157,6 @@ pub(crate) enum ResolveKind {
 
 impl ResolveKind {
     pub(crate) fn is_link(&self) -> bool {
-        matches!(self, ResolveKind::Link)
+        matches!(self, Self::Link)
     }
 }

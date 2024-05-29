@@ -80,11 +80,6 @@ impl TransactionEvent {
     /// Returns `true` if the event is final and no more events are expected for this transaction
     /// hash.
     pub const fn is_final(&self) -> bool {
-        matches!(
-            self,
-            TransactionEvent::Replaced(_) |
-                TransactionEvent::Mined(_) |
-                TransactionEvent::Discarded
-        )
+        matches!(self, Self::Replaced(_) | Self::Mined(_) | Self::Discarded)
     }
 }

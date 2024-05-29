@@ -188,7 +188,7 @@ pub mod validate;
 
 pub mod blobstore;
 mod config;
-mod identifier;
+pub mod identifier;
 mod ordering;
 mod traits;
 

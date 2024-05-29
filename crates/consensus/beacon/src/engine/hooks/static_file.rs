@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;

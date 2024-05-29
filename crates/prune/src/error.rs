@@ -1,5 +1,5 @@
 use reth_db::DatabaseError;
-use reth_interfaces::RethError;
+use reth_errors::RethError;
 use reth_primitives::PruneSegmentError;
 use reth_provider::ProviderError;
 use thiserror::Error;
@@ -23,11 +23,9 @@ pub enum PrunerError {
 impl From<PrunerError> for RethError {
     fn from(err: PrunerError) -> Self {
         match err {
-            PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
-                RethError::other(err)
-            }
-            PrunerError::Database(err) => RethError::Database(err),
-            PrunerError::Provider(err) => RethError::Provider(err),
+            PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => Self::other(err),
+            PrunerError::Database(err) => Self::Database(err),
+            PrunerError::Provider(err) => Self::Provider(err),
         }
     }
 }

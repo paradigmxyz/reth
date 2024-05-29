@@ -38,7 +38,7 @@ impl Account {
 
     /// Makes an [Account] from [GenesisAccount] type
     pub fn from_genesis_account(value: &GenesisAccount) -> Self {
-        Account {
+        Self {
             // nonce must exist, so we default to zero when converting a genesis account
             nonce: value.nonce.unwrap_or_default(),
             balance: value.balance,
@@ -115,9 +115,9 @@ impl Compact for Bytecode {
         let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
-            0 => Bytecode(RevmBytecode::new_raw(bytes)),
+            0 => Self(RevmBytecode::new_raw(bytes)),
             1 => unreachable!("Junk data in database: checked Bytecode variant was removed"),
-            2 => Bytecode(unsafe {
+            2 => Self(unsafe {
                 RevmBytecode::new_analyzed(
                     bytes,
                     buf.read_u64::<BigEndian>().unwrap() as usize,

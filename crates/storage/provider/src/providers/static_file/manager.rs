@@ -56,7 +56,7 @@ pub enum StaticFileAccess {
 impl StaticFileAccess {
     /// Returns `true` if read-only access.
     pub const fn is_read_only(&self) -> bool {
-        matches!(self, StaticFileAccess::RO)
+        matches!(self, Self::RO)
     }
 }
 
@@ -863,7 +863,7 @@ impl StaticFileProvider {
         fetch_from_database: FD,
     ) -> ProviderResult<Option<T>>
     where
-        FS: Fn(&StaticFileProvider) -> ProviderResult<Option<T>>,
+        FS: Fn(&Self) -> ProviderResult<Option<T>>,
         FD: Fn() -> ProviderResult<Option<T>>,
     {
         // If there is, check the maximum block or transaction number of the segment.
@@ -902,7 +902,7 @@ impl StaticFileProvider {
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        FS: Fn(&StaticFileProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FS: Fn(&Self, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
         FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {

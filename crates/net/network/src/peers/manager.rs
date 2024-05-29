@@ -915,7 +915,7 @@ impl PeersManager {
 
 impl Default for PeersManager {
     fn default() -> Self {
-        PeersManager::new(Default::default())
+        Self::new(Default::default())
     }
 }
 
@@ -1002,7 +1002,7 @@ impl ConnectionInfo {
 
 impl Default for ConnectionInfo {
     fn default() -> Self {
-        ConnectionInfo {
+        Self {
             num_outbound: 0,
             num_inbound: 0,
             max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
@@ -1161,8 +1161,8 @@ impl PeerConnectionState {
     #[inline]
     fn disconnect(&mut self) {
         match self {
-            PeerConnectionState::In => *self = PeerConnectionState::DisconnectingIn,
-            PeerConnectionState::Out => *self = PeerConnectionState::DisconnectingOut,
+            Self::In => *self = Self::DisconnectingIn,
+            Self::Out => *self = Self::DisconnectingOut,
             _ => {}
         }
     }
@@ -1170,28 +1170,25 @@ impl PeerConnectionState {
     /// Returns true if this is an active incoming connection.
     #[inline]
     fn is_incoming(&self) -> bool {
-        matches!(self, PeerConnectionState::In)
+        matches!(self, Self::In)
     }
 
     /// Returns whether we're currently connected with this peer
     #[inline]
     fn is_connected(&self) -> bool {
-        matches!(
-            self,
-            PeerConnectionState::In | PeerConnectionState::Out | PeerConnectionState::PendingOut
-        )
+        matches!(self, Self::In | Self::Out | Self::PendingOut)
     }
 
     /// Returns if there's currently no connection to that peer.
     #[inline]
     fn is_unconnected(&self) -> bool {
-        matches!(self, PeerConnectionState::Idle)
+        matches!(self, Self::Idle)
     }
 
     /// Returns true if there's currently an outbound dial to that peer.
     #[inline]
     fn is_pending_out(&self) -> bool {
-        matches!(self, PeerConnectionState::PendingOut)
+        matches!(self, Self::PendingOut)
     }
 }
 
@@ -1501,7 +1498,7 @@ impl PeerBackoffDurations {
     /// Returns durations for testing.
     #[cfg(test)]
     const fn test() -> Self {
-        PeerBackoffDurations {
+        Self {
             low: Duration::from_millis(200),
             medium: Duration::from_millis(200),
             high: Duration::from_millis(200),

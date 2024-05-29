@@ -61,9 +61,9 @@ impl SyncTarget {
     /// header in [SyncTarget::Gap]
     pub fn tip(&self) -> BlockHashOrNumber {
         match self {
-            SyncTarget::Tip(tip) => (*tip).into(),
-            SyncTarget::Gap(gap) => gap.parent_hash.into(),
-            SyncTarget::TipNum(num) => (*num).into(),
+            Self::Tip(tip) => (*tip).into(),
+            Self::Gap(gap) => gap.parent_hash.into(),
+            Self::TipNum(num) => (*num).into(),
         }
     }
 }

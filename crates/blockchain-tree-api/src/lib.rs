@@ -140,17 +140,17 @@ pub enum BlockValidationKind {
 impl BlockValidationKind {
     /// Returns true if the state root should be validated if possible.
     pub fn is_exhaustive(&self) -> bool {
-        matches!(self, BlockValidationKind::Exhaustive)
+        matches!(self, Self::Exhaustive)
     }
 }
 
 impl std::fmt::Display for BlockValidationKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BlockValidationKind::Exhaustive => {
+            Self::Exhaustive => {
                 write!(f, "Exhaustive")
             }
-            BlockValidationKind::SkipStateRootValidation => {
+            Self::SkipStateRootValidation => {
                 write!(f, "SkipStateRootValidation")
             }
         }
@@ -179,22 +179,22 @@ impl CanonicalOutcome {
     /// Returns the header of the block that was made canonical.
     pub fn header(&self) -> &SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
-            CanonicalOutcome::Committed { head } => head,
+            Self::AlreadyCanonical { header, .. } => header,
+            Self::Committed { head } => head,
         }
     }
 
     /// Consumes the outcome and returns the header of the block that was made canonical.
     pub fn into_header(self) -> SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
-            CanonicalOutcome::Committed { head } => head,
+            Self::AlreadyCanonical { header, .. } => header,
+            Self::Committed { head } => head,
         }
     }
 
     /// Returns true if the block was already canonical.
     pub fn is_already_canonical(&self) -> bool {
-        matches!(self, CanonicalOutcome::AlreadyCanonical { .. })
+        matches!(self, Self::AlreadyCanonical { .. })
     }
 }
 
@@ -241,7 +241,7 @@ impl BlockAttachment {
     /// Returns `true` if the block is canonical or a descendant of the canonical head.
     #[inline]
     pub const fn is_canonical(&self) -> bool {
-        matches!(self, BlockAttachment::Canonical)
+        matches!(self, Self::Canonical)
     }
 }
 

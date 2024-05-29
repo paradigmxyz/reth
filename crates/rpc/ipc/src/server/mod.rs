@@ -284,7 +284,7 @@ pub struct RpcServiceBuilder<L>(tower::ServiceBuilder<L>);
 
 impl Default for RpcServiceBuilder<Identity> {
     fn default() -> Self {
-        RpcServiceBuilder(tower::ServiceBuilder::new())
+        Self(tower::ServiceBuilder::new())
     }
 }
 
@@ -577,7 +577,7 @@ pub struct Builder<HttpMiddleware, RpcMiddleware> {
 
 impl Default for Builder<Identity, Identity> {
     fn default() -> Self {
-        Builder {
+        Self {
             settings: Settings::default(),
             id_provider: Arc::new(RandomIntegerIdProvider),
             rpc_middleware: RpcServiceBuilder::new(),

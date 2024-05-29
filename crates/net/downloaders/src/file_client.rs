@@ -74,7 +74,7 @@ impl FileClient {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
-        FileClient::from_file(file).await
+        Self::from_file(file).await
     }
 
     /// Initialize the [`FileClient`] with a file directly.
