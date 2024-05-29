@@ -6641,11 +6641,11 @@ name = "reth-consensus-common"
 version = "0.2.0-beta.7"
 dependencies = [
  "mockall",
+ "rand 0.8.5",
  "reth-consensus",
- "reth-interfaces",
  "reth-optimism-primitives",
  "reth-primitives",
- "reth-provider",
+ "reth-storage-api",
 ]
 
 [[package]]
