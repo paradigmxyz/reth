@@ -226,12 +226,12 @@ pub struct TransactionFetcherMetrics {
 /// accumulator value passed as a mutable reference.
 #[macro_export]
 macro_rules! duration_metered_exec {
-    ($code:expr, $acc:ident) => {{
-        let start = Instant::now();
+    ($code:expr, $acc:expr) => {{
+        let start = std::time::Instant::now();
 
         let res = $code;
 
-        *$acc += start.elapsed();
+        $acc += start.elapsed();
 
         res
     }};
@@ -321,6 +321,10 @@ pub struct EthRequestHandlerMetrics {
 
     /// Number of GetNodeData requests received
     pub(crate) eth_node_data_requests_received_total: Counter,
+
+    /// Duration in seconds of call to poll
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
+    pub(crate) acc_duration_poll_eth_req_handler: Gauge,
 }
 
 /// Eth67 announcement metrics, track entries by TxType

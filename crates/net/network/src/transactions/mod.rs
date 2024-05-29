@@ -1231,9 +1231,8 @@ where
         // this can potentially validate >200k transactions. More if the message size
         // is bigger than the soft limit on a `PooledTransactions` response which is
         // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
-        let acc = &mut poll_durations.acc_pending_imports;
         let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_pending_imports,
             "net::tx",
             "Batched pool imports stream",
             DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
@@ -1242,9 +1241,8 @@ where
         );
 
         // Advance network/peer related events (update peers map).
-        let acc = &mut poll_durations.acc_network_events;
         let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_network_events,
             "net::tx",
             "Network events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1261,9 +1259,8 @@ where
         // We don't expect this buffer to be large, since only pending transactions are
         // emitted here.
         let mut new_txs = Vec::new();
-        let acc = &mut poll_durations.acc_imported_txns;
         let maybe_more_pending_txns = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_imported_txns,
             "net::tx",
             "Pending transactions stream",
             DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
@@ -1284,9 +1281,8 @@ where
         // this can potentially queue >200k transactions for insertion to pool. More
         // if the message size is bigger than the soft limit on a `PooledTransactions`
         // response which is 2 MiB.
-        let acc = &mut poll_durations.acc_fetch_events;
         let maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_fetch_events,
             "net::tx",
             "Transaction fetch events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1308,9 +1304,8 @@ where
         // validated until they are inserted into the pool, this can potentially queue
         // >13k transactions for insertion to pool. More if the message size is bigger
         // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
-        let acc = &mut poll_durations.acc_tx_events;
         let maybe_more_tx_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_tx_events,
             "net::tx",
             "Network transaction events stream",
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
@@ -1322,20 +1317,18 @@ where
         // capacity for this (fetch txns).
         //
         // Sends at most one request.
-        let acc = &mut poll_durations.acc_pending_fetch;
         duration_metered_exec!(
             {
                 if this.has_capacity_for_fetching_pending_hashes() {
                     this.on_fetch_hashes_pending_fetch();
                 }
             },
-            acc
+            poll_durations.acc_pending_fetch
         );
 
         // Advance commands (propagate/fetch/serve txns).
-        let acc = &mut poll_durations.acc_cmds;
         let maybe_more_commands = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_cmds,
             "net::tx",
             "Commands channel",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
