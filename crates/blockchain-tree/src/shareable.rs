@@ -18,10 +18,7 @@ use reth_provider::{
     ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::trace;
 
 /// Shareable blockchain tree that is behind a `RwLock`

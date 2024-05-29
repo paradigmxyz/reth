@@ -13,7 +13,7 @@ use reth_provider::{
     CanonStateSubscriptions, FullBundleStateDataProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 /// A `BlockchainTree` that does nothing.
 ///
