@@ -119,16 +119,17 @@ impl StaticFileProviderRW {
     ///
     /// Check [NippyJarWriter::ensure_file_consistency] for more on healing.
     pub fn ensure_file_consistency(&mut self, read_only: bool) -> ProviderResult<()> {
-        let err = |err: NippyJarError| ProviderError::NippyJar(err.to_string());
+        let inconsistent_error = || {
+            ProviderError::NippyJar(
+                "Inconsistent state found. Restart the node to heal.".to_string(),
+            )
+        };
 
         self.writer.ensure_file_consistency(read_only).map_err(|error| {
             if matches!(error, NippyJarError::InconsistentState) {
-                return ProviderError::NippyJar(
-                    "Inconsistent state found. Start the node to heal or run a manual unwind."
-                        .to_string(),
-                )
+                return inconsistent_error()
             }
-            err(error)
+            ProviderError::NippyJar(error.to_string())
         })?;
 
         // If we have lost rows, we need to update the [SegmentHeader]
@@ -139,10 +140,13 @@ impl StaticFileProviderRW {
         };
         let pruned_rows = expected_rows - self.writer.rows() as u64;
         if pruned_rows > 0 {
+            if read_only {
+                return Err(inconsistent_error())
+            }
             self.user_header_mut().prune(pruned_rows);
         }
 
-        self.writer.commit().map_err(err)?;
+        self.writer.commit().map_err(|error| ProviderError::NippyJar(error.to_string()))?;
 
         // Updates the [SnapshotProvider] manager
         self.update_index()?;
