@@ -652,6 +652,11 @@ impl StaticFileProviderRW {
         provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
     }
 
+    /// Helper function to access [`SegmentHeader`].
+    pub fn user_header(&self) -> &SegmentHeader {
+        self.writer.user_header()
+    }
+
     /// Helper function to access a mutable reference to [`SegmentHeader`].
     pub fn user_header_mut(&mut self) -> &mut SegmentHeader {
         self.writer.user_header_mut()
@@ -661,12 +666,6 @@ impl StaticFileProviderRW {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
-    }
-
-    /// Helper function to access [`SegmentHeader`].
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn user_header(&self) -> &SegmentHeader {
-        self.writer.user_header()
     }
 
     /// Helper function to override block range for testing.
