@@ -1649,11 +1649,10 @@ impl OptimismGenesisInfo {
                 .as_object()
                 .and_then(|obj| obj.get("eip1559Denominator").and_then(|value| value.as_u64()))
         });
-        let base_fee_params = if eip1559_elasticity.is_some() && eip1559_denominator.is_some() {
-            BaseFeeParams::new(
-                eip1559_denominator.unwrap() as u128,
-                eip1559_elasticity.unwrap() as u128,
-            )
+        let base_fee_params = if let (Some(elasticity), Some(denominator)) =
+            (eip1559_elasticity, eip1559_denominator)
+        {
+            BaseFeeParams::new(denominator as u128, elasticity as u128)
         } else {
             BaseFeeParams::ethereum()
         };
