@@ -1,0 +1,50 @@
+[package]
+name = "kona-exex"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-primitives.workspace = true
+reth-execution-errors.workspace = true
+reth-provider.workspace = true
+reth-revm.workspace = true
+reth-tracing.workspace = true
+reth-transaction-pool.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-evm.workspace = true
+reth-payload-builder.workspace = true
+reth-rpc-types.workspace = true
+reth-node-ethereum.workspace = true
+
+# alloy
+alloy-rlp.workspace = true
+alloy-eips.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-client.workspace = true
+alloy-rpc-types.workspace = true
+alloy-transport-http.workspace = true
+alloy-transport = { workspace = true, default-features = false }
+alloy-consensus = { workspace = true, default-features = false, features = ["kzg"] }
+
+# other
+tracing.workspace = true
+async-trait.workspace = true
+url.workspace = true
+reqwest.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+
+# kona
+anyhow = { version = "1.0.86", default-features = false }
+kona-derive = { git = "https://github.com/ethereum-optimism/kona", branch = "main", features = ["online", "serde", "k256"] }
+
+[dev-dependencies]
+reth-testing-utils.workspace = true
+secp256k1.workspace = true
