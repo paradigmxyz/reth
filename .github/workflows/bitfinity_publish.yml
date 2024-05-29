@@ -1,4 +1,4 @@
-name: 'Deploy Bitfinity Reth to GHCR'
+name: 'Bitfinity - Deploy Reth to GHCR'
 
 on:
   workflow_dispatch: {}

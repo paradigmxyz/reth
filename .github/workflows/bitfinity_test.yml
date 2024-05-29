@@ -1,4 +1,4 @@
-name: 'Deploy Bitfinity Reth to GHCR'
+name: 'Bitfinity - Tests'
 
 on:
   workflow_dispatch: {}
