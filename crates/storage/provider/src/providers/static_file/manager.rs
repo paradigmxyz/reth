@@ -36,7 +36,7 @@ use std::{
     sync::{mpsc, Arc},
 };
 use strum::IntoEnumIterator;
-use tracing::warn;
+use tracing::{info, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
@@ -563,6 +563,11 @@ impl StaticFileProvider {
                         if indices.last_tx_num() <= highest_tx {
                             break
                         }
+                    } else {
+                        // If the block body indices can not be found, then it means that static
+                        // files is ahead of database, and the `ensure_invariants` check will fix
+                        // it by comparing with stage checkpoints.
+                        break
                     }
                     if last_block == 0 {
                         break
@@ -575,22 +580,22 @@ impl StaticFileProvider {
             }
 
             if let Some(unwind) = match segment {
-                StaticFileSegment::Headers => self.check_invariants::<_, tables::Headers>(
+                StaticFileSegment::Headers => self.ensure_invariants::<_, tables::Headers>(
                     provider,
-                    StageId::Headers,
+                    segment,
                     highest_block,
                     highest_block,
                 )?,
                 StaticFileSegment::Transactions => self
-                    .check_invariants::<_, tables::Transactions>(
+                    .ensure_invariants::<_, tables::Transactions>(
                         provider,
-                        StageId::Bodies,
+                        segment,
                         highest_tx,
                         highest_block,
                     )?,
-                StaticFileSegment::Receipts => self.check_invariants::<_, tables::Receipts>(
+                StaticFileSegment::Receipts => self.ensure_invariants::<_, tables::Receipts>(
                     provider,
-                    StageId::Execution,
+                    segment,
                     highest_tx,
                     highest_block,
                 )?,
@@ -602,12 +607,19 @@ impl StaticFileProvider {
         Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
-    /// Check invariants for each corresponding table and static file segment. See
-    /// [Self::check_consistency] for more.
-    fn check_invariants<TX: DbTx, T: Table<Key = u64>>(
+    /// Check invariants for each corresponding table and static file segment:
+    ///
+    /// * the corresponding database table should overlap or have continuity in their keys
+    ///   ([TxNumber] or [BlockNumber]).
+    /// * its highest block should match the stage checkpoint block number if it's equal or higher
+    ///   than the corresponding database table last entry.
+    ///   * If the checkpoint block is higher, then request a pipeline unwind to the static file
+    ///     block.
+    ///   * If the checkpoint block is lower, then heal by removing rows from the static file.
+    fn ensure_invariants<TX: DbTx, T: Table<Key = u64>>(
         &self,
         provider: &DatabaseProvider<TX>,
-        stage_id: StageId,
+        segment: StaticFileSegment,
         highest_static_file_entry: Option<u64>,
         highest_static_file_block: Option<BlockNumber>,
     ) -> ProviderResult<Option<BlockNumber>> {
@@ -634,10 +646,43 @@ impl StaticFileProvider {
 
         // If static file entry is ahead of the database entries, then ensure the checkpoint block
         // number matches.
-        let block_number =
-            provider.get_stage_checkpoint(stage_id)?.unwrap_or_default().block_number;
-        if block_number != highest_static_file_block {
-            return Ok(Some(block_number.min(highest_static_file_block)));
+        let checkpoint_block_number = provider
+            .get_stage_checkpoint(match segment {
+                StaticFileSegment::Headers => StageId::Headers,
+                StaticFileSegment::Transactions => StageId::Bodies,
+                StaticFileSegment::Receipts => StageId::Execution,
+            })?
+            .unwrap_or_default()
+            .block_number;
+
+        // If the checkpoint is ahead, then we lost static file data. May have been an interrupted
+        // unwind that committed the static file changes or data corruption.
+        if checkpoint_block_number > highest_static_file_block {
+            return Ok(Some(highest_static_file_block));
+        }
+
+        // If the checkpoint is behind, then we failed to do a database commit **but committed** to
+        // static files. All we need to do is to unwind those rows.
+        if checkpoint_block_number < highest_static_file_block {
+            info!(
+                target: "reth::providers",
+                ?segment,
+                from = highest_static_file_block,
+                to = checkpoint_block_number,
+                "Unwinding static file segment."
+            );
+            let mut writer = self.latest_writer(segment)?;
+            if segment.is_headers() {
+                writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
+            } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                let number = highest_static_file_entry - block.last_tx_num();
+                if segment.is_receipts() {
+                    writer.prune_receipts(number, checkpoint_block_number)?;
+                } else {
+                    writer.prune_transactions(number, checkpoint_block_number)?;
+                }
+            }
+            writer.commit()?;
         }
 
         Ok(None)
