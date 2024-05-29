@@ -995,8 +995,15 @@ impl HeaderProvider for StaticFileProvider {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?
-            .header_by_number(num)
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+            .and_then(|provider| provider.header_by_number(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -1009,8 +1016,15 @@ impl HeaderProvider for StaticFileProvider {
     }
 
     fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?
-            .header_td_by_number(num)
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+            .and_then(|provider| provider.header_td_by_number(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
@@ -1023,8 +1037,15 @@ impl HeaderProvider for StaticFileProvider {
     }
 
     fn sealed_header(&self, num: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)?
-            .sealed_header(num)
+        self.get_segment_provider_from_block(StaticFileSegment::Headers, num, None)
+            .and_then(|provider| provider.sealed_header(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 
     fn sealed_headers_while(
@@ -1066,8 +1087,15 @@ impl BlockHashReader for StaticFileProvider {
 
 impl ReceiptProvider for StaticFileProvider {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)?
-            .receipt(num)
+        self.get_segment_provider_from_transaction(StaticFileSegment::Receipts, num, None)
+            .and_then(|provider| provider.receipt(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileTx(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -1171,16 +1199,30 @@ impl TransactionsProvider for StaticFileProvider {
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
-        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)?
-            .transaction_by_id(num)
+        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
+            .and_then(|provider| provider.transaction_by_id(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileTx(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 
     fn transaction_by_id_no_hash(
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)?
-            .transaction_by_id_no_hash(num)
+        self.get_segment_provider_from_transaction(StaticFileSegment::Transactions, num, None)
+            .and_then(|provider| provider.transaction_by_id_no_hash(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileTx(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
