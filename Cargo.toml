@@ -22,7 +22,6 @@ members = [
     "crates/evm/execution-errors",
     "crates/evm/execution-types",
     "crates/exex/",
-    "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
     "crates/net/common/",
@@ -253,7 +252,6 @@ reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex" }
 reth-fs-util = { path = "crates/fs-util" }
-reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }

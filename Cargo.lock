@@ -2700,7 +2700,6 @@ dependencies = [
  "rayon",
  "reth-db",
  "reth-evm-ethereum",
- "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-stages",
@@ -6671,7 +6670,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-fs-util",
- "reth-interfaces",
  "reth-libmdbx",
  "reth-metrics",
  "reth-nippy-jar",
@@ -7105,18 +7103,6 @@ version = "0.2.0-beta.7"
 dependencies = [
  "serde_json",
  "thiserror",
-]
-
-[[package]]
-name = "reth-interfaces"
-version = "0.2.0-beta.7"
-dependencies = [
- "reth-blockchain-tree-api",
- "reth-errors",
- "reth-execution-errors",
- "reth-network-p2p",
- "reth-storage-errors",
- "reth-testing-utils",
 ]
 
 [[package]]
@@ -7834,7 +7820,6 @@ dependencies = [
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-evm-ethereum",
- "reth-interfaces",
  "reth-ipc",
  "reth-metrics",
  "reth-network-api",
