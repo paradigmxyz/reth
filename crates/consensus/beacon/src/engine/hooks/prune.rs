@@ -99,7 +99,7 @@ impl<DB: Database + 'static> PruneHook<DB> {
                             let _ = tx.send((pruner, result));
                         }),
                     );
-                    self.metrics.runs.increment(1);
+                    self.metrics.runs_total.increment(1);
                     self.pruner_state = PrunerState::Running(rx);
 
                     Some(EngineHookEvent::Started)
@@ -160,7 +160,7 @@ enum PrunerState<DB> {
 #[metrics(scope = "consensus.engine.prune")]
 struct Metrics {
     /// The number of times the pruner was run.
-    runs: Counter,
+    runs_total: Counter,
 }
 
 impl From<PrunerError> for EngineHookError {
