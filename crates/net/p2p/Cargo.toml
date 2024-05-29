@@ -34,9 +34,7 @@ parking_lot = { workspace = true, optional = true }
 reth-consensus = { workspace = true, features = ["test-utils"] }
 
 parking_lot.workspace = true
-rand.workspace = true
 tokio = { workspace = true, features = ["full"] }
-secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
 test-utils = ["reth-consensus/test-utils", "parking_lot"]
