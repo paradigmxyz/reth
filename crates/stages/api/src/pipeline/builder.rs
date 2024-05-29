@@ -50,7 +50,7 @@ where
     /// Set the target block.
     ///
     /// Once this block is reached, the pipeline will stop.
-pub const fn with_max_block(mut self, block: BlockNumber) -> Self {
+    pub const fn with_max_block(mut self, block: BlockNumber) -> Self {
         self.max_block = Some(block);
         self
     }

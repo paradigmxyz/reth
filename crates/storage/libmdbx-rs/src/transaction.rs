@@ -612,7 +612,7 @@ pub struct CommitLatency(ffi::MDBX_commit_latency);
 
 impl CommitLatency {
     /// Create a new CommitLatency with zero'd inner struct `ffi::MDBX_commit_latency`.
-pub(crate) const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         unsafe { Self(std::mem::zeroed()) }
     }
 
@@ -626,56 +626,56 @@ impl CommitLatency {
     /// Duration of preparation (commit child transactions, update
     /// sub-databases records and cursors destroying).
     #[inline]
-pub const fn preparation(&self) -> Duration {
+    pub const fn preparation(&self) -> Duration {
         Self::time_to_duration(self.0.preparation)
     }
 
     /// Duration of GC update by wall clock.
     #[inline]
-pub const fn gc_wallclock(&self) -> Duration {
+    pub const fn gc_wallclock(&self) -> Duration {
         Self::time_to_duration(self.0.gc_wallclock)
     }
 
     /// Duration of internal audit if enabled.
     #[inline]
-pub const fn audit(&self) -> Duration {
+    pub const fn audit(&self) -> Duration {
         Self::time_to_duration(self.0.audit)
     }
 
     /// Duration of writing dirty/modified data pages to a filesystem,
     /// i.e. the summary duration of a `write()` syscalls during commit.
     #[inline]
-pub const fn write(&self) -> Duration {
+    pub const fn write(&self) -> Duration {
         Self::time_to_duration(self.0.write)
     }
 
     /// Duration of syncing written data to the disk/storage, i.e.
     /// the duration of a `fdatasync()` or a `msync()` syscall during commit.
     #[inline]
-pub const fn sync(&self) -> Duration {
+    pub const fn sync(&self) -> Duration {
         Self::time_to_duration(self.0.sync)
     }
 
     /// Duration of transaction ending (releasing resources).
     #[inline]
-pub const fn ending(&self) -> Duration {
+    pub const fn ending(&self) -> Duration {
         Self::time_to_duration(self.0.ending)
     }
 
     /// The total duration of a commit.
     #[inline]
-pub const fn whole(&self) -> Duration {
+    pub const fn whole(&self) -> Duration {
         Self::time_to_duration(self.0.whole)
     }
 
     /// User-mode CPU time spent on GC update.
     #[inline]
-pub const fn gc_cputime(&self) -> Duration {
+    pub const fn gc_cputime(&self) -> Duration {
         Self::time_to_duration(self.0.gc_cputime)
     }
 
     #[inline]
-const fn time_to_duration(time: u32) -> Duration {
+    const fn time_to_duration(time: u32) -> Duration {
         Duration::from_nanos(time as u64 * (1_000_000_000 / 65_536))
     }
 }
@@ -693,7 +693,7 @@ mod tests {
     const fn assert_send_sync<T: Send + Sync>() {}
 
     #[allow(dead_code)]
-const fn test_txn_send_sync() {
+    const fn test_txn_send_sync() {
         assert_send_sync::<Transaction<RO>>();
         assert_send_sync::<Transaction<RW>>();
     }

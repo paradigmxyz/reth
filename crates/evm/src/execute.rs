@@ -149,7 +149,7 @@ pub struct BlockExecutionInput<'a, Block> {
 
 impl<'a, Block> BlockExecutionInput<'a, Block> {
     /// Creates a new input.
-pub const fn new(block: &'a Block, total_difficulty: U256) -> Self {
+    pub const fn new(block: &'a Block, total_difficulty: U256) -> Self {
         Self { block, total_difficulty }
     }
 }

@@ -74,12 +74,12 @@ pub struct UnauthedP2PStream<S> {
 
 impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
-pub const fn new(inner: S) -> Self {
+    pub const fn new(inner: S) -> Self {
         Self { inner }
     }
 
     /// Returns a reference to the inner stream.
-pub const fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 }
@@ -275,7 +275,7 @@ impl<S> P2PStream<S> {
     }
 
     /// Returns a reference to the inner stream.
-pub const fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 
@@ -292,7 +292,7 @@ pub const fn inner(&self) -> &S {
     ///
     /// This includes all the shared capabilities that were negotiated during the handshake and
     /// their offsets based on the number of messages of each capability.
-pub const fn shared_capabilities(&self) -> &SharedCapabilities {
+    pub const fn shared_capabilities(&self) -> &SharedCapabilities {
         &self.shared_capabilities
     }
 
@@ -663,7 +663,7 @@ pub enum P2PMessage {
 
 impl P2PMessage {
     /// Gets the [`P2PMessageID`] for the given message.
-pub const fn message_id(&self) -> P2PMessageID {
+    pub const fn message_id(&self) -> P2PMessageID {
         match self {
             Self::Hello(_) => P2PMessageID::Hello,
             Self::Disconnect(_) => P2PMessageID::Disconnect,

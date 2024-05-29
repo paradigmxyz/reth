@@ -259,7 +259,7 @@ impl Discv4 {
     }
 
     /// Returns the address of the UDP socket.
-pub const fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
@@ -1977,7 +1977,7 @@ struct LookupTargetRotator {
 
 impl LookupTargetRotator {
     /// Returns a rotator that always returns the local target.
-const fn local_only() -> Self {
+    const fn local_only() -> Self {
         Self { interval: 1, counter: 0 }
     }
 }

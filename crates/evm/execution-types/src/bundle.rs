@@ -58,7 +58,7 @@ pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>
 
 impl BundleStateWithReceipts {
     /// Create Bundle State.
-pub const fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
+    pub const fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
         Self { bundle, receipts, first_block }
     }
 
@@ -101,7 +101,7 @@ pub const fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumb
     }
 
     /// Return revm bundle state.
-pub const fn state(&self) -> &BundleState {
+    pub const fn state(&self) -> &BundleState {
         &self.bundle
     }
 
@@ -199,7 +199,7 @@ pub const fn state(&self) -> &BundleState {
     }
 
     /// Returns reference to receipts.
-pub const fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts {
         &self.receipts
     }
 
@@ -225,7 +225,7 @@ pub const fn receipts(&self) -> &Receipts {
     }
 
     /// Return first block of the bundle
-pub const fn first_block(&self) -> BlockNumber {
+    pub const fn first_block(&self) -> BlockNumber {
         self.first_block
     }
 

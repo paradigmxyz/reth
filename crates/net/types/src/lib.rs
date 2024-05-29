@@ -150,17 +150,17 @@ impl<T> From<(PeerId, T)> for WithPeerId<T> {
 
 impl<T> WithPeerId<T> {
     /// Wraps the value with the peerid.
-pub const fn new(peer: PeerId, value: T) -> Self {
+    pub const fn new(peer: PeerId, value: T) -> Self {
         Self(peer, value)
     }
 
     /// Get the peer id
-pub const fn peer_id(&self) -> PeerId {
+    pub const fn peer_id(&self) -> PeerId {
         self.0
     }
 
     /// Get the underlying data
-pub const fn data(&self) -> &T {
+    pub const fn data(&self) -> &T {
         &self.1
     }
 

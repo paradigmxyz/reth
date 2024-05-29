@@ -61,7 +61,7 @@ impl StreamCodec {
     }
 
     /// New custom stream codec
-pub const fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
+    pub const fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
         Self { incoming_separator, outgoing_separator }
     }
 }

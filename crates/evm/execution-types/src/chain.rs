@@ -62,7 +62,7 @@ impl Chain {
     }
 
     /// Get the blocks in this chain.
-pub const fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
+    pub const fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
         &self.blocks
     }
 
@@ -77,7 +77,7 @@ pub const fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
     }
 
     /// Get cached trie updates for this chain.
-pub const fn trie_updates(&self) -> Option<&TrieUpdates> {
+    pub const fn trie_updates(&self) -> Option<&TrieUpdates> {
         self.trie_updates.as_ref()
     }
 
@@ -87,7 +87,7 @@ pub const fn trie_updates(&self) -> Option<&TrieUpdates> {
     }
 
     /// Get post state of this chain
-pub const fn state(&self) -> &BundleStateWithReceipts {
+    pub const fn state(&self) -> &BundleStateWithReceipts {
         &self.state
     }
 
@@ -141,7 +141,7 @@ pub const fn state(&self) -> &BundleStateWithReceipts {
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-pub const fn inner(&self) -> (ChainBlocks<'_>, &BundleStateWithReceipts) {
+    pub const fn inner(&self) -> (ChainBlocks<'_>, &BundleStateWithReceipts) {
         (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
     }
 

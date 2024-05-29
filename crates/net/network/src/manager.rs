@@ -137,7 +137,7 @@ impl<C> NetworkManager<C> {
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
     ///
     /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
-pub const fn handle(&self) -> &NetworkHandle {
+    pub const fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
 
@@ -148,7 +148,7 @@ pub const fn handle(&self) -> &NetworkHandle {
     }
 
     /// Returns the secret key used for authenticating sessions.
-pub const fn secret_key(&self) -> SecretKey {
+    pub const fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
     }
 
@@ -313,12 +313,12 @@ where
     }
 
     /// Create a [`NetworkBuilder`] to configure all components of the network
-pub const fn into_builder(self) -> NetworkBuilder<C, (), ()> {
+    pub const fn into_builder(self) -> NetworkBuilder<C, (), ()> {
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
-pub const fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
     }
 

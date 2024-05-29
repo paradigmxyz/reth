@@ -45,7 +45,7 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
         &self.root
     }
 
-pub(crate) const fn link(&self) -> &LinkEntry<K> {
+    pub(crate) const fn link(&self) -> &LinkEntry<K> {
         &self.link
     }
 
@@ -156,7 +156,7 @@ pub(crate) enum ResolveKind {
 // === impl ResolveKind ===
 
 impl ResolveKind {
-pub(crate) const fn is_link(&self) -> bool {
+    pub(crate) const fn is_link(&self) -> bool {
         matches!(self, Self::Link)
     }
 }

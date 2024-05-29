@@ -40,7 +40,7 @@ impl BanList {
     }
 
     /// Creates a new ban list that bans the given peers and ips with an optional timeout.
-pub const fn new_with_timeout(
+    pub const fn new_with_timeout(
         banned_peers: HashMap<PeerId, Option<Instant>>,
         banned_ips: HashMap<IpAddr, Option<Instant>>,
     ) -> Self {

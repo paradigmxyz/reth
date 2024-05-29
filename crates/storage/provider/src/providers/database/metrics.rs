@@ -65,7 +65,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-const fn as_str(&self) -> &'static str {
+    const fn as_str(&self) -> &'static str {
         match self {
             Self::InsertStorageHashing => "insert storage hashing",
             Self::InsertAccountHashing => "insert account hashing",

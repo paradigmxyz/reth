@@ -390,12 +390,12 @@ impl Discv5 {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Returns the RLPx [`IpMode`] of the local node.
-pub const fn ip_mode(&self) -> IpMode {
+    pub const fn ip_mode(&self) -> IpMode {
         self.rlpx_ip_mode
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
-pub const fn fork_key(&self) -> Option<&[u8]> {
+    pub const fn fork_key(&self) -> Option<&[u8]> {
         self.fork_key
     }
 }

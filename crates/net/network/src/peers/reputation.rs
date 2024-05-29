@@ -122,7 +122,7 @@ pub(crate) struct ReputationChange(Reputation);
 impl ReputationChange {
     /// Helper type for easier conversion
     #[inline]
-pub(crate) const fn as_i32(self) -> Reputation {
+    pub(crate) const fn as_i32(self) -> Reputation {
         self.0
     }
 }

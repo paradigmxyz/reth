@@ -16,7 +16,7 @@ pub struct Receipts {
 }
 
 impl Receipts {
-pub const fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }

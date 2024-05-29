@@ -221,7 +221,7 @@ pub enum EthMessage {
 
 impl EthMessage {
     /// Returns the message's ID.
-pub const fn message_id(&self) -> EthMessageID {
+    pub const fn message_id(&self) -> EthMessageID {
         match self {
             Self::Status(_) => EthMessageID::Status,
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
@@ -306,7 +306,7 @@ pub enum EthBroadcastMessage {
 
 impl EthBroadcastMessage {
     /// Returns the message's ID.
-pub const fn message_id(&self) -> EthMessageID {
+    pub const fn message_id(&self) -> EthMessageID {
         match self {
             Self::NewBlock(_) => EthMessageID::NewBlock,
             Self::Transactions(_) => EthMessageID::Transactions,

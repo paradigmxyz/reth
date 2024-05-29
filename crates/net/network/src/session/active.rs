@@ -685,7 +685,7 @@ impl InflightRequest {
 
     /// Returns true if we're still waiting for a response
     #[inline]
-const fn is_waiting(&self) -> bool {
+    const fn is_waiting(&self) -> bool {
         matches!(self.request, RequestState::Waiting(_))
     }
 

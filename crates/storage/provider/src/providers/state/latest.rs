@@ -26,7 +26,7 @@ pub struct LatestStateProviderRef<'b, TX: DbTx> {
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-pub const fn new(tx: &'b TX, static_file_provider: StaticFileProvider) -> Self {
+    pub const fn new(tx: &'b TX, static_file_provider: StaticFileProvider) -> Self {
         Self { tx, static_file_provider }
     }
 }
@@ -130,7 +130,7 @@ pub struct LatestStateProvider<TX: DbTx> {
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-pub const fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
+    pub const fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
         Self { db, static_file_provider }
     }
 
@@ -150,7 +150,7 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-const fn assert_latest_state_provider<T: DbTx>() {
+    const fn assert_latest_state_provider<T: DbTx>() {
         assert_state_provider::<LatestStateProvider<T>>();
     }
 }

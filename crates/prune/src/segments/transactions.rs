@@ -13,7 +13,7 @@ pub struct Transactions {
 }
 
 impl Transactions {
-pub const fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }

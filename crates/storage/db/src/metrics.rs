@@ -248,7 +248,7 @@ enum Labels {
 
 impl Labels {
     /// Converts each label variant into its corresponding string representation.
-pub(crate) const fn as_str(&self) -> &'static str {
+    pub(crate) const fn as_str(&self) -> &'static str {
         match self {
             Self::Table => "table",
             Self::TransactionMode => "mode",

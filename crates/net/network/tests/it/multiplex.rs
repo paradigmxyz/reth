@@ -59,7 +59,7 @@ mod proto {
         }
 
         /// Returns the protocol for the `test` protocol.
-pub const fn protocol() -> Protocol {
+        pub const fn protocol() -> Protocol {
             Protocol::new(Self::capability(), 4)
         }
 

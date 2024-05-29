@@ -82,7 +82,7 @@ pub struct TxEip4844 {
 
 impl TxEip4844 {
     /// Returns the effective gas price for the given `base_fee`.
-pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+    pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match base_fee {
             None => self.max_fee_per_gas,
             Some(base_fee) => {
@@ -244,7 +244,7 @@ pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
     }
 
     /// Get transaction type
-pub(crate) const fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Eip4844
     }
 

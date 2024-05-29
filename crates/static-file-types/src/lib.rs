@@ -36,7 +36,7 @@ pub struct HighestStaticFiles {
 
 impl HighestStaticFiles {
     /// Returns the highest static file if it exists for a segment
-pub const fn highest(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+    pub const fn highest(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         match segment {
             StaticFileSegment::Headers => self.headers,
             StaticFileSegment::Transactions => self.transactions,

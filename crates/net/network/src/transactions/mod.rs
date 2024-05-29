@@ -1485,7 +1485,7 @@ enum TransactionSource {
 
 impl TransactionSource {
     /// Whether the transaction were sent as broadcast.
-const fn is_broadcast(&self) -> bool {
+    const fn is_broadcast(&self) -> bool {
         matches!(self, Self::Broadcast)
     }
 }

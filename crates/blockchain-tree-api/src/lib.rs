@@ -139,7 +139,7 @@ pub enum BlockValidationKind {
 
 impl BlockValidationKind {
     /// Returns true if the state root should be validated if possible.
-pub const fn is_exhaustive(&self) -> bool {
+    pub const fn is_exhaustive(&self) -> bool {
         matches!(self, Self::Exhaustive)
     }
 }
@@ -177,7 +177,7 @@ pub enum CanonicalOutcome {
 
 impl CanonicalOutcome {
     /// Returns the header of the block that was made canonical.
-pub const fn header(&self) -> &SealedHeader {
+    pub const fn header(&self) -> &SealedHeader {
         match self {
             Self::AlreadyCanonical { header, .. } => header,
             Self::Committed { head } => head,
@@ -193,7 +193,7 @@ pub const fn header(&self) -> &SealedHeader {
     }
 
     /// Returns true if the block was already canonical.
-pub const fn is_already_canonical(&self) -> bool {
+    pub const fn is_already_canonical(&self) -> bool {
         matches!(self, Self::AlreadyCanonical { .. })
     }
 }

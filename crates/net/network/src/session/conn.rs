@@ -38,7 +38,7 @@ pub enum EthRlpxConnection {
 impl EthRlpxConnection {
     /// Returns the negotiated ETH version.
     #[inline]
-pub(crate) const fn version(&self) -> EthVersion {
+    pub(crate) const fn version(&self) -> EthVersion {
         match self {
             Self::EthOnly(conn) => conn.version(),
             Self::Satellite(conn) => conn.primary().version(),

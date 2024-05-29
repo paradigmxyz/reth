@@ -20,7 +20,7 @@ pub enum BlockErrorKind {
 
 impl BlockErrorKind {
     /// Returns `true` if the error is a state root error.
-pub const fn is_state_root_error(&self) -> bool {
+    pub const fn is_state_root_error(&self) -> bool {
         match self {
             Self::Validation(err) => err.is_state_root_error(),
             Self::Execution(err) => err.is_state_root_error(),
@@ -134,7 +134,7 @@ pub enum StageError {
 
 impl StageError {
     /// If the error is fatal the pipeline will stop.
-pub const fn is_fatal(&self) -> bool {
+    pub const fn is_fatal(&self) -> bool {
         matches!(
             self,
             Self::Database(_) |

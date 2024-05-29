@@ -154,7 +154,7 @@ impl ConfigBuilder {
 
     /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
-pub const fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+    pub const fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
         self.fork = Some((fork_key, fork_id));
         self
     }
@@ -162,7 +162,7 @@ pub const fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
     /// Sets the tcp socket to advertise in the local [`Enr`](discv5::enr::Enr). The IP address of
     /// this socket will overwrite the discovery address of the same IP version, if one is
     /// configured.
-pub const fn tcp_socket(mut self, socket: SocketAddr) -> Self {
+    pub const fn tcp_socket(mut self, socket: SocketAddr) -> Self {
         self.tcp_socket = socket;
         self
     }
@@ -176,20 +176,20 @@ pub const fn tcp_socket(mut self, socket: SocketAddr) -> Self {
 
     /// Sets the interval at which to run lookup queries, in order to fill kbuckets. Lookup queries
     /// are done periodically at the given interval for the whole run of the program.
-pub const fn lookup_interval(mut self, seconds: u64) -> Self {
+    pub const fn lookup_interval(mut self, seconds: u64) -> Self {
         self.lookup_interval = Some(seconds);
         self
     }
 
     /// Sets the interval at which to run boost lookup queries at start up. Queries will be started
     /// at this interval for the configured number of times after start up.
-pub const fn bootstrap_lookup_interval(mut self, seconds: u64) -> Self {
+    pub const fn bootstrap_lookup_interval(mut self, seconds: u64) -> Self {
         self.bootstrap_lookup_interval = Some(seconds);
         self
     }
 
     /// Sets the the number of times at which to run boost lookup queries to bootstrap the node.
-pub const fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
+    pub const fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
         self.bootstrap_lookup_countdown = Some(counts);
         self
     }
@@ -310,7 +310,7 @@ impl Config {
 
     /// Returns the RLPx (TCP) socket contained in the [`discv5::Config`]. This socket will be
     /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
-pub const fn rlpx_socket(&self) -> &SocketAddr {
+    pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
     }
 }

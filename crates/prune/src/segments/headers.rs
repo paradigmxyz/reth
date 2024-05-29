@@ -25,7 +25,7 @@ pub struct Headers {
 }
 
 impl Headers {
-pub const fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }

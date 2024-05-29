@@ -94,7 +94,7 @@ where
 
     /// Return the minimum block number achieved by
     /// any stage during the execution of the pipeline.
-pub const fn minimum_block_number(&self) -> Option<u64> {
+    pub const fn minimum_block_number(&self) -> Option<u64> {
         self.progress.minimum_block_number
     }
 

@@ -23,7 +23,7 @@ enum MetricField<'a> {
 }
 
 impl<'a> MetricField<'a> {
-const fn field(&self) -> &'a Field {
+    const fn field(&self) -> &'a Field {
         match self {
             MetricField::Included(Metric { field, .. }) | MetricField::Skipped(field) => field,
         }

@@ -198,7 +198,7 @@ impl StageCheckpoint {
     }
 
     /// Sets the block number.
-pub const fn with_block_number(mut self, block_number: BlockNumber) -> Self {
+    pub const fn with_block_number(mut self, block_number: BlockNumber) -> Self {
         self.block_number = block_number;
         self
     }

@@ -41,7 +41,7 @@ impl fmt::Debug for IncCounterOnDrop {
 
 impl IncCounterOnDrop {
     /// Creates a new instance of `IncCounterOnDrop` with the given counter.
-pub const fn new(counter: Counter) -> Self {
+    pub const fn new(counter: Counter) -> Self {
         Self(counter)
     }
 }

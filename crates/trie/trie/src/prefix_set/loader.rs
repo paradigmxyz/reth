@@ -19,7 +19,7 @@ pub struct PrefixSetLoader<'a, TX>(&'a TX);
 
 impl<'a, TX> PrefixSetLoader<'a, TX> {
     /// Create a new loader.
-pub const fn new(tx: &'a TX) -> Self {
+    pub const fn new(tx: &'a TX) -> Self {
         Self(tx)
     }
 }

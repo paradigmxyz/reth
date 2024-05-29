@@ -102,7 +102,7 @@ impl TxLegacy {
     }
 
     /// Get transaction type
-pub(crate) const fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Legacy
     }
 

@@ -110,7 +110,7 @@ where
     ///
     /// Note: this is only used internally by the [PayloadBuilderService] to manage the payload
     /// building flow See [PayloadBuilderService::poll] for implementation details.
-pub const fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand<Engine>>) -> Self {
+    pub const fn new(to_service: mpsc::UnboundedSender<PayloadServiceCommand<Engine>>) -> Self {
         Self { to_service }
     }
 
