@@ -515,8 +515,7 @@ impl StaticFileProvider {
         has_receipt_pruning: bool,
     ) -> ProviderResult<Option<PipelineTarget>> {
         let mut unwind_target: Option<BlockNumber> = None;
-        let mut update_unwind_target = |new_target: Option<BlockNumber>| {
-            let new_target = new_target.unwrap_or_default();
+        let mut update_unwind_target = |new_target: BlockNumber| {
             if let Some(target) = unwind_target.as_mut() {
                 *target = (*target).min(new_target);
             } else {
@@ -548,7 +547,7 @@ impl StaticFileProvider {
             // interruption.
             let mut highest_block = self.get_highest_static_file_block(segment);
             if initial_highest_block != highest_block {
-                update_unwind_target(highest_block);
+                update_unwind_target(highest_block.unwrap_or_default());
             }
 
             // Only applies to transaction-based static files. (Receipts & Transactions)
@@ -576,7 +575,7 @@ impl StaticFileProvider {
                     last_block -= 1;
 
                     highest_block = Some(last_block);
-                    update_unwind_target(highest_block);
+                    update_unwind_target(last_block);
                 }
             }
 
@@ -601,7 +600,7 @@ impl StaticFileProvider {
                     highest_block,
                 )?,
             } {
-                update_unwind_target(Some(unwind));
+                update_unwind_target(unwind);
             }
         }
 
