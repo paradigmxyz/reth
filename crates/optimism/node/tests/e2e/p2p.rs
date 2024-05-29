@@ -1,5 +1,5 @@
 use crate::utils::{advance_chain, setup};
-use reth_interfaces::blockchain_tree::error::BlockchainTreeError;
+use reth::blockchain_tree::error::BlockchainTreeError;
 use reth_rpc_types::engine::PayloadStatusEnum;
 use std::sync::Arc;
 use tokio::sync::Mutex;
