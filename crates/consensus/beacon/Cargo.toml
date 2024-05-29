@@ -13,9 +13,10 @@ workspace = true
 [dependencies]
 # reth
 reth-ethereum-consensus.workspace = true
+reth-blockchain-tree-api.workspace = true
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
 reth-stages-api.workspace = true
+reth-errors.workspace = true
 reth-db.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
@@ -26,6 +27,8 @@ reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
+reth-network-p2p.workspace = true
+
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -46,12 +49,12 @@ schnellru.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-consensus = { workspace = true, features = ["test-utils"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-blockchain-tree = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true, features = ["test-utils"] }
+reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-rpc-types-compat.workspace = true
 reth-rpc.workspace = true
 reth-tracing.workspace = true
