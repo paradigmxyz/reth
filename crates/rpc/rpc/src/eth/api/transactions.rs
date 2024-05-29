@@ -23,8 +23,8 @@ use reth_primitives::{
     B256, U256,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider,
-    ReceiptProvider, StateProviderBox, StateProviderFactory, TransactionsProvider,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ReceiptProvider,
+    StateProviderBox, StateProviderFactory, TransactionsProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -83,7 +83,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &(impl BlockIdReader + BlockReader);
+    fn provider(&self) -> &impl BlockReaderIdExt;
 
     /// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state
     /// changes.
@@ -598,7 +598,7 @@ where
     Network: NetworkInfo + 'static,
     EvmConfig: ConfigureEvm,
 {
-    fn provider(&self) -> &(impl BlockIdReader + BlockReader) {
+    fn provider(&self) -> &impl BlockReaderIdExt {
         &self.inner.provider
     }
 

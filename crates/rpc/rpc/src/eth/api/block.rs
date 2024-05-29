@@ -28,7 +28,7 @@ pub trait EthBlocks {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &(impl BlockIdReader + BlockReader);
+    fn provider(&self) -> &impl BlockReaderIdExt;
 
     /// Helper function for `eth_getBlockReceipts`.
     ///
@@ -106,7 +106,7 @@ where
     Provider: BlockReaderIdExt + BlockReader + ReceiptProvider,
 {
     #[inline]
-    fn provider(&self) -> &(impl BlockIdReader + BlockReader) {
+    fn provider(&self) -> &impl BlockReaderIdExt {
         self.inner.provider()
     }
 }

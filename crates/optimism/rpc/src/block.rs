@@ -1,7 +1,7 @@
 //! Loads and formats OP block RPC response.   
 
 use reth_primitives::TransactionMeta;
-use reth_provider::{BlockIdReader, BlockReader, ChainSpecProvider, ReceiptProvider};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider};
 use reth_rpc::eth::{
     api::{
         block::EthBlocks,
@@ -18,10 +18,10 @@ use super::OptimismApi;
 impl<Provider, Pool, Network, EvmConfig> EthBlocks
     for OptimismApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockIdReader + BlockReader + ReceiptProvider + ChainSpecProvider,
+    Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     #[inline]
-    fn provider(&self) -> &(impl BlockIdReader + BlockReader) {
+    fn provider(&self) -> &impl BlockReaderIdExt {
         self.inner.provider()
     }
 
