@@ -190,16 +190,15 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
 mod tests {
     use super::*;
     use mockall::mock;
-    use reth_interfaces::{
-        provider::ProviderResult,
-        test_utils::generators::{self, Rng},
-    };
+    use rand::Rng;
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
         BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
         Withdrawal, Withdrawals, U256,
     };
-    use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
+    use reth_storage_api::{
+        errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
+    };
     use std::ops::RangeBounds;
 
     mock! {
@@ -300,7 +299,7 @@ mod tests {
     }
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = generators::rng();
+        let mut rng = rand::thread_rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
