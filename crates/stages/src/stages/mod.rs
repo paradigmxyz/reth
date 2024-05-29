@@ -316,7 +316,7 @@ mod tests {
         db: &TestStageDB, // replace DbType with your actual database type
         stage_id: StageId,
         checkpoint_block_number: BlockNumber,
-        expected: PipelineTarget,
+        expected: Option<PipelineTarget>,
     ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         provider_rw
@@ -328,7 +328,7 @@ mod tests {
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
-            Ok(Some(expected))
+            Ok(expected)
         );
     }
 
@@ -398,11 +398,25 @@ mod tests {
     fn test_consistency_checkpoints() {
         let db = seed_data(90).unwrap();
 
-        save_checkpoint_and_check(&db, StageId::Headers, 91, PipelineTarget::Unwind(89));
+        // When a checkpoint is behind, we delete data from static files.
+        save_checkpoint_and_check(&db, StageId::Bodies, 87, None);
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Transactions),
+            Some(87)
+        );
 
-        save_checkpoint_and_check(&db, StageId::Bodies, 87, PipelineTarget::Unwind(87));
+        save_checkpoint_and_check(&db, StageId::Execution, 86, None);
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(86)
+        );
 
-        save_checkpoint_and_check(&db, StageId::Execution, 50, PipelineTarget::Unwind(50));
+        // When a checkpoint is ahead, we request a pipeline unwind.
+        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(89)));
     }
 
     #[test]
