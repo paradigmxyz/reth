@@ -87,8 +87,7 @@ impl PartialOrd for ForkFilterKey {
 impl Ord for ForkFilterKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (Self::Block(a), Self::Block(b)) |
-            (Self::Time(a), Self::Time(b)) => a.cmp(b),
+            (Self::Block(a), Self::Block(b)) | (Self::Time(a), Self::Time(b)) => a.cmp(b),
             (Self::Block(_), Self::Time(_)) => Ordering::Less,
             _ => Ordering::Greater,
         }

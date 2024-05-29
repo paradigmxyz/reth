@@ -592,8 +592,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         let start = Instant::now();
         let res =
-            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
-                .await;
+            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
         self.inner.metrics.latency.new_payload_v3.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
         Ok(res?)
@@ -608,8 +607,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
         let res =
-            Self::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root)
-                .await;
+            Self::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root).await;
         self.inner.metrics.latency.new_payload_v4.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
         Ok(res?)
@@ -626,8 +624,7 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         let start = Instant::now();
-        let res =
-            Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
+        let res = Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -642,8 +639,7 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         let start = Instant::now();
-        let res =
-            Self::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
+        let res = Self::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -659,8 +655,7 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         let start = Instant::now();
-        let res =
-            Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
+        let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)

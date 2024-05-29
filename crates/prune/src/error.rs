@@ -23,9 +23,7 @@ pub enum PrunerError {
 impl From<PrunerError> for RethError {
     fn from(err: PrunerError) -> Self {
         match err {
-            PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
-                Self::other(err)
-            }
+            PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => Self::other(err),
             PrunerError::Database(err) => Self::Database(err),
             PrunerError::Provider(err) => Self::Provider(err),
         }

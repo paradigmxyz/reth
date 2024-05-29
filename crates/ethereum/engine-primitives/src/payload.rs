@@ -101,10 +101,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, .. } = value;
 
-        Self {
-            block_value: fees,
-            execution_payload: convert_block_to_payload_field_v2(block),
-        }
+        Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
     }
 }
 

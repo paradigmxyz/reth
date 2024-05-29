@@ -168,9 +168,7 @@ impl ForkchoiceStateHash {
 impl AsRef<B256> for ForkchoiceStateHash {
     fn as_ref(&self) -> &B256 {
         match self {
-            Self::Head(h) |
-            Self::Safe(h) |
-            Self::Finalized(h) => h,
+            Self::Head(h) | Self::Safe(h) | Self::Finalized(h) => h,
         }
     }
 }

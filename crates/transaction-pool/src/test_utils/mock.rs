@@ -291,8 +291,7 @@ impl MockTransaction {
     /// Returns a new EIP4844 transaction with a provided sidecar
     pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecar) -> Self {
         let mut transaction = Self::eip4844();
-        if let Self::Eip4844 { sidecar: ref mut existing_sidecar, .. } = &mut transaction
-        {
+        if let Self::Eip4844 { sidecar: ref mut existing_sidecar, .. } = &mut transaction {
             *existing_sidecar = sidecar;
         }
         transaction
@@ -352,17 +351,14 @@ impl MockTransaction {
     pub const fn get_priority_fee(&self) -> Option<u128> {
         match self {
             Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } => {
-                Some(*max_priority_fee_per_gas)
-            }
+            Self::Eip4844 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
             _ => None,
         }
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
-        if let Self::Eip1559 { max_fee_per_gas, .. } |
-        Self::Eip4844 { max_fee_per_gas, .. } = self
+        if let Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } = self
         {
             *max_fee_per_gas = val;
         }
@@ -378,8 +374,9 @@ impl MockTransaction {
     /// Gets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub const fn get_max_fee(&self) -> Option<u128> {
         match self {
-            Self::Eip1559 { max_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
+            Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } => {
+                Some(*max_fee_per_gas)
+            }
             _ => None,
         }
     }
@@ -400,8 +397,7 @@ impl MockTransaction {
     /// Sets the gas price for the transaction.
     pub fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
-            Self::Legacy { gas_price, .. } |
-            Self::Eip2930 { gas_price, .. } => {
+            Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => {
                 *gas_price = val;
             }
             Self::Eip1559 { max_fee_per_gas, max_priority_fee_per_gas, .. } |
@@ -416,20 +412,11 @@ impl MockTransaction {
     /// Sets the gas price for the transaction.
     pub fn with_gas_price(mut self, val: u128) -> Self {
         match self {
-            Self::Legacy { ref mut gas_price, .. } |
-            Self::Eip2930 { ref mut gas_price, .. } => {
+            Self::Legacy { ref mut gas_price, .. } | Self::Eip2930 { ref mut gas_price, .. } => {
                 *gas_price = val;
             }
-            Self::Eip1559 {
-                ref mut max_fee_per_gas,
-                ref mut max_priority_fee_per_gas,
-                ..
-            } |
-            Self::Eip4844 {
-                ref mut max_fee_per_gas,
-                ref mut max_priority_fee_per_gas,
-                ..
-            } => {
+            Self::Eip1559 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } |
+            Self::Eip4844 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } => {
                 *max_fee_per_gas = val;
                 *max_priority_fee_per_gas = val;
             }
@@ -440,10 +427,10 @@ impl MockTransaction {
     /// Gets the gas price for the transaction.
     pub const fn get_gas_price(&self) -> u128 {
         match self {
-            Self::Legacy { gas_price, .. } |
-            Self::Eip2930 { gas_price, .. } => *gas_price,
-            Self::Eip1559 { max_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
+            Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } => {
+                *max_fee_per_gas
+            }
         }
     }
 
@@ -617,10 +604,10 @@ impl PoolTransaction for MockTransaction {
 
     fn max_fee_per_gas(&self) -> u128 {
         match self {
-            Self::Legacy { gas_price, .. } |
-            Self::Eip2930 { gas_price, .. } => *gas_price,
-            Self::Eip1559 { max_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
+            Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } => {
+                *max_fee_per_gas
+            }
         }
     }
 
@@ -637,9 +624,7 @@ impl PoolTransaction for MockTransaction {
         match self {
             Self::Legacy { .. } | Self::Eip2930 { .. } => None,
             Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } => {
-                Some(*max_priority_fee_per_gas)
-            }
+            Self::Eip4844 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
         }
     }
 
@@ -679,8 +664,7 @@ impl PoolTransaction for MockTransaction {
     /// Returns the priority fee or gas price based on the transaction type.
     fn priority_fee_or_price(&self) -> u128 {
         match self {
-            Self::Legacy { gas_price, .. } |
-            Self::Eip2930 { gas_price, .. } => *gas_price,
+            Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
             Self::Eip1559 { max_priority_fee_per_gas, .. } |
             Self::Eip4844 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
         }
@@ -689,9 +673,7 @@ impl PoolTransaction for MockTransaction {
     /// Returns the transaction kind associated with the transaction.
     fn kind(&self) -> TxKind {
         match self {
-            Self::Legacy { to, .. } |
-            Self::Eip1559 { to, .. } |
-            Self::Eip2930 { to, .. } => *to,
+            Self::Legacy { to, .. } | Self::Eip1559 { to, .. } | Self::Eip2930 { to, .. } => *to,
             Self::Eip4844 { to, .. } => TxKind::Call(*to),
         }
     }

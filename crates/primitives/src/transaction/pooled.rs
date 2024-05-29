@@ -87,12 +87,7 @@ impl PooledTransactionsElement {
             // If the transaction is an EIP-4844 transaction...
             TransactionSigned { transaction: Transaction::Eip4844(tx), signature, hash } => {
                 // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
-                Self::BlobTransaction(BlobTransaction {
-                    transaction: tx,
-                    signature,
-                    hash,
-                    sidecar,
-                })
+                Self::BlobTransaction(BlobTransaction { transaction: tx, signature, hash, sidecar })
             }
             // If the transaction is not EIP-4844, return an error with the original
             // transaction.
@@ -114,9 +109,9 @@ impl PooledTransactionsElement {
     /// Reference to transaction hash. Used to identify transaction.
     pub fn hash(&self) -> &TxHash {
         match self {
-            Self::Legacy { hash, .. } |
-            Self::Eip2930 { hash, .. } |
-            Self::Eip1559 { hash, .. } => hash,
+            Self::Legacy { hash, .. } | Self::Eip2930 { hash, .. } | Self::Eip1559 { hash, .. } => {
+                hash
+            }
             Self::BlobTransaction(tx) => &tx.hash,
         }
     }
@@ -587,8 +582,7 @@ impl TryFrom<TransactionSigned> for PooledTransactionsElement {
     type Error = TransactionConversionError;
 
     fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
-        Self::try_from_broadcast(tx)
-            .map_err(|_| TransactionConversionError::UnsupportedForP2P)
+        Self::try_from_broadcast(tx).map_err(|_| TransactionConversionError::UnsupportedForP2P)
     }
 }
 

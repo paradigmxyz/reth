@@ -359,11 +359,7 @@ impl Arbitrary for NewPooledTransactionHashes68 {
 
                 (types_vec, sizes_vec, hashes_vec)
             })
-            .prop_map(|(types, sizes, hashes)| Self {
-                types,
-                sizes,
-                hashes,
-            })
+            .prop_map(|(types, sizes, hashes)| Self { types, sizes, hashes })
             .boxed()
     }
 
