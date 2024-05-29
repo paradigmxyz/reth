@@ -1,5 +1,5 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
+    Address, Bytes, GotExpected, Header, Requests, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
@@ -12,6 +12,16 @@ use std::ops::Deref;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+
+// HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
+// a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
+// requests as withdrawals
+#[cfg(any(feature = "arbitrary", test))]
+prop_compose! {
+    pub fn empty_requests_strategy()(_ in 0..1) -> Option<Requests> {
+        None
+    }
+}
 
 /// Ethereum full block.
 ///
@@ -45,6 +55,9 @@ pub struct Block {
         proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
     pub withdrawals: Option<Withdrawals>,
+    /// Block requests.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
+    pub requests: Option<Requests>,
 }
 
 impl Block {
@@ -55,6 +68,7 @@ impl Block {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
@@ -67,6 +81,7 @@ impl Block {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
@@ -257,14 +272,17 @@ pub struct SealedBlock {
         proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
     pub withdrawals: Option<Withdrawals>,
+    /// Block requests.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
+    pub requests: Option<Requests>,
 }
 
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
     pub fn new(header: SealedHeader, body: BlockBody) -> Self {
-        let BlockBody { transactions, ommers, withdrawals } = body;
-        Self { header, body: transactions, ommers, withdrawals }
+        let BlockBody { transactions, ommers, withdrawals, requests } = body;
+        Self { header, body: transactions, ommers, withdrawals, requests }
     }
 
     /// Header hash.
@@ -288,6 +306,7 @@ impl SealedBlock {
                 transactions: self.body,
                 ommers: self.ommers,
                 withdrawals: self.withdrawals,
+                requests: self.requests,
             },
         )
     }
@@ -343,6 +362,7 @@ impl SealedBlock {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
@@ -514,16 +534,21 @@ pub struct BlockBody {
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
+    /// Requests in the block.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
+    pub requests: Option<Requests>,
 }
 
 impl BlockBody {
     /// Create a [`Block`] from the body and its header.
+    // todo(onbjerg): should this not just take `self`? its used in one place
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,
             body: self.transactions.clone(),
             ommers: self.ommers.clone(),
             withdrawals: self.withdrawals.clone(),
+            requests: self.requests.clone(),
         }
     }
 
@@ -543,6 +568,12 @@ impl BlockBody {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
     }
 
+    /// Calculate the requests root for the block body, if requests exist. If there are no
+    /// requests, this will return `None`.
+    pub fn calculate_requests_root(&self) -> Option<B256> {
+        self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
+    }
+
     /// Calculates a heuristic for the in-memory size of the [BlockBody].
     #[inline]
     pub fn size(&self) -> usize {
@@ -558,7 +589,12 @@ impl BlockBody {
 
 impl From<Block> for BlockBody {
     fn from(block: Block) -> Self {
-        Self { transactions: block.body, ommers: block.ommers, withdrawals: block.withdrawals }
+        Self {
+            transactions: block.body,
+            ommers: block.ommers,
+            withdrawals: block.withdrawals,
+            requests: block.requests,
+        }
     }
 }
 
@@ -601,6 +637,9 @@ pub fn generate_valid_header(
         header.excess_blob_gas = None;
         header.parent_beacon_block_root = None;
     }
+
+    // todo(onbjerg): adjust this for eip-7589
+    header.requests_root = None;
 
     header
 }

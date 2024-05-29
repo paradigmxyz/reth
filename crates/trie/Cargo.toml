@@ -14,8 +14,9 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
+reth-execution-errors.workspace = true
 reth-db.workspace = true
+
 revm.workspace = true
 
 # alloy
@@ -25,7 +26,6 @@ alloy-rlp.workspace = true
 tracing.workspace = true
 
 # misc
-thiserror.workspace = true
 derive_more.workspace = true
 auto_impl.workspace = true
 
@@ -41,6 +41,7 @@ triehash = { version = "0.8", optional = true }
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-errors.workspace = true
 
 # trie
 triehash = "0.8"

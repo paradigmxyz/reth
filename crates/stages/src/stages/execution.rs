@@ -273,7 +273,8 @@ where
             }
         }
         let time = Instant::now();
-        let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } =
+            executor.finalize();
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
@@ -560,7 +561,7 @@ impl ExecutionStageThresholds {
 
 impl From<ExecutionConfig> for ExecutionStageThresholds {
     fn from(config: ExecutionConfig) -> Self {
-        ExecutionStageThresholds {
+        Self {
             max_blocks: config.max_blocks,
             max_changes: config.max_changes,
             max_cumulative_gas: config.max_cumulative_gas,
@@ -654,7 +655,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_interfaces::executor::BlockValidationError;
+    use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,

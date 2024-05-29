@@ -71,7 +71,7 @@ impl Compact for MerkleCheckpoint {
         }
 
         let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (MerkleCheckpoint { target_block, last_account_key, walker_stack, state }, buf)
+        (Self { target_block, last_account_key, walker_stack, state }, buf)
     }
 }
 

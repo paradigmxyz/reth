@@ -11,19 +11,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-consensus.workspace = true
+reth-blockchain-tree-api.workspace = true
 reth-execution-errors.workspace = true
-reth-fs-util.workspace = true
-reth-network-api.workspace = true
 reth-network-p2p.workspace = true
-reth-primitives.workspace = true
 reth-storage-errors.workspace = true
+reth-errors.workspace = true
 
-# misc
-auto_impl.workspace = true
-thiserror.workspace = true
-
+reth-testing-utils = { workspace = true, optional = true }
 
 [features]
-test-utils = ["reth-consensus/test-utils", "reth-network-p2p/test-utils"]
+test-utils = ["reth-network-p2p/test-utils", "reth-testing-utils"]
 clap = ["reth-storage-errors/clap"]

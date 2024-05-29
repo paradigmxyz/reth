@@ -20,7 +20,6 @@ reth-provider.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
-reth-interfaces.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true

@@ -4,8 +4,8 @@
 
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use futures::SinkExt;
-use reth_interfaces::test_utils::{generators, generators::random_block_range};
 use reth_primitives::{BlockBody, SealedHeader, B256};
+use reth_testing_utils::{generators, generators::random_block_range};
 use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
 use tokio::{fs::File, io::AsyncSeekExt};
 use tokio_util::codec::FramedWrite;
@@ -33,6 +33,7 @@ pub(crate) fn generate_bodies(
                     transactions: block.body,
                     ommers: block.ommers,
                     withdrawals: block.withdrawals,
+                    requests: block.requests,
                 },
             )
         })

@@ -472,17 +472,17 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PayloadServiceCommand::BuildNewPayload(f0, f1) => {
+            Self::BuildNewPayload(f0, f1) => {
                 f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
             }
-            PayloadServiceCommand::BestPayload(f0, f1) => {
+            Self::BestPayload(f0, f1) => {
                 f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
             }
-            PayloadServiceCommand::PayloadAttributes(f0, f1) => {
+            Self::PayloadAttributes(f0, f1) => {
                 f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
             }
-            PayloadServiceCommand::Resolve(f0, _f1) => f.debug_tuple("Resolve").field(&f0).finish(),
-            PayloadServiceCommand::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
+            Self::Resolve(f0, _f1) => f.debug_tuple("Resolve").field(&f0).finish(),
+            Self::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
         }
     }
 }

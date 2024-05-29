@@ -138,10 +138,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         match self {
-            MerkleStage::Execution { .. } => StageId::MerkleExecute,
-            MerkleStage::Unwind => StageId::MerkleUnwind,
+            Self::Execution { .. } => StageId::MerkleExecute,
+            Self::Unwind => StageId::MerkleUnwind,
             #[cfg(any(test, feature = "test-utils"))]
-            MerkleStage::Both { .. } => StageId::Other("MerkleBoth"),
+            Self::Both { .. } => StageId::Other("MerkleBoth"),
         }
     }
 
@@ -152,13 +152,13 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let threshold = match self {
-            MerkleStage::Unwind => {
+            Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            MerkleStage::Execution { clean_threshold } => *clean_threshold,
+            Self::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
-            MerkleStage::Both { clean_threshold } => *clean_threshold,
+            Self::Both { clean_threshold } => *clean_threshold,
         };
 
         let range = input.next_block_range();
@@ -292,7 +292,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
         let range = input.unwind_block_range();
-        if matches!(self, MerkleStage::Execution { .. }) {
+        if matches!(self, Self::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
             return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
@@ -368,16 +368,16 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
+    };
+    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_testing_utils::{
         generators,
         generators::{
             random_block, random_block_range, random_changeset_range, random_contract_account_range,
         },
     };
-    use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
-    };
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
@@ -516,7 +516,7 @@ mod tests {
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
-            let SealedBlock { header, body, ommers, withdrawals } = random_block(
+            let SealedBlock { header, body, ommers, withdrawals, requests } = random_block(
                 &mut rng,
                 stage_progress,
                 preblocks.last().map(|b| b.hash()),
@@ -531,7 +531,8 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed_head = SealedBlock { header: header.seal_slow(), body, ommers, withdrawals };
+            let sealed_head =
+                SealedBlock { header: header.seal_slow(), body, ommers, withdrawals, requests };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];

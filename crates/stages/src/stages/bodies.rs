@@ -13,10 +13,7 @@ use reth_db::{
     tables,
     transaction::DbTxMut,
 };
-use reth_interfaces::{
-    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-    provider::ProviderResult,
-};
+use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     StaticFileSegment, TxNumber,
@@ -28,6 +25,7 @@ use reth_provider::{
 use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
 
 use reth_stages_api::Stage;
+use reth_storage_errors::provider::ProviderResult;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
@@ -127,6 +125,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
+        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
 
         // Get id for the next tx_num of zero if there are no transactions.
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
@@ -238,6 +237,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
                         }
                     }
+
+                    // Write requests if any
+                    if let Some(requests) = block.requests {
+                        if !requests.0.is_empty() {
+                            requests_cursor.append(block_number, requests)?;
+                        }
+                    }
                 }
                 BlockResponse::Empty(_) => {}
             };
@@ -273,6 +279,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
+        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
         // Cursors to unwind transitions
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
@@ -290,6 +297,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Delete the withdrawals entry if any
             if withdrawals_cursor.seek_exact(number)?.is_some() {
                 withdrawals_cursor.delete_current()?;
+            }
+
+            // Delete the requests entry if any
+            if requests_cursor.seek_exact(number)?.is_some() {
+                requests_cursor.delete_current()?;
             }
 
             // Delete all transaction to block values.
@@ -621,18 +633,12 @@ mod tests {
             transaction::{DbTx, DbTxMut},
             DatabaseEnv,
         };
-        use reth_interfaces::{
-            p2p::{
-                bodies::{
-                    downloader::{BodyDownloader, BodyDownloaderResult},
-                    response::BlockResponse,
-                },
-                error::DownloadResult,
+        use reth_network_p2p::{
+            bodies::{
+                downloader::{BodyDownloader, BodyDownloaderResult},
+                response::BlockResponse,
             },
-            test_utils::{
-                generators,
-                generators::{random_block_range, random_signed_tx},
-            },
+            error::DownloadResult,
         };
         use reth_primitives::{
             BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader,
@@ -643,6 +649,10 @@ mod tests {
             StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
+        use reth_testing_utils::{
+            generators,
+            generators::{random_block_range, random_signed_tx},
+        };
 
         use crate::{
             stages::bodies::BodyStage,
@@ -663,6 +673,7 @@ mod tests {
                     transactions: block.body.clone(),
                     ommers: block.ommers.clone(),
                     withdrawals: block.withdrawals.clone(),
+                    requests: block.requests.clone(),
                 },
             )
         }
@@ -941,6 +952,7 @@ mod tests {
                             body: body.transactions,
                             ommers: body.ommers,
                             withdrawals: body.withdrawals,
+                            requests: body.requests,
                         }));
                     }
 

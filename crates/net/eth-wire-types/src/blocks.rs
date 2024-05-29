@@ -79,13 +79,13 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
             ))
         }
 
-        Ok(BlockHeaders(headers))
+        Ok(Self(headers))
     }
 }
 
 impl From<Vec<Header>> for BlockHeaders {
     fn from(headers: Vec<Header>) -> Self {
-        BlockHeaders(headers)
+        Self(headers)
     }
 }
 
@@ -100,7 +100,7 @@ pub struct GetBlockBodies(
 
 impl From<Vec<B256>> for GetBlockBodies {
     fn from(hashes: Vec<B256>) -> Self {
-        GetBlockBodies(hashes)
+        Self(hashes)
     }
 }
 
@@ -122,7 +122,7 @@ pub struct BlockBodies(
 
 impl From<Vec<BlockBody>> for BlockBodies {
     fn from(bodies: Vec<BlockBody>) -> Self {
-        BlockBodies(bodies)
+        Self(bodies)
     }
 }
 
@@ -296,6 +296,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         }.encode(&mut data);
@@ -330,6 +331,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         };
@@ -430,9 +432,11 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };
@@ -504,9 +508,11 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };

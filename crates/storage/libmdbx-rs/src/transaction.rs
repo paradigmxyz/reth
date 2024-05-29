@@ -502,7 +502,7 @@ impl Transaction<RO> {
 
 impl Transaction<RW> {
     /// Begins a new nested transaction inside of this transaction.
-    pub fn begin_nested_txn(&mut self) -> Result<Transaction<RW>> {
+    pub fn begin_nested_txn(&mut self) -> Result<Self> {
         if self.inner.env.is_write_map() {
             return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
         }
@@ -514,7 +514,7 @@ impl Transaction<RW> {
                 sender: tx,
             });
 
-            rx.recv().unwrap().map(|ptr| Transaction::new_from_ptr(self.env().clone(), ptr.0))
+            rx.recv().unwrap().map(|ptr| Self::new_from_ptr(self.env().clone(), ptr.0))
         })?
     }
 }

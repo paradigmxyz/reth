@@ -19,10 +19,10 @@ impl ServerKind {
     /// Returns the appropriate flags for each variant.
     pub fn flags(&self) -> &'static str {
         match self {
-            ServerKind::Http(_) => "--http.port",
-            ServerKind::WS(_) => "--ws.port",
-            ServerKind::WsHttp(_) => "--ws.port and --http.port",
-            ServerKind::Auth(_) => "--authrpc.port",
+            Self::Http(_) => "--http.port",
+            Self::WS(_) => "--ws.port",
+            Self::WsHttp(_) => "--ws.port and --http.port",
+            Self::Auth(_) => "--authrpc.port",
         }
     }
 }
@@ -30,10 +30,10 @@ impl ServerKind {
 impl std::fmt::Display for ServerKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ServerKind::Http(addr) => write!(f, "{addr} (HTTP-RPC server)"),
-            ServerKind::WS(addr) => write!(f, "{addr} (WS-RPC server)"),
-            ServerKind::WsHttp(addr) => write!(f, "{addr} (WS-HTTP-RPC server)"),
-            ServerKind::Auth(addr) => write!(f, "{addr} (AUTH server)"),
+            Self::Http(addr) => write!(f, "{addr} (HTTP-RPC server)"),
+            Self::WS(addr) => write!(f, "{addr} (WS-RPC server)"),
+            Self::WsHttp(addr) => write!(f, "{addr} (WS-HTTP-RPC server)"),
+            Self::Auth(addr) => write!(f, "{addr} (AUTH server)"),
         }
     }
 }
@@ -73,11 +73,11 @@ pub enum RpcError {
 
 impl RpcError {
     /// Converts an [io::Error] to a more descriptive `RpcError`.
-    pub fn server_error(io_error: io::Error, kind: ServerKind) -> RpcError {
+    pub fn server_error(io_error: io::Error, kind: ServerKind) -> Self {
         if io_error.kind() == ErrorKind::AddrInUse {
-            return RpcError::AddressAlreadyInUse { kind, error: io_error }
+            return Self::AddressAlreadyInUse { kind, error: io_error }
         }
-        RpcError::ServerError { kind, error: io_error }
+        Self::ServerError { kind, error: io_error }
     }
 }
 

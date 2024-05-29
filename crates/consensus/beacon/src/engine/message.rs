@@ -1,7 +1,7 @@
 use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
 use futures::{future::Either, FutureExt};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_payload_primitives::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,

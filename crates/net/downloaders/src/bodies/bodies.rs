@@ -4,7 +4,7 @@ use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
 use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{
         client::BodiesClient,
         downloader::{BodyDownloader, BodyDownloaderResult},
@@ -505,7 +505,7 @@ impl BodiesDownloaderBuilder {
     /// Creates a new [BodiesDownloaderBuilder] with configurations based on the provided
     /// [BodiesConfig].
     pub fn new(config: BodiesConfig) -> Self {
-        BodiesDownloaderBuilder::default()
+        Self::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
             .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
@@ -606,9 +606,9 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
+    use reth_testing_utils::{generators, generators::random_block_range};
     use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -655,7 +655,12 @@ mod tests {
             .map(|block| {
                 (
                     block.hash(),
-                    BlockBody { transactions: block.body, ommers: block.ommers, withdrawals: None },
+                    BlockBody {
+                        transactions: block.body,
+                        ommers: block.ommers,
+                        withdrawals: None,
+                        requests: None,
+                    },
                 )
             })
             .collect::<HashMap<_, _>>();

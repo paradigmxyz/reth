@@ -15,7 +15,8 @@ workspace = true
 # reth
 reth-beacon-consensus.workspace = true
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
+reth-execution-errors.workspace = true
+reth-network-p2p.workspace = true
 reth-provider.workspace = true
 reth-stages-api.workspace = true
 reth-revm.workspace = true

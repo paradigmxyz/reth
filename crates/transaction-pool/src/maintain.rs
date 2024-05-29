@@ -485,7 +485,7 @@ impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
     #[inline]
     const fn is_drifted(&self) -> bool {
-        matches!(self, MaintainedPoolState::Drifted)
+        matches!(self, Self::Drifted)
     }
 }
 

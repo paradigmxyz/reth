@@ -27,20 +27,20 @@ pub enum ControlFlow {
 impl ControlFlow {
     /// Whether the pipeline should continue executing stages.
     pub fn should_continue(&self) -> bool {
-        matches!(self, ControlFlow::Continue { .. } | ControlFlow::NoProgress { .. })
+        matches!(self, Self::Continue { .. } | Self::NoProgress { .. })
     }
 
     /// Returns true if the control flow is unwind.
     pub fn is_unwind(&self) -> bool {
-        matches!(self, ControlFlow::Unwind { .. })
+        matches!(self, Self::Unwind { .. })
     }
 
     /// Returns the pipeline block number the stage reached, if the state is not `Unwind`.
     pub fn block_number(&self) -> Option<BlockNumber> {
         match self {
-            ControlFlow::Unwind { .. } => None,
-            ControlFlow::Continue { block_number } => Some(*block_number),
-            ControlFlow::NoProgress { block_number } => *block_number,
+            Self::Unwind { .. } => None,
+            Self::Continue { block_number } => Some(*block_number),
+            Self::NoProgress { block_number } => *block_number,
         }
     }
 }
