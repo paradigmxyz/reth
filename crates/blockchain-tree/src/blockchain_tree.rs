@@ -2421,6 +2421,6 @@ mod tests {
         let tree =
             BlockchainTree::new(cloned_externals_2, config, None).expect("failed to create tree");
 
-        assert_eq!(tree.block_indices().last_finalized_block(), 11);
+        assert_eq!(tree.block_indices().last_finalized_block(), block1a.number);
     }
 }
