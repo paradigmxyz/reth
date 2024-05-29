@@ -80,8 +80,8 @@ members = [
     "crates/tokio-util/",
     "crates/tracing/",
     "crates/transaction-pool/",
-    "crates/trie-parallel/",
-    "crates/trie/",
+    "crates/trie/parallel/",
+    "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -298,8 +298,8 @@ reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
-reth-trie = { path = "crates/trie" }
-reth-trie-parallel = { path = "crates/trie-parallel" }
+reth-trie = { path = "crates/trie/trie" }
+reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
 revm = { version = "9.0.0", features = [
