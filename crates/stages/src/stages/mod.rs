@@ -53,7 +53,6 @@ mod tests {
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
-    use reth_interfaces::provider::ProviderResult;
     use reth_primitives::{
         address,
         hex_literal::hex,
@@ -64,7 +63,8 @@ mod tests {
     };
     use reth_provider::{
         providers::StaticFileWriter, AccountExtReader, DatabaseProviderFactory, ProviderFactory,
-        ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
+        ProviderResult, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
+        StorageReader,
     };
     use reth_stages_api::{ExecInput, Stage};
     use reth_testing_utils::generators::{self, random_block, random_block_range, random_receipt};
