@@ -10,6 +10,8 @@ use crate::execute::{
     BlockExecutorProvider, Executor,
 };
 
+const UNAVAILABLE_FOR_NOOP: &'static str = "execution unavailable for noop";
+
 /// A [BlockExecutorProvider] implementation that does nothing.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -41,7 +43,7 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        Err(BlockExecutionError::UnavailableForNoop)
+        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 }
 
@@ -51,7 +53,7 @@ impl<DB> BatchExecutor<DB> for NoopBlockExecutorProvider {
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
-        Err(BlockExecutionError::UnavailableForNoop)
+        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 
     fn finalize(self) -> Self::Output {

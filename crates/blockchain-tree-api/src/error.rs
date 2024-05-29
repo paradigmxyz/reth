@@ -296,8 +296,6 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::CanonicalRevert { .. } |
                     BlockExecutionError::CanonicalCommit { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
-                    BlockExecutionError::UnavailableForTest |
-                    BlockExecutionError::UnavailableForNoop => false,
                     BlockExecutionError::Other(_) => false,
                 }
             }
