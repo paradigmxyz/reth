@@ -7332,6 +7332,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-core",
  "reth-node-events",
+ "reth-optimism-consensus",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",

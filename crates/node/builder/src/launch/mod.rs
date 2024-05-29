@@ -29,6 +29,10 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+
+#[cfg(feature = "optimism")]
+use reth_optimism_consensus::OptimismBeaconConsensus;
+
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::EngineApi;
@@ -133,6 +137,8 @@ where
         // setup the consensus instance
         let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
             Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
+        } else if cfg!(feature = "optimism") && ctx.chain_spec().is_optimism() {
+            Arc::new(OptimismBeaconConsensus::new(ctx.chain_spec()))
         } else {
             Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
         };
