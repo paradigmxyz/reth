@@ -1458,7 +1458,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_network_pool_transactions_messages_sent{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_sent_total{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "legendFormat": "Tx",
@@ -1471,7 +1471,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_network_pool_transactions_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_pool_transactions_messages_received_total{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Rx",
           "range": true,
@@ -1483,7 +1483,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_network_pool_transactions_messages_sent{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received{instance=~\"$instance\"}",
+          "expr": "reth_network_pool_transactions_messages_sent_total{instance=~\"$instance\"} - reth_network_pool_transactions_messages_received_total{instance=~\"$instance\"}",
           "hide": false,
           "legendFormat": "Messages in Channel",
           "range": true,
@@ -3087,7 +3087,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_network_invalid_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_invalid_messages_received_total{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Invalid Messages",
           "range": true,

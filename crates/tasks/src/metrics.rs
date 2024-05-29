@@ -9,24 +9,24 @@ use reth_metrics::{metrics::Counter, Metrics};
 #[metrics(scope = "executor.spawn")]
 pub struct TaskExecutorMetrics {
     /// Number of spawned critical tasks
-    pub(crate) critical_tasks: Counter,
+    pub(crate) critical_tasks_total: Counter,
     /// Number of finished spawned critical tasks
-    pub(crate) finished_critical_tasks: Counter,
+    pub(crate) finished_critical_tasks_total: Counter,
     /// Number of spawned regular tasks
-    pub(crate) regular_tasks: Counter,
+    pub(crate) regular_tasks_total: Counter,
     /// Number of finished spawned regular tasks
-    pub(crate) finished_regular_tasks: Counter,
+    pub(crate) finished_regular_tasks_total: Counter,
 }
 
 impl TaskExecutorMetrics {
     /// Increments the counter for spawned critical tasks.
     pub(crate) fn inc_critical_tasks(&self) {
-        self.critical_tasks.increment(1);
+        self.critical_tasks_total.increment(1);
     }
 
     /// Increments the counter for spawned regular tasks.
     pub(crate) fn inc_regular_tasks(&self) {
-        self.regular_tasks.increment(1);
+        self.regular_tasks_total.increment(1);
     }
 }
 
