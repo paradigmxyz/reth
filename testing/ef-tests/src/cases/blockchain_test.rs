@@ -92,16 +92,15 @@ impl Case for BlockchainTestCase {
                 .unwrap();
 
                 // Insert initial test state into the provider.
-                provider
-                    .insert_historical_block(
-                        SealedBlock::new(
-                            case.genesis_block_header.clone().into(),
-                            BlockBody::default(),
-                        )
-                        .try_seal_with_senders()
-                        .unwrap(),
-                        None,
-                    )?;
+                provider.insert_historical_block(
+                    SealedBlock::new(
+                        case.genesis_block_header.clone().into(),
+                        BlockBody::default(),
+                    )
+                    .try_seal_with_senders()
+                    .unwrap(),
+                    None,
+                )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
                 // Initialize receipts static file with genesis
@@ -117,11 +116,10 @@ impl Case for BlockchainTestCase {
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                    provider
-                        .insert_historical_block(
-                            decoded.clone().try_seal_with_senders().unwrap(),
-                            None,
-                        )?;
+                    provider.insert_historical_block(
+                        decoded.clone().try_seal_with_senders().unwrap(),
+                        None,
+                    )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
@@ -154,12 +152,11 @@ impl Case for BlockchainTestCase {
                     (None, Some(expected_state_root)) => {
                         // Insert state hashes into the provider based on the expected state root.
                         let last_block = last_block.unwrap_or_default();
-                        provider
-                            .insert_hashes(
-                                0..=last_block.number,
-                                last_block.hash(),
-                                *expected_state_root,
-                            )?;
+                        provider.insert_hashes(
+                            0..=last_block.number,
+                            last_block.hash(),
+                            *expected_state_root,
+                        )?;
                     }
                     _ => return Err(Error::MissingPostState),
                 }

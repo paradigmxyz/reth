@@ -2,9 +2,9 @@
 
 use crate::Case;
 use reth_db::DatabaseError;
+use reth_provider::ProviderError;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use reth_provider::ProviderError;
 
 /// Test errors
 ///
