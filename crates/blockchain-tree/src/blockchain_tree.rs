@@ -2399,7 +2399,6 @@ mod tests {
         tree.make_canonical(block2.hash()).unwrap();
 
         // restart
-        drop(tree);
         let mut tree =
             BlockchainTree::new(cloned_externals_1, config, None).expect("failed to create tree");
         assert_eq!(tree.block_indices().last_finalized_block(), 0);
@@ -2417,7 +2416,6 @@ mod tests {
         tree.finalize_block(block1a.number).unwrap();
 
         // restart
-        drop(tree);
         let tree =
             BlockchainTree::new(cloned_externals_2, config, None).expect("failed to create tree");
 
