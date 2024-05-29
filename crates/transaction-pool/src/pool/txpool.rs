@@ -1704,7 +1704,7 @@ pub(crate) struct PendingFees {
 
 impl Default for PendingFees {
     fn default() -> Self {
-        PendingFees { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
+        Self { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
     }
 }
 

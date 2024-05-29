@@ -65,21 +65,8 @@ impl StateWriter for BundleStateWithReceipts {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashMap};
-
-    use revm::{
-        db::{
-            states::{
-                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
-            },
-            BundleState, EmptyDB,
-        },
-        primitives::{
-            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, StorageSlot,
-        },
-        DatabaseCommit, State,
-    };
-
+    use super::*;
+    use crate::{test_utils::create_test_provider_factory, AccountReader};
     use reth_db::{
         cursor::DbDupCursorRO,
         database::Database,
@@ -92,10 +79,19 @@ mod tests {
         Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::{test_utils::state_root, StateRoot};
-
-    use crate::{test_utils::create_test_provider_factory, AccountReader};
-
-    use super::*;
+    use revm::{
+        db::{
+            states::{
+                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
+            },
+            BundleState, EmptyDB,
+        },
+        primitives::{
+            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
+        },
+        DatabaseCommit, State,
+    };
+    use std::collections::{BTreeMap, HashMap};
 
     #[test]
     fn write_to_db_account_info() {
@@ -264,11 +260,11 @@ mod tests {
                     storage: HashMap::from([
                         (
                             U256::from(0),
-                            StorageSlot { present_value: U256::from(1), ..Default::default() },
+                            EvmStorageSlot { present_value: U256::from(1), ..Default::default() },
                         ),
                         (
                             U256::from(1),
-                            StorageSlot { present_value: U256::from(2), ..Default::default() },
+                            EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                         ),
                     ]),
                 },
@@ -281,9 +277,9 @@ mod tests {
                     // 0x01 => 1 => 2
                     storage: HashMap::from([(
                         U256::from(1),
-                        StorageSlot {
+                        EvmStorageSlot {
                             present_value: U256::from(2),
-                            previous_or_original_value: U256::from(1),
+                            original_value: U256::from(1),
                         },
                     )]),
                 },
@@ -444,11 +440,11 @@ mod tests {
                 storage: HashMap::from([
                     (
                         U256::ZERO,
-                        StorageSlot { present_value: U256::from(1), ..Default::default() },
+                        EvmStorageSlot { present_value: U256::from(1), ..Default::default() },
                     ),
                     (
                         U256::from(1),
-                        StorageSlot { present_value: U256::from(2), ..Default::default() },
+                        EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                     ),
                 ]),
             },
@@ -474,10 +470,7 @@ mod tests {
                 // 0x00 => 1 => 2
                 storage: HashMap::from([(
                     U256::ZERO,
-                    StorageSlot {
-                        previous_or_original_value: U256::from(1),
-                        present_value: U256::from(2),
-                    },
+                    EvmStorageSlot { original_value: U256::from(1), present_value: U256::from(2) },
                 )]),
             },
         )]));
@@ -517,15 +510,15 @@ mod tests {
                 storage: HashMap::from([
                     (
                         U256::ZERO,
-                        StorageSlot { present_value: U256::from(2), ..Default::default() },
+                        EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                     ),
                     (
                         U256::from(2),
-                        StorageSlot { present_value: U256::from(4), ..Default::default() },
+                        EvmStorageSlot { present_value: U256::from(4), ..Default::default() },
                     ),
                     (
                         U256::from(6),
-                        StorageSlot { present_value: U256::from(6), ..Default::default() },
+                        EvmStorageSlot { present_value: U256::from(6), ..Default::default() },
                     ),
                 ]),
             },
@@ -560,7 +553,7 @@ mod tests {
                 // 0x00 => 0 => 2
                 storage: HashMap::from([(
                     U256::ZERO,
-                    StorageSlot { present_value: U256::from(2), ..Default::default() },
+                    EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                 )]),
             },
         )]));
@@ -591,7 +584,7 @@ mod tests {
                 // 0x00 => 0 => 9
                 storage: HashMap::from([(
                     U256::ZERO,
-                    StorageSlot { present_value: U256::from(9), ..Default::default() },
+                    EvmStorageSlot { present_value: U256::from(9), ..Default::default() },
                 )]),
             },
         )]));
@@ -752,11 +745,11 @@ mod tests {
                 storage: HashMap::from([
                     (
                         U256::ZERO,
-                        StorageSlot { present_value: U256::from(1), ..Default::default() },
+                        EvmStorageSlot { present_value: U256::from(1), ..Default::default() },
                     ),
                     (
                         U256::from(1),
-                        StorageSlot { present_value: U256::from(2), ..Default::default() },
+                        EvmStorageSlot { present_value: U256::from(2), ..Default::default() },
                     ),
                 ]),
             },
@@ -800,7 +793,7 @@ mod tests {
                 // 0x01 => 0 => 5
                 storage: HashMap::from([(
                     U256::from(1),
-                    StorageSlot { present_value: U256::from(5), ..Default::default() },
+                    EvmStorageSlot { present_value: U256::from(5), ..Default::default() },
                 )]),
             },
         )]));
@@ -953,7 +946,7 @@ mod tests {
                 info: into_revm_acc(account2.0),
                 storage: HashMap::from_iter([(
                     slot2,
-                    StorageSlot::new_changed(account2_slot2_old_value, account2_slot2_new_value),
+                    EvmStorageSlot::new_changed(account2_slot2_old_value, account2_slot2_new_value),
                 )]),
             },
         )]));
@@ -1021,7 +1014,7 @@ mod tests {
                 info: into_revm_acc(account1_new),
                 storage: HashMap::from_iter([(
                     slot20,
-                    StorageSlot::new_changed(U256::ZERO, account1_slot20_value),
+                    EvmStorageSlot::new_changed(U256::ZERO, account1_slot20_value),
                 )]),
             },
         )]));

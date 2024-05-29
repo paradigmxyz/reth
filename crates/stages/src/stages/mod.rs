@@ -52,7 +52,6 @@ mod tests {
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
-    use reth_interfaces::test_utils::generators::{self, random_block};
     use reth_primitives::{
         address, hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, PruneMode,
         PruneModes, SealedBlock, StaticFileSegment, U256,
@@ -62,6 +61,7 @@ mod tests {
         StorageReader,
     };
     use reth_stages_api::{ExecInput, Stage};
+    use reth_testing_utils::generators::{self, random_block};
     use std::sync::Arc;
 
     #[tokio::test]

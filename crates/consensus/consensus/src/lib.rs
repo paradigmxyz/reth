@@ -15,6 +15,9 @@ use reth_primitives::{
 };
 use std::fmt::Debug;
 
+/// A consensus implementation that does nothing.
+pub mod noop;
+
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking consensus
 pub mod test_utils;
@@ -325,7 +328,7 @@ pub enum ConsensusError {
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
     pub fn is_state_root_error(&self) -> bool {
-        matches!(self, ConsensusError::BodyStateRootDiff(_))
+        matches!(self, Self::BodyStateRootDiff(_))
     }
 }
 

@@ -178,7 +178,7 @@ pub struct FeeHistoryCacheConfig {
 
 impl Default for FeeHistoryCacheConfig {
     fn default() -> Self {
-        FeeHistoryCacheConfig { max_blocks: MAX_HEADER_HISTORY + 100, resolution: 4 }
+        Self { max_blocks: MAX_HEADER_HISTORY + 100, resolution: 4 }
     }
 }
 
@@ -352,7 +352,7 @@ impl FeeHistoryEntry {
     ///
     /// Note: This does not calculate the rewards for the block.
     pub fn new(block: &SealedBlock) -> Self {
-        FeeHistoryEntry {
+        Self {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             base_fee_per_blob_gas: block.blob_fee(),

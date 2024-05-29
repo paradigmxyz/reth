@@ -562,7 +562,7 @@ impl Discv4Service {
 
         let shared_node_record = Arc::new(Mutex::new(local_node_record));
 
-        Discv4Service {
+        Self {
             local_address,
             local_eip_868_enr,
             local_node_record,

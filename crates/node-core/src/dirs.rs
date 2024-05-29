@@ -148,8 +148,8 @@ impl<D> From<PlatformPath<D>> for PathBuf {
 
 impl<D> PlatformPath<D> {
     /// Returns the path joined with another path
-    pub fn join<P: AsRef<Path>>(&self, path: P) -> PlatformPath<D> {
-        PlatformPath::<D>(self.0.join(path), std::marker::PhantomData)
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
+        Self(self.0.join(path), std::marker::PhantomData)
     }
 }
 
@@ -161,7 +161,7 @@ impl<D> PlatformPath<D> {
 
         let path = self.0.join(chain_name);
 
-        let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
+        let platform_path = Self(path, std::marker::PhantomData);
         ChainPath::new(platform_path, chain)
     }
 

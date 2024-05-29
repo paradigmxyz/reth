@@ -1,7 +1,7 @@
 use super::file_codec::BlockFileCodec;
 use futures::Future;
 use itertools::Either;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
@@ -74,7 +74,7 @@ impl FileClient {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
-        FileClient::from_file(file).await
+        Self::from_file(file).await
     }
 
     /// Initialize the [`FileClient`] with a file directly.
@@ -483,7 +483,7 @@ mod tests {
     use futures_util::stream::StreamExt;
     use rand::Rng;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::p2p::{
+    use reth_network_p2p::{
         bodies::downloader::BodyDownloader,
         headers::downloader::{HeaderDownloader, SyncTarget},
     };

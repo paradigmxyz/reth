@@ -1,6 +1,6 @@
 use crate::{
     BlockIdReader, BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, TransactionsProvider, WithdrawalsProvider,
+    RequestsProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::models::StoredBlockBodyIndices;
 use reth_primitives::{
@@ -9,16 +9,6 @@ use reth_primitives::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
-
-/// Enum to control transaction hash inclusion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum TransactionVariant {
-    /// Indicates that transactions should be processed without including their hashes.
-    NoHash,
-    /// Indicates that transactions should be processed along with their hashes.
-    #[default]
-    WithHash,
-}
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -42,12 +32,12 @@ pub enum BlockSource {
 impl BlockSource {
     /// Returns `true` if the block source is `Pending` or `Any`.
     pub fn is_pending(&self) -> bool {
-        matches!(self, BlockSource::Pending | BlockSource::Any)
+        matches!(self, Self::Pending | Self::Any)
     }
 
     /// Returns `true` if the block source is `Database` or `Any`.
     pub fn is_database(&self) -> bool {
-        matches!(self, BlockSource::Database | BlockSource::Any)
+        matches!(self, Self::Database | Self::Any)
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::blockchain_tree::error::{BlockchainTreeError, CanonicalError};
+use reth_blockchain_tree_api::error::{BlockchainTreeError, CanonicalError};
 use reth_consensus::ConsensusError;
 use reth_execution_errors::BlockExecutionError;
 use reth_fs_util::FsPathError;
@@ -46,24 +46,24 @@ impl RethError {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        RethError::Other(Box::new(error))
+        Self::Other(Box::new(error))
     }
 
     /// Create a new `RethError` from a given message.
     pub fn msg(msg: impl Display) -> Self {
-        RethError::Other(msg.to_string().into())
+        Self::Other(msg.to_string().into())
     }
 }
 
 impl From<BlockchainTreeError> for RethError {
     fn from(error: BlockchainTreeError) -> Self {
-        RethError::Canonical(CanonicalError::BlockchainTree(error))
+        Self::Canonical(CanonicalError::BlockchainTree(error))
     }
 }
 
 impl From<FsPathError> for RethError {
     fn from(err: FsPathError) -> Self {
-        RethError::other(err)
+        Self::other(err)
     }
 }
 

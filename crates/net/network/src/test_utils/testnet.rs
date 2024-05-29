@@ -227,7 +227,7 @@ impl Testnet<NoopProvider, TestPool> {
 
     /// Creates a new [`Testnet`] with the given number of peers
     pub async fn try_create(num_peers: usize) -> Result<Self, NetworkError> {
-        let mut this = Testnet::default();
+        let mut this = Self::default();
 
         this.extend_peer_with_config((0..num_peers).map(|_| Default::default())).await?;
         Ok(this)
@@ -531,7 +531,7 @@ where
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
-        let PeerConfig { config, client, secret_key } = self;
+        let Self { config, client, secret_key } = self;
         let network = NetworkManager::new(config).await?;
         let peer = Peer {
             network,

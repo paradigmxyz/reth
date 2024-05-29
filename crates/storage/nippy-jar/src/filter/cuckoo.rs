@@ -21,7 +21,7 @@ impl Cuckoo {
         // close to capacity. Therefore, we increase it.
         let max_capacity = max_capacity + 100 + max_capacity / 3;
 
-        Cuckoo { remaining: max_capacity, filter: CuckooFilter::with_capacity(max_capacity) }
+        Self { remaining: max_capacity, filter: CuckooFilter::with_capacity(max_capacity) }
     }
 }
 
@@ -73,7 +73,7 @@ impl<'de> Deserialize<'de> for Cuckoo {
         let (remaining, exported): (usize, ExportedCuckooFilter) =
             Deserialize::deserialize(deserializer)?;
 
-        Ok(Cuckoo { remaining, filter: exported.into() })
+        Ok(Self { remaining, filter: exported.into() })
     }
 }
 

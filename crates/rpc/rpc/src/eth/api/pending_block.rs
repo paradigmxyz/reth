@@ -372,13 +372,13 @@ pub(crate) enum PendingBlockEnvOrigin {
 impl PendingBlockEnvOrigin {
     /// Returns true if the origin is the actual pending block as received from the CL.
     pub(crate) fn is_actual_pending(&self) -> bool {
-        matches!(self, PendingBlockEnvOrigin::ActualPending(_))
+        matches!(self, Self::ActualPending(_))
     }
 
     /// Consumes the type and returns the actual pending block.
     pub(crate) fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => Some(block),
+            Self::ActualPending(block) => Some(block),
             _ => None,
         }
     }
@@ -389,8 +389,8 @@ impl PendingBlockEnvOrigin {
     /// identify the block by its hash (latest block).
     pub(crate) fn state_block_id(&self) -> BlockId {
         match self {
-            PendingBlockEnvOrigin::ActualPending(_) => BlockNumberOrTag::Pending.into(),
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
+            Self::ActualPending(_) => BlockNumberOrTag::Pending.into(),
+            Self::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
         }
     }
 
@@ -400,16 +400,16 @@ impl PendingBlockEnvOrigin {
     /// For the [PendingBlockEnvOrigin::DerivedFromLatest] this is the hash of the _latest_ header.
     fn build_target_hash(&self) -> B256 {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash(),
+            Self::ActualPending(block) => block.parent_hash,
+            Self::DerivedFromLatest(header) => header.hash(),
         }
     }
 
     /// Returns the header this pending block is based on.
     pub(crate) fn header(&self) -> &SealedHeader {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => &block.header,
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => header,
+            Self::ActualPending(block) => &block.header,
+            Self::DerivedFromLatest(header) => header,
         }
     }
 }

@@ -1,8 +1,8 @@
 //! Async caching support for eth RPC
 
 use futures::{future::Either, Stream, StreamExt};
+use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::ConfigureEvm;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TransactionSignedEcRecovered, B256,
@@ -92,7 +92,7 @@ impl EthStateCache {
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
             evm_config,
         };
-        let cache = EthStateCache { to_service };
+        let cache = Self { to_service };
         (cache, service)
     }
 

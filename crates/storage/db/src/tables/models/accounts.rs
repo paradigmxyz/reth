@@ -92,7 +92,7 @@ impl BlockNumberAddress {
 
 impl From<(BlockNumber, Address)> for BlockNumberAddress {
     fn from(tpl: (u64, Address)) -> Self {
-        BlockNumberAddress(tpl)
+        Self(tpl)
     }
 }
 
@@ -117,7 +117,7 @@ impl Decode for BlockNumberAddress {
         let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
         let hash = Address::from_slice(&value[8..]);
 
-        Ok(BlockNumberAddress((num, hash)))
+        Ok(Self((num, hash)))
     }
 }
 
@@ -150,7 +150,7 @@ impl Decode for AddressStorageKey {
         let address = Address::from_slice(&value[..20]);
         let storage_key = StorageKey::from_slice(&value[20..]);
 
-        Ok(AddressStorageKey((address, storage_key)))
+        Ok(Self((address, storage_key)))
     }
 }
 

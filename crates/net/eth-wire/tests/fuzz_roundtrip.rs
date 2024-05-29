@@ -96,7 +96,7 @@ pub mod fuzz_rlp {
 
     impl Default for HelloMessageWrapper {
         fn default() -> Self {
-            HelloMessageWrapper(HelloMessage {
+            Self(HelloMessage {
                 client_version: Default::default(),
                 capabilities: Default::default(),
                 protocol_version: Default::default(),
@@ -138,7 +138,7 @@ pub mod fuzz_rlp {
 
     impl Default for GetBlockHeadersWrapper {
         fn default() -> Self {
-            GetBlockHeadersWrapper(GetBlockHeaders {
+            Self(GetBlockHeaders {
                 start_block: BlockHashOrNumber::Number(0),
                 limit: Default::default(),
                 skip: Default::default(),

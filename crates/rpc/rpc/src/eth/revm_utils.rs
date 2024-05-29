@@ -356,7 +356,7 @@ impl CallFees {
         blob_versioned_hashes: Option<&[B256]>,
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
-    ) -> EthResult<CallFees> {
+    ) -> EthResult<Self> {
         /// Get the effective gas price of a transaction as specfified in EIP-1559 with relevant
         /// checks.
         fn get_effective_gas_price(
@@ -399,7 +399,7 @@ impl CallFees {
                 // either legacy transaction or no fee fields are specified
                 // when no fields are specified, set gas price to zero
                 let gas_price = gas_price.unwrap_or(U256::ZERO);
-                Ok(CallFees {
+                Ok(Self {
                     gas_price,
                     max_priority_fee_per_gas: None,
                     max_fee_per_blob_gas: has_blob_hashes.then_some(block_blob_fee).flatten(),
@@ -414,7 +414,7 @@ impl CallFees {
                 )?;
                 let max_fee_per_blob_gas = has_blob_hashes.then_some(block_blob_fee).flatten();
 
-                Ok(CallFees {
+                Ok(Self {
                     gas_price: effective_gas_price,
                     max_priority_fee_per_gas,
                     max_fee_per_blob_gas,
@@ -433,7 +433,7 @@ impl CallFees {
                     return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
                 }
 
-                Ok(CallFees {
+                Ok(Self {
                     gas_price: effective_gas_price,
                     max_priority_fee_per_gas,
                     max_fee_per_blob_gas: Some(max_fee_per_blob_gas),
@@ -537,13 +537,19 @@ where
                 account,
                 new_account_state
                     .into_iter()
-                    .map(|(slot, value)| (U256::from_be_bytes(slot.0), value))
+                    .map(|(slot, value)| {
+                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
+                    })
                     .collect(),
             )?;
         }
         (None, Some(account_state_diff)) => {
             for (slot, value) in account_state_diff {
-                db.insert_account_storage(account, U256::from_be_bytes(slot.0), value)?;
+                db.insert_account_storage(
+                    account,
+                    U256::from_be_bytes(slot.0),
+                    U256::from_be_bytes(value.0),
+                )?;
             }
         }
     };

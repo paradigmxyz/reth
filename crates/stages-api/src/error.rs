@@ -1,8 +1,7 @@
 use crate::PipelineEvent;
 use reth_consensus::ConsensusError;
-use reth_interfaces::{
-    db::DatabaseError as DbError, executor, p2p::error::DownloadError, RethError,
-};
+use reth_errors::{BlockExecutionError, DatabaseError, RethError};
+use reth_network_p2p::error::DownloadError;
 use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use reth_provider::ProviderError;
 use thiserror::Error;
@@ -16,15 +15,15 @@ pub enum BlockErrorKind {
     Validation(#[from] ConsensusError),
     /// The block encountered an execution error.
     #[error("execution error: {0}")]
-    Execution(#[from] executor::BlockExecutionError),
+    Execution(#[from] BlockExecutionError),
 }
 
 impl BlockErrorKind {
     /// Returns `true` if the error is a state root error.
     pub fn is_state_root_error(&self) -> bool {
         match self {
-            BlockErrorKind::Validation(err) => err.is_state_root_error(),
-            BlockErrorKind::Execution(err) => err.is_state_root_error(),
+            Self::Validation(err) => err.is_state_root_error(),
+            Self::Execution(err) => err.is_state_root_error(),
         }
     }
 }
@@ -66,7 +65,7 @@ pub enum StageError {
     MissingSyncGap,
     /// The stage encountered a database error.
     #[error("internal database error occurred: {0}")]
-    Database(#[from] DbError),
+    Database(#[from] DatabaseError),
     /// Invalid pruning configuration
     #[error(transparent)]
     PruningConfiguration(#[from] reth_primitives::PruneSegmentError),
@@ -138,24 +137,24 @@ impl StageError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            StageError::Database(_) |
-                StageError::Download(_) |
-                StageError::DatabaseIntegrity(_) |
-                StageError::StageCheckpoint(_) |
-                StageError::MissingDownloadBuffer |
-                StageError::MissingSyncGap |
-                StageError::ChannelClosed |
-                StageError::InconsistentBlockNumber { .. } |
-                StageError::InconsistentTxNumber { .. } |
-                StageError::Internal(_) |
-                StageError::Fatal(_)
+            Self::Database(_) |
+                Self::Download(_) |
+                Self::DatabaseIntegrity(_) |
+                Self::StageCheckpoint(_) |
+                Self::MissingDownloadBuffer |
+                Self::MissingSyncGap |
+                Self::ChannelClosed |
+                Self::InconsistentBlockNumber { .. } |
+                Self::InconsistentTxNumber { .. } |
+                Self::Internal(_) |
+                Self::Fatal(_)
         )
     }
 }
 
 impl From<std::io::Error> for StageError {
     fn from(source: std::io::Error) -> Self {
-        StageError::Fatal(Box::new(source))
+        Self::Fatal(Box::new(source))
     }
 }
 
@@ -167,7 +166,7 @@ pub enum PipelineError {
     Stage(#[from] StageError),
     /// The pipeline encountered a database error.
     #[error(transparent)]
-    Database(#[from] DbError),
+    Database(#[from] DatabaseError),
     /// Provider error.
     #[error(transparent)]
     Provider(#[from] ProviderError),

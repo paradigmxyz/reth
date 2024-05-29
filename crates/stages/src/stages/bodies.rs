@@ -13,10 +13,7 @@ use reth_db::{
     tables,
     transaction::DbTxMut,
 };
-use reth_interfaces::{
-    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-    provider::ProviderResult,
-};
+use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     StaticFileSegment, TxNumber,
@@ -28,6 +25,7 @@ use reth_provider::{
 use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
 
 use reth_stages_api::Stage;
+use reth_storage_errors::provider::ProviderResult;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
@@ -635,18 +633,12 @@ mod tests {
             transaction::{DbTx, DbTxMut},
             DatabaseEnv,
         };
-        use reth_interfaces::{
-            p2p::{
-                bodies::{
-                    downloader::{BodyDownloader, BodyDownloaderResult},
-                    response::BlockResponse,
-                },
-                error::DownloadResult,
+        use reth_network_p2p::{
+            bodies::{
+                downloader::{BodyDownloader, BodyDownloaderResult},
+                response::BlockResponse,
             },
-            test_utils::{
-                generators,
-                generators::{random_block_range, random_signed_tx},
-            },
+            error::DownloadResult,
         };
         use reth_primitives::{
             BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader,
@@ -657,6 +649,10 @@ mod tests {
             StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
+        use reth_testing_utils::{
+            generators,
+            generators::{random_block_range, random_signed_tx},
+        };
 
         use crate::{
             stages::bodies::BodyStage,

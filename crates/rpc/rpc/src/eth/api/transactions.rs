@@ -39,8 +39,8 @@ use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{
-        db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult,
-        ResultAndState, SpecId, State,
+        db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState,
+        ExecutionResult, ResultAndState, SpecId,
     },
     GetInspector, Inspector,
 };
@@ -425,7 +425,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -443,7 +443,7 @@ pub trait EthTransactions: Send + Sync {
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [State] and the database that points to the state
+    /// _after_ the transaction [EvmState] and the database that points to the state
     /// right _before_ the transaction, in other words the state the transaction was
     /// executed on: `changed_state = tx(cached_state)`
     ///
@@ -462,7 +462,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 Insp,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -491,7 +491,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -529,7 +529,7 @@ pub trait EthTransactions: Send + Sync {
                 TransactionInfo,
                 Insp,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -1278,7 +1278,7 @@ where
                 TransactionInfo,
                 Insp,
                 ExecutionResult,
-                &'a State,
+                &'a EvmState,
                 &'a StateCacheDB,
             ) -> EthResult<R>
             + Send
@@ -1623,7 +1623,7 @@ impl TransactionSource {
     /// Returns the transaction and block related info, if not pending
     pub fn split(self) -> (TransactionSignedEcRecovered, TransactionInfo) {
         match self {
-            TransactionSource::Pool(tx) => {
+            Self::Pool(tx) => {
                 let hash = tx.hash();
                 (
                     tx,
@@ -1636,7 +1636,7 @@ impl TransactionSource {
                     },
                 )
             }
-            TransactionSource::Block { transaction, index, block_hash, block_number, base_fee } => {
+            Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let hash = transaction.hash();
                 (
                     transaction,

@@ -90,7 +90,7 @@ pub(crate) struct RpcRequestMetricsService<S> {
 impl<S> RpcRequestMetricsService<S> {
     pub(crate) fn new(service: S, metrics: RpcRequestMetrics) -> Self {
         // this instance is kept alive for the duration of the connection
-        metrics.inner.connection_metrics.connections_opened.increment(1);
+        metrics.inner.connection_metrics.connections_opened_total.increment(1);
         Self { inner: service, metrics }
     }
 }
@@ -102,10 +102,10 @@ where
     type Future = MeteredRequestFuture<S::Future>;
 
     fn call(&self, req: Request<'a>) -> Self::Future {
-        self.metrics.inner.connection_metrics.requests_started.increment(1);
+        self.metrics.inner.connection_metrics.requests_started_total.increment(1);
         let call_metrics = self.metrics.inner.call_metrics.get_key_value(req.method.as_ref());
         if let Some((_, call_metrics)) = &call_metrics {
-            call_metrics.started.increment(1);
+            call_metrics.started_total.increment(1);
         }
         MeteredRequestFuture {
             fut: self.inner.call(req),
@@ -119,7 +119,7 @@ where
 impl<S> Drop for RpcRequestMetricsService<S> {
     fn drop(&mut self) {
         // update connection metrics, connection closed
-        self.metrics.inner.connection_metrics.connections_closed.increment(1);
+        self.metrics.inner.connection_metrics.connections_closed_total.increment(1);
     }
 }
 
@@ -153,7 +153,7 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
             let elapsed = this.started_at.elapsed().as_secs_f64();
 
             // update transport metrics
-            this.metrics.inner.connection_metrics.requests_finished.increment(1);
+            this.metrics.inner.connection_metrics.requests_finished_total.increment(1);
             this.metrics.inner.connection_metrics.request_time_seconds.record(elapsed);
 
             // update call metrics
@@ -162,9 +162,9 @@ impl<F: Future<Output = MethodResponse>> Future for MeteredRequestFuture<F> {
             {
                 call_metrics.time_seconds.record(elapsed);
                 if resp.is_success() {
-                    call_metrics.successful.increment(1);
+                    call_metrics.successful_total.increment(1);
                 } else {
-                    call_metrics.failed.increment(1);
+                    call_metrics.failed_total.increment(1);
                 }
             }
         }
@@ -185,9 +185,9 @@ impl RpcTransport {
     /// Returns the string representation of the transport protocol.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            RpcTransport::Http => "http",
-            RpcTransport::WebSocket => "ws",
-            RpcTransport::Ipc => "ipc",
+            Self::Http => "http",
+            Self::WebSocket => "ws",
+            Self::Ipc => "ipc",
         }
     }
 
@@ -202,13 +202,13 @@ impl RpcTransport {
 #[metrics(scope = "rpc_server.connections")]
 struct RpcServerConnectionMetrics {
     /// The number of connections opened
-    connections_opened: Counter,
+    connections_opened_total: Counter,
     /// The number of connections closed
-    connections_closed: Counter,
+    connections_closed_total: Counter,
     /// The number of requests started
-    requests_started: Counter,
+    requests_started_total: Counter,
     /// The number of requests finished
-    requests_finished: Counter,
+    requests_finished_total: Counter,
     /// Response for a single request/response pair
     request_time_seconds: Histogram,
 }
@@ -218,11 +218,11 @@ struct RpcServerConnectionMetrics {
 #[metrics(scope = "rpc_server.calls")]
 struct RpcServerCallMetrics {
     /// The number of calls started
-    started: Counter,
+    started_total: Counter,
     /// The number of successful calls
-    successful: Counter,
+    successful_total: Counter,
     /// The number of failed calls
-    failed: Counter,
+    failed_total: Counter,
     /// Response for a single call
     time_seconds: Histogram,
 }

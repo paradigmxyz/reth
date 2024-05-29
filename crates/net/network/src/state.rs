@@ -536,7 +536,7 @@ mod tests {
         capability::{Capabilities, Capability},
         BlockBodies, EthVersion,
     };
-    use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_network_types::PeerId;
     use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;
