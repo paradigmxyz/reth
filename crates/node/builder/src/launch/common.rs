@@ -1,16 +1,12 @@
 //! Helper types that can be used by launchers.
 
-use std::{cmp::max, sync::Arc, thread::available_parallelism};
-
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use tokio::sync::mpsc::Receiver;
-
 use reth_auto_seal_consensus::MiningMode;
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
-use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -22,7 +18,9 @@ use reth_prune::PrunerBuilder;
 use reth_rpc_layer::JwtSecret;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{error, info, warn};
+use reth_tracing::tracing::{debug, error, info, warn};
+use std::{sync::Arc, thread::available_parallelism};
+use tokio::sync::mpsc::Receiver;
 
 /// Reusable setup for launching a node.
 ///
@@ -114,15 +112,24 @@ impl LaunchContext {
     pub fn configure_globals(&self) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        let _ = fdlimit::raise_fd_limit();
+        match fdlimit::raise_fd_limit() {
+            Ok(fdlimit::Outcome::LimitRaised { from, to }) => {
+                debug!(from, to, "Raised file descriptor limit");
+            }
+            Ok(fdlimit::Outcome::Unsupported) => {}
+            Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
+        }
 
         // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
-        let _ = ThreadPoolBuilder::new()
-            .num_threads(
-                available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
-            )
+        let num_threads =
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(2));
+        if let Err(err) = ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("reth-rayon-{i}"))
             .build_global()
-            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
+        {
+            error!(%err, "Failed to build global thread pool")
+        }
     }
 }
 

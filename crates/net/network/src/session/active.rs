@@ -18,8 +18,8 @@ use reth_eth_wire::{
     message::{EthBroadcastMessage, RequestPair},
     DisconnectP2P, DisconnectReason, EthMessage,
 };
-use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
+use reth_network_p2p::error::RequestError;
 use reth_network_types::PeerId;
 use std::{
     collections::VecDeque,
@@ -713,8 +713,8 @@ enum OnIncomingMessageOutcome {
 impl From<Result<(), ActiveSessionMessage>> for OnIncomingMessageOutcome {
     fn from(res: Result<(), ActiveSessionMessage>) -> Self {
         match res {
-            Ok(_) => OnIncomingMessageOutcome::Ok,
-            Err(msg) => OnIncomingMessageOutcome::NoCapacity(msg),
+            Ok(_) => Self::Ok,
+            Err(msg) => Self::NoCapacity(msg),
         }
     }
 }
@@ -736,13 +736,13 @@ pub(crate) enum OutgoingMessage {
 
 impl From<EthMessage> for OutgoingMessage {
     fn from(value: EthMessage) -> Self {
-        OutgoingMessage::Eth(value)
+        Self::Eth(value)
     }
 }
 
 impl From<EthBroadcastMessage> for OutgoingMessage {
     fn from(value: EthBroadcastMessage) -> Self {
-        OutgoingMessage::Broadcast(value)
+        Self::Broadcast(value)
     }
 }
 

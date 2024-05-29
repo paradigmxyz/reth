@@ -42,7 +42,7 @@ impl ValidationTask {
 
     /// Creates a new task with the given receiver.
     pub fn with_receiver(jobs: mpsc::Receiver<Pin<Box<dyn Future<Output = ()> + Send>>>) -> Self {
-        ValidationTask { validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))) }
+        Self { validation_jobs: Arc::new(Mutex::new(ReceiverStream::new(jobs))) }
     }
 
     /// Executes all new validation jobs that come in.

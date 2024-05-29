@@ -57,14 +57,6 @@ impl BlockIndices {
         }
     }
 
-    /// Return internal index that maps all pending block number to their hashes.
-    ///
-    /// This essentially contains all possible branches. Given a parent block, then the child block
-    /// number as the key has all possible block hashes as the value.
-    pub fn block_number_to_block_hashes(&self) -> &BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        &self.block_number_to_block_hashes
-    }
-
     /// Return fork to child indices
     pub fn fork_to_child(&self) -> &HashMap<BlockHash, LinkedHashSet<BlockHash>> {
         &self.fork_to_child

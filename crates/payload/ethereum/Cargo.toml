@@ -19,6 +19,8 @@ reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
 
 # ethereum
 revm.workspace = true

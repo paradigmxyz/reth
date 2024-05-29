@@ -24,9 +24,9 @@ use reth_downloaders::{
 };
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
-use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
+use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_primitives::{
     stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
@@ -187,7 +187,7 @@ impl Command {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?block, "Successfully fetched block");
-                    return Ok(tip_header.hash());
+                    return Ok(tip_header.hash())
                 }
                 Err(error) => {
                     error!(target: "reth::cli", ?block, %error, "Failed to fetch the block. Retrying...");
@@ -255,7 +255,7 @@ impl Command {
             provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
         if latest_block_number.unwrap_or_default() >= self.to {
             info!(target: "reth::cli", latest = latest_block_number, "Nothing to run");
-            return Ok(());
+            return Ok(())
         }
 
         let pipeline_events = pipeline.events();

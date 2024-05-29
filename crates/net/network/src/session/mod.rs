@@ -755,7 +755,7 @@ impl PendingSessionHandshakeError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
     pub fn as_disconnected(&self) -> Option<DisconnectReason> {
         match self {
-            PendingSessionHandshakeError::Eth(eth_err) => eth_err.as_disconnected(),
+            Self::Eth(eth_err) => eth_err.as_disconnected(),
             _ => None,
         }
     }

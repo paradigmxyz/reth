@@ -10,7 +10,7 @@ use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
     Receipts,
 };
-use reth_interfaces::p2p::error::RequestResult;
+use reth_network_p2p::error::RequestResult;
 use reth_network_types::PeerId;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
@@ -166,6 +166,7 @@ where
                     transactions: block.body,
                     ommers: block.ommers,
                     withdrawals: block.withdrawals,
+                    requests: block.requests,
                 };
 
                 total_bytes += body.length();

@@ -23,7 +23,7 @@ reth-provider = { workspace = true }
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
-reth-interfaces = { workspace = true, features = ["clap"] }
+reth-errors.workspace = true
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-cli-runner.workspace = true
@@ -35,6 +35,7 @@ reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
+reth-network-p2p.workspace = true
 reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
@@ -58,6 +59,7 @@ reth-db-common.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
+reth-optimism-primitives.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

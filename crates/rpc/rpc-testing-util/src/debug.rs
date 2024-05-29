@@ -272,7 +272,7 @@ impl std::fmt::Display for JsTracerBuilder {
 
 impl From<JsTracerBuilder> for GethDebugTracingOptions {
     fn from(b: JsTracerBuilder) -> Self {
-        GethDebugTracingOptions {
+        Self {
             tracer: Some(GethDebugTracerType::JsTracer(b.code())),
             tracer_config: serde_json::Value::Object(Default::default()).into(),
             ..Default::default()
@@ -356,7 +356,7 @@ pub struct NoopJsTracer;
 
 impl From<NoopJsTracer> for GethDebugTracingOptions {
     fn from(_: NoopJsTracer) -> Self {
-        GethDebugTracingOptions {
+        Self {
             tracer: Some(GethDebugTracerType::JsTracer(NOOP_TRACER.to_string())),
             tracer_config: serde_json::Value::Object(Default::default()).into(),
             ..Default::default()
@@ -413,8 +413,8 @@ mod tests {
         let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
         let client = HttpClientBuilder::default().build(url).unwrap();
 
-        let opts =
-            GethDebugTracingOptions::default().call_config(CallConfig::default().only_top_call());
+        let opts = GethDebugTracingOptions::default()
+            .with_call_config(CallConfig::default().only_top_call());
 
         let mut stream = client.debug_trace_transactions_in_block(block, opts).await.unwrap();
         while let Some(res) = stream.next().await {

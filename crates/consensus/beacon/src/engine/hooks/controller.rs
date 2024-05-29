@@ -176,7 +176,7 @@ mod tests {
         EngineHooksController,
     };
     use futures::poll;
-    use reth_interfaces::{RethError, RethResult};
+    use reth_errors::{RethError, RethResult};
     use std::{
         collections::VecDeque,
         future::poll_fn,

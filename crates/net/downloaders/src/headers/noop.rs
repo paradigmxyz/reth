@@ -1,5 +1,5 @@
 use futures::Stream;
-use reth_interfaces::p2p::headers::{
+use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
     error::HeadersDownloaderError,
 };
