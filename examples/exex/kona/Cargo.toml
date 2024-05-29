@@ -1,0 +1,50 @@
+[package]
+name = "kona-exex"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-node-ethereum.workspace = true
+reth-primitives.workspace = true
+reth-execution-errors.workspace = true
+reth-provider.workspace = true
+reth-revm.workspace = true
+reth-tracing.workspace = true
+reth-transaction-pool.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-evm.workspace = true
+reth-payload-builder.workspace = true
+reth-rpc-types.workspace = true
+reth-node-optimism = { workspace = true, features = [ "optimism" ] }
+
+# workspace deps
+tracing.workspace = true
+async-trait.workspace = true
+url.workspace = true
+reqwest.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+
+# kona
+anyhow = { version = "1.0.79", default-features = false }
+kona-derive = { git = "https://github.com/ethereum-optimism/kona", branch = "main", features = ["online", "serde", "k256"] }
+kona-primitives = { git = "https://github.com/ethereum-optimism/kona", branch = "main" }
+
+# alloy
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "e3f2f07", default-features = false, features = ["kzg"] }
+# alloy-consensus = { workspace = true, features = ["kzg"] }
+alloy-rlp.workspace = true
+
+[dev-dependencies]
+reth-testing-utils.workspace = true
+secp256k1.workspace = true
