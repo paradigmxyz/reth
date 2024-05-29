@@ -566,7 +566,7 @@ pub enum NetworkMode {
 impl NetworkMode {
     /// Returns true if network has entered proof-of-stake
     pub fn is_stake(&self) -> bool {
-        matches!(self, NetworkMode::Stake)
+        matches!(self, Self::Stake)
     }
 }
 

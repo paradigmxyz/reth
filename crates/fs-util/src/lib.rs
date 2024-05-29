@@ -143,57 +143,57 @@ pub enum FsPathError {
 impl FsPathError {
     /// Returns the complementary error variant for [`std::fs::write`].
     pub fn write(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::Write { source, path: path.into() }
+        Self::Write { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::read`].
     pub fn read(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::Read { source, path: path.into() }
+        Self::Read { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::read_link`].
     pub fn read_link(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::ReadLink { source, path: path.into() }
+        Self::ReadLink { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::File::create`].
     pub fn create_file(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::CreateFile { source, path: path.into() }
+        Self::CreateFile { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::remove_file`].
     pub fn remove_file(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::RemoveFile { source, path: path.into() }
+        Self::RemoveFile { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::create_dir`].
     pub fn create_dir(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::CreateDir { source, path: path.into() }
+        Self::CreateDir { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::remove_dir`].
     pub fn remove_dir(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::RemoveDir { source, path: path.into() }
+        Self::RemoveDir { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::read_dir`].
     pub fn read_dir(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::ReadDir { source, path: path.into() }
+        Self::ReadDir { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::File::open`].
     pub fn open(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::Open { source, path: path.into() }
+        Self::Open { source, path: path.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::rename`].
     pub fn rename(source: io::Error, from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> Self {
-        FsPathError::Rename { source, from: from.into(), to: to.into() }
+        Self::Rename { source, from: from.into(), to: to.into() }
     }
 
     /// Returns the complementary error variant for [`std::fs::File::metadata`].
     pub fn metadata(source: io::Error, path: impl Into<PathBuf>) -> Self {
-        FsPathError::Metadata { source, path: path.into() }
+        Self::Metadata { source, path: path.into() }
     }
 }
 

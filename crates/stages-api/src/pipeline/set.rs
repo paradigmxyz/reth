@@ -240,7 +240,7 @@ where
 }
 
 impl<DB: Database> StageSet<DB> for StageSetBuilder<DB> {
-    fn builder(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> Self {
         self
     }
 }

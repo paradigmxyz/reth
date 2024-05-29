@@ -88,13 +88,13 @@ impl<'de> Deserialize<'de> for GoFmph {
         D: Deserializer<'de>,
     {
         if let Some(buffer) = <Option<Vec<u8>>>::deserialize(deserializer)? {
-            return Ok(GoFmph {
+            return Ok(Self {
                 function: Some(
                     GOFunction::read(&mut std::io::Cursor::new(buffer))
                         .map_err(D::Error::custom)?,
                 ),
             })
         }
-        Ok(GoFmph { function: None })
+        Ok(Self { function: None })
     }
 }

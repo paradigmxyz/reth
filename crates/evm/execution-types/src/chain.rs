@@ -240,7 +240,7 @@ impl Chain {
     /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, other: Chain) -> Result<(), BlockExecutionError> {
+    pub fn append_chain(&mut self, other: Self) -> Result<(), BlockExecutionError> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
@@ -315,12 +315,12 @@ impl Chain {
         // TODO: Currently, trie updates are reset on chain split.
         // Add tests ensuring that it is valid to leave updates in the pending chain.
         ChainSplit::Split {
-            canonical: Chain {
+            canonical: Self {
                 state: canonical_state.expect("split in range"),
                 blocks: self.blocks,
                 trie_updates: None,
             },
-            pending: Chain {
+            pending: Self {
                 state: pending_state,
                 blocks: higher_number_blocks,
                 trie_updates: None,

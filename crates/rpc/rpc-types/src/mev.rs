@@ -276,7 +276,7 @@ impl Serialize for PrivacyHint {
 impl<'de> Deserialize<'de> for PrivacyHint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let hints = Vec::<String>::deserialize(deserializer)?;
-        let mut privacy_hint = PrivacyHint::default();
+        let mut privacy_hint = Self::default();
         for hint in hints {
             match hint.as_str() {
                 "calldata" => privacy_hint.calldata = true,
@@ -489,22 +489,22 @@ pub enum BundleStats {
 impl Serialize for BundleStats {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            BundleStats::Unknown => serde_json::json!({"isSimulated": false}).serialize(serializer),
-            BundleStats::Seen(stats) => stats.serialize(serializer),
-            BundleStats::Simulated(stats) => stats.serialize(serializer),
+            Self::Unknown => serde_json::json!({"isSimulated": false}).serialize(serializer),
+            Self::Seen(stats) => stats.serialize(serializer),
+            Self::Simulated(stats) => stats.serialize(serializer),
         }
     }
 }
 
 impl<'de> Deserialize<'de> for BundleStats {
-    fn deserialize<D>(deserializer: D) -> Result<BundleStats, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let map = serde_json::Map::deserialize(deserializer)?;
 
         if map.get("receivedAt").is_none() {
-            Ok(BundleStats::Unknown)
+            Ok(Self::Unknown)
         } else if map["isSimulated"] == false {
             StatsSeen::deserialize(serde_json::Value::Object(map))
                 .map(BundleStats::Seen)

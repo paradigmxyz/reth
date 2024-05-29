@@ -153,6 +153,7 @@ uninhabited_references = "warn"
 unused_peekable = "warn"
 unused_rounding = "warn"
 useless_let_if_seq = "warn"
+use_self = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -175,7 +176,6 @@ significant_drop_tightening = "allow"
 string_lit_as_bytes = "allow"
 type_repetition_in_bounds = "allow"
 unnecessary_struct_initialization = "allow"
-use_self = "allow"
 
 [workspace.package]
 version = "0.2.0-beta.7"

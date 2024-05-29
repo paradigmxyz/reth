@@ -405,7 +405,7 @@ pub enum DiskFileBlobStoreError {
 
 impl From<DiskFileBlobStoreError> for BlobStoreError {
     fn from(value: DiskFileBlobStoreError) -> Self {
-        BlobStoreError::Other(Box::new(value))
+        Self::Other(Box::new(value))
     }
 }
 

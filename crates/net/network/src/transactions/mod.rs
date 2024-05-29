@@ -1437,8 +1437,8 @@ impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
     fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
-            PooledTransactionsHashesBuilder::Eth68(msg) => {
+            Self::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
+            Self::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.tx_type());
@@ -1448,8 +1448,8 @@ impl PooledTransactionsHashesBuilder {
 
     fn push(&mut self, tx: &PropagateTransaction) {
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(tx.hash()),
-            PooledTransactionsHashesBuilder::Eth68(msg) => {
+            Self::Eth66(msg) => msg.0.push(tx.hash()),
+            Self::Eth68(msg) => {
                 msg.hashes.push(tx.hash());
                 msg.sizes.push(tx.size);
                 msg.types.push(tx.transaction.tx_type().into());
@@ -1460,17 +1460,15 @@ impl PooledTransactionsHashesBuilder {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         match version {
-            EthVersion::Eth66 | EthVersion::Eth67 => {
-                PooledTransactionsHashesBuilder::Eth66(Default::default())
-            }
-            EthVersion::Eth68 => PooledTransactionsHashesBuilder::Eth68(Default::default()),
+            EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
+            EthVersion::Eth68 => Self::Eth68(Default::default()),
         }
     }
 
     fn build(self) -> NewPooledTransactionHashes {
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => msg.into(),
-            PooledTransactionsHashesBuilder::Eth68(msg) => msg.into(),
+            Self::Eth66(msg) => msg.into(),
+            Self::Eth68(msg) => msg.into(),
         }
     }
 }
@@ -1488,7 +1486,7 @@ enum TransactionSource {
 impl TransactionSource {
     /// Whether the transaction were sent as broadcast.
     fn is_broadcast(&self) -> bool {
-        matches!(self, TransactionSource::Broadcast)
+        matches!(self, Self::Broadcast)
     }
 }
 

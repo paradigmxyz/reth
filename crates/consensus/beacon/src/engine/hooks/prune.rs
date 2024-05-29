@@ -167,7 +167,7 @@ impl From<PrunerError> for EngineHookError {
     fn from(err: PrunerError) -> Self {
         match err {
             PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
-                EngineHookError::Internal(Box::new(err))
+                Self::Internal(Box::new(err))
             }
             PrunerError::Database(err) => RethError::Database(err).into(),
             PrunerError::Provider(err) => RethError::Provider(err).into(),
