@@ -1,14 +1,15 @@
 name: 'Bitfinity - Tests'
 
 on:
-  workflow_dispatch: {}
-
+  workflow_dispatch:
   pull_request:
-    branches: [bitfinity-archive-node]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   build-test:
@@ -23,10 +24,6 @@ jobs:
 
       - name: Configure Rust Cache
         uses: Swatinem/rust-cache@v2
-        if: ${{ (github.event.pull_request.base.ref != 'main') && (github.ref_name != 'main') }}
-        with:
-          shared-key: ${{ github.repository }}
-          save-if: ${{ github.ref_type != 'tag' }}
 
       - name: test
         run: |
