@@ -30,7 +30,7 @@ pub struct Proof<'a, TX, H> {
 
 impl<'a, TX> Proof<'a, TX, &'a TX> {
     /// Create a new [Proof] instance.
-    pub fn new(tx: &'a TX) -> Self {
+pub const fn new(tx: &'a TX) -> Self {
         Self { tx, hashed_cursor_factory: tx }
     }
 }

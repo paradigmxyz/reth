@@ -974,7 +974,7 @@ struct HeadersResponseError {
 
 impl HeadersResponseError {
     /// Returns true if the error was caused by a closed channel to the network.
-    fn is_channel_closed(&self) -> bool {
+const fn is_channel_closed(&self) -> bool {
         if let DownloadError::RequestError(ref err) = self.error {
             return err.is_channel_closed()
         }

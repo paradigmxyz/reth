@@ -18,7 +18,7 @@ impl PruneMode {
     /// Prune blocks up to the specified block number. The specified block number is also pruned.
     ///
     /// This acts as `PruneMode::Before(block_number + 1)`.
-    pub fn before_inclusive(block_number: BlockNumber) -> Self {
+pub const fn before_inclusive(block_number: BlockNumber) -> Self {
         Self::Before(block_number + 1)
     }
 
@@ -45,7 +45,7 @@ impl PruneMode {
     }
 
     /// Check if target block should be pruned according to the provided prune mode and tip.
-    pub fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
+pub const fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
         match self {
             Self::Full => true,
             Self::Distance(distance) => {
@@ -59,7 +59,7 @@ impl PruneMode {
     }
 
     /// Returns true if the prune mode is [`PruneMode::Full`].
-    pub fn is_full(&self) -> bool {
+pub const fn is_full(&self) -> bool {
         matches!(self, Self::Full)
     }
 }

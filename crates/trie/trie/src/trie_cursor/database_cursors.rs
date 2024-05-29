@@ -34,7 +34,7 @@ pub struct DatabaseAccountTrieCursor<C>(C);
 
 impl<C> DatabaseAccountTrieCursor<C> {
     /// Create a new account trie cursor.
-    pub fn new(cursor: C) -> Self {
+pub const fn new(cursor: C) -> Self {
         Self(cursor)
     }
 }
@@ -76,7 +76,7 @@ pub struct DatabaseStorageTrieCursor<C> {
 
 impl<C> DatabaseStorageTrieCursor<C> {
     /// Create a new storage trie cursor.
-    pub fn new(cursor: C, hashed_address: B256) -> Self {
+pub const fn new(cursor: C, hashed_address: B256) -> Self {
         Self { cursor, hashed_address }
     }
 }

@@ -285,7 +285,7 @@ impl EnvironmentKind {
     }
 
     /// Additional flags required when opening the environment.
-    pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
+    pub(crate) const fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
         match self {
             Self::Default => ffi::MDBX_ENV_DEFAULTS,
             Self::WriteMap => ffi::MDBX_WRITEMAP,
@@ -307,7 +307,7 @@ pub struct Stat(ffi::MDBX_stat);
 
 impl Stat {
     /// Create a new Stat with zero'd inner struct `ffi::MDB_stat`.
-    pub(crate) fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         unsafe { Self(mem::zeroed()) }
     }
 
@@ -320,37 +320,37 @@ impl Stat {
 impl Stat {
     /// Size of a database page. This is the same for all databases in the environment.
     #[inline]
-    pub fn page_size(&self) -> u32 {
+    pub const fn page_size(&self) -> u32 {
         self.0.ms_psize
     }
 
     /// Depth (height) of the B-tree.
     #[inline]
-    pub fn depth(&self) -> u32 {
+    pub const fn depth(&self) -> u32 {
         self.0.ms_depth
     }
 
     /// Number of internal (non-leaf) pages.
     #[inline]
-    pub fn branch_pages(&self) -> usize {
+    pub const fn branch_pages(&self) -> usize {
         self.0.ms_branch_pages as usize
     }
 
     /// Number of leaf pages.
     #[inline]
-    pub fn leaf_pages(&self) -> usize {
+    pub const fn leaf_pages(&self) -> usize {
         self.0.ms_leaf_pages as usize
     }
 
     /// Number of overflow pages.
     #[inline]
-    pub fn overflow_pages(&self) -> usize {
+    pub const fn overflow_pages(&self) -> usize {
         self.0.ms_overflow_pages as usize
     }
 
     /// Number of data items.
     #[inline]
-    pub fn entries(&self) -> usize {
+    pub const fn entries(&self) -> usize {
         self.0.ms_entries as usize
     }
 }
@@ -360,7 +360,7 @@ impl Stat {
 pub struct GeometryInfo(ffi::MDBX_envinfo__bindgen_ty_1);
 
 impl GeometryInfo {
-    pub fn min(&self) -> u64 {
+    pub const fn min(&self) -> u64 {
         self.0.lower
     }
 }
@@ -373,43 +373,43 @@ impl GeometryInfo {
 pub struct Info(ffi::MDBX_envinfo);
 
 impl Info {
-    pub fn geometry(&self) -> GeometryInfo {
+    pub const fn geometry(&self) -> GeometryInfo {
         GeometryInfo(self.0.mi_geo)
     }
 
     /// Size of memory map.
     #[inline]
-    pub fn map_size(&self) -> usize {
+    pub const fn map_size(&self) -> usize {
         self.0.mi_mapsize as usize
     }
 
     /// Last used page number
     #[inline]
-    pub fn last_pgno(&self) -> usize {
+    pub const fn last_pgno(&self) -> usize {
         self.0.mi_last_pgno as usize
     }
 
     /// Last transaction ID
     #[inline]
-    pub fn last_txnid(&self) -> usize {
+    pub const fn last_txnid(&self) -> usize {
         self.0.mi_recent_txnid as usize
     }
 
     /// Max reader slots in the environment
     #[inline]
-    pub fn max_readers(&self) -> usize {
+    pub const fn max_readers(&self) -> usize {
         self.0.mi_maxreaders as usize
     }
 
     /// Max reader slots used in the environment
     #[inline]
-    pub fn num_readers(&self) -> usize {
+    pub const fn num_readers(&self) -> usize {
         self.0.mi_numreaders as usize
     }
 
     /// Return the internal page ops metrics
     #[inline]
-    pub fn page_ops(&self) -> PageOps {
+    pub const fn page_ops(&self) -> PageOps {
         PageOps {
             newly: self.0.mi_pgop_stat.newly,
             cow: self.0.mi_pgop_stat.cow,
@@ -857,7 +857,7 @@ pub(crate) mod read_transactions {
 
     #[cfg(feature = "read-tx-timeouts")]
     impl MaxReadTransactionDuration {
-        pub fn as_duration(&self) -> Option<Duration> {
+        pub const fn as_duration(&self) -> Option<Duration> {
             match self {
                 Self::Unbounded => None,
                 Self::Set(duration) => Some(*duration),
@@ -911,7 +911,6 @@ unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> f
     std::mem::forget(closure);
 
     // Cast the closure to FFI `extern fn` type.
-    #[allow(clippy::missing_transmute_annotations)]
     Some(std::mem::transmute(closure_ptr))
 }
 

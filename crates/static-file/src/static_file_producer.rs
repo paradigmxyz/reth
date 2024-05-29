@@ -76,7 +76,7 @@ pub struct StaticFileTargets {
 
 impl StaticFileTargets {
     /// Returns `true` if any of the targets are [Some].
-    pub fn any(&self) -> bool {
+pub const fn any(&self) -> bool {
         self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
     }
 

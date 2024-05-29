@@ -197,12 +197,12 @@ pub enum Direction {
 
 impl Direction {
     /// Returns `true` if this an incoming connection.
-    pub fn is_incoming(&self) -> bool {
+pub const fn is_incoming(&self) -> bool {
         matches!(self, Self::Incoming)
     }
 
     /// Returns `true` if this an outgoing connection.
-    pub fn is_outgoing(&self) -> bool {
+pub const fn is_outgoing(&self) -> bool {
         matches!(self, Self::Outgoing(_))
     }
 }

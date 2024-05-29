@@ -104,12 +104,12 @@ pub enum RequestError {
 
 impl RequestError {
     /// Indicates whether this error is retryable or fatal.
-    pub fn is_retryable(&self) -> bool {
+pub const fn is_retryable(&self) -> bool {
         matches!(self, Self::Timeout | Self::ConnectionDropped)
     }
 
     /// Whether the error happened because the channel was closed.
-    pub fn is_channel_closed(&self) -> bool {
+pub const fn is_channel_closed(&self) -> bool {
         matches!(self, Self::ChannelClosed)
     }
 }

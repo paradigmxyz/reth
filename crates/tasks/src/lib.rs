@@ -297,12 +297,12 @@ pub struct TaskExecutor {
 
 impl TaskExecutor {
     /// Returns the [Handle] to the tokio runtime.
-    pub fn handle(&self) -> &Handle {
+pub const fn handle(&self) -> &Handle {
         &self.handle
     }
 
     /// Returns the receiver of the shutdown signal.
-    pub fn on_shutdown_signal(&self) -> &Shutdown {
+pub const fn on_shutdown_signal(&self) -> &Shutdown {
         &self.on_shutdown
     }
 

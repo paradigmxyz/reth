@@ -152,7 +152,7 @@ impl<T> MeteredSender<T> {
     }
 
     /// Returns the underlying [Sender](mpsc::Sender).
-    pub fn inner(&self) -> &mpsc::Sender<T> {
+pub const fn inner(&self) -> &mpsc::Sender<T> {
         &self.sender
     }
 

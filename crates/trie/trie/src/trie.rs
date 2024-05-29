@@ -49,13 +49,13 @@ impl<T, H> StateRoot<T, H> {
     }
 
     /// Set the threshold.
-    pub fn with_threshold(mut self, threshold: u64) -> Self {
+pub const fn with_threshold(mut self, threshold: u64) -> Self {
         self.threshold = threshold;
         self
     }
 
     /// Set the threshold to maximum value so that intermediate progress is not returned.
-    pub fn with_no_threshold(mut self) -> Self {
+pub const fn with_no_threshold(mut self) -> Self {
         self.threshold = u64::MAX;
         self
     }

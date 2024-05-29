@@ -51,7 +51,7 @@ impl ExecInput {
     }
 
     /// Return true if this is the first block range to execute.
-    pub fn is_first_range(&self) -> bool {
+pub const fn is_first_range(&self) -> bool {
         self.checkpoint.is_none()
     }
 

@@ -44,17 +44,17 @@ impl EthBuiltPayload {
     }
 
     /// Returns the identifier of the payload.
-    pub fn id(&self) -> PayloadId {
+pub const fn id(&self) -> PayloadId {
         self.id
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlock {
+pub const fn block(&self) -> &SealedBlock {
         &self.block
     }
 
     /// Fees of the block
-    pub fn fees(&self) -> U256 {
+pub const fn fees(&self) -> U256 {
         self.fees
     }
 
@@ -172,7 +172,7 @@ pub struct EthPayloadBuilderAttributes {
 
 impl EthPayloadBuilderAttributes {
     /// Returns the identifier of the payload.
-    pub fn payload_id(&self) -> PayloadId {
+pub const fn payload_id(&self) -> PayloadId {
         self.id
     }
 

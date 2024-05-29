@@ -47,13 +47,13 @@ pub struct Inclusion {
 
 impl Inclusion {
     /// Creates a new inclusion with the given min block..
-    pub fn at_block(block: u64) -> Self {
+pub const fn at_block(block: u64) -> Self {
         Self { block, max_block: None }
     }
 
     /// Returns the block number of the first block the bundle is valid for.
     #[inline]
-    pub fn block_number(&self) -> u64 {
+pub const fn block_number(&self) -> u64 {
         self.block
     }
 
@@ -155,71 +155,71 @@ pub struct PrivacyHint {
 impl PrivacyHint {
     /// Sets the flag indicating inclusion of calldata and returns the modified PrivacyHint
     /// instance.
-    pub fn with_calldata(mut self) -> Self {
+pub const fn with_calldata(mut self) -> Self {
         self.calldata = true;
         self
     }
 
     /// Sets the flag indicating inclusion of contract address and returns the modified PrivacyHint
     /// instance.
-    pub fn with_contract_address(mut self) -> Self {
+pub const fn with_contract_address(mut self) -> Self {
         self.contract_address = true;
         self
     }
 
     /// Sets the flag indicating inclusion of logs and returns the modified PrivacyHint instance.
-    pub fn with_logs(mut self) -> Self {
+pub const fn with_logs(mut self) -> Self {
         self.logs = true;
         self
     }
 
     /// Sets the flag indicating inclusion of function selector and returns the modified PrivacyHint
     /// instance.
-    pub fn with_function_selector(mut self) -> Self {
+pub const fn with_function_selector(mut self) -> Self {
         self.function_selector = true;
         self
     }
 
     /// Sets the flag indicating inclusion of hash and returns the modified PrivacyHint instance.
-    pub fn with_hash(mut self) -> Self {
+pub const fn with_hash(mut self) -> Self {
         self.hash = true;
         self
     }
 
     /// Sets the flag indicating inclusion of transaction hash and returns the modified PrivacyHint
     /// instance.
-    pub fn with_tx_hash(mut self) -> Self {
+pub const fn with_tx_hash(mut self) -> Self {
         self.tx_hash = true;
         self
     }
 
     /// Checks if calldata inclusion flag is set.
-    pub fn has_calldata(&self) -> bool {
+pub const fn has_calldata(&self) -> bool {
         self.calldata
     }
 
     /// Checks if contract address inclusion flag is set.
-    pub fn has_contract_address(&self) -> bool {
+pub const fn has_contract_address(&self) -> bool {
         self.contract_address
     }
 
     /// Checks if logs inclusion flag is set.
-    pub fn has_logs(&self) -> bool {
+pub const fn has_logs(&self) -> bool {
         self.logs
     }
 
     /// Checks if function selector inclusion flag is set.
-    pub fn has_function_selector(&self) -> bool {
+pub const fn has_function_selector(&self) -> bool {
         self.function_selector
     }
 
     /// Checks if hash inclusion flag is set.
-    pub fn has_hash(&self) -> bool {
+pub const fn has_hash(&self) -> bool {
         self.hash
     }
 
     /// Checks if transaction hash inclusion flag is set.
-    pub fn has_tx_hash(&self) -> bool {
+pub const fn has_tx_hash(&self) -> bool {
         self.tx_hash
     }
 
@@ -456,7 +456,7 @@ pub struct PrivateTransactionPreferences {
 
 impl PrivateTransactionPreferences {
     /// Returns true if the preferences are empty.
-    pub fn is_empty(&self) -> bool {
+pub const fn is_empty(&self) -> bool {
         self.validity.is_none() && self.privacy.is_none()
     }
 }

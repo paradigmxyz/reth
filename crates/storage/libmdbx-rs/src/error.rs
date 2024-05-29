@@ -127,7 +127,7 @@ pub enum Error {
 
 impl Error {
     /// Converts a raw error code to an [Error].
-    pub fn from_err_code(err_code: c_int) -> Self {
+pub const fn from_err_code(err_code: c_int) -> Self {
         match err_code {
             ffi::MDBX_KEYEXIST => Self::KeyExist,
             ffi::MDBX_NOTFOUND => Self::NotFound,
@@ -163,7 +163,7 @@ impl Error {
     }
 
     /// Converts an [Error] to the raw error code.
-    pub fn to_err_code(&self) -> i32 {
+pub const fn to_err_code(&self) -> i32 {
         match self {
             Self::KeyExist => ffi::MDBX_KEYEXIST,
             Self::NotFound => ffi::MDBX_NOTFOUND,
@@ -209,7 +209,7 @@ impl From<Error> for i32 {
 }
 
 #[inline]
-pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
+pub(crate) const fn mdbx_result(err_code: c_int) -> Result<bool> {
     match err_code {
         ffi::MDBX_SUCCESS => Ok(false),
         ffi::MDBX_RESULT_TRUE => Ok(true),

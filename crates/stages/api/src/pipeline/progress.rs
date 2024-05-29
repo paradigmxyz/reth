@@ -19,7 +19,7 @@ impl PipelineProgress {
     }
 
     /// Get next control flow step
-    pub(crate) fn next_ctrl(&self) -> ControlFlow {
+pub(crate) const fn next_ctrl(&self) -> ControlFlow {
         match self.block_number {
             Some(block_number) => ControlFlow::Continue { block_number },
             None => ControlFlow::NoProgress { block_number: None },

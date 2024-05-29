@@ -199,7 +199,7 @@ impl BranchEntry {
             /// `n` bytes of base32-encoded data.
             /// See also <https://cs.opensource.google/go/go/+/refs/tags/go1.19.5:src/encoding/base32/base32.go;l=526-531;drc=8a5845e4e34c046758af3729acf9221b8b6c01ae>
             #[inline(always)]
-            fn base32_no_padding_decoded_len(n: usize) -> usize {
+const fn base32_no_padding_decoded_len(n: usize) -> usize {
                 n * 5 / 8
             }
 

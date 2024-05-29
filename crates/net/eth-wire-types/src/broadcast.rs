@@ -137,7 +137,7 @@ pub enum NewPooledTransactionHashes {
 
 impl NewPooledTransactionHashes {
     /// Returns the message [`EthVersion`].
-    pub fn version(&self) -> EthVersion {
+pub const fn version(&self) -> EthVersion {
         match self {
             Self::Eth66(_) => EthVersion::Eth66,
             Self::Eth68(_) => EthVersion::Eth68,
@@ -145,7 +145,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns `true` if the payload is valid for the given version
-    pub fn is_valid_for_version(&self, version: EthVersion) -> bool {
+pub const fn is_valid_for_version(&self, version: EthVersion) -> bool {
         match self {
             Self::Eth66(_) => {
                 matches!(version, EthVersion::Eth67 | EthVersion::Eth66)
@@ -165,7 +165,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns an immutable reference to transaction hashes.
-    pub fn hashes(&self) -> &Vec<B256> {
+pub const fn hashes(&self) -> &Vec<B256> {
         match self {
             Self::Eth66(msg) => &msg.0,
             Self::Eth68(msg) => &msg.hashes,
@@ -226,7 +226,7 @@ impl NewPooledTransactionHashes {
     }
 
     /// Returns an immutable reference to the inner type if this an eth68 announcement.
-    pub fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
+pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
             Self::Eth66(_) => None,
             Self::Eth68(msg) => Some(msg),
@@ -597,17 +597,17 @@ handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
 
 impl<V> PartiallyValidData<V> {
     /// Wraps raw data.
-    pub fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
+pub const fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
         Self { data, version }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth68`].
-    pub fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
+pub const fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth68))
     }
 
     /// Wraps raw data with version [`EthVersion::Eth66`].
-    pub fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
+pub const fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth66))
     }
 
@@ -625,7 +625,7 @@ impl<V> PartiallyValidData<V> {
 
     /// Returns the version of the message this data was received in if different versions of the
     /// message exists, either [`Eth66`](EthVersion::Eth66) or [`Eth68`](EthVersion::Eth68).
-    pub fn msg_version(&self) -> Option<EthVersion> {
+pub const fn msg_version(&self) -> Option<EthVersion> {
         self.version
     }
 

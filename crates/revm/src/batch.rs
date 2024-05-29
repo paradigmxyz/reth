@@ -74,7 +74,7 @@ impl BlockBatchRecord {
     }
 
     /// Returns the recorded receipts.
-    pub fn receipts(&self) -> &Receipts {
+pub const fn receipts(&self) -> &Receipts {
         &self.receipts
     }
 

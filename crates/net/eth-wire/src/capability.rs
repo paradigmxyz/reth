@@ -53,7 +53,7 @@ pub struct Capability {
 
 impl Capability {
     /// Create a new `Capability` with the given name and version.
-    pub fn new(name: String, version: usize) -> Self {
+pub const fn new(name: String, version: usize) -> Self {
         Self { name: Cow::Owned(name), version }
     }
 
@@ -170,25 +170,25 @@ impl Capabilities {
 
     /// Whether the peer supports `eth` sub-protocol.
     #[inline]
-    pub fn supports_eth(&self) -> bool {
+pub const fn supports_eth(&self) -> bool {
         self.eth_68 || self.eth_67 || self.eth_66
     }
 
     /// Whether this peer supports eth v66 protocol.
     #[inline]
-    pub fn supports_eth_v66(&self) -> bool {
+pub const fn supports_eth_v66(&self) -> bool {
         self.eth_66
     }
 
     /// Whether this peer supports eth v67 protocol.
     #[inline]
-    pub fn supports_eth_v67(&self) -> bool {
+pub const fn supports_eth_v67(&self) -> bool {
         self.eth_67
     }
 
     /// Whether this peer supports eth v68 protocol.
     #[inline]
-    pub fn supports_eth_v68(&self) -> bool {
+pub const fn supports_eth_v68(&self) -> bool {
         self.eth_68
     }
 }
@@ -287,7 +287,7 @@ impl SharedCapability {
     }
 
     /// Returns the capability.
-    pub fn capability(&self) -> Cow<'_, Capability> {
+pub const fn capability(&self) -> Cow<'_, Capability> {
         match self {
             Self::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
             Self::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
@@ -305,12 +305,12 @@ impl SharedCapability {
 
     /// Returns true if the capability is eth.
     #[inline]
-    pub fn is_eth(&self) -> bool {
+pub const fn is_eth(&self) -> bool {
         matches!(self, Self::Eth { .. })
     }
 
     /// Returns the version of the capability.
-    pub fn version(&self) -> u8 {
+pub const fn version(&self) -> u8 {
         match self {
             Self::Eth { version, .. } => *version as u8,
             Self::UnknownCapability { cap, .. } => cap.version as u8,
@@ -318,7 +318,7 @@ impl SharedCapability {
     }
 
     /// Returns the eth version if it's the `eth` capability.
-    pub fn eth_version(&self) -> Option<EthVersion> {
+pub const fn eth_version(&self) -> Option<EthVersion> {
         match self {
             Self::Eth { version, .. } => Some(*version),
             _ => None,
@@ -329,7 +329,7 @@ impl SharedCapability {
     ///
     /// This represents the message ID offset for the first message of the eth capability in the
     /// message id space.
-    pub fn message_id_offset(&self) -> u8 {
+pub const fn message_id_offset(&self) -> u8 {
         match self {
             Self::Eth { offset, .. } => *offset,
             Self::UnknownCapability { offset, .. } => *offset,
@@ -338,12 +338,12 @@ impl SharedCapability {
 
     /// Returns the message ID offset of the current capability relative to the start of the
     /// reserved message id space: [`MAX_RESERVED_MESSAGE_ID`].
-    pub fn relative_message_id_offset(&self) -> u8 {
+pub const fn relative_message_id_offset(&self) -> u8 {
         self.message_id_offset() - MAX_RESERVED_MESSAGE_ID - 1
     }
 
     /// Returns the number of protocol messages supported by this capability.
-    pub fn num_messages(&self) -> u8 {
+pub const fn num_messages(&self) -> u8 {
         match self {
             Self::Eth { version: _version, .. } => EthMessageID::max() + 1,
             Self::UnknownCapability { messages, .. } => *messages,

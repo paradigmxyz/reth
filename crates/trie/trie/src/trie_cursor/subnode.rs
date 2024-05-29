@@ -69,7 +69,7 @@ impl CursorSubNode {
 
     /// Returns the full key of the current node.
     #[inline]
-    pub fn full_key(&self) -> &Nibbles {
+pub const fn full_key(&self) -> &Nibbles {
         &self.full_key
     }
 
@@ -114,7 +114,7 @@ impl CursorSubNode {
 
     /// Returns the next child index to visit.
     #[inline]
-    pub fn nibble(&self) -> i8 {
+pub const fn nibble(&self) -> i8 {
         self.nibble
     }
 

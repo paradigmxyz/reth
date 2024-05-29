@@ -121,7 +121,7 @@ where
     Client: BodiesClient + HeadersClient,
 {
     /// Returns the hash of the block being requested.
-    pub fn hash(&self) -> &B256 {
+pub const fn hash(&self) -> &B256 {
         &self.hash
     }
 
@@ -524,17 +524,17 @@ where
 
     /// Returns whether or not a bodies request has been started, returning false if there is no
     /// pending request.
-    fn has_bodies_request_started(&self) -> bool {
+const fn has_bodies_request_started(&self) -> bool {
         self.request.bodies.is_some()
     }
 
     /// Returns the start hash for the request
-    pub fn start_hash(&self) -> B256 {
+pub const fn start_hash(&self) -> B256 {
         self.start_hash
     }
 
     /// Returns the block count for the request
-    pub fn count(&self) -> u64 {
+pub const fn count(&self) -> u64 {
         self.count
     }
 }

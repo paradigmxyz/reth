@@ -75,17 +75,17 @@ impl BlockNumberAddress {
     }
 
     /// Return the block number
-    pub fn block_number(&self) -> BlockNumber {
+pub const fn block_number(&self) -> BlockNumber {
         self.0 .0
     }
 
     /// Return the address
-    pub fn address(&self) -> Address {
+pub const fn address(&self) -> Address {
         self.0 .1
     }
 
     /// Consumes `Self` and returns [`BlockNumber`], [`Address`]
-    pub fn take(self) -> (BlockNumber, Address) {
+pub const fn take(self) -> (BlockNumber, Address) {
         (self.0 .0, self.0 .1)
     }
 }

@@ -71,7 +71,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     /// Returns a reference to `H` of [`NippyJar`]
-    pub fn user_header(&self) -> &H {
+pub const fn user_header(&self) -> &H {
         &self.jar.user_header
     }
 
@@ -81,7 +81,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     /// Gets total writer rows in jar.
-    pub fn rows(&self) -> usize {
+pub const fn rows(&self) -> usize {
         self.jar.rows()
     }
 

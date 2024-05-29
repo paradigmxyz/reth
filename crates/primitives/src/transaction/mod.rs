@@ -151,7 +151,7 @@ impl Transaction {
     }
 
     /// Get chain_id.
-    pub fn chain_id(&self) -> Option<u64> {
+pub const fn chain_id(&self) -> Option<u64> {
         match self {
             Self::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
             Self::Eip2930(TxEip2930 { chain_id, .. }) |
@@ -176,7 +176,7 @@ impl Transaction {
 
     /// Gets the transaction's [`TxKind`], which is the address of the recipient or
     /// [`TxKind::Create`] if the transaction is a contract creation.
-    pub fn kind(&self) -> TxKind {
+pub const fn kind(&self) -> TxKind {
         match self {
             Self::Legacy(TxLegacy { to, .. }) |
             Self::Eip2930(TxEip2930 { to, .. }) |
@@ -196,7 +196,7 @@ impl Transaction {
     }
 
     /// Get the transaction's type
-    pub fn tx_type(&self) -> TxType {
+pub const fn tx_type(&self) -> TxType {
         match self {
             Self::Legacy(legacy_tx) => legacy_tx.tx_type(),
             Self::Eip2930(access_list_tx) => access_list_tx.tx_type(),
@@ -208,7 +208,7 @@ impl Transaction {
     }
 
     /// Gets the transaction's value field.
-    pub fn value(&self) -> U256 {
+pub const fn value(&self) -> U256 {
         *match self {
             Self::Legacy(TxLegacy { value, .. }) |
             Self::Eip2930(TxEip2930 { value, .. }) |
@@ -220,7 +220,7 @@ impl Transaction {
     }
 
     /// Get the transaction's nonce.
-    pub fn nonce(&self) -> u64 {
+pub const fn nonce(&self) -> u64 {
         match self {
             Self::Legacy(TxLegacy { nonce, .. }) |
             Self::Eip2930(TxEip2930 { nonce, .. }) |
@@ -235,7 +235,7 @@ impl Transaction {
     /// Returns the [AccessList] of the transaction.
     ///
     /// Returns `None` for legacy transactions.
-    pub fn access_list(&self) -> Option<&AccessList> {
+pub const fn access_list(&self) -> Option<&AccessList> {
         match self {
             Self::Legacy(_) => None,
             Self::Eip2930(tx) => Some(&tx.access_list),
@@ -247,7 +247,7 @@ impl Transaction {
     }
 
     /// Get the gas limit of the transaction.
-    pub fn gas_limit(&self) -> u64 {
+pub const fn gas_limit(&self) -> u64 {
         match self {
             Self::Legacy(TxLegacy { gas_limit, .. }) |
             Self::Eip2930(TxEip2930 { gas_limit, .. }) |
@@ -259,7 +259,7 @@ impl Transaction {
     }
 
     /// Returns true if the tx supports dynamic fees
-    pub fn is_dynamic_fee(&self) -> bool {
+pub const fn is_dynamic_fee(&self) -> bool {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) => false,
             Self::Eip1559(_) | Self::Eip4844(_) => true,
@@ -271,7 +271,7 @@ impl Transaction {
     /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
-    pub fn max_fee_per_gas(&self) -> u128 {
+pub const fn max_fee_per_gas(&self) -> u128 {
         match self {
             Self::Legacy(TxLegacy { gas_price, .. }) |
             Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
@@ -288,7 +288,7 @@ impl Transaction {
     /// is `None`
     ///
     /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
-    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+pub const fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) => None,
             Self::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) |
@@ -320,7 +320,7 @@ impl Transaction {
     /// Returns `None` for non-eip4844 transactions.
     ///
     /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
-    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+pub const fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
             Self::Eip4844(TxEip4844 { max_fee_per_blob_gas, .. }) => Some(*max_fee_per_blob_gas),
             _ => None,
@@ -343,7 +343,7 @@ impl Transaction {
     ///
     /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
     /// non-EIP-1559 transactions.
-    pub fn priority_fee_or_price(&self) -> u128 {
+pub const fn priority_fee_or_price(&self) -> u128 {
         match self {
             Self::Legacy(TxLegacy { gas_price, .. }) |
             Self::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
@@ -357,7 +357,7 @@ impl Transaction {
     /// Returns the effective gas price for the given base fee.
     ///
     /// If the transaction is a legacy or EIP2930 transaction, the gas price is returned.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match self {
             Self::Legacy(tx) => tx.gas_price,
             Self::Eip2930(tx) => tx.gas_price,
@@ -400,7 +400,7 @@ impl Transaction {
     }
 
     /// Get the transaction's input field.
-    pub fn input(&self) -> &Bytes {
+pub const fn input(&self) -> &Bytes {
         match self {
             Self::Legacy(TxLegacy { input, .. }) |
             Self::Eip2930(TxEip2930 { input, .. }) |
@@ -414,7 +414,7 @@ impl Transaction {
     /// Returns the source hash of the transaction, which uniquely identifies its source.
     /// If not a deposit transaction, this will always return `None`.
     #[cfg(feature = "optimism")]
-    pub fn source_hash(&self) -> Option<B256> {
+pub const fn source_hash(&self) -> Option<B256> {
         match self {
             Self::Deposit(TxDeposit { source_hash, .. }) => Some(*source_hash),
             _ => None,
@@ -424,7 +424,7 @@ impl Transaction {
     /// Returns the amount of ETH locked up on L1 that will be minted on L2. If the transaction
     /// is not a deposit transaction, this will always return `None`.
     #[cfg(feature = "optimism")]
-    pub fn mint(&self) -> Option<u128> {
+pub const fn mint(&self) -> Option<u128> {
         match self {
             Self::Deposit(TxDeposit { mint, .. }) => *mint,
             _ => None,
@@ -434,7 +434,7 @@ impl Transaction {
     /// Returns whether or not the transaction is a system transaction. If the transaction
     /// is not a deposit transaction, this will always return `false`.
     #[cfg(feature = "optimism")]
-    pub fn is_system_transaction(&self) -> bool {
+pub const fn is_system_transaction(&self) -> bool {
         match self {
             Self::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
             _ => false,
@@ -443,7 +443,7 @@ impl Transaction {
 
     /// Returns whether or not the transaction is an Optimism Deposited transaction.
     #[cfg(feature = "optimism")]
-    pub fn is_deposit(&self) -> bool {
+pub const fn is_deposit(&self) -> bool {
         matches!(self, Self::Deposit(_))
     }
 
@@ -552,7 +552,7 @@ impl Transaction {
     }
 
     /// Returns the [TxLegacy] variant if the transaction is a legacy transaction.
-    pub fn as_legacy(&self) -> Option<&TxLegacy> {
+pub const fn as_legacy(&self) -> Option<&TxLegacy> {
         match self {
             Self::Legacy(tx) => Some(tx),
             _ => None,
@@ -560,7 +560,7 @@ impl Transaction {
     }
 
     /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
-    pub fn as_eip2930(&self) -> Option<&TxEip2930> {
+pub const fn as_eip2930(&self) -> Option<&TxEip2930> {
         match self {
             Self::Eip2930(tx) => Some(tx),
             _ => None,
@@ -568,7 +568,7 @@ impl Transaction {
     }
 
     /// Returns the [TxEip1559] variant if the transaction is an EIP-1559 transaction.
-    pub fn as_eip1559(&self) -> Option<&TxEip1559> {
+pub const fn as_eip1559(&self) -> Option<&TxEip1559> {
         match self {
             Self::Eip1559(tx) => Some(tx),
             _ => None,
@@ -576,7 +576,7 @@ impl Transaction {
     }
 
     /// Returns the [TxEip4844] variant if the transaction is an EIP-4844 transaction.
-    pub fn as_eip4844(&self) -> Option<&TxEip4844> {
+pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
         match self {
             Self::Eip4844(tx) => Some(tx),
             _ => None,
@@ -984,17 +984,17 @@ impl AsRef<Self> for TransactionSigned {
 
 impl TransactionSigned {
     /// Transaction signature.
-    pub fn signature(&self) -> &Signature {
+pub const fn signature(&self) -> &Signature {
         &self.signature
     }
 
     /// Transaction hash. Used to identify transaction.
-    pub fn hash(&self) -> TxHash {
+pub const fn hash(&self) -> TxHash {
         self.hash
     }
 
     /// Reference to transaction hash. Used to identify transaction.
-    pub fn hash_ref(&self) -> &TxHash {
+pub const fn hash_ref(&self) -> &TxHash {
         &self.hash
     }
 
@@ -1520,7 +1520,7 @@ pub struct TransactionSignedEcRecovered {
 
 impl TransactionSignedEcRecovered {
     /// Signer of transaction recovered from signature
-    pub fn signer(&self) -> Address {
+pub const fn signer(&self) -> Address {
         self.signer
     }
 

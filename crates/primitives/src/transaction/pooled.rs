@@ -107,7 +107,7 @@ impl PooledTransactionsElement {
     }
 
     /// Reference to transaction hash. Used to identify transaction.
-    pub fn hash(&self) -> &TxHash {
+pub const fn hash(&self) -> &TxHash {
         match self {
             Self::Legacy { hash, .. } | Self::Eip2930 { hash, .. } | Self::Eip1559 { hash, .. } => {
                 hash
@@ -117,7 +117,7 @@ impl PooledTransactionsElement {
     }
 
     /// Returns the signature of the transaction.
-    pub fn signature(&self) -> &Signature {
+pub const fn signature(&self) -> &Signature {
         match self {
             Self::Legacy { signature, .. } |
             Self::Eip2930 { signature, .. } |
@@ -127,7 +127,7 @@ impl PooledTransactionsElement {
     }
 
     /// Returns the transaction nonce.
-    pub fn nonce(&self) -> u64 {
+pub const fn nonce(&self) -> u64 {
         match self {
             Self::Legacy { transaction, .. } => transaction.nonce,
             Self::Eip2930 { transaction, .. } => transaction.nonce,
@@ -339,7 +339,7 @@ impl PooledTransactionsElement {
     }
 
     /// Returns the [TxLegacy] variant if the transaction is a legacy transaction.
-    pub fn as_legacy(&self) -> Option<&TxLegacy> {
+pub const fn as_legacy(&self) -> Option<&TxLegacy> {
         match self {
             Self::Legacy { transaction, .. } => Some(transaction),
             _ => None,
@@ -347,7 +347,7 @@ impl PooledTransactionsElement {
     }
 
     /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
-    pub fn as_eip2930(&self) -> Option<&TxEip2930> {
+pub const fn as_eip2930(&self) -> Option<&TxEip2930> {
         match self {
             Self::Eip2930 { transaction, .. } => Some(transaction),
             _ => None,
@@ -355,7 +355,7 @@ impl PooledTransactionsElement {
     }
 
     /// Returns the [TxEip1559] variant if the transaction is an EIP-1559 transaction.
-    pub fn as_eip1559(&self) -> Option<&TxEip1559> {
+pub const fn as_eip1559(&self) -> Option<&TxEip1559> {
         match self {
             Self::Eip1559 { transaction, .. } => Some(transaction),
             _ => None,
@@ -363,7 +363,7 @@ impl PooledTransactionsElement {
     }
 
     /// Returns the [TxEip4844] variant if the transaction is an EIP-4844 transaction.
-    pub fn as_eip4844(&self) -> Option<&TxEip4844> {
+pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
         match self {
             Self::BlobTransaction(tx) => Some(&tx.transaction),
             _ => None,
@@ -384,7 +384,7 @@ impl PooledTransactionsElement {
     /// Returns `None` for non-eip4844 transactions.
     ///
     /// This is also commonly referred to as the "Blob Gas Fee Cap" (`BlobGasFeeCap`).
-    pub fn max_fee_per_blob_gas(&self) -> Option<u128> {
+pub const fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
             Self::BlobTransaction(tx) => Some(tx.transaction.max_fee_per_blob_gas),
             _ => None,
@@ -395,7 +395,7 @@ impl PooledTransactionsElement {
     /// is `None`
     ///
     /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
-    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+pub const fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             Self::Legacy { .. } | Self::Eip2930 { .. } => None,
             Self::Eip1559 { transaction, .. } => Some(transaction.max_priority_fee_per_gas),
@@ -406,7 +406,7 @@ impl PooledTransactionsElement {
     /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
-    pub fn max_fee_per_gas(&self) -> u128 {
+pub const fn max_fee_per_gas(&self) -> u128 {
         match self {
             Self::Legacy { transaction, .. } => transaction.gas_price,
             Self::Eip2930 { transaction, .. } => transaction.gas_price,
@@ -654,7 +654,7 @@ pub struct PooledTransactionsElementEcRecovered {
 
 impl PooledTransactionsElementEcRecovered {
     /// Signer of transaction recovered from signature
-    pub fn signer(&self) -> Address {
+pub const fn signer(&self) -> Address {
         self.signer
     }
 
@@ -676,7 +676,7 @@ impl PooledTransactionsElementEcRecovered {
 
     /// Create [`TransactionSignedEcRecovered`] from [`PooledTransactionsElement`] and [`Address`]
     /// of the signer.
-    pub fn from_signed_transaction(
+pub const fn from_signed_transaction(
         transaction: PooledTransactionsElement,
         signer: Address,
     ) -> Self {
