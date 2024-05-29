@@ -564,7 +564,7 @@ where
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         let start = Instant::now();
-        let res = EngineApi::new_payload_v1(self, payload).await;
+        let res = Self::new_payload_v1(self, payload).await;
         self.inner.metrics.latency.new_payload_v1.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
         Ok(res?)
@@ -575,7 +575,7 @@ where
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         let start = Instant::now();
-        let res = EngineApi::new_payload_v2(self, payload).await;
+        let res = Self::new_payload_v2(self, payload).await;
         self.inner.metrics.latency.new_payload_v2.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
         Ok(res?)
@@ -592,7 +592,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         let start = Instant::now();
         let res =
-            EngineApi::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
+            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root)
                 .await;
         self.inner.metrics.latency.new_payload_v3.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
@@ -608,7 +608,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
         let res =
-            EngineApi::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root)
+            Self::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root)
                 .await;
         self.inner.metrics.latency.new_payload_v4.record(start.elapsed());
         self.inner.metrics.new_payload_response.update_response_metrics(&res);
@@ -627,7 +627,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
         let start = Instant::now();
         let res =
-            EngineApi::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
+            Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -643,7 +643,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
         let start = Instant::now();
         let res =
-            EngineApi::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
+            Self::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -660,7 +660,7 @@ where
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         let start = Instant::now();
         let res =
-            EngineApi::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
+            Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
         self.inner.metrics.fcu_response.update_response_metrics(&res);
         Ok(res?)
@@ -683,7 +683,7 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
         let start = Instant::now();
-        let res = EngineApi::get_payload_v1(self, payload_id).await;
+        let res = Self::get_payload_v1(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v1.record(start.elapsed());
         Ok(res?)
     }
@@ -703,7 +703,7 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
         let start = Instant::now();
-        let res = EngineApi::get_payload_v2(self, payload_id).await;
+        let res = Self::get_payload_v2(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v2.record(start.elapsed());
         Ok(res?)
     }
@@ -723,7 +723,7 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
         let start = Instant::now();
-        let res = EngineApi::get_payload_v3(self, payload_id).await;
+        let res = Self::get_payload_v3(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v3.record(start.elapsed());
         Ok(res?)
     }
@@ -743,7 +743,7 @@ where
     ) -> RpcResult<EngineT::ExecutionPayloadV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
         let start = Instant::now();
-        let res = EngineApi::get_payload_v4(self, payload_id).await;
+        let res = Self::get_payload_v4(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
         Ok(res?)
     }
@@ -756,7 +756,7 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         let start = Instant::now();
-        let res = EngineApi::get_payload_bodies_by_hash(self, block_hashes);
+        let res = Self::get_payload_bodies_by_hash(self, block_hashes);
         self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
         Ok(res?)
     }
@@ -784,7 +784,7 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         let start_time = Instant::now();
-        let res = EngineApi::get_payload_bodies_by_range(self, start.to(), count.to()).await;
+        let res = Self::get_payload_bodies_by_range(self, start.to(), count.to()).await;
         self.inner.metrics.latency.get_payload_bodies_by_range_v1.record(start_time.elapsed());
         Ok(res?)
     }
@@ -797,7 +797,7 @@ where
     ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
         let start = Instant::now();
-        let res = EngineApi::exchange_transition_configuration(self, config).await;
+        let res = Self::exchange_transition_configuration(self, config).await;
         self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
@@ -809,7 +809,7 @@ where
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
         trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
-        let res = EngineApi::get_client_version_v1(self, client).await;
+        let res = Self::get_client_version_v1(self, client).await;
 
         Ok(res?)
     }

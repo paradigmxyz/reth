@@ -144,12 +144,12 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
 impl NippyJar<()> {
     /// Creates a new [`NippyJar`] without an user-defined header data.
     pub fn new_without_header(columns: usize, path: &Path) -> Self {
-        NippyJar::<()>::new(columns, path, ())
+        Self::new(columns, path, ())
     }
 
     /// Loads the file configuration and returns [`Self`] on a jar without user-defined header data.
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
-        NippyJar::<()>::load(path)
+        Self::load(path)
     }
 
     /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
@@ -161,7 +161,7 @@ impl NippyJar<()> {
 impl<H: NippyJarHeader> NippyJar<H> {
     /// Creates a new [`NippyJar`] with a user-defined header data.
     pub fn new(columns: usize, path: &Path, user_header: H) -> Self {
-        NippyJar {
+        Self {
             version: NIPPY_JAR_VERSION,
             user_header,
             columns,

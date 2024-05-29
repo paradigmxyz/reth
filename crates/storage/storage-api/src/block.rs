@@ -32,12 +32,12 @@ pub enum BlockSource {
 impl BlockSource {
     /// Returns `true` if the block source is `Pending` or `Any`.
     pub fn is_pending(&self) -> bool {
-        matches!(self, BlockSource::Pending | BlockSource::Any)
+        matches!(self, Self::Pending | Self::Any)
     }
 
     /// Returns `true` if the block source is `Database` or `Any`.
     pub fn is_database(&self) -> bool {
-        matches!(self, BlockSource::Database | BlockSource::Any)
+        matches!(self, Self::Database | Self::Any)
     }
 }
 

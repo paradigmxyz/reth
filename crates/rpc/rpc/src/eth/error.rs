@@ -127,7 +127,7 @@ pub enum EthApiError {
 impl EthApiError {
     /// crates a new [EthApiError::Other] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
-        EthApiError::Other(Box::new(err))
+        Self::Other(Box::new(err))
     }
 }
 
@@ -177,9 +177,9 @@ impl From<JsInspectorError> for EthApiError {
     fn from(error: JsInspectorError) -> Self {
         match error {
             err @ JsInspectorError::JsError(_) => {
-                EthApiError::InternalJsTracerError(err.to_string())
+                Self::InternalJsTracerError(err.to_string())
             }
-            err => EthApiError::InvalidParams(err.to_string()),
+            err => Self::InvalidParams(err.to_string()),
         }
     }
 }
@@ -188,7 +188,7 @@ impl From<RethError> for EthApiError {
     fn from(error: RethError) -> Self {
         match error {
             RethError::Provider(err) => err.into(),
-            err => EthApiError::Internal(err),
+            err => Self::Internal(err),
         }
     }
 }
@@ -202,28 +202,28 @@ impl From<reth_errors::ProviderError> for EthApiError {
             ProviderError::BestBlockNotFound |
             ProviderError::BlockNumberForTransactionIndexNotFound |
             ProviderError::TotalDifficultyNotFound { .. } |
-            ProviderError::UnknownBlockHash(_) => EthApiError::UnknownBlockNumber,
+            ProviderError::UnknownBlockHash(_) => Self::UnknownBlockNumber,
             ProviderError::FinalizedBlockNotFound | ProviderError::SafeBlockNotFound => {
-                EthApiError::UnknownSafeOrFinalizedBlock
+                Self::UnknownSafeOrFinalizedBlock
             }
-            err => EthApiError::Internal(err.into()),
+            err => Self::Internal(err.into()),
         }
     }
 }
 
 impl<T> From<EVMError<T>> for EthApiError
 where
-    T: Into<EthApiError>,
+    T: Into<Self>,
 {
     fn from(err: EVMError<T>) -> Self {
         match err {
             EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
-            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => EthApiError::PrevrandaoNotSet,
+            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
             EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => {
-                EthApiError::ExcessBlobGasNotSet
+                Self::ExcessBlobGasNotSet
             }
             EVMError::Database(err) => err.into(),
-            EVMError::Custom(err) => EthApiError::EvmCustom(err),
+            EVMError::Custom(err) => Self::EvmCustom(err),
         }
     }
 }
@@ -373,10 +373,10 @@ impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     fn error_code(&self) -> i32 {
         match self {
-            RpcInvalidTransactionError::InvalidChainId |
-            RpcInvalidTransactionError::GasTooLow |
-            RpcInvalidTransactionError::GasTooHigh => EthRpcErrorCode::InvalidInput.code(),
-            RpcInvalidTransactionError::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
+            Self::InvalidChainId |
+            Self::GasTooLow |
+            Self::GasTooHigh => EthRpcErrorCode::InvalidInput.code(),
+            Self::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
     }
@@ -386,22 +386,22 @@ impl RpcInvalidTransactionError {
     /// Takes the configured gas limit of the transaction which is attached to the error
     pub(crate) fn halt(reason: HaltReason, gas_limit: u64) -> Self {
         match reason {
-            HaltReason::OutOfGas(err) => RpcInvalidTransactionError::out_of_gas(err, gas_limit),
-            HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
-            err => RpcInvalidTransactionError::EvmHalt(err),
+            HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
+            HaltReason::NonceOverflow => Self::NonceMaxValue,
+            err => Self::EvmHalt(err),
         }
     }
 
     /// Converts the out of gas error
     pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
         match reason {
-            OutOfGasError::Basic => RpcInvalidTransactionError::BasicOutOfGas(gas_limit),
-            OutOfGasError::Memory => RpcInvalidTransactionError::MemoryOutOfGas(gas_limit),
-            OutOfGasError::Precompile => RpcInvalidTransactionError::PrecompileOutOfGas(gas_limit),
+            OutOfGasError::Basic => Self::BasicOutOfGas(gas_limit),
+            OutOfGasError::Memory => Self::MemoryOutOfGas(gas_limit),
+            OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => {
-                RpcInvalidTransactionError::InvalidOperandOutOfGas(gas_limit)
+                Self::InvalidOperandOutOfGas(gas_limit)
             }
-            OutOfGasError::MemoryLimit => RpcInvalidTransactionError::MemoryOutOfGas(gas_limit),
+            OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
         }
     }
 }
@@ -426,64 +426,64 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
     fn from(err: revm::primitives::InvalidTransaction) -> Self {
         use revm::primitives::InvalidTransaction;
         match err {
-            InvalidTransaction::InvalidChainId => RpcInvalidTransactionError::InvalidChainId,
+            InvalidTransaction::InvalidChainId => Self::InvalidChainId,
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => {
-                RpcInvalidTransactionError::TipAboveFeeCap
+                Self::TipAboveFeeCap
             }
-            InvalidTransaction::GasPriceLessThanBasefee => RpcInvalidTransactionError::FeeCapTooLow,
+            InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
             InvalidTransaction::CallerGasLimitMoreThanBlock => {
-                RpcInvalidTransactionError::GasTooHigh
+                Self::GasTooHigh
             }
             InvalidTransaction::CallGasCostMoreThanGasLimit => {
-                RpcInvalidTransactionError::GasTooHigh
+                Self::GasTooHigh
             }
-            InvalidTransaction::RejectCallerWithCode => RpcInvalidTransactionError::SenderNoEOA,
+            InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { .. } => {
-                RpcInvalidTransactionError::InsufficientFunds
+                Self::InsufficientFunds
             }
             InvalidTransaction::OverflowPaymentInTransaction => {
-                RpcInvalidTransactionError::GasUintOverflow
+                Self::GasUintOverflow
             }
             InvalidTransaction::NonceOverflowInTransaction => {
-                RpcInvalidTransactionError::NonceMaxValue
+                Self::NonceMaxValue
             }
             InvalidTransaction::CreateInitCodeSizeLimit => {
-                RpcInvalidTransactionError::MaxInitCodeSizeExceeded
+                Self::MaxInitCodeSizeExceeded
             }
-            InvalidTransaction::NonceTooHigh { .. } => RpcInvalidTransactionError::NonceTooHigh,
-            InvalidTransaction::NonceTooLow { .. } => RpcInvalidTransactionError::NonceTooLow,
+            InvalidTransaction::NonceTooHigh { .. } => Self::NonceTooHigh,
+            InvalidTransaction::NonceTooLow { .. } => Self::NonceTooLow,
             InvalidTransaction::AccessListNotSupported => {
-                RpcInvalidTransactionError::AccessListNotSupported
+                Self::AccessListNotSupported
             }
             InvalidTransaction::MaxFeePerBlobGasNotSupported => {
-                RpcInvalidTransactionError::MaxFeePerBlobGasNotSupported
+                Self::MaxFeePerBlobGasNotSupported
             }
             InvalidTransaction::BlobVersionedHashesNotSupported => {
-                RpcInvalidTransactionError::BlobVersionedHashesNotSupported
+                Self::BlobVersionedHashesNotSupported
             }
             InvalidTransaction::BlobGasPriceGreaterThanMax => {
-                RpcInvalidTransactionError::BlobFeeCapTooLow
+                Self::BlobFeeCapTooLow
             }
             InvalidTransaction::EmptyBlobs => {
-                RpcInvalidTransactionError::BlobTransactionMissingBlobHashes
+                Self::BlobTransactionMissingBlobHashes
             }
             InvalidTransaction::BlobVersionNotSupported => {
-                RpcInvalidTransactionError::BlobHashVersionMismatch
+                Self::BlobHashVersionMismatch
             }
             InvalidTransaction::TooManyBlobs { max, have } => {
-                RpcInvalidTransactionError::TooManyBlobs { max, have }
+                Self::TooManyBlobs { max, have }
             }
             InvalidTransaction::BlobCreateTransaction => {
-                RpcInvalidTransactionError::BlobTransactionIsCreate
+                Self::BlobTransactionIsCreate
             }
             #[cfg(feature = "optimism")]
             InvalidTransaction::DepositSystemTxPostRegolith => {
-                RpcInvalidTransactionError::Optimism(
+                Self::Optimism(
                     OptimismInvalidTransactionError::DepositSystemTxPostRegolith,
                 )
             }
             #[cfg(feature = "optimism")]
-            InvalidTransaction::HaltedDepositPostRegolith => RpcInvalidTransactionError::Optimism(
+            InvalidTransaction::HaltedDepositPostRegolith => Self::Optimism(
                 OptimismInvalidTransactionError::HaltedDepositPostRegolith,
             ),
             // TODO(EOF)
@@ -499,29 +499,29 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
             InvalidTransactionError::InsufficientFunds { .. } => {
-                RpcInvalidTransactionError::InsufficientFunds
+                Self::InsufficientFunds
             }
-            InvalidTransactionError::NonceNotConsistent => RpcInvalidTransactionError::NonceTooLow,
+            InvalidTransactionError::NonceNotConsistent => Self::NonceTooLow,
             InvalidTransactionError::OldLegacyChainId => {
                 // Note: this should be unreachable since Spurious Dragon now enabled
-                RpcInvalidTransactionError::OldLegacyChainId
+                Self::OldLegacyChainId
             }
-            InvalidTransactionError::ChainIdMismatch => RpcInvalidTransactionError::InvalidChainId,
+            InvalidTransactionError::ChainIdMismatch => Self::InvalidChainId,
             InvalidTransactionError::Eip2930Disabled |
             InvalidTransactionError::Eip1559Disabled |
             InvalidTransactionError::Eip4844Disabled => {
-                RpcInvalidTransactionError::TxTypeNotSupported
+                Self::TxTypeNotSupported
             }
             InvalidTransactionError::TxTypeNotSupported => {
-                RpcInvalidTransactionError::TxTypeNotSupported
+                Self::TxTypeNotSupported
             }
-            InvalidTransactionError::GasUintOverflow => RpcInvalidTransactionError::GasUintOverflow,
-            InvalidTransactionError::GasTooLow => RpcInvalidTransactionError::GasTooLow,
-            InvalidTransactionError::GasTooHigh => RpcInvalidTransactionError::GasTooHigh,
-            InvalidTransactionError::TipAboveFeeCap => RpcInvalidTransactionError::TipAboveFeeCap,
-            InvalidTransactionError::FeeCapTooLow => RpcInvalidTransactionError::FeeCapTooLow,
+            InvalidTransactionError::GasUintOverflow => Self::GasUintOverflow,
+            InvalidTransactionError::GasTooLow => Self::GasTooLow,
+            InvalidTransactionError::GasTooHigh => Self::GasTooHigh,
+            InvalidTransactionError::TipAboveFeeCap => Self::TipAboveFeeCap,
+            InvalidTransactionError::FeeCapTooLow => Self::FeeCapTooLow,
             InvalidTransactionError::SignerAccountHasBytecode => {
-                RpcInvalidTransactionError::SenderNoEOA
+                Self::SenderNoEOA
             }
         }
     }
@@ -629,39 +629,39 @@ impl From<RpcPoolError> for ErrorObject<'static> {
 }
 
 impl From<PoolError> for RpcPoolError {
-    fn from(err: PoolError) -> RpcPoolError {
+    fn from(err: PoolError) -> Self {
         match err.kind {
-            PoolErrorKind::ReplacementUnderpriced => RpcPoolError::ReplaceUnderpriced,
-            PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => RpcPoolError::Underpriced,
-            PoolErrorKind::SpammerExceededCapacity(_) => RpcPoolError::TxPoolOverflow,
-            PoolErrorKind::DiscardedOnInsert => RpcPoolError::TxPoolOverflow,
+            PoolErrorKind::ReplacementUnderpriced => Self::ReplaceUnderpriced,
+            PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => Self::Underpriced,
+            PoolErrorKind::SpammerExceededCapacity(_) => Self::TxPoolOverflow,
+            PoolErrorKind::DiscardedOnInsert => Self::TxPoolOverflow,
             PoolErrorKind::InvalidTransaction(err) => err.into(),
-            PoolErrorKind::Other(err) => RpcPoolError::Other(err),
-            PoolErrorKind::AlreadyImported => RpcPoolError::AlreadyKnown,
+            PoolErrorKind::Other(err) => Self::Other(err),
+            PoolErrorKind::AlreadyImported => Self::AlreadyKnown,
             PoolErrorKind::ExistingConflictingTransactionType(_, _) => {
-                RpcPoolError::AddressAlreadyReserved
+                Self::AddressAlreadyReserved
             }
         }
     }
 }
 
 impl From<InvalidPoolTransactionError> for RpcPoolError {
-    fn from(err: InvalidPoolTransactionError) -> RpcPoolError {
+    fn from(err: InvalidPoolTransactionError) -> Self {
         match err {
-            InvalidPoolTransactionError::Consensus(err) => RpcPoolError::Invalid(err.into()),
-            InvalidPoolTransactionError::ExceedsGasLimit(_, _) => RpcPoolError::ExceedsGasLimit,
+            InvalidPoolTransactionError::Consensus(err) => Self::Invalid(err.into()),
+            InvalidPoolTransactionError::ExceedsGasLimit(_, _) => Self::ExceedsGasLimit,
             InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => {
-                RpcPoolError::ExceedsMaxInitCodeSize
+                Self::ExceedsMaxInitCodeSize
             }
             InvalidPoolTransactionError::IntrinsicGasTooLow => {
-                RpcPoolError::Invalid(RpcInvalidTransactionError::GasTooLow)
+                Self::Invalid(RpcInvalidTransactionError::GasTooLow)
             }
-            InvalidPoolTransactionError::OversizedData(_, _) => RpcPoolError::OversizedData,
-            InvalidPoolTransactionError::Underpriced => RpcPoolError::Underpriced,
-            InvalidPoolTransactionError::Other(err) => RpcPoolError::PoolTransactionError(err),
-            InvalidPoolTransactionError::Eip4844(err) => RpcPoolError::Eip4844(err),
+            InvalidPoolTransactionError::OversizedData(_, _) => Self::OversizedData,
+            InvalidPoolTransactionError::Underpriced => Self::Underpriced,
+            InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
+            InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
             InvalidPoolTransactionError::Overdraft => {
-                RpcPoolError::Invalid(RpcInvalidTransactionError::InsufficientFunds)
+                Self::Invalid(RpcInvalidTransactionError::InsufficientFunds)
             }
         }
     }
@@ -669,7 +669,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
 
 impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
-        EthApiError::PoolError(RpcPoolError::from(err))
+        Self::PoolError(RpcPoolError::from(err))
     }
 }
 

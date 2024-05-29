@@ -101,7 +101,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, .. } = value;
 
-        ExecutionPayloadEnvelopeV2 {
+        Self {
             block_value: fees,
             execution_payload: convert_block_to_payload_field_v2(block),
         }
@@ -112,7 +112,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
-        ExecutionPayloadEnvelopeV3 {
+        Self {
             execution_payload: block_to_payload_v3(block).0,
             block_value: fees,
             // From the engine API spec:
@@ -133,7 +133,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
-        ExecutionPayloadEnvelopeV4 {
+        Self {
             execution_payload: block_to_payload_v4(block),
             block_value: fees,
             // From the engine API spec:

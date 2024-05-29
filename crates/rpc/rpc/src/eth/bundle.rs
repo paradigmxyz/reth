@@ -216,7 +216,7 @@ where
     Eth: EthTransactions + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        Ok(EthBundle::call_bundle(self, request).await?)
+        Ok(Self::call_bundle(self, request).await?)
     }
 }
 

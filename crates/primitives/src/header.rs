@@ -111,7 +111,7 @@ pub struct Header {
 
 impl Default for Header {
     fn default() -> Self {
-        Header {
+        Self {
             parent_hash: Default::default(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Default::default(),
@@ -674,7 +674,7 @@ impl SealedHeader {
     #[inline(always)]
     fn validate_gas_limit(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
@@ -739,7 +739,7 @@ impl SealedHeader {
     /// of certain features (e.g., Optimism feature) or the activation of specific hardforks.
     pub fn validate_against_parent(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Parent number is consistent.
@@ -826,7 +826,7 @@ impl SealedHeader {
     /// parent header fields.
     pub fn validate_4844_header_against_parent(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
     ) -> Result<(), HeaderValidationError> {
         // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
         //
@@ -885,7 +885,7 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
         // map valid header strategy by sealing
         valid_header_strategy().prop_map(|header| header.seal_slow()).boxed()
     }
-    type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -971,12 +971,12 @@ pub enum HeadersDirection {
 impl HeadersDirection {
     /// Returns true for rising block numbers
     pub fn is_rising(&self) -> bool {
-        matches!(self, HeadersDirection::Rising)
+        matches!(self, Self::Rising)
     }
 
     /// Returns true for falling block numbers
     pub fn is_falling(&self) -> bool {
-        matches!(self, HeadersDirection::Falling)
+        matches!(self, Self::Falling)
     }
 
     /// Converts the bool into a direction.
@@ -987,9 +987,9 @@ impl HeadersDirection {
     /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
     pub fn new(reverse: bool) -> Self {
         if reverse {
-            HeadersDirection::Falling
+            Self::Falling
         } else {
-            HeadersDirection::Rising
+            Self::Rising
         }
     }
 }

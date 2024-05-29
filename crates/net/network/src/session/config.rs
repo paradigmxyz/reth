@@ -57,7 +57,7 @@ pub struct SessionsConfig {
 
 impl Default for SessionsConfig {
     fn default() -> Self {
-        SessionsConfig {
+        Self {
             // This should be sufficient to slots for handling commands sent to the session task,
             // since the manager is the sender.
             session_command_buffer: 32,

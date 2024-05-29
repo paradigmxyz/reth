@@ -197,13 +197,13 @@ impl Subcommands {
         let provider = factory.provider()?;
         let last = provider.last_block_number()?;
         let target = match self {
-            Subcommands::ToBlock { target } => match target {
+            Self::ToBlock { target } => match target {
                 BlockHashOrNumber::Hash(hash) => provider
                     .block_number(*hash)?
                     .ok_or_else(|| eyre::eyre!("Block hash not found in database: {hash:?}"))?,
                 BlockHashOrNumber::Number(num) => *num,
             },
-            Subcommands::NumBlocks { amount } => last.saturating_sub(*amount),
+            Self::NumBlocks { amount } => last.saturating_sub(*amount),
         } + 1;
         if target > last {
             eyre::bail!("Target block number is higher than the latest block number")

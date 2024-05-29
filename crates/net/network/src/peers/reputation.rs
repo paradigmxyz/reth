@@ -135,6 +135,6 @@ impl From<ReputationChange> for Reputation {
 
 impl From<Reputation> for ReputationChange {
     fn from(value: Reputation) -> Self {
-        ReputationChange(value)
+        Self(value)
     }
 }

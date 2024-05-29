@@ -63,7 +63,7 @@ impl Compact for StoredSubNode {
             None
         };
 
-        (StoredSubNode { key, nibble, node }, buf)
+        (Self { key, nibble, node }, buf)
     }
 }
 
