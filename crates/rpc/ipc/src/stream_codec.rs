@@ -43,7 +43,7 @@ pub enum Separator {
 
 impl Default for Separator {
     fn default() -> Self {
-        Self::Byte(b'\n')
+        Separator::Byte(b'\n')
     }
 }
 
@@ -57,12 +57,12 @@ pub struct StreamCodec {
 impl StreamCodec {
     /// Default codec with streaming input data. Input can be both enveloped and not.
     pub fn stream_incoming() -> Self {
-        Self::new(Separator::Empty, Default::default())
+        StreamCodec::new(Separator::Empty, Default::default())
     }
 
     /// New custom stream codec
     pub fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
-        Self { incoming_separator, outgoing_separator }
+        StreamCodec { incoming_separator, outgoing_separator }
     }
 }
 
@@ -117,7 +117,7 @@ impl tokio_util::codec::Decoder for StreamCodec {
                     return match String::from_utf8(bts.into()) {
                         Ok(val) => Ok(Some(val)),
                         Err(_) => Ok(None),
-                    };
+                    }
                 }
             }
             Ok(None)

@@ -57,11 +57,11 @@ impl NatResolver {
 impl fmt::Display for NatResolver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Any => f.write_str("any"),
-            Self::Upnp => f.write_str("upnp"),
-            Self::PublicIp => f.write_str("publicip"),
-            Self::ExternalIp(ip) => write!(f, "extip:{ip}"),
-            Self::None => f.write_str("none"),
+            NatResolver::Any => f.write_str("any"),
+            NatResolver::Upnp => f.write_str("upnp"),
+            NatResolver::PublicIp => f.write_str("publicip"),
+            NatResolver::ExternalIp(ip) => write!(f, "extip:{ip}"),
+            NatResolver::None => f.write_str("none"),
         }
     }
 }
@@ -82,17 +82,17 @@ impl FromStr for NatResolver {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let r = match s {
-            "any" => Self::Any,
-            "upnp" => Self::Upnp,
-            "none" => Self::None,
-            "publicip" | "public-ip" => Self::PublicIp,
+            "any" => NatResolver::Any,
+            "upnp" => NatResolver::Upnp,
+            "none" => NatResolver::None,
+            "publicip" | "public-ip" => NatResolver::PublicIp,
             s => {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
                         "Unknown Nat Resolver: {s}"
-                    )));
+                    )))
                 };
-                Self::ExternalIp(ip.parse::<IpAddr>()?)
+                NatResolver::ExternalIp(ip.parse::<IpAddr>()?)
             }
         };
         Ok(r)
@@ -220,7 +220,7 @@ impl Future for ResolveAny {
             let ip = ready!(upnp.poll(cx));
             this.upnp.set(None);
             if ip.is_some() {
-                return Poll::Ready(ip);
+                return Poll::Ready(ip)
             }
         }
 
@@ -228,13 +228,13 @@ impl Future for ResolveAny {
             if let Poll::Ready(ip) = upnp.poll(cx) {
                 this.external.set(None);
                 if ip.is_some() {
-                    return Poll::Ready(ip);
+                    return Poll::Ready(ip)
                 }
             }
         }
 
         if this.upnp.is_none() && this.external.is_none() {
-            return Poll::Ready(None);
+            return Poll::Ready(None)
         }
 
         Poll::Pending

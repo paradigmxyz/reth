@@ -58,7 +58,7 @@ where
     I: IntoIterator<Item = Nibbles>,
 {
     fn from(value: I) -> Self {
-        Self { keys: value.into_iter().collect(), ..Default::default() }
+        PrefixSetMut { keys: value.into_iter().collect(), ..Default::default() }
     }
 }
 
@@ -84,12 +84,12 @@ impl PrefixSetMut {
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
             if key.has_prefix(prefix) {
                 self.index += idx;
-                return true;
+                return true
             }
 
             if *key > *prefix {
                 self.index += idx;
-                return false;
+                return false
             }
         }
 
@@ -149,16 +149,21 @@ impl PrefixSet {
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
             if key.has_prefix(prefix) {
                 self.index += idx;
-                return true;
+                return true
             }
 
             if key > prefix {
                 self.index += idx;
-                return false;
+                return false
             }
         }
 
         false
+    }
+
+    /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
+    pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
+        self.keys.iter()
     }
 
     /// Returns the number of elements in the set.

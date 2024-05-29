@@ -10,10 +10,7 @@ use reth_db::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::{
-    p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
-    provider::ProviderError,
-};
+use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
@@ -28,6 +25,7 @@ use reth_provider::{
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
+use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -129,7 +127,7 @@ where
             let (sealed_header, _) = SealedHeader::from_compact(&header_buf, header_buf.len());
             let (header, header_hash) = sealed_header.split();
             if header.number == 0 {
-                continue;
+                continue
             }
             last_header_number = header.number;
 
@@ -209,7 +207,7 @@ where
 
         // Return if stage has already completed the gap on the ETL files
         if self.is_etl_ready {
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(Ok(()))
         }
 
         // Lookup the head and tip of the sync range
@@ -226,7 +224,7 @@ where
                 "Target block already reached"
             );
             self.is_etl_ready = true;
-            return Poll::Ready(Ok(()));
+            return Poll::Ready(Ok(()))
         }
 
         debug!(target: "sync::stages::headers", ?tip, head = ?gap.local_head.hash(), "Commencing sync");
@@ -250,13 +248,13 @@ where
                         // filled the gap.
                         if header_number == local_head_number + 1 {
                             self.is_etl_ready = true;
-                            return Poll::Ready(Ok(()));
+                            return Poll::Ready(Ok(()))
                         }
                     }
                 }
                 Some(Err(HeadersDownloaderError::DetachedHead { local_head, header, error })) => {
                     error!(target: "sync::stages::headers", %error, "Cannot attach header to head");
-                    return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }));
+                    return Poll::Ready(Err(StageError::DetachedHead { local_head, header, error }))
                 }
                 None => return Poll::Ready(Err(StageError::ChannelClosed)),
             }
@@ -274,12 +272,12 @@ where
 
         if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
             self.is_etl_ready = false;
-            return Ok(ExecOutput::done(current_checkpoint));
+            return Ok(ExecOutput::done(current_checkpoint))
         }
 
         // We should be here only after we have downloaded all headers into the disk buffer (ETL).
         if !self.is_etl_ready {
-            return Err(StageError::MissingDownloadBuffer);
+            return Err(StageError::MissingDownloadBuffer)
         }
 
         // Reset flag
@@ -383,13 +381,13 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{self, random_header, random_header_range};
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
     };
     use reth_provider::{
         BlockWriter, BundleStateWithReceipts, ProviderFactory, StaticFileProviderFactory,
     };
+    use reth_testing_utils::generators::{self, random_header, random_header_range};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use test_runner::HeadersTestRunner;
 
@@ -401,7 +399,7 @@ mod tests {
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
-        use reth_interfaces::test_utils::{TestHeaderDownloader, TestHeadersClient};
+        use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
         use reth_provider::BlockNumReader;
         use tokio::sync::watch;
 
@@ -465,7 +463,7 @@ mod tests {
                 let end = input.target.unwrap_or_default() + 1;
 
                 if start + 1 >= end {
-                    return Ok(Vec::default());
+                    return Ok(Vec::default())
                 }
 
                 let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());

@@ -458,7 +458,7 @@ impl SessionManager {
                         peer_id,
                         remote_addr,
                         direction,
-                    });
+                    })
                 }
 
                 let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
@@ -755,7 +755,7 @@ impl PendingSessionHandshakeError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
     pub fn as_disconnected(&self) -> Option<DisconnectReason> {
         match self {
-            Self::Eth(eth_err) => eth_err.as_disconnected(),
+            PendingSessionHandshakeError::Eth(eth_err) => eth_err.as_disconnected(),
             _ => None,
         }
     }
@@ -854,7 +854,7 @@ async fn start_pending_outbound_session(
                     error,
                 })
                 .await;
-            return;
+            return
         }
     };
     authenticate(
@@ -900,7 +900,7 @@ async fn authenticate(
                     direction,
                 })
                 .await;
-            return;
+            return
         }
     };
 

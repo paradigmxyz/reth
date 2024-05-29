@@ -20,13 +20,15 @@ pub enum OptimismEthApiError {
 impl ToRpcError for OptimismEthApiError {
     fn to_rpc_error(&self) -> ErrorObject<'static> {
         match self {
-            Self::L1BlockFeeError | Self::L1BlockGasError => internal_rpc_err(self.to_string()),
+            OptimismEthApiError::L1BlockFeeError | OptimismEthApiError::L1BlockGasError => {
+                internal_rpc_err(self.to_string())
+            }
         }
     }
 }
 
 impl From<OptimismEthApiError> for EthApiError {
     fn from(err: OptimismEthApiError) -> Self {
-        Self::other(err)
+        EthApiError::other(err)
     }
 }

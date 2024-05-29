@@ -138,8 +138,8 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 /// and therefore:
 ///  * the call must execute to completion
 ///  * the call does not count against the block’s gas limit
-///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
-///  part of the call
+///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as part
+///    of the call
 ///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
 pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
     env.tx = TxEnv {
@@ -171,9 +171,6 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
             // enveloped tx size.
             enveloped_tx: Some(Bytes::default()),
         },
-        // TODO(EOF)
-        eof_initcodes: vec![],
-        eof_initcodes_hashed: Default::default(),
     };
 
     // ensure the block gas limit is >= the tx
@@ -272,10 +269,7 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
-            };
+            tx_env.transact_to = TransactTo::Call(tx.to);
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);

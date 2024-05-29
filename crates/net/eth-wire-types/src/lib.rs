@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 // TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
 #![allow(unknown_lints, non_local_definitions)]
+#![allow(clippy::needless_lifetimes)] // side effect of optimism fields
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod status;

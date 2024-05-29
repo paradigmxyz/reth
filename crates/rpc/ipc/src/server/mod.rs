@@ -284,7 +284,7 @@ pub struct RpcServiceBuilder<L>(tower::ServiceBuilder<L>);
 
 impl Default for RpcServiceBuilder<Identity> {
     fn default() -> Self {
-        Self(tower::ServiceBuilder::new())
+        RpcServiceBuilder(tower::ServiceBuilder::new())
     }
 }
 
@@ -577,7 +577,7 @@ pub struct Builder<HttpMiddleware, RpcMiddleware> {
 
 impl Default for Builder<Identity, Identity> {
     fn default() -> Self {
-        Self {
+        Builder {
             settings: Settings::default(),
             id_provider: Arc::new(RandomIntegerIdProvider),
             rpc_middleware: RpcServiceBuilder::new(),
@@ -871,7 +871,7 @@ mod tests {
                     // and you might want to do something smarter if it's
                     // critical that "the most recent item" must be sent when it is produced.
                     if sink.send(notif).await.is_err() {
-                        break Ok(());
+                        break Ok(())
                     }
 
                     closed = c;

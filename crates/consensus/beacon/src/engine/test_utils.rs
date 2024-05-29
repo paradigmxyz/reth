@@ -16,9 +16,8 @@ use reth_downloaders::{
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_interfaces::{
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-    sync::NoopSyncStateUpdater,
+use reth_network_p2p::{
+    bodies::client::BodiesClient, headers::client::HeadersClient, sync::NoopSyncStateUpdater,
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
@@ -83,7 +82,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.send_new_payload(payload.clone(), cancun_fields.clone()).await?;
             if !result.is_syncing() {
-                return Ok(result);
+                return Ok(result)
             }
         }
     }
@@ -104,7 +103,7 @@ impl<DB> TestEnv<DB> {
         loop {
             let result = self.engine_handle.fork_choice_updated(state, None).await?;
             if !result.is_syncing() {
-                return Ok(result);
+                return Ok(result)
             }
         }
     }

@@ -70,7 +70,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (tx_range, block_range, is_final_range) =
@@ -84,7 +84,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 checkpoint: StageCheckpoint::new(end_block)
                     .with_entities_stage_checkpoint(stage_checkpoint(provider)?),
                 done: is_final_range,
-            });
+            })
         }
 
         let tx = provider.tx_ref();
@@ -215,7 +215,7 @@ fn recover_range<DB: Database>(
                             })
                         }
                         SenderRecoveryStageError::StageError(err) => Err(err),
-                    };
+                    }
                 }
             };
             senders_cursor.append(tx_id, sender)?;
@@ -285,10 +285,6 @@ struct FailedSenderRecoveryError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_db::cursor::DbCursorRO;
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block, random_block_range},
-    };
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
@@ -296,6 +292,10 @@ mod tests {
     use reth_provider::{
         providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
         TransactionsProvider,
+    };
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block, random_block_range},
     };
 
     use super::*;
@@ -507,10 +507,9 @@ mod tests {
         /// # Panics
         ///
         /// 1. If there are any entries in the [tables::TransactionSenders] table above a given
-        /// block number.
-        ///
+        ///    block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        /// [tables::TransactionSenders] is not empty.
+        ///    [tables::TransactionSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db
@@ -569,7 +568,7 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(());
+                        return Ok(())
                     }
 
                     let mut body_cursor =

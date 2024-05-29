@@ -15,8 +15,8 @@ use reth_primitives::{
     Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{Database, EvmBuilder};
+
 pub mod execute;
-pub mod verify;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;

@@ -20,16 +20,17 @@ use reth_eth_wire::{
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     PooledTransactions, RequestTxHashes, Transactions,
 };
-use reth_interfaces::{
-    p2p::error::{RequestError, RequestResult},
-    sync::SyncStateProvider,
-};
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    sync::SyncStateProvider,
+};
 use reth_network_types::PeerId;
 use reth_primitives::{
     FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
@@ -197,7 +198,7 @@ pub struct TransactionsManager<Pool> {
     /// Subscriptions to all network related events.
     ///
     /// From which we get all new incoming transaction related messages.
-    network_events: UnboundedReceiverStream<NetworkEvent>,
+    network_events: EventStream<NetworkEvent>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher,
     /// All currently pending transactions grouped by peers.
@@ -350,7 +351,7 @@ where
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             if self.network.tx_gossip_disabled() {
                 let _ = response.send(Ok(PooledTransactions::default()));
-                return;
+                return
             }
             let transactions = self.pool.get_pooled_transaction_elements(
                 request.0,
@@ -382,10 +383,10 @@ where
     fn on_new_pending_transactions(&mut self, hashes: Vec<TxHash>) {
         // Nothing to propagate while initially syncing
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
         if self.network.tx_gossip_disabled() {
-            return;
+            return
         }
 
         trace!(target: "net::tx", num_hashes=?hashes.len(), "Start propagating transactions");
@@ -412,7 +413,7 @@ where
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
         if self.network.tx_gossip_disabled() {
-            return propagated;
+            return propagated
         }
 
         // send full transactions to a fraction of the connected peers (square root of the total
@@ -522,7 +523,7 @@ where
 
         if full_transactions.transactions.is_empty() {
             // nothing to propagate
-            return None;
+            return None
         }
 
         let new_full_transactions = full_transactions.build();
@@ -549,7 +550,7 @@ where
         let propagated = {
             let Some(peer) = self.peers.get_mut(&peer_id) else {
                 // no such peer
-                return;
+                return
             };
 
             let to_propagate: Vec<PropagateTransaction> =
@@ -570,7 +571,7 @@ where
 
             if new_pooled_hashes.is_empty() {
                 // nothing to propagate
-                return;
+                return
             }
 
             for hash in new_pooled_hashes.iter_hashes().copied() {
@@ -598,10 +599,10 @@ where
     ) {
         // If the node is initially syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
         if self.network.tx_gossip_disabled() {
-            return;
+            return
         }
 
         // get handle to peer's session, if the session is still active
@@ -612,7 +613,7 @@ where
                 "discarding announcement from inactive peer"
             );
 
-            return;
+            return
         };
         let client = peer.client_version.clone();
 
@@ -673,7 +674,7 @@ where
 
         if partially_valid_msg.is_empty() {
             // nothing to request
-            return;
+            return
         }
 
         // 4. filter out invalid entries (spam)
@@ -702,7 +703,7 @@ where
 
         if valid_announcement_data.is_empty() {
             // no valid announcement data
-            return;
+            return
         }
 
         // 5. filter out already seen unknown hashes
@@ -722,7 +723,7 @@ where
 
         if valid_announcement_data.is_empty() {
             // nothing to request
-            return;
+            return
         }
 
         trace!(target: "net::tx",
@@ -751,7 +752,7 @@ where
 
             self.transaction_fetcher.buffer_hashes(hashes, Some(peer_id));
 
-            return;
+            return
         }
 
         // load message version before announcement data type is destructed in packing
@@ -880,8 +881,8 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event: NetworkEvent) {
-        match event {
+    fn on_network_event(&mut self, event_result: NetworkEvent) {
+        match event_result {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
                 self.peers.remove(&peer_id);
@@ -903,7 +904,7 @@ where
                 // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
                 // transactions in the pool.
                 if self.network.is_initially_syncing() || self.network.tx_gossip_disabled() {
-                    return;
+                    return
                 }
 
                 let pooled_txs = self.pool.pooled_transactions_max(
@@ -911,7 +912,7 @@ where
                 );
                 if pooled_txs.is_empty() {
                     // do not send a message if there are no transactions in the pool
-                    return;
+                    return
                 }
 
                 let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
@@ -936,10 +937,10 @@ where
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
-            return;
+            return
         }
         if self.network.tx_gossip_disabled() {
-            return;
+            return
         }
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
@@ -989,7 +990,7 @@ where
                             "failed ecrecovery for transaction"
                         );
                         has_bad_transactions = true;
-                        continue;
+                        continue
                     }
                 };
 
@@ -1126,7 +1127,7 @@ where
             RequestError::Timeout => ReputationChangeKind::Timeout,
             RequestError::ChannelClosed | RequestError::ConnectionDropped => {
                 // peer is already disconnected
-                return;
+                return
             }
             RequestError::BadResponse => return self.report_peer_bad_transactions(peer_id),
         };
@@ -1171,7 +1172,7 @@ where
 
         // if we're _currently_ syncing, we ignore a bad transaction
         if !err.is_bad_transaction() || self.network.is_syncing() {
-            return;
+            return
         }
         // otherwise we penalize the peer that sent the bad transaction, with the assumption that
         // the peer should have known that this transaction is bad (e.g. violating consensus rules)
@@ -1354,7 +1355,7 @@ where
         {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         this.update_poll_metrics(start, poll_durations);
@@ -1405,7 +1406,7 @@ impl FullTransactionsBuilder {
         if new_size > DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE &&
             self.total_size > 0
         {
-            return;
+            return
         }
 
         self.total_size = new_size;
@@ -1436,8 +1437,8 @@ impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
     fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
         match self {
-            Self::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
-            Self::Eth68(msg) => {
+            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
+            PooledTransactionsHashesBuilder::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.tx_type());
@@ -1447,8 +1448,8 @@ impl PooledTransactionsHashesBuilder {
 
     fn push(&mut self, tx: &PropagateTransaction) {
         match self {
-            Self::Eth66(msg) => msg.0.push(tx.hash()),
-            Self::Eth68(msg) => {
+            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(tx.hash()),
+            PooledTransactionsHashesBuilder::Eth68(msg) => {
                 msg.hashes.push(tx.hash());
                 msg.sizes.push(tx.size);
                 msg.types.push(tx.transaction.tx_type().into());
@@ -1459,15 +1460,17 @@ impl PooledTransactionsHashesBuilder {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         match version {
-            EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
-            EthVersion::Eth68 => Self::Eth68(Default::default()),
+            EthVersion::Eth66 | EthVersion::Eth67 => {
+                PooledTransactionsHashesBuilder::Eth66(Default::default())
+            }
+            EthVersion::Eth68 => PooledTransactionsHashesBuilder::Eth68(Default::default()),
         }
     }
 
     fn build(self) -> NewPooledTransactionHashes {
         match self {
-            Self::Eth66(msg) => msg.into(),
-            Self::Eth68(msg) => msg.into(),
+            PooledTransactionsHashesBuilder::Eth66(msg) => msg.into(),
+            PooledTransactionsHashesBuilder::Eth68(msg) => msg.into(),
         }
     }
 }
@@ -1485,7 +1488,7 @@ enum TransactionSource {
 impl TransactionSource {
     /// Whether the transaction were sent as broadcast.
     fn is_broadcast(&self) -> bool {
-        matches!(self, Self::Broadcast)
+        matches!(self, TransactionSource::Broadcast)
     }
 }
 
@@ -1616,14 +1619,18 @@ mod tests {
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
-    use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
+    use reth_network_p2p::{
+        error::{RequestError, RequestResult},
+        sync::{NetworkSyncUpdater, SyncState},
+    };
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
     use std::{fmt, future::poll_fn, hash};
     use tests::fetcher::TxFetchMetadata;
+    use tracing::error;
 
     async fn new_tx_manager() -> TransactionsManager<impl TransactionPool> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -1732,7 +1739,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1818,7 +1825,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1902,7 +1909,7 @@ mod tests {
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }
@@ -1990,7 +1997,7 @@ mod tests {
                 }),
                 NetworkEvent::PeerAdded(_peer_id) => continue,
                 ev => {
-                    panic!("unexpected event {ev:?}")
+                    error!("unexpected event {ev:?}")
                 }
             }
         }

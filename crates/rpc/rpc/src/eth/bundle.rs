@@ -50,12 +50,12 @@ where
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
-            ));
+            ))
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
-            ));
+            ))
         }
 
         let transactions = txs
@@ -82,7 +82,7 @@ where
         {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::Eip4844BlobGasExceeded.to_string(),
-            ));
+            ))
         }
 
         let block_id: reth_rpc_types::BlockId = state_block_number.into();
@@ -216,7 +216,7 @@ where
     Eth: EthTransactions + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        Ok(Self::call_bundle(self, request).await?)
+        Ok(EthBundle::call_bundle(self, request).await?)
     }
 }
 

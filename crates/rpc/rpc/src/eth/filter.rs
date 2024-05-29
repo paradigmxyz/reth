@@ -143,7 +143,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty);
+                return Ok(FilterChanges::Empty)
             }
 
             // update filter
@@ -212,7 +212,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(FilterError::FilterNotFound(id));
+                return Err(FilterError::FilterNotFound(id))
             }
         };
 
@@ -269,7 +269,7 @@ where
     /// Handler for `eth_getFilterChanges`
     async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges> {
         trace!(target: "rpc::eth", "Serving eth_getFilterChanges");
-        Ok(Self::filter_changes(self, id).await?)
+        Ok(EthFilter::filter_changes(self, id).await?)
     }
 
     /// Returns an array of all logs matching filter with given id.
@@ -279,7 +279,7 @@ where
     /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getFilterLogs");
-        Ok(Self::filter_logs(self, id).await?)
+        Ok(EthFilter::filter_logs(self, id).await?)
     }
 
     /// Handler for `eth_uninstallFilter`
@@ -432,7 +432,7 @@ where
         let best_number = chain_info.best_number;
 
         if to_block - from_block > self.max_blocks_per_filter {
-            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter));
+            return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
         }
 
         let mut all_logs = Vec::new();
@@ -456,7 +456,7 @@ where
                     block.header.timestamp,
                 )?;
             }
-            return Ok(all_logs);
+            return Ok(all_logs)
         }
 
         // derive bloom filters from filter input, so we can check headers for matching logs
@@ -502,7 +502,7 @@ where
                         if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
                             return Err(FilterError::QueryExceedsMaxResults(
                                 self.max_logs_per_response,
-                            ));
+                            ))
                         }
                     }
                 }
@@ -588,7 +588,7 @@ struct PendingTransactionsReceiver {
 
 impl PendingTransactionsReceiver {
     fn new(receiver: Receiver<TxHash>) -> Self {
-        Self { txs_receiver: Arc::new(Mutex::new(receiver)) }
+        PendingTransactionsReceiver { txs_receiver: Arc::new(Mutex::new(receiver)) }
     }
 
     /// Returns all new pending transactions received since the last poll.
@@ -617,7 +617,7 @@ where
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>) -> Self {
-        Self { txs_stream: Arc::new(Mutex::new(stream)) }
+        FullTransactionsReceiver { txs_stream: Arc::new(Mutex::new(stream)) }
     }
 
     /// Returns all new pending transactions received since the last poll.
@@ -646,7 +646,7 @@ where
     T: PoolTransaction + 'static,
 {
     async fn drain(&self) -> FilterChanges {
-        Self::drain(self).await
+        FullTransactionsReceiver::drain(self).await
     }
 }
 
@@ -664,8 +664,8 @@ enum PendingTransactionKind {
 impl PendingTransactionKind {
     async fn drain(&self) -> FilterChanges {
         match self {
-            Self::Hashes(receiver) => receiver.drain().await,
-            Self::FullTransaction(receiver) => receiver.drain().await,
+            PendingTransactionKind::Hashes(receiver) => receiver.drain().await,
+            PendingTransactionKind::FullTransaction(receiver) => receiver.drain().await,
         }
     }
 }
@@ -717,7 +717,7 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 
 impl From<ProviderError> for FilterError {
     fn from(err: ProviderError) -> Self {
-        Self::EthAPIError(err.into())
+        FilterError::EthAPIError(err.into())
     }
 }
 
@@ -742,7 +742,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None;
+            return None
         }
         Some((start, end))
     }

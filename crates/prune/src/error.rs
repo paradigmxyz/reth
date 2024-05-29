@@ -4,6 +4,7 @@ use reth_primitives::PruneSegmentError;
 use reth_provider::ProviderError;
 use thiserror::Error;
 
+/// Errors that can occur during pruning.
 #[derive(Error, Debug)]
 pub enum PrunerError {
     #[error(transparent)]
@@ -11,9 +12,6 @@ pub enum PrunerError {
 
     #[error("inconsistent data: {0}")]
     InconsistentData(&'static str),
-
-    #[error(transparent)]
-    Interface(#[from] RethError),
 
     #[error(transparent)]
     Database(#[from] DatabaseError),
@@ -26,11 +24,10 @@ impl From<PrunerError> for RethError {
     fn from(err: PrunerError) -> Self {
         match err {
             PrunerError::PruneSegment(_) | PrunerError::InconsistentData(_) => {
-                Self::Custom(err.to_string())
+                RethError::other(err)
             }
-            PrunerError::Interface(err) => err,
-            PrunerError::Database(err) => Self::Database(err),
-            PrunerError::Provider(err) => Self::Provider(err),
+            PrunerError::Database(err) => RethError::Database(err),
+            PrunerError::Provider(err) => RethError::Provider(err),
         }
     }
 }

@@ -315,7 +315,7 @@ impl<DB> NodeState<DB> {
                     warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
                 }
             }
         }
@@ -392,41 +392,44 @@ pub enum NodeEvent {
     Pruner(PrunerEvent),
     /// A static_file_producer event
     StaticFileProducer(StaticFileProducerEvent),
+    /// Used to encapsulate various conditions or situations that do not
+    /// naturally fit into the other more specific variants.
+    Other(String),
 }
 
 impl From<NetworkEvent> for NodeEvent {
-    fn from(event: NetworkEvent) -> Self {
-        Self::Network(event)
+    fn from(event: NetworkEvent) -> NodeEvent {
+        NodeEvent::Network(event)
     }
 }
 
 impl From<PipelineEvent> for NodeEvent {
-    fn from(event: PipelineEvent) -> Self {
-        Self::Pipeline(event)
+    fn from(event: PipelineEvent) -> NodeEvent {
+        NodeEvent::Pipeline(event)
     }
 }
 
 impl From<BeaconConsensusEngineEvent> for NodeEvent {
     fn from(event: BeaconConsensusEngineEvent) -> Self {
-        Self::ConsensusEngine(event)
+        NodeEvent::ConsensusEngine(event)
     }
 }
 
 impl From<ConsensusLayerHealthEvent> for NodeEvent {
     fn from(event: ConsensusLayerHealthEvent) -> Self {
-        Self::ConsensusLayerHealth(event)
+        NodeEvent::ConsensusLayerHealth(event)
     }
 }
 
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
-        Self::Pruner(event)
+        NodeEvent::Pruner(event)
     }
 }
 
 impl From<StaticFileProducerEvent> for NodeEvent {
     fn from(event: StaticFileProducerEvent) -> Self {
-        Self::StaticFileProducer(event)
+        NodeEvent::StaticFileProducer(event)
     }
 }
 
@@ -575,6 +578,9 @@ where
                 NodeEvent::StaticFileProducer(event) => {
                     this.state.handle_static_file_producer_event(event);
                 }
+                NodeEvent::Other(event_description) => {
+                    warn!("{event_description}");
+                }
             }
         }
 
@@ -607,7 +613,7 @@ impl Eta {
             else {
                 self.eta = None;
                 debug!(target: "reth::cli", %stage, ?current, ?self.last_checkpoint, "Failed to calculate the ETA: processed entities is less than the last checkpoint");
-                return;
+                return
             };
             let elapsed = last_checkpoint_time.elapsed();
             let per_second = processed_since_last as f64 / elapsed.as_secs_f64();
@@ -615,7 +621,7 @@ impl Eta {
             let Some(remaining) = current.total.checked_sub(current.processed) else {
                 self.eta = None;
                 debug!(target: "reth::cli", %stage, ?current, "Failed to calculate the ETA: total entities is less than processed entities");
-                return;
+                return
             };
 
             self.eta = Duration::try_from_secs_f64(remaining as f64 / per_second).ok();
@@ -656,7 +662,7 @@ impl Display for Eta {
                     f,
                     "{}",
                     humantime::format_duration(Duration::from_secs(remaining.as_secs()))
-                );
+                )
             }
         }
 

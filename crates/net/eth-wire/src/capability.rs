@@ -116,7 +116,7 @@ impl fmt::Display for Capability {
 impl From<EthVersion> for Capability {
     #[inline]
     fn from(value: EthVersion) -> Self {
-        Self::eth(value)
+        Capability::eth(value)
     }
 }
 
@@ -137,12 +137,12 @@ impl proptest::arbitrary::Arbitrary for Capability {
         proptest::arbitrary::any_with::<String>(args) // TODO: what possible values?
             .prop_flat_map(move |name| {
                 proptest::arbitrary::any_with::<usize>(()) // TODO: What's the max?
-                    .prop_map(move |version| Self::new(name.clone(), version))
+                    .prop_map(move |version| Capability::new(name.clone(), version))
             })
             .boxed()
     }
 
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+    type Strategy = proptest::strategy::BoxedStrategy<Capability>;
 }
 
 /// Represents all capabilities of a node.
@@ -268,7 +268,7 @@ impl SharedCapability {
         messages: u8,
     ) -> Result<Self, SharedCapabilityError> {
         if offset <= MAX_RESERVED_MESSAGE_ID {
-            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset));
+            return Err(SharedCapabilityError::ReservedMessageIdOffset(offset))
         }
 
         match name {
@@ -289,8 +289,8 @@ impl SharedCapability {
     /// Returns the capability.
     pub fn capability(&self) -> Cow<'_, Capability> {
         match self {
-            Self::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
-            Self::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
+            SharedCapability::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
+            SharedCapability::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
         }
     }
 
@@ -298,29 +298,29 @@ impl SharedCapability {
     #[inline]
     pub fn name(&self) -> &str {
         match self {
-            Self::Eth { .. } => "eth",
-            Self::UnknownCapability { cap, .. } => cap.name.as_ref(),
+            SharedCapability::Eth { .. } => "eth",
+            SharedCapability::UnknownCapability { cap, .. } => cap.name.as_ref(),
         }
     }
 
     /// Returns true if the capability is eth.
     #[inline]
     pub fn is_eth(&self) -> bool {
-        matches!(self, Self::Eth { .. })
+        matches!(self, SharedCapability::Eth { .. })
     }
 
     /// Returns the version of the capability.
     pub fn version(&self) -> u8 {
         match self {
-            Self::Eth { version, .. } => *version as u8,
-            Self::UnknownCapability { cap, .. } => cap.version as u8,
+            SharedCapability::Eth { version, .. } => *version as u8,
+            SharedCapability::UnknownCapability { cap, .. } => cap.version as u8,
         }
     }
 
     /// Returns the eth version if it's the `eth` capability.
     pub fn eth_version(&self) -> Option<EthVersion> {
         match self {
-            Self::Eth { version, .. } => Some(*version),
+            SharedCapability::Eth { version, .. } => Some(*version),
             _ => None,
         }
     }
@@ -331,8 +331,8 @@ impl SharedCapability {
     /// message id space.
     pub fn message_id_offset(&self) -> u8 {
         match self {
-            Self::Eth { offset, .. } => *offset,
-            Self::UnknownCapability { offset, .. } => *offset,
+            SharedCapability::Eth { offset, .. } => *offset,
+            SharedCapability::UnknownCapability { offset, .. } => *offset,
         }
     }
 
@@ -345,8 +345,8 @@ impl SharedCapability {
     /// Returns the number of protocol messages supported by this capability.
     pub fn num_messages(&self) -> u8 {
         match self {
-            Self::Eth { version: _version, .. } => EthMessageID::max() + 1,
-            Self::UnknownCapability { messages, .. } => *messages,
+            SharedCapability::Eth { version: _version, .. } => EthMessageID::max() + 1,
+            SharedCapability::UnknownCapability { messages, .. } => *messages,
         }
     }
 }
@@ -425,12 +425,12 @@ impl SharedCapabilities {
         let mut cap = iter.next()?;
         if offset < cap.message_id_offset() {
             // reserved message id space
-            return None;
+            return None
         }
 
         for next in iter {
             if offset < next.message_id_offset() {
-                return Some(cap);
+                return Some(cap)
             }
             cap = next
         }
@@ -514,7 +514,7 @@ pub fn shared_capability_offsets(
 
     // disconnect if we don't share any capabilities
     if shared_capabilities.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities));
+        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
     }
 
     // order versions based on capability name (alphabetical) and select offsets based on
@@ -538,7 +538,7 @@ pub fn shared_capability_offsets(
     }
 
     if shared_with_offsets.is_empty() {
-        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities));
+        return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
     }
 
     Ok(shared_with_offsets)

@@ -164,7 +164,7 @@ impl Stream for MockDiscovery {
                                 ping,
                                 pong,
                                 to: remote_addr,
-                            }));
+                            }))
                         }
                     }
                     Message::Pong(_) => {}
@@ -178,7 +178,7 @@ impl Stream for MockDiscovery {
                             return Poll::Ready(Some(MockEvent::Neighbours {
                                 nodes,
                                 to: remote_addr,
-                            }));
+                            }))
                         }
                     }
                     Message::Neighbours(_) => {}

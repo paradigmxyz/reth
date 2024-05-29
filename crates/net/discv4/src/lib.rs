@@ -39,13 +39,15 @@ use discv5::{
 use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
-use reth_network_types::PeerId;
+use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{bytes::Bytes, hex, ForkId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
-    fmt, io,
+    fmt,
+    future::poll_fn,
+    io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
     rc::Rc,
@@ -560,7 +562,7 @@ impl Discv4Service {
 
         let shared_node_record = Arc::new(Mutex::new(local_node_record));
 
-        Self {
+        Discv4Service {
             local_address,
             local_eip_868_enr,
             local_node_record,
@@ -763,7 +765,7 @@ impl Discv4Service {
             // (e.g. connectivity problems over a long period of time, or issues during initial
             // bootstrapping) so we attempt to bootstrap again
             self.bootstrap();
-            return;
+            return
         }
 
         trace!(target: "discv4", ?target, num = closest.len(), "Start lookup closest nodes");
@@ -843,7 +845,7 @@ impl Discv4Service {
     fn has_bond(&self, remote_id: PeerId, remote_ip: IpAddr) -> bool {
         if let Some(timestamp) = self.received_pongs.last_pong(remote_id, remote_ip) {
             if timestamp.elapsed() < self.config.bond_expiration {
-                return true;
+                return true
             }
         }
         false
@@ -855,7 +857,7 @@ impl Discv4Service {
     /// followup request to retrieve the updated ENR
     fn update_on_reping(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
         if record.id == self.local_node_record.id {
-            return;
+            return
         }
 
         // If EIP868 extension is disabled then we want to ignore this
@@ -890,7 +892,7 @@ impl Discv4Service {
     /// Callback invoked when we receive a pong from the peer.
     fn update_on_pong(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
         if record.id == *self.local_peer_id() {
-            return;
+            return
         }
 
         // If EIP868 extension is disabled then we want to ignore this
@@ -999,7 +1001,7 @@ impl Discv4Service {
     fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: B256) {
         if self.is_expired(ping.expire) {
             // ping's expiration timestamp is in the past
-            return;
+            return
         }
 
         // create the record
@@ -1117,17 +1119,17 @@ impl Discv4Service {
     fn try_ping(&mut self, node: NodeRecord, reason: PingReason) {
         if node.id == *self.local_peer_id() {
             // don't ping ourselves
-            return;
+            return
         }
 
         if self.pending_pings.contains_key(&node.id) ||
             self.pending_find_nodes.contains_key(&node.id)
         {
-            return;
+            return
         }
 
         if self.queued_pings.iter().any(|(n, _)| n.id == node.id) {
-            return;
+            return
         }
 
         if self.pending_pings.len() < MAX_NODES_PING {
@@ -1162,7 +1164,7 @@ impl Discv4Service {
     /// Returns the echo hash of the ping message.
     pub(crate) fn send_enr_request(&mut self, node: NodeRecord) {
         if !self.config.enable_eip868 {
-            return;
+            return
         }
         let remote_addr = node.udp_addr();
         let enr_request = EnrRequest { expire: self.enr_request_expiration() };
@@ -1177,7 +1179,7 @@ impl Discv4Service {
     /// Message handler for an incoming `Pong`.
     fn on_pong(&mut self, pong: Pong, remote_addr: SocketAddr, remote_id: PeerId) {
         if self.is_expired(pong.expire) {
-            return;
+            return
         }
 
         let PingRequest { node, reason, .. } = match self.pending_pings.entry(remote_id) {
@@ -1186,7 +1188,7 @@ impl Discv4Service {
                     let request = entry.get();
                     if request.echo_hash != pong.echo {
                         trace!(target: "discv4", from=?remote_addr, expected=?request.echo_hash, echo_hash=?pong.echo,"Got unexpected Pong");
-                        return;
+                        return
                     }
                 }
                 entry.remove()
@@ -1222,11 +1224,11 @@ impl Discv4Service {
     fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: PeerId) {
         if self.is_expired(msg.expire) {
             // expiration timestamp is in the past
-            return;
+            return
         }
         if node_id == *self.local_peer_id() {
             // ignore find node requests to ourselves
-            return;
+            return
         }
 
         if self.has_bond(node_id, remote_addr.ip()) {
@@ -1238,6 +1240,12 @@ impl Discv4Service {
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
         trace!(target: "discv4", ?remote_addr, ?msg, "received ENR response");
         if let Some(resp) = self.pending_enr_requests.remove(&id) {
+            // ensure the ENR's public key matches the expected node id
+            let enr_id = pk2id(&msg.enr.public_key());
+            if id != enr_id {
+                return
+            }
+
             if resp.echo_hash == msg.request_hash {
                 let key = kad_key(id);
                 let fork_id = msg.eth_fork_id();
@@ -1274,7 +1282,7 @@ impl Discv4Service {
         request_hash: B256,
     ) {
         if !self.config.enable_eip868 || self.is_expired(msg.expire) {
-            return;
+            return
         }
 
         if self.has_bond(id, remote_addr.ip()) {
@@ -1293,7 +1301,7 @@ impl Discv4Service {
     fn on_neighbours(&mut self, msg: Neighbours, remote_addr: SocketAddr, node_id: PeerId) {
         if self.is_expired(msg.expire) {
             // response is expired
-            return;
+            return
         }
         // check if this request was expected
         let ctx = match self.pending_find_nodes.entry(node_id) {
@@ -1309,7 +1317,7 @@ impl Discv4Service {
                         request.response_count = total;
                     } else {
                         trace!(target: "discv4", total, from=?remote_addr, "Received neighbors packet entries exceeds max nodes per bucket");
-                        return;
+                        return
                     }
                 };
 
@@ -1325,7 +1333,7 @@ impl Discv4Service {
             Entry::Vacant(_) => {
                 // received neighbours response without requesting it
                 trace!(target: "discv4", from=?remote_addr, "Received unsolicited Neighbours");
-                return;
+                return
             }
         };
 
@@ -1335,7 +1343,7 @@ impl Discv4Service {
             // prevent banned peers from being added to the context
             if self.config.ban_list.is_banned(&node.id, &node.address) {
                 trace!(target: "discv4", peer_id=?node.id, ip=?node.address, "ignoring banned record");
-                continue;
+                continue
             }
 
             ctx.add_node(node);
@@ -1417,7 +1425,7 @@ impl Discv4Service {
         self.pending_pings.retain(|node_id, ping_request| {
             if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
                 failed_pings.push(*node_id);
-                return false;
+                return false
             }
             true
         });
@@ -1433,7 +1441,7 @@ impl Discv4Service {
         self.pending_lookup.retain(|node_id, (lookup_sent_at, _)| {
             if now.duration_since(*lookup_sent_at) > self.config.request_timeout {
                 failed_lookups.push(*node_id);
-                return false;
+                return false
             }
             true
         });
@@ -1457,7 +1465,7 @@ impl Discv4Service {
                     // treat this as an hard error since it responded.
                     failed_neighbours.push(*node_id);
                 }
-                return false;
+                return false
             }
             true
         });
@@ -1485,7 +1493,7 @@ impl Discv4Service {
                 if let Some(bucket) = self.kbuckets.get_bucket(&key) {
                     if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
                         // skip half empty bucket
-                        continue;
+                        continue
                     }
                 }
                 self.remove_node(node_id);
@@ -1532,7 +1540,7 @@ impl Discv4Service {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         if self.config.enforce_expiration_timestamps && timestamp < now {
             trace!(target: "discv4", "Expired packet");
-            return Err(());
+            return Err(())
         }
         Ok(())
     }
@@ -1576,7 +1584,7 @@ impl Discv4Service {
         loop {
             // drain buffered events first
             if let Some(event) = self.queued_events.pop_front() {
-                return Poll::Ready(event);
+                return Poll::Ready(event)
             }
 
             // trigger self lookup
@@ -1701,7 +1709,7 @@ impl Discv4Service {
                         // this will make sure we're woken up again
                         cx.waker().wake_by_ref();
                     }
-                    break;
+                    break
                 }
             }
 
@@ -1719,7 +1727,7 @@ impl Discv4Service {
             }
 
             if self.queued_events.is_empty() {
-                return Poll::Pending;
+                return Poll::Pending
             }
         }
     }
@@ -1790,7 +1798,13 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
     }
 }
 
+/// Rate limits the number of incoming packets from individual IPs to 1 packet/second
+const MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP: usize = 60usize;
+
 /// Continuously awaits new incoming messages and sends them back through the channel.
+///
+/// The receive loop enforce primitive rate limiting for ips to prevent message spams from
+/// individual IPs
 pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
@@ -1802,6 +1816,12 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
         });
     };
 
+    let mut cache = ReceiveCache::default();
+
+    // tick at half the rate of the limit
+    let tick = MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP / 2;
+    let mut interval = tokio::time::interval(Duration::from_secs(tick as u64));
+
     let mut buf = [0; MAX_PACKET_SIZE];
     loop {
         let res = udp.recv_from(&mut buf).await;
@@ -1811,14 +1831,27 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                 send(IngressEvent::RecvError(err)).await;
             }
             Ok((read, remote_addr)) => {
+                // rate limit incoming packets by IP
+                if cache.inc_ip(remote_addr.ip()) > MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP {
+                    trace!(target: "discv4", ?remote_addr, "Too many incoming packets from IP.");
+                    continue
+                }
+
                 let packet = &buf[..read];
                 match Message::decode(packet) {
                     Ok(packet) => {
                         if packet.node_id == local_id {
                             // received our own message
                             debug!(target: "discv4", ?remote_addr, "Received own packet.");
-                            continue;
+                            continue
                         }
+
+                        // skip if we've already received the same packet
+                        if cache.contains_packet(packet.hash) {
+                            debug!(target: "discv4", ?remote_addr, "Received duplicate packet.");
+                            continue
+                        }
+
                         send(IngressEvent::Packet(remote_addr, packet)).await;
                     }
                     Err(err) => {
@@ -1827,6 +1860,67 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                     }
                 }
             }
+        }
+
+        // reset the tracked ips if the interval has passed
+        if poll_fn(|cx| match interval.poll_tick(cx) {
+            Poll::Ready(_) => Poll::Ready(true),
+            Poll::Pending => Poll::Ready(false),
+        })
+        .await
+        {
+            cache.tick_ips(tick);
+        }
+    }
+}
+
+/// A cache for received packets and their source address.
+///
+/// This is used to discard duplicated packets and rate limit messages from the same source.
+struct ReceiveCache {
+    /// keeps track of how many messages we've received from a given IP address since the last
+    /// tick.
+    ///
+    /// This is used to count the number of messages received from a given IP address within an
+    /// interval.
+    ip_messages: HashMap<IpAddr, usize>,
+    // keeps track of unique packet hashes
+    unique_packets: schnellru::LruMap<B256, ()>,
+}
+
+impl ReceiveCache {
+    /// Updates the counter for each IP address and removes IPs that have exceeded the limit.
+    ///
+    /// This will decrement the counter for each IP address and remove IPs that have reached 0.
+    fn tick_ips(&mut self, tick: usize) {
+        self.ip_messages.retain(|_, count| {
+            if let Some(reset) = count.checked_sub(tick) {
+                *count = reset;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// Increases the counter for the given IP address and returns the new count.
+    fn inc_ip(&mut self, ip: IpAddr) -> usize {
+        let ctn = self.ip_messages.entry(ip).or_default();
+        *ctn = ctn.saturating_add(1);
+        *ctn
+    }
+
+    /// Returns true if we previously received the packet
+    fn contains_packet(&mut self, hash: B256) -> bool {
+        !self.unique_packets.insert(hash, ())
+    }
+}
+
+impl Default for ReceiveCache {
+    fn default() -> Self {
+        Self {
+            ip_messages: Default::default(),
+            unique_packets: schnellru::LruMap::new(schnellru::ByLength::new(32)),
         }
     }
 }
@@ -1904,7 +1998,7 @@ impl LookupTargetRotator {
         self.counter += 1;
         self.counter %= self.interval;
         if self.counter == 0 {
-            return *local;
+            return *local
         }
         PeerId::random()
     }
@@ -2266,7 +2360,7 @@ mod tests {
                 assert!(service.pending_pings.contains_key(&node.id));
                 assert_eq!(service.pending_pings.len(), num_inserted);
                 if num_inserted == MAX_NODES_PING {
-                    break;
+                    break
                 }
             }
         }

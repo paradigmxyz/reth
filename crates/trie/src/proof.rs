@@ -1,13 +1,13 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    node_iter::{AccountNode, AccountNodeIter, StorageNode, StorageNodeIter},
+    node_iter::{TrieElement, TrieNodeIter},
     prefix_set::PrefixSetMut,
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::{tables, transaction::DbTx};
-use reth_interfaces::trie::{StateRootError, StorageRootError};
+use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
@@ -64,13 +64,13 @@ where
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
 
         let mut account_rlp = Vec::with_capacity(128);
-        let mut account_node_iter = AccountNodeIter::new(walker, hashed_account_cursor);
+        let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
-                AccountNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                AccountNode::Leaf(hashed_address, account) => {
+                TrieElement::Leaf(hashed_address, account) => {
                     let storage_root = if hashed_address == target_hashed_address {
                         let (storage_root, storage_proofs) =
                             self.storage_root_with_proofs(hashed_address, slots)?;
@@ -109,13 +109,14 @@ where
         hashed_address: B256,
         slots: &[B256],
     ) -> Result<(B256, Vec<StorageProof>), StorageRootError> {
-        let mut hashed_storage_cursor = self.hashed_cursor_factory.hashed_storage_cursor()?;
+        let mut hashed_storage_cursor =
+            self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
 
         let mut proofs = slots.iter().copied().map(StorageProof::new).collect::<Vec<_>>();
 
         // short circuit on empty storage
-        if hashed_storage_cursor.is_storage_empty(hashed_address)? {
-            return Ok((EMPTY_ROOT_HASH, proofs));
+        if hashed_storage_cursor.is_storage_empty()? {
+            return Ok((EMPTY_ROOT_HASH, proofs))
         }
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
@@ -128,14 +129,13 @@ where
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        let mut storage_node_iter =
-            StorageNodeIter::new(walker, hashed_storage_cursor, hashed_address);
+        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
-                StorageNode::Branch(node) => {
+                TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
-                StorageNode::Leaf(hashed_slot, value) => {
+                TrieElement::Leaf(hashed_slot, value) => {
                     let nibbles = Nibbles::unpack(hashed_slot);
                     if let Some(proof) = proofs.iter_mut().find(|proof| proof.nibbles == nibbles) {
                         proof.set_value(value);
@@ -168,9 +168,9 @@ mod tests {
     use crate::StateRoot;
     use once_cell::sync::Lazy;
     use reth_db::database::Database;
-    use reth_interfaces::RethResult;
     use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
+    use reth_storage_errors::provider::ProviderResult;
     use std::{str::FromStr, sync::Arc};
 
     /*
@@ -201,7 +201,7 @@ mod tests {
     fn insert_genesis<DB: Database>(
         provider_factory: &ProviderFactory<DB>,
         chain_spec: Arc<ChainSpec>,
-    ) -> RethResult<B256> {
+    ) -> ProviderResult<B256> {
         let mut provider = provider_factory.provider_rw()?;
 
         // Hash accounts and insert them into hashing table.

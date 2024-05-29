@@ -11,39 +11,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
-reth-fs-util.workspace = true
-reth-network-api.workspace = true
-reth-eth-wire-types.workspace = true
-reth-consensus.workspace = true
-reth-network-types.workspace = true
+reth-blockchain-tree-api.workspace = true
+reth-execution-errors.workspace = true
+reth-network-p2p.workspace = true
+reth-storage-errors.workspace = true
+reth-errors.workspace = true
 
-# async
-futures.workspace = true
-tokio = { workspace = true, features = ["sync"] }
-
-# misc
-auto_impl.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-secp256k1 = { workspace = true, default-features = false, features = [
-    "alloc",
-    "recovery",
-    "rand",
-], optional = true }
-clap = { workspace = true, features = ["derive"], optional = true }
-parking_lot = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
-
-[dev-dependencies]
-reth-consensus = { workspace = true, features = ["test-utils"] }
-
-parking_lot.workspace = true
-rand.workspace = true
-tokio = { workspace = true, features = ["full"] }
-secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
+reth-testing-utils = { workspace = true, optional = true }
 
 [features]
-test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
-cli = ["clap"]
-optimism = ["reth-eth-wire-types/optimism"]
+test-utils = ["reth-network-p2p/test-utils", "reth-testing-utils"]
+clap = ["reth-storage-errors/clap"]

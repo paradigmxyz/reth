@@ -51,7 +51,7 @@ macro_rules! impl_uints {
 impl_uints!(u64, u32, u16, u8);
 
 impl Encode for Vec<u8> {
-    type Encoded = Self;
+    type Encoded = Vec<u8>;
 
     fn encode(self) -> Self::Encoded {
         self
@@ -74,7 +74,7 @@ impl Encode for Address {
 
 impl Decode for Address {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(Self::from_slice(value.as_ref()))
+        Ok(Address::from_slice(value.as_ref()))
     }
 }
 
@@ -88,7 +88,7 @@ impl Encode for B256 {
 
 impl Decode for B256 {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(Self::new(value.as_ref().try_into().map_err(|_| DatabaseError::Decode)?))
+        Ok(B256::new(value.as_ref().try_into().map_err(|_| DatabaseError::Decode)?))
     }
 }
 
@@ -102,7 +102,7 @@ impl Encode for String {
 
 impl Decode for String {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Self::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::Decode)
+        String::from_utf8(value.as_ref().to_vec()).map_err(|_| DatabaseError::Decode)
     }
 }
 

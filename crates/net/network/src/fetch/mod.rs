@@ -3,12 +3,12 @@
 use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
-use reth_interfaces::p2p::{
+use reth_network_api::ReputationChangeKind;
+use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
 };
-use reth_network_api::ReputationChangeKind;
 use reth_network_types::PeerId;
 use reth_primitives::{BlockBody, Header, B256};
 use std::{
@@ -114,7 +114,7 @@ impl StateFetcher {
             if number > peer.best_number {
                 peer.best_hash = hash;
                 peer.best_number = number;
-                return true;
+                return true
             }
         }
         false
@@ -139,7 +139,7 @@ impl StateFetcher {
             // replace best peer if our current best peer sent us a bad response last time
             if best_peer.1.last_response_likely_bad && !maybe_better.1.last_response_likely_bad {
                 best_peer = maybe_better;
-                continue;
+                continue
             }
 
             // replace best peer if this peer has better rtt
@@ -157,7 +157,7 @@ impl StateFetcher {
     fn poll_action(&mut self) -> PollAction {
         // we only check and not pop here since we don't know yet whether a peer is available.
         if self.queued_requests.is_empty() {
-            return PollAction::NoRequests;
+            return PollAction::NoRequests
         }
 
         let Some(peer_id) = self.next_best_peer() else { return PollAction::NoPeersAvailable };
@@ -204,7 +204,7 @@ impl StateFetcher {
             }
 
             if self.queued_requests.is_empty() || no_peers_available {
-                return Poll::Pending;
+                return Poll::Pending
             }
         }
     }
@@ -279,7 +279,7 @@ impl StateFetcher {
             // If the peer is still ready to accept new requests, we try to send a followup
             // request immediately.
             if peer.state.on_request_finished() && !is_error && !is_likely_bad_response {
-                return self.followup_request(peer_id);
+                return self.followup_request(peer_id)
             }
         }
 
@@ -305,7 +305,7 @@ impl StateFetcher {
             peer.last_response_likely_bad = is_likely_bad_response;
 
             if peer.state.on_request_finished() && !is_likely_bad_response {
-                return self.followup_request(peer_id);
+                return self.followup_request(peer_id)
             }
         }
         None
@@ -372,7 +372,7 @@ enum PeerState {
 impl PeerState {
     /// Returns true if the peer is currently idle.
     fn is_idle(&self) -> bool {
-        matches!(self, Self::Idle)
+        matches!(self, PeerState::Idle)
     }
 
     /// Resets the state on a received response.
@@ -381,9 +381,9 @@ impl PeerState {
     ///
     /// Returns `true` if the peer is ready for another request.
     fn on_request_finished(&mut self) -> bool {
-        if !matches!(self, Self::Closing) {
-            *self = Self::Idle;
-            return true;
+        if !matches!(self, PeerState::Closing) {
+            *self = PeerState::Idle;
+            return true
         }
         false
     }
@@ -423,16 +423,16 @@ impl DownloadRequest {
     /// Returns the corresponding state for a peer that handles the request.
     fn peer_state(&self) -> PeerState {
         match self {
-            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
-            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            DownloadRequest::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
+            DownloadRequest::GetBlockBodies { .. } => PeerState::GetBlockBodies,
         }
     }
 
     /// Returns the requested priority of this request
     fn get_priority(&self) -> &Priority {
         match self {
-            Self::GetBlockHeaders { priority, .. } => priority,
-            Self::GetBlockBodies { priority, .. } => priority,
+            DownloadRequest::GetBlockHeaders { priority, .. } => priority,
+            DownloadRequest::GetBlockBodies { priority, .. } => priority,
         }
     }
 

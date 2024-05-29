@@ -444,7 +444,7 @@ where
             }
 
             if !new_job {
-                return Poll::Pending;
+                return Poll::Pending
             }
         }
     }
@@ -479,17 +479,17 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BuildNewPayload(f0, f1) => {
+            PayloadServiceCommand::BuildNewPayload(f0, f1) => {
                 f.debug_tuple("BuildNewPayload").field(&f0).field(&f1).finish()
             }
-            Self::BestPayload(f0, f1) => {
+            PayloadServiceCommand::BestPayload(f0, f1) => {
                 f.debug_tuple("BestPayload").field(&f0).field(&f1).finish()
             }
-            Self::PayloadAttributes(f0, f1) => {
+            PayloadServiceCommand::PayloadAttributes(f0, f1) => {
                 f.debug_tuple("PayloadAttributes").field(&f0).field(&f1).finish()
             }
-            Self::Resolve(f0, _f1) => f.debug_tuple("Resolve").field(&f0).finish(),
-            Self::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
+            PayloadServiceCommand::Resolve(f0, _f1) => f.debug_tuple("Resolve").field(&f0).finish(),
+            PayloadServiceCommand::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
         }
     }
 }

@@ -439,7 +439,7 @@ where
     /// * `client1` - The first RPC client.
     /// * `client2` - The second RPC client.
     pub fn new(client1: C1, client2: C2) -> Self {
-        Self { client1, client2 }
+        RpcComparer { client1, client2 }
     }
 
     /// Compares the `trace_block` responses from the two RPC clients.

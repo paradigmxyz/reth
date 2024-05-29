@@ -9,10 +9,17 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use reth_consensus::{Consensus, ConsensusError};
-use reth_consensus_common::{validation, validation::validate_header_extradata};
-use reth_primitives::{ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256};
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
+use reth_consensus_common::validation::{
+    validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
+};
+use reth_primitives::{
+    BlockWithSenders, ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+};
 use std::{sync::Arc, time::SystemTime};
+
+mod validation;
+pub use validation::validate_block_post_execution;
 
 /// Optimism consensus implementation.
 ///
@@ -37,7 +44,7 @@ impl OptimismBeaconConsensus {
 
 impl Consensus for OptimismBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
-        validation::validate_header_standalone(header, &self.chain_spec)?;
+        validate_header_standalone(header, &self.chain_spec)?;
         Ok(())
     }
 
@@ -60,11 +67,11 @@ impl Consensus for OptimismBeaconConsensus {
 
         if is_post_merge {
             if header.nonce != 0 {
-                return Err(ConsensusError::TheMergeNonceIsNotZero);
+                return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
             if header.ommers_hash != EMPTY_OMMER_ROOT_HASH {
-                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
+                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
             }
 
             // Post-merge, the consensus layer is expected to perform checks such that the block
@@ -89,14 +96,22 @@ impl Consensus for OptimismBeaconConsensus {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp,
                     present_timestamp,
-                });
+                })
             }
         }
 
         Ok(())
     }
 
-    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validation::validate_block_standalone(block, &self.chain_spec)
+    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+        validate_block_pre_execution(block, &self.chain_spec)
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
+        validate_block_post_execution(block, &self.chain_spec, input.receipts)
     }
 }

@@ -42,7 +42,7 @@ impl Database {
 
     /// Opens the freelist database with DBI `0`.
     pub fn freelist_db() -> Self {
-        Self { dbi: 0, _env: None }
+        Database { dbi: 0, _env: None }
     }
 
     /// Returns the underlying MDBX database handle.

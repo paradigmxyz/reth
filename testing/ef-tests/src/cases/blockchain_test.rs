@@ -42,7 +42,7 @@ pub struct BlockchainTestCase {
 
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(Self {
+        Ok(BlockchainTestCase {
             tests: {
                 let s = fs::read_to_string(path)
                     .map_err(|error| Error::Io { path: path.into(), error })?;
@@ -60,7 +60,7 @@ impl Case for BlockchainTestCase {
     fn run(&self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
-            return Err(Error::Skipped);
+            return Err(Error::Skipped)
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
@@ -87,7 +87,8 @@ impl Case for BlockchainTestCase {
                     db.as_ref(),
                     Arc::new(case.network.clone().into()),
                     static_files_dir_path,
-                )?
+                )
+                .map_err(|err| Error::RethError(err.into()))?
                 .provider_rw()
                 .unwrap();
 

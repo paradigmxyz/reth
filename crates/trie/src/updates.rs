@@ -1,3 +1,4 @@
+use crate::walker::TrieWalker;
 use derive_more::Deref;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -12,8 +13,6 @@ use reth_primitives::{
     B256,
 };
 use std::collections::{hash_map::IntoIter, HashMap, HashSet};
-
-use crate::walker::TrieWalker;
 
 /// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -38,7 +37,7 @@ pub enum TrieOp {
 impl TrieOp {
     /// Returns `true` if the operation is an update.
     pub fn is_update(&self) -> bool {
-        matches!(self, Self::Update(..))
+        matches!(self, TrieOp::Update(..))
     }
 }
 
@@ -132,7 +131,7 @@ impl TrieUpdates {
     /// Flush updates all aggregated updates to the database.
     pub fn flush(self, tx: &(impl DbTx + DbTxMut)) -> Result<(), reth_db::DatabaseError> {
         if self.trie_operations.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;

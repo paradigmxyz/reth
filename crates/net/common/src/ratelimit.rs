@@ -24,7 +24,7 @@ impl RateLimit {
         let until = tokio::time::Instant::now();
         let state = State::Ready { until, remaining: rate.limit() };
 
-        Self { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
+        RateLimit { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
     }
 
     /// Returns the configured limit of the [RateLimit]
@@ -38,7 +38,7 @@ impl RateLimit {
             State::Ready { .. } => return Poll::Ready(()),
             State::Limited => {
                 if Pin::new(&mut self.sleep).poll(cx).is_pending() {
-                    return Poll::Pending;
+                    return Poll::Pending
                 }
             }
         }
@@ -107,7 +107,7 @@ pub struct Rate {
 impl Rate {
     /// Create a new [Rate] with the given `limit/duration` ratio.
     pub fn new(limit: u64, duration: Duration) -> Self {
-        Self { limit, duration }
+        Rate { limit, duration }
     }
 
     fn limit(&self) -> u64 {

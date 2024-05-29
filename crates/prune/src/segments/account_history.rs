@@ -45,7 +45,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No account history to prune");
-                return Ok(PruneOutput::done());
+                return Ok(PruneOutput::done())
             }
         };
         let range_end = *range.end();
@@ -59,7 +59,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             return Ok(PruneOutput::not_done(
                 PruneInterruptReason::new(&limiter),
                 input.previous_checkpoint.map(|checkpoint| checkpoint.into()),
-            ));
+            ))
         }
 
         let mut last_changeset_pruned_block = None;

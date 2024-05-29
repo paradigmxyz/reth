@@ -29,8 +29,8 @@ impl PipelineTarget {
     /// - `None`: If the target is for backward unwinding.
     pub fn sync_target(self) -> Option<BlockHash> {
         match self {
-            Self::Sync(hash) => Some(hash),
-            Self::Unwind(_) => None,
+            PipelineTarget::Sync(hash) => Some(hash),
+            PipelineTarget::Unwind(_) => None,
         }
     }
 
@@ -42,8 +42,8 @@ impl PipelineTarget {
     /// - `None`: If the target is for forward synchronization.
     pub fn unwind_target(self) -> Option<BlockNumber> {
         match self {
-            Self::Sync(_) => None,
-            Self::Unwind(number) => Some(number),
+            PipelineTarget::Sync(_) => None,
+            PipelineTarget::Unwind(number) => Some(number),
         }
     }
 }

@@ -28,7 +28,9 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
         body: transformed.body,
         ommers: transformed.ommers,
         withdrawals: transformed.withdrawals,
+        requests: transformed.requests,
     })
+    .0
 }
 
 #[test]

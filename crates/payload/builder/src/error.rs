@@ -37,18 +37,18 @@ impl PayloadBuilderError {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        Self::Other(Box::new(error))
+        PayloadBuilderError::Other(Box::new(error))
     }
 }
 
 impl From<ProviderError> for PayloadBuilderError {
     fn from(error: ProviderError) -> Self {
-        Self::Internal(RethError::Provider(error))
+        PayloadBuilderError::Internal(RethError::Provider(error))
     }
 }
 
 impl From<oneshot::error::RecvError> for PayloadBuilderError {
     fn from(_: oneshot::error::RecvError) -> Self {
-        Self::ChannelClosed
+        PayloadBuilderError::ChannelClosed
     }
 }

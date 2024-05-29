@@ -1,10 +1,7 @@
-use crate::{
-    engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus},
-    BeaconConsensusEngineEvent,
-};
+use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
 use futures::{future::Either, FutureExt};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
@@ -15,7 +12,7 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::oneshot;
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -162,6 +159,4 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     },
     /// Message with exchanged transition configuration.
     TransitionConfigurationExchanged,
-    /// Add a new listener for [`BeaconEngineMessage`].
-    EventListener(UnboundedSender<BeaconConsensusEngineEvent>),
 }

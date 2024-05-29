@@ -6,7 +6,7 @@ use crate::{
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
+    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers, BlockRequests,
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccounts, HashedStorages,
     HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
     PruneCheckpoints, Receipts, StageCheckpointProgresses, StageCheckpoints, StorageChangeSets,
@@ -97,6 +97,9 @@ impl Command {
                 }
                 Tables::BlockWithdrawals => {
                     find_diffs::<BlockWithdrawals>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::BlockRequests => {
+                    find_diffs::<BlockRequests>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::TransactionBlocks => {
                     find_diffs::<TransactionBlocks>(primary_tx, secondary_tx, output_dir)?
@@ -376,12 +379,12 @@ where
     ) {
         // do not bother comparing if the key is already in the discrepancies map
         if self.discrepancies.contains_key(&key) {
-            return;
+            return
         }
 
         // do not bother comparing if the key is already in the extra elements map
         if self.extra_elements.contains_key(&key) {
-            return;
+            return
         }
 
         match (first, second) {

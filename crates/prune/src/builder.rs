@@ -31,7 +31,7 @@ impl PrunerBuilder {
 
     /// Creates a new [PrunerBuilder] from the given [PruneConfig].
     pub fn new(pruner_config: PruneConfig) -> Self {
-        Self::default()
+        PrunerBuilder::default()
             .block_interval(pruner_config.block_interval)
             .segments(pruner_config.segments)
     }

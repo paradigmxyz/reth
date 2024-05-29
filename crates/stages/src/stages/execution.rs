@@ -59,8 +59,7 @@ use tracing::*;
 /// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountsHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StoragesHistory] to remove change set and apply old
-///   values
-/// to [tables::PlainStorageState]
+///   values to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<E> {
@@ -175,7 +174,7 @@ where
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let start_block = input.next_block();
@@ -240,9 +239,11 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            executor.execute_one((&block, td).into()).map_err(|error| StageError::Block {
-                block: Box::new(block.header.clone().seal_slow()),
-                error: BlockErrorKind::Execution(error),
+            executor.execute_and_verify_one((&block, td).into()).map_err(|error| {
+                StageError::Block {
+                    block: Box::new(block.header.clone().seal_slow()),
+                    error: BlockErrorKind::Execution(error),
+                }
             })?;
             execution_duration += execute_start.elapsed();
 
@@ -268,11 +269,12 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break;
+                break
             }
         }
         let time = Instant::now();
-        let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } =
+            executor.finalize();
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
@@ -451,7 +453,7 @@ where
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            });
+            })
         }
 
         // Unwind account and storage changesets, as well as receipts.
@@ -559,7 +561,7 @@ impl ExecutionStageThresholds {
 
 impl From<ExecutionConfig> for ExecutionStageThresholds {
     fn from(config: ExecutionConfig) -> Self {
-        Self {
+        ExecutionStageThresholds {
             max_blocks: config.max_blocks,
             max_changes: config.max_changes,
             max_cumulative_gas: config.max_cumulative_gas,
@@ -622,11 +624,11 @@ where
             loop {
                 if let Some(indices) = provider.block_body_indices(last_block)? {
                     if indices.last_tx_num() <= last_receipt_num {
-                        break;
+                        break
                     }
                 }
                 if last_block == 0 {
-                    break;
+                    break
                 }
                 last_block -= 1;
             }
@@ -637,7 +639,7 @@ where
             return Err(StageError::MissingStaticFileData {
                 block: missing_block,
                 segment: StaticFileSegment::Receipts,
-            });
+            })
         }
         Ordering::Equal => {}
     }
@@ -653,7 +655,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_interfaces::executor::BlockValidationError;
+    use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
         Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,

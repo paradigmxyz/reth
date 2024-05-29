@@ -1,11 +1,8 @@
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
-    provider::ProviderError,
-    RethResult,
+use reth_blockchain_tree_api::{
+    self,
+    error::{BlockchainTreeError, CanonicalError, InsertBlockError, ProviderError},
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -15,7 +12,7 @@ use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions, FullBundleStateDataProvider,
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 /// A BlockchainTree that does nothing.
 ///
@@ -57,11 +54,11 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         _last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         Ok(())
     }
 
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         Ok(())
     }
 
@@ -71,16 +68,12 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
 
     fn update_block_hashes_and_clear_buffered(
         &self,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError> {
         Ok(BTreeMap::new())
     }
 }
 
 impl BlockchainTreeViewer for NoopBlockchainTree {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        Default::default()
-    }
-
     fn header_by_hash(&self, _hash: BlockHash) -> Option<SealedHeader> {
         None
     }
@@ -93,16 +86,8 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
         None
     }
 
-    fn buffered_block_by_hash(&self, _block_hash: BlockHash) -> Option<SealedBlock> {
-        None
-    }
-
     fn buffered_header_by_hash(&self, _block_hash: BlockHash) -> Option<SealedHeader> {
         None
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        Default::default()
     }
 
     fn is_canonical(&self, _block_hash: BlockHash) -> Result<bool, ProviderError> {
@@ -115,10 +100,6 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
 
     fn canonical_tip(&self) -> BlockNumHash {
         Default::default()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        (0, vec![])
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {

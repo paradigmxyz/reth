@@ -134,11 +134,11 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                 }) => {
                     if rollupChainId != U256::from(CHAIN_ID) {
                         error!(tx_hash = %tx.recalculate_hash(), "Invalid rollup chain ID");
-                        continue;
+                        continue
                     }
                     if token != Address::ZERO {
                         error!(tx_hash = %tx.recalculate_hash(), "Only ETH deposits are supported");
-                        continue;
+                        continue
                     }
 
                     self.db.upsert_account(rollupRecipient, |account| {
@@ -199,11 +199,11 @@ impl<Node: FullNodeComponents> Rollup<Node> {
                 }) => {
                     if rollupChainId != U256::from(CHAIN_ID) {
                         error!(tx_hash = %tx.recalculate_hash(), "Invalid rollup chain ID");
-                        continue;
+                        continue
                     }
                     if token != Address::ZERO {
                         error!(tx_hash = %tx.recalculate_hash(), "Only ETH deposits are supported");
-                        continue;
+                        continue
                     }
 
                     self.db.upsert_account(rollupRecipient, |account| {

@@ -57,7 +57,7 @@ pub struct SessionsConfig {
 
 impl Default for SessionsConfig {
     fn default() -> Self {
-        Self {
+        SessionsConfig {
             // This should be sufficient to slots for handling commands sent to the session task,
             // since the manager is the sender.
             session_command_buffer: 32,
@@ -223,7 +223,7 @@ impl SessionCounter {
     fn ensure(current: u32, limit: Option<u32>) -> Result<(), ExceedsSessionLimit> {
         if let Some(limit) = limit {
             if current >= limit {
-                return Err(ExceedsSessionLimit(limit));
+                return Err(ExceedsSessionLimit(limit))
             }
         }
         Ok(())

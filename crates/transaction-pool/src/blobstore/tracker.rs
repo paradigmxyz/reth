@@ -1,7 +1,7 @@
 //! Support for maintaining the blob pool.
 
 use reth_primitives::{BlockNumber, B256};
-use reth_provider::chain::ChainBlocks;
+use reth_provider::ChainBlocks;
 use std::collections::BTreeMap;
 
 /// The type that is used to track canonical blob transactions.
@@ -55,7 +55,7 @@ impl BlobStoreCanonTracker {
             if *entry.key() <= finalized_block {
                 finalized.extend(entry.remove_entry().1);
             } else {
-                break;
+                break
             }
         }
 

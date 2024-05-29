@@ -45,7 +45,7 @@ pub fn unused_tcp_and_udp_port() -> u16 {
     loop {
         let port = unused_port();
         if std::net::UdpSocket::bind(format!("127.0.0.1:{port}")).is_ok() {
-            return port;
+            return port
         }
     }
 }

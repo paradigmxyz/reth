@@ -1,3 +1,4 @@
+use crate::PipelineEvent;
 use reth_consensus::ConsensusError;
 use reth_interfaces::{
     db::DatabaseError as DbError, executor, p2p::error::DownloadError, RethError,
@@ -5,9 +6,7 @@ use reth_interfaces::{
 use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
 use reth_provider::ProviderError;
 use thiserror::Error;
-
-use crate::PipelineEvent;
-use tokio::sync::mpsc::error::SendError;
+use tokio::sync::broadcast::error::SendError;
 
 /// Represents the specific error type within a block error.
 #[derive(Error, Debug)]
@@ -24,8 +23,8 @@ impl BlockErrorKind {
     /// Returns `true` if the error is a state root error.
     pub fn is_state_root_error(&self) -> bool {
         match self {
-            Self::Validation(err) => err.is_state_root_error(),
-            Self::Execution(err) => err.is_state_root_error(),
+            BlockErrorKind::Validation(err) => err.is_state_root_error(),
+            BlockErrorKind::Execution(err) => err.is_state_root_error(),
         }
     }
 }
@@ -139,24 +138,24 @@ impl StageError {
     pub fn is_fatal(&self) -> bool {
         matches!(
             self,
-            Self::Database(_) |
-                Self::Download(_) |
-                Self::DatabaseIntegrity(_) |
-                Self::StageCheckpoint(_) |
-                Self::MissingDownloadBuffer |
-                Self::MissingSyncGap |
-                Self::ChannelClosed |
-                Self::InconsistentBlockNumber { .. } |
-                Self::InconsistentTxNumber { .. } |
-                Self::Internal(_) |
-                Self::Fatal(_)
+            StageError::Database(_) |
+                StageError::Download(_) |
+                StageError::DatabaseIntegrity(_) |
+                StageError::StageCheckpoint(_) |
+                StageError::MissingDownloadBuffer |
+                StageError::MissingSyncGap |
+                StageError::ChannelClosed |
+                StageError::InconsistentBlockNumber { .. } |
+                StageError::InconsistentTxNumber { .. } |
+                StageError::Internal(_) |
+                StageError::Fatal(_)
         )
     }
 }
 
 impl From<std::io::Error> for StageError {
     fn from(source: std::io::Error) -> Self {
-        Self::Fatal(Box::new(source))
+        StageError::Fatal(Box::new(source))
     }
 }
 

@@ -11,10 +11,9 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
-
 use async_trait::async_trait;
+use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
-use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -324,7 +323,7 @@ where
     pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
         let pending = self.pending_block_env_and_cfg()?;
         if pending.origin.is_actual_pending() {
-            return Ok(pending.origin.into_actual_pending());
+            return Ok(pending.origin.into_actual_pending())
         }
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
@@ -339,7 +338,7 @@ where
                     pending.origin.header().hash() == pending_block.block.parent_hash &&
                     now <= pending_block.expires_at
                 {
-                    return Ok(Some(pending_block.block.clone()));
+                    return Ok(Some(pending_block.block.clone()))
                 }
             }
 
@@ -348,7 +347,7 @@ where
                 Ok(block) => block,
                 Err(err) => {
                     tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None);
+                    return Ok(None)
                 }
             };
 
@@ -391,7 +390,7 @@ where
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
     async fn protocol_version(&self) -> RethResult<U64> {
-        let status = self.network().network_status().await?;
+        let status = self.network().network_status().await.map_err(RethError::other)?;
         Ok(U64::from(status.protocol_version))
     }
 

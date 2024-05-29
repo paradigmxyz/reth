@@ -34,13 +34,13 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     compute_pending_block: bool,
     /// The rollup's chain spec.
     chain_spec: Arc<ChainSpec>,
-
+    /// The type responsible for creating the evm.
     evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// OptimismPayloadBuilder constructor.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, chain_spec, evm_config }
     }
 
@@ -95,7 +95,7 @@ where
         if args.config.attributes.no_tx_pool {
             if let Ok(BuildOutcome::Better { payload, .. }) = self.try_build(args) {
                 trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
-                return Some(payload);
+                return Some(payload)
             }
         }
 
@@ -217,9 +217,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
+            requests_root: None,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
         Ok(OptimismBuiltPayload::new(
@@ -317,14 +318,14 @@ where
     for sequencer_tx in &attributes.transactions {
         // Check if the job was cancelled, if so we can exit early.
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled);
+            return Ok(BuildOutcome::Cancelled)
         }
 
         // A sequencer's block should never contain blob transactions.
         if sequencer_tx.is_eip4844() {
             return Err(PayloadBuilderError::other(
                 OptimismPayloadBuilderError::BlobTransactionRejected,
-            ));
+            ))
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
@@ -366,11 +367,11 @@ where
                 match err {
                     EVMError::Transaction(err) => {
                         trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                        continue;
+                        continue
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err));
+                        return Err(PayloadBuilderError::EvmExecutionError(err))
                     }
                 }
             }
@@ -416,7 +417,7 @@ where
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
@@ -426,7 +427,7 @@ where
 
             // check if the job was cancelled, if so we can exit early
             if cancel.is_cancelled() {
-                return Ok(BuildOutcome::Cancelled);
+                return Ok(BuildOutcome::Cancelled)
             }
 
             // convert tx to a signed transaction
@@ -455,11 +456,11 @@ where
                                 best_txs.mark_invalid(&pool_tx);
                             }
 
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err));
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
                         }
                     }
                 }
@@ -499,7 +500,7 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
@@ -577,10 +578,11 @@ where
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root: None,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests: None };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

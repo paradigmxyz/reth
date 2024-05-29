@@ -59,7 +59,7 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> EthResult<FeeHistory> {
         if block_count == 0 {
-            return Ok(FeeHistory::default());
+            return Ok(FeeHistory::default())
         }
 
         // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
@@ -79,7 +79,7 @@ where
         }
 
         let Some(end_block) = self.provider().block_number_for_id(newest_block.into())? else {
-            return Err(EthApiError::UnknownBlockNumber);
+            return Err(EthApiError::UnknownBlockNumber)
         };
 
         // need to add 1 to the end block to get the correct (inclusive) range
@@ -95,7 +95,7 @@ where
         // Note: The types used ensure that the percentiles are never < 0
         if let Some(percentiles) = &reward_percentiles {
             if percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.) {
-                return Err(EthApiError::InvalidRewardPercentiles);
+                return Err(EthApiError::InvalidRewardPercentiles)
             }
         }
 
@@ -120,7 +120,7 @@ where
 
         if let Some(fee_entries) = fee_entries {
             if fee_entries.len() != block_count as usize {
-                return Err(EthApiError::InvalidBlockRange);
+                return Err(EthApiError::InvalidBlockRange)
             }
 
             for entry in &fee_entries {
@@ -149,7 +149,7 @@ where
             // read the requested header range
             let headers = self.provider().sealed_headers_range(start_block..=end_block)?;
             if headers.len() != block_count as usize {
-                return Err(EthApiError::InvalidBlockRange);
+                return Err(EthApiError::InvalidBlockRange)
             }
 
             for header in &headers {
@@ -157,8 +157,8 @@ where
                 gas_used_ratio.push(header.gas_used as f64 / header.gas_limit as f64);
                 base_fee_per_blob_gas.push(header.blob_fee().unwrap_or_default());
                 blob_gas_used_ratio.push(
-                    header.blob_gas_used.unwrap_or_default() as f64
-                        / reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+                    header.blob_gas_used.unwrap_or_default() as f64 /
+                        reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
                 );
 
                 // Percentiles were specified, so we need to collect reward percentile ino
@@ -188,19 +188,16 @@ where
             // The unwrap is safe since we checked earlier that we got at least 1 header.
             let last_header = headers.last().expect("is present");
             base_fee_per_gas.push(
-                self.provider()
-                    .chain_spec()
-                    .base_fee_params_at_timestamp(last_header.timestamp)
-                    .next_block_base_fee(
-                        last_header.gas_used as u128,
-                        last_header.gas_limit as u128,
-                        last_header.base_fee_per_gas.unwrap_or_default() as u128,
-                    ),
-            );
+                self.provider().chain_spec().base_fee_params_at_timestamp(last_header.timestamp).next_block_base_fee(
+                    last_header.gas_used as u128,
+                    last_header.gas_limit as u128,
+                    last_header.base_fee_per_gas.unwrap_or_default() as u128,
+                ));
 
             // Same goes for the `base_fee_per_blob_gas`:
             // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
-            base_fee_per_blob_gas.push(last_header.next_block_blob_fee().unwrap_or_default());
+            base_fee_per_blob_gas
+                .push(last_header.next_block_blob_fee().unwrap_or_default());
         };
 
         Ok(FeeHistory {

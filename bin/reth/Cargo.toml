@@ -54,9 +54,11 @@ reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
 ] }
 reth-node-core.workspace = true
+reth-db-common.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
+reth-optimism-primitives.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -134,7 +136,6 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
     "reth-primitives/optimism",
-    "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",

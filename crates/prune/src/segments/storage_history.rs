@@ -49,7 +49,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No storage history to prune");
-                return Ok(PruneOutput::done());
+                return Ok(PruneOutput::done())
             }
         };
         let range_end = *range.end();
@@ -63,7 +63,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             return Ok(PruneOutput::not_done(
                 PruneInterruptReason::new(&limiter),
                 input.previous_checkpoint.map(|checkpoint| checkpoint.into()),
-            ));
+            ))
         }
 
         let mut last_changeset_pruned_block = None;

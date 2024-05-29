@@ -36,6 +36,9 @@ pub struct DbTool<DB: Database> {
 impl<DB: Database> DbTool<DB> {
     /// Takes a DB where the tables have already been created.
     pub fn new(provider_factory: ProviderFactory<DB>, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
+        // Disable timeout because we are entering a TUI which might read for a long time. We
+        // disable on the [`DbTool`] level since it's only used in the CLI.
+        provider_factory.provider()?.disable_long_read_transaction_safety();
         Ok(Self { provider_factory, chain })
     }
 
@@ -61,18 +64,18 @@ impl<DB: Database> DbTool<DB> {
                     let (key, value) = (k.into_key(), v.into_value());
 
                     if key.len() + value.len() < filter.min_row_size {
-                        return None;
+                        return None
                     }
                     if key.len() < filter.min_key_size {
-                        return None;
+                        return None
                     }
                     if value.len() < filter.min_value_size {
-                        return None;
+                        return None
                     }
 
                     let result = || {
                         if filter.only_count {
-                            return None;
+                            return None
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -86,12 +89,12 @@ impl<DB: Database> DbTool<DB> {
                                 searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
-                                return result();
+                                return result()
                             }
                         }
                         None => {
                             hits += 1;
-                            return result();
+                            return result()
                         }
                     }
                 }

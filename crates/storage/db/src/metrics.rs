@@ -156,14 +156,14 @@ impl TransactionMode {
     /// Returns the transaction mode as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            Self::ReadOnly => "read-only",
-            Self::ReadWrite => "read-write",
+            TransactionMode::ReadOnly => "read-only",
+            TransactionMode::ReadWrite => "read-write",
         }
     }
 
     /// Returns `true` if the transaction mode is read-only.
     pub(crate) const fn is_read_only(&self) -> bool {
-        matches!(self, Self::ReadOnly)
+        matches!(self, TransactionMode::ReadOnly)
     }
 }
 
@@ -182,15 +182,15 @@ impl TransactionOutcome {
     /// Returns the transaction outcome as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            Self::Commit => "commit",
-            Self::Abort => "abort",
-            Self::Drop => "drop",
+            TransactionOutcome::Commit => "commit",
+            TransactionOutcome::Abort => "abort",
+            TransactionOutcome::Drop => "drop",
         }
     }
 
     /// Returns `true` if the transaction outcome is a commit.
     pub(crate) const fn is_commit(&self) -> bool {
-        matches!(self, Self::Commit)
+        matches!(self, TransactionOutcome::Commit)
     }
 }
 
@@ -221,15 +221,15 @@ impl Operation {
     /// Returns the operation as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            Self::Get => "get",
-            Self::Put => "put",
-            Self::Delete => "delete",
-            Self::CursorUpsert => "cursor-upsert",
-            Self::CursorInsert => "cursor-insert",
-            Self::CursorAppend => "cursor-append",
-            Self::CursorAppendDup => "cursor-append-dup",
-            Self::CursorDeleteCurrent => "cursor-delete-current",
-            Self::CursorDeleteCurrentDuplicates => "cursor-delete-current-duplicates",
+            Operation::Get => "get",
+            Operation::Put => "put",
+            Operation::Delete => "delete",
+            Operation::CursorUpsert => "cursor-upsert",
+            Operation::CursorInsert => "cursor-insert",
+            Operation::CursorAppend => "cursor-append",
+            Operation::CursorAppendDup => "cursor-append-dup",
+            Operation::CursorDeleteCurrent => "cursor-delete-current",
+            Operation::CursorDeleteCurrentDuplicates => "cursor-delete-current-duplicates",
         }
     }
 }
@@ -250,10 +250,10 @@ impl Labels {
     /// Converts each label variant into its corresponding string representation.
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            Self::Table => "table",
-            Self::TransactionMode => "mode",
-            Self::TransactionOutcome => "outcome",
-            Self::Operation => "operation",
+            Labels::Table => "table",
+            Labels::TransactionMode => "mode",
+            Labels::TransactionOutcome => "outcome",
+            Labels::Operation => "operation",
         }
     }
 }

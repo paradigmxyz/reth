@@ -40,12 +40,12 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
-    use reth_interfaces::test_utils::{
+    use reth_primitives::SealedHeader;
+    use reth_provider::providers::StaticFileWriter;
+    use reth_testing_utils::{
         generators,
         generators::{random_header, random_header_range},
     };
-    use reth_primitives::SealedHeader;
-    use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(FinishTestRunner, finish);
 
@@ -79,7 +79,7 @@ mod tests {
             let end = input.target.unwrap_or_default() + 1;
 
             if start + 1 >= end {
-                return Ok(Vec::default());
+                return Ok(Vec::default())
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());

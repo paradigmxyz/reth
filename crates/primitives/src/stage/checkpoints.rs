@@ -71,7 +71,7 @@ impl Compact for MerkleCheckpoint {
         }
 
         let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (Self { target_block, last_account_key, walker_stack, state }, buf)
+        (MerkleCheckpoint { target_block, last_account_key, walker_stack, state }, buf)
     }
 }
 
@@ -147,7 +147,7 @@ impl EntitiesCheckpoint {
     /// Return [None] if `total == 0`.
     pub fn fmt_percentage(&self) -> Option<String> {
         if self.total == 0 {
-            return None;
+            return None
         }
 
         // Calculate percentage with 2 decimal places.

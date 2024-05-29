@@ -67,19 +67,19 @@ impl<T: Table> Entries<T> {
     /// if needed.
     fn set(&mut self, new_entries: Vec<TableRow<T>>) {
         match self {
-            Self::RawValues(old_entries) => {
+            Entries::RawValues(old_entries) => {
                 *old_entries =
                     new_entries.into_iter().map(|(key, value)| (key, value.into())).collect()
             }
-            Self::Values(old_entries) => *old_entries = new_entries,
+            Entries::Values(old_entries) => *old_entries = new_entries,
         }
     }
 
     /// Returns the length of internal [Vec].
     fn len(&self) -> usize {
         match self {
-            Self::RawValues(entries) => entries.len(),
-            Self::Values(entries) => entries.len(),
+            Entries::RawValues(entries) => entries.len(),
+            Entries::Values(entries) => entries.len(),
         }
     }
 
@@ -297,7 +297,7 @@ where
             }
         }
 
-        return Ok(false);
+        return Ok(false)
     }
 
     match event {

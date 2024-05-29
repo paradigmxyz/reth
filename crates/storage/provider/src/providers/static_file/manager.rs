@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StatsReader, TransactionVariant, TransactionsProvider,
+    ReceiptProvider, RequestsProvider, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
@@ -16,7 +16,6 @@ use reth_db::{
     table::Table,
     tables,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
@@ -26,6 +25,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::{Deref, Range, RangeBounds, RangeInclusive},
@@ -206,7 +206,7 @@ impl StaticFileProvider {
             )
             .and_then(|(parsed_segment, block_range)| {
                 if parsed_segment == segment {
-                    return Some(block_range);
+                    return Some(block_range)
                 }
                 None
             }),
@@ -215,7 +215,7 @@ impl StaticFileProvider {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
-            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?));
+            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?))
         }
 
         Ok(None)
@@ -324,11 +324,11 @@ impl StaticFileProvider {
         while let Some((tx_end, block_range)) = static_files_rev_iter.next() {
             if tx > *tx_end {
                 // request tx is higher than highest static file tx
-                return None;
+                return None
             }
             let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(find_fixed_range(block_range.end()));
+                return Some(find_fixed_range(block_range.end()))
             }
         }
         None
@@ -481,7 +481,7 @@ impl StaticFileProvider {
             let mut range = find_fixed_range(highest_block);
             while range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
-                    return Ok(Some(res));
+                    return Ok(Some(res))
                 }
                 range = SegmentRangeInclusive::new(
                     range.start().saturating_sub(BLOCKS_PER_STATIC_FILE),
@@ -534,10 +534,10 @@ impl StaticFileProvider {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
                         if !predicate(&res) {
-                            break 'outer;
+                            break 'outer
                         }
                         result.push(res);
-                        break 'inner;
+                        break 'inner
                     }
                     None => {
                         if retrying {
@@ -553,7 +553,7 @@ impl StaticFileProvider {
                             } else {
                                 ProviderError::MissingStaticFileTx(segment, number)
                             };
-                            return Err(err);
+                            return Err(err)
                         }
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
@@ -622,7 +622,7 @@ impl StaticFileProvider {
         fetch_from_database: FD,
     ) -> ProviderResult<Option<T>>
     where
-        FS: Fn(&Self) -> ProviderResult<Option<T>>,
+        FS: Fn(&StaticFileProvider) -> ProviderResult<Option<T>>,
         FD: Fn() -> ProviderResult<Option<T>>,
     {
         // If there is, check the maximum block or transaction number of the segment.
@@ -636,7 +636,7 @@ impl StaticFileProvider {
         if static_file_upper_bound
             .map_or(false, |static_file_upper_bound| static_file_upper_bound >= number)
         {
-            return fetch_from_static_file(self);
+            return fetch_from_static_file(self)
         }
         fetch_from_database()
     }
@@ -661,7 +661,7 @@ impl StaticFileProvider {
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        FS: Fn(&Self, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FS: Fn(&StaticFileProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
         FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
@@ -763,7 +763,7 @@ impl HeaderProvider for StaticFileProvider {
                 .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
                 .and_then(|(header, hash)| {
                     if &hash == block_hash {
-                        return Some(header);
+                        return Some(header)
                     }
                     None
                 }))
@@ -848,7 +848,7 @@ impl ReceiptProvider for StaticFileProvider {
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(num) = self.transaction_id(hash)? {
-            return self.receipt(num);
+            return self.receipt(num)
         }
         Ok(None)
     }
@@ -1123,6 +1123,17 @@ impl WithdrawalsProvider for StaticFileProvider {
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl RequestsProvider for StaticFileProvider {
+    fn requests_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }

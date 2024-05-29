@@ -74,7 +74,7 @@ impl EngineHooksController {
                     self.hooks.push_back(hook);
                 }
 
-                return Poll::Ready(Ok(result));
+                return Poll::Ready(Ok(result))
             }
             Poll::Pending => {
                 self.active_db_write_hook = Some(hook);
@@ -141,7 +141,7 @@ impl EngineHooksController {
                 db_write_active ||
                 args.finalized_block_number.is_none())
         {
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         if let Poll::Ready(event) = hook.poll(cx, args)? {
@@ -155,7 +155,7 @@ impl EngineHooksController {
                 "Polled next hook"
             );
 
-            return Poll::Ready(Ok(result));
+            return Poll::Ready(Ok(result))
         } else {
             debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
         }
@@ -176,7 +176,7 @@ mod tests {
         EngineHooksController,
     };
     use futures::poll;
-    use reth_interfaces::{RethError, RethResult};
+    use reth_errors::{RethError, RethResult};
     use std::{
         collections::VecDeque,
         future::poll_fn,
@@ -330,7 +330,7 @@ mod tests {
         let hook_ro_name = "read-only";
         let mut hook_ro = TestHook::new_ro(hook_ro_name);
         hook_ro.add_result(Ok(EngineHookEvent::Started));
-        hook_ro.add_result(Err(RethError::Custom("something went wrong".to_string())));
+        hook_ro.add_result(Err(RethError::msg("something went wrong")));
 
         let mut hooks = EngineHooks::new();
         hooks.add(hook_rw_1);

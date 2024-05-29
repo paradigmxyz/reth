@@ -10,7 +10,7 @@ use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
     Receipts,
 };
-use reth_interfaces::p2p::error::RequestResult;
+use reth_network_p2p::error::RequestResult;
 use reth_network_types::PeerId;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection};
 use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
@@ -84,7 +84,7 @@ where
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
                 let Some(hash) = self.client.block_hash(num).unwrap_or_default() else {
-                    return headers;
+                    return headers
                 };
                 hash.into()
             }
@@ -100,7 +100,7 @@ where
                         if let Some(next) = (header.number + 1).checked_add(skip) {
                             block = next.into()
                         } else {
-                            break;
+                            break
                         }
                     }
                     HeadersDirection::Falling => {
@@ -112,7 +112,7 @@ where
                             {
                                 block = next.into()
                             } else {
-                                break;
+                                break
                             }
                         } else {
                             block = header.parent_hash.into()
@@ -124,14 +124,14 @@ where
                 headers.push(header);
 
                 if headers.len() >= MAX_HEADERS_SERVE {
-                    break;
+                    break
                 }
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
             } else {
-                break;
+                break
             }
         }
 
@@ -144,7 +144,7 @@ where
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     ) {
-        self.metrics.received_headers_requests.increment(1);
+        self.metrics.eth_headers_requests_received_total.increment(1);
         let headers = self.get_headers_response(request);
         let _ = response.send(Ok(BlockHeaders(headers)));
     }
@@ -155,7 +155,7 @@ where
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     ) {
-        self.metrics.received_bodies_requests.increment(1);
+        self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();
 
         let mut total_bytes = 0;
@@ -166,20 +166,21 @@ where
                     transactions: block.body,
                     ommers: block.ommers,
                     withdrawals: block.withdrawals,
+                    requests: block.requests,
                 };
 
                 total_bytes += body.length();
                 bodies.push(body);
 
                 if bodies.len() >= MAX_BODIES_SERVE {
-                    break;
+                    break
                 }
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
             } else {
-                break;
+                break
             }
         }
 
@@ -192,6 +193,8 @@ where
         request: GetReceipts,
         response: oneshot::Sender<RequestResult<Receipts>>,
     ) {
+        self.metrics.eth_receipts_requests_received_total.increment(1);
+
         let mut receipts = Vec::new();
 
         let mut total_bytes = 0;
@@ -209,14 +212,14 @@ where
                 receipts.push(receipt);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE {
-                    break;
+                    break
                 }
 
                 if total_bytes > SOFT_RESPONSE_LIMIT {
-                    break;
+                    break
                 }
             } else {
-                break;
+                break
             }
         }
 
@@ -249,7 +252,9 @@ where
                     IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
                         this.on_bodies_request(peer_id, request, response)
                     }
-                    IncomingEthRequest::GetNodeData { .. } => {}
+                    IncomingEthRequest::GetNodeData { .. } => {
+                        this.metrics.eth_node_data_requests_received_total.increment(1);
+                    }
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
                     }
@@ -261,7 +266,7 @@ where
         if maybe_more_incoming_requests {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         Poll::Pending

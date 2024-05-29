@@ -1,7 +1,7 @@
 //! This includes download client implementations for auto sealing miners.
 
 use crate::Storage;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
@@ -41,7 +41,7 @@ impl AutoSealClient {
                     hash.into()
                 } else {
                     warn!(target: "consensus::auto", num, "no matching block found");
-                    return headers;
+                    return headers
                 }
             }
         };
@@ -58,7 +58,7 @@ impl AutoSealClient {
                 }
                 headers.push(header);
             } else {
-                break;
+                break
             }
         }
 
@@ -75,7 +75,7 @@ impl AutoSealClient {
             if let Some(body) = storage.bodies.get(&hash).cloned() {
                 bodies.push(body);
             } else {
-                break;
+                break
             }
         }
 

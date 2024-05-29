@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
@@ -14,14 +14,14 @@ use reth_interfaces::p2p::{
 use reth_primitives::{stage::PipelineTarget, BlockNumber, ChainSpec, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::EventSender;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Manages syncing under the control of the engine.
@@ -49,8 +49,8 @@ where
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
-    /// Listeners for engine events.
-    listeners: EventListeners<BeaconConsensusEngineEvent>,
+    /// Sender for engine events.
+    event_sender: EventSender<BeaconConsensusEngineEvent>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
@@ -76,7 +76,7 @@ where
         run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<ChainSpec>,
-        listeners: EventListeners<BeaconConsensusEngineEvent>,
+        event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(
@@ -90,7 +90,7 @@ where
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
             run_pipeline_continuously,
-            listeners,
+            event_sender,
             max_block,
             metrics: EngineSyncMetrics::default(),
         }
@@ -125,11 +125,6 @@ where
     /// Returns whether or not the sync controller is set to run the pipeline continuously.
     pub(crate) fn run_pipeline_continuously(&self) -> bool {
         self.run_pipeline_continuously
-    }
-
-    /// Pushes an [UnboundedSender] to the sync controller's listeners.
-    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
-        self.listeners.push_listener(listener);
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
@@ -169,7 +164,7 @@ where
             );
 
             // notify listeners that we're downloading a block range
-            self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+            self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
                 ConsensusEngineLiveSyncProgress::DownloadingBlocks {
                     remaining_blocks: count,
                     target: hash,
@@ -189,7 +184,7 @@ where
     /// given hash.
     pub(crate) fn download_full_block(&mut self, hash: B256) -> bool {
         if self.is_inflight_request(hash) {
-            return false;
+            return false
         }
         trace!(
             target: "consensus::engine::sync",
@@ -198,7 +193,7 @@ where
         );
 
         // notify listeners that we're downloading a block
-        self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+        self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
             ConsensusEngineLiveSyncProgress::DownloadingBlocks {
                 remaining_blocks: 1,
                 target: hash,
@@ -223,7 +218,7 @@ where
                 "Pipeline target cannot be zero hash."
             );
             // precaution to never sync to the zero hash
-            return;
+            return
         }
         self.pending_pipeline_target = Some(target);
     }
@@ -280,7 +275,7 @@ where
 
                 if target.is_none() && !self.run_pipeline_continuously {
                     // nothing to sync
-                    return None;
+                    return None
                 }
 
                 let (tx, rx) = oneshot::channel();
@@ -309,14 +304,14 @@ where
     pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<EngineSyncEvent> {
         // try to spawn a pipeline if a target is set
         if let Some(event) = self.try_spawn_pipeline() {
-            return Poll::Ready(event);
+            return Poll::Ready(event)
         }
 
         // make sure we poll the pipeline if it's active, and return any ready pipeline events
         if !self.is_pipeline_idle() {
             // advance the pipeline
             if let Poll::Ready(event) = self.poll_pipeline(cx) {
-                return Poll::Ready(event);
+                return Poll::Ready(event)
             }
         }
 
@@ -354,10 +349,10 @@ where
                 if peek.0 .0.hash() == block.0 .0.hash() {
                     PeekMut::pop(peek);
                 } else {
-                    break;
+                    break
                 }
             }
-            return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0));
+            return Poll::Ready(EngineSyncEvent::FetchedFullBlock(block.0 .0))
         }
 
         Poll::Pending
@@ -424,7 +419,7 @@ enum PipelineState<DB: Database> {
 impl<DB: Database> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
     fn is_idle(&self) -> bool {
-        matches!(self, Self::Idle(_))
+        matches!(self, PipelineState::Idle(_))
     }
 }
 
@@ -434,7 +429,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
-    use reth_interfaces::{p2p::either::Either, test_utils::TestFullBlockClient};
+    use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
         Header, PruneModes, SealedHeader, MAINNET,

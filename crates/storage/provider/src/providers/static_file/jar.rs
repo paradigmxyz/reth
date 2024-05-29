@@ -10,11 +10,11 @@ use reth_db::{
     codecs::CompactU256,
     static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     ops::{Deref, RangeBounds},
     sync::Arc,
@@ -63,7 +63,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 
     /// Adds a new auxiliary static file to help query data from the main one
-    pub fn with_auxiliary(mut self, auxiliary_jar: Self) -> Self {
+    pub fn with_auxiliary(mut self, auxiliary_jar: StaticFileJarProvider<'a>) -> Self {
         self.auxiliary_jar = Some(Box::new(auxiliary_jar));
         self
     }
@@ -138,7 +138,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
             {
                 let sealed = header.seal(hash);
                 if !predicate(&sealed) {
-                    break;
+                    break
                 }
                 headers.push(sealed);
             }
@@ -298,7 +298,7 @@ impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(tx_static_file) = &self.auxiliary_jar {
             if let Some(num) = tx_static_file.transaction_id(hash)? {
-                return self.receipt(num);
+                return self.receipt(num)
             }
         }
         Ok(None)

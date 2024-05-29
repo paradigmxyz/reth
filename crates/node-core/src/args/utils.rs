@@ -98,7 +98,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
                     if s.contains('{') {
                         s.to_string()
                     } else {
-                        return Err(io_err.into()); // assume invalid path
+                        return Err(io_err.into()) // assume invalid path
                     }
                 }
             };
@@ -141,22 +141,22 @@ pub enum SocketAddressParsingError {
 /// The following formats are checked:
 ///
 /// - If the value can be parsed as a `u16` or starts with `:` it is considered a port, and the
-/// hostname is set to `localhost`.
+///   hostname is set to `localhost`.
 /// - If the value contains `:` it is assumed to be the format `<host>:<port>`
 /// - Otherwise it is assumed to be a hostname
 ///
 /// An error is returned if the value is empty.
 pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddressParsingError> {
     if value.is_empty() {
-        return Err(SocketAddressParsingError::Empty);
+        return Err(SocketAddressParsingError::Empty)
     }
 
     if let Some(port) = value.strip_prefix(':').or_else(|| value.strip_prefix("localhost:")) {
         let port: u16 = port.parse()?;
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
     if let Ok(port) = value.parse::<u16>() {
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
     value
         .to_socket_addrs()?

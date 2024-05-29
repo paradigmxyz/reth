@@ -40,12 +40,12 @@ impl MessageId {
     /// Converts the byte that represents the message id to the enum.
     fn from_u8(msg: u8) -> Result<Self, u8> {
         Ok(match msg {
-            1 => Self::Ping,
-            2 => Self::Pong,
-            3 => Self::FindNode,
-            4 => Self::Neighbours,
-            5 => Self::EnrRequest,
-            6 => Self::EnrResponse,
+            1 => MessageId::Ping,
+            2 => MessageId::Pong,
+            3 => MessageId::FindNode,
+            4 => MessageId::Neighbours,
+            5 => MessageId::EnrRequest,
+            6 => MessageId::EnrResponse,
             _ => return Err(msg),
         })
     }
@@ -72,14 +72,14 @@ pub enum Message {
 
 impl Message {
     /// Returns the id for this type
-    pub fn msg_type(&self) -> MessageId {
+    pub const fn msg_type(&self) -> MessageId {
         match self {
-            Self::Ping(_) => MessageId::Ping,
-            Self::Pong(_) => MessageId::Pong,
-            Self::FindNode(_) => MessageId::FindNode,
-            Self::Neighbours(_) => MessageId::Neighbours,
-            Self::EnrRequest(_) => MessageId::EnrRequest,
-            Self::EnrResponse(_) => MessageId::EnrResponse,
+            Message::Ping(_) => MessageId::Ping,
+            Message::Pong(_) => MessageId::Pong,
+            Message::FindNode(_) => MessageId::FindNode,
+            Message::Neighbours(_) => MessageId::Neighbours,
+            Message::EnrRequest(_) => MessageId::EnrRequest,
+            Message::EnrResponse(_) => MessageId::EnrResponse,
         }
     }
 
@@ -101,12 +101,12 @@ impl Message {
 
         // Match the message type and encode the corresponding message into the payload
         match self {
-            Self::Ping(message) => message.encode(&mut payload),
-            Self::Pong(message) => message.encode(&mut payload),
-            Self::FindNode(message) => message.encode(&mut payload),
-            Self::Neighbours(message) => message.encode(&mut payload),
-            Self::EnrRequest(message) => message.encode(&mut payload),
-            Self::EnrResponse(message) => message.encode(&mut payload),
+            Message::Ping(message) => message.encode(&mut payload),
+            Message::Pong(message) => message.encode(&mut payload),
+            Message::FindNode(message) => message.encode(&mut payload),
+            Message::Neighbours(message) => message.encode(&mut payload),
+            Message::EnrRequest(message) => message.encode(&mut payload),
+            Message::EnrResponse(message) => message.encode(&mut payload),
         }
 
         // Sign the payload with the secret key using recoverable ECDSA
@@ -137,7 +137,7 @@ impl Message {
     /// Returns the decoded message and the public key of the sender.
     pub fn decode(packet: &[u8]) -> Result<Packet, DecodePacketError> {
         if packet.len() < MIN_PACKET_SIZE {
-            return Err(DecodePacketError::PacketTooShort);
+            return Err(DecodePacketError::PacketTooShort)
         }
 
         // parses the wire-protocol, every packet starts with a header:
@@ -148,7 +148,7 @@ impl Message {
         let header_hash = keccak256(&packet[32..]);
         let data_hash = B256::from_slice(&packet[..32]);
         if data_hash != header_hash {
-            return Err(DecodePacketError::HashMismatch);
+            return Err(DecodePacketError::HashMismatch)
         }
 
         let signature = &packet[32..96];
@@ -165,12 +165,12 @@ impl Message {
         let payload = &mut &packet[98..];
 
         let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
-            MessageId::Ping => Self::Ping(Ping::decode(payload)?),
-            MessageId::Pong => Self::Pong(Pong::decode(payload)?),
-            MessageId::FindNode => Self::FindNode(FindNode::decode(payload)?),
-            MessageId::Neighbours => Self::Neighbours(Neighbours::decode(payload)?),
-            MessageId::EnrRequest => Self::EnrRequest(EnrRequest::decode(payload)?),
-            MessageId::EnrResponse => Self::EnrResponse(EnrResponse::decode(payload)?),
+            MessageId::Ping => Message::Ping(Ping::decode(payload)?),
+            MessageId::Pong => Message::Pong(Pong::decode(payload)?),
+            MessageId::FindNode => Message::FindNode(FindNode::decode(payload)?),
+            MessageId::Neighbours => Message::Neighbours(Neighbours::decode(payload)?),
+            MessageId::EnrRequest => Message::EnrRequest(EnrRequest::decode(payload)?),
+            MessageId::EnrResponse => Message::EnrResponse(EnrResponse::decode(payload)?),
         };
 
         Ok(Packet { msg, node_id, hash: header_hash })
@@ -210,7 +210,7 @@ impl From<NodeRecord> for NodeEndpoint {
 impl NodeEndpoint {
     /// Creates a new [`NodeEndpoint`] from a given UDP address and TCP port.
     pub fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
-        Self { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
+        NodeEndpoint { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
     }
 }
 
@@ -231,7 +231,7 @@ impl Decodable for FindNode {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString);
+            return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -245,7 +245,7 @@ impl Decodable for FindNode {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -273,7 +273,7 @@ impl Decodable for Neighbours {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString);
+            return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -287,7 +287,7 @@ impl Decodable for Neighbours {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -316,7 +316,7 @@ impl Decodable for EnrRequest {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString);
+            return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -330,7 +330,7 @@ impl Decodable for EnrRequest {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -424,7 +424,7 @@ impl Decodable for Ping {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString);
+            return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -449,7 +449,7 @@ impl Decodable for Ping {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);
@@ -504,7 +504,7 @@ impl Decodable for Pong {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString);
+            return Err(RlpError::UnexpectedString)
         }
         let started_len = b.len();
         let mut this = Self {
@@ -524,7 +524,7 @@ impl Decodable for Pong {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
         let rem = rlp_head.payload_length - consumed;
         b.advance(rem);

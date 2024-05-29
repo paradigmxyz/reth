@@ -1,6 +1,6 @@
 //! Canonical chain state notification trait and types.
 
-use crate::{chain::BlockReceipts, Chain};
+use crate::{BlockReceipts, Chain};
 use auto_impl::auto_impl;
 use reth_primitives::SealedBlockWithSenders;
 use std::{
@@ -51,10 +51,10 @@ impl Stream for CanonStateNotificationStream {
                 Some(Ok(notification)) => Poll::Ready(Some(notification)),
                 Some(Err(err)) => {
                     debug!(%err, "canonical state notification stream lagging behind");
-                    continue;
+                    continue
                 }
                 None => Poll::Ready(None),
-            };
+            }
         }
     }
 }

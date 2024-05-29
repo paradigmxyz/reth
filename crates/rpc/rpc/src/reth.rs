@@ -1,7 +1,7 @@
 use crate::eth::error::{EthApiError, EthResult};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_primitives::{Address, BlockId, U256};
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
@@ -63,7 +63,7 @@ where
 
     fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<HashMap<Address, U256>> {
         let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
-            return Err(EthApiError::UnknownBlockNumber);
+            return Err(EthApiError::UnknownBlockNumber)
         };
 
         let state = self.provider().state_by_block_id(block_id)?;
@@ -93,7 +93,7 @@ where
         &self,
         block_id: BlockId,
     ) -> RpcResult<HashMap<Address, U256>> {
-        Ok(Self::balance_changes_in_block(self, block_id).await?)
+        Ok(RethApi::balance_changes_in_block(self, block_id).await?)
     }
 }
 

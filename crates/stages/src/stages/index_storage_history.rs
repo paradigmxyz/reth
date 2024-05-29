@@ -92,7 +92,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         }
 
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let mut range = input.next_block_range();
@@ -164,12 +164,12 @@ mod tests {
         transaction::DbTx,
         BlockNumberList,
     };
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
+    use reth_provider::providers::StaticFileWriter;
+    use reth_testing_utils::{
         generators,
         generators::{random_block_range, random_changeset_range, random_contract_account_range},
     };
-    use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
-    use reth_provider::providers::StaticFileWriter;
     use std::collections::BTreeMap;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
@@ -587,7 +587,7 @@ mod tests {
                 let start_block = input.next_block();
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(());
+                    return Ok(())
                 }
 
                 assert_eq!(

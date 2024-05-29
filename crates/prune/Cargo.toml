@@ -30,15 +30,11 @@ thiserror.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 tokio.workspace = true
-tokio-stream.workspace = true
 
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
-
-# misc
-derive_more.workspace = true
 
 assert_matches.workspace = true

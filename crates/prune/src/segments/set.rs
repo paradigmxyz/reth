@@ -26,7 +26,7 @@ impl<DB: Database> SegmentSet<DB> {
     /// Adds new [Segment] to collection if it's [Some].
     pub fn segment_opt<S: Segment<DB> + 'static>(self, segment: Option<S>) -> Self {
         if let Some(segment) = segment {
-            return self.segment(segment);
+            return self.segment(segment)
         }
         self
     }
@@ -47,7 +47,7 @@ impl<DB: Database> SegmentSet<DB> {
             receipts_log_filter,
         } = prune_modes;
 
-        Self::default()
+        SegmentSet::default()
             // Receipts
             .segment_opt(receipts.map(Receipts::new))
             // Receipts by logs

@@ -20,7 +20,7 @@ pub enum FilterOutcome {
 impl FilterOutcome {
     /// Returns `true` for [`FilterOutcome::Ok`].
     pub fn is_ok(&self) -> bool {
-        matches!(self, Self::Ok)
+        matches!(self, FilterOutcome::Ok)
     }
 }
 
@@ -37,7 +37,7 @@ impl MustIncludeKey {
         if enr.get_raw_rlp(self.key).is_none() {
             return FilterOutcome::Ignore {
                 reason: format!("{} fork required", String::from_utf8_lossy(self.key)),
-            };
+            }
         }
         FilterOutcome::Ok
     }
@@ -58,7 +58,7 @@ impl MustNotIncludeKeys {
             _ = keys.insert(MustIncludeKey::new(key));
         }
 
-        Self { keys }
+        MustNotIncludeKeys { keys }
     }
 }
 
@@ -72,7 +72,7 @@ impl MustNotIncludeKeys {
                         "{} forks not allowed",
                         self.keys.iter().map(|key| String::from_utf8_lossy(key.key)).format(",")
                     ),
-                };
+                }
             }
         }
 

@@ -129,7 +129,7 @@ where
         if tx_len != receipts.len() {
             return Err(internal_rpc_err(
                 "the number of transactions does not match the number of receipts",
-            ));
+            ))
         }
 
         // make sure the block is full

@@ -33,7 +33,7 @@ impl MiningMode {
     /// Creates a new instant mining mode that listens for new transactions and tries to build
     /// non-empty blocks as soon as transactions arrive.
     pub fn instant(max_transactions: usize, listener: Receiver<TxHash>) -> Self {
-        Self::Auto(ReadyTransactionMiner {
+        MiningMode::Auto(ReadyTransactionMiner {
             max_transactions,
             has_pending_txs: None,
             rx: ReceiverStream::new(listener).fuse(),
@@ -42,7 +42,7 @@ impl MiningMode {
 
     /// Creates a new interval miner that builds a block ever `duration`.
     pub fn interval(duration: Duration) -> Self {
-        Self::FixedBlockTime(FixedBlockTimeMiner::new(duration))
+        MiningMode::FixedBlockTime(FixedBlockTimeMiner::new(duration))
     }
 
     /// polls the Pool and returns those transactions that should be put in a block, if any.
@@ -55,9 +55,9 @@ impl MiningMode {
         Pool: TransactionPool,
     {
         match self {
-            Self::None => Poll::Pending,
-            Self::Auto(miner) => miner.poll(pool, cx),
-            Self::FixedBlockTime(miner) => miner.poll(pool, cx),
+            MiningMode::None => Poll::Pending,
+            MiningMode::Auto(miner) => miner.poll(pool, cx),
+            MiningMode::FixedBlockTime(miner) => miner.poll(pool, cx),
         }
     }
 }
@@ -65,9 +65,9 @@ impl MiningMode {
 impl fmt::Display for MiningMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match self {
-            Self::None => "None",
-            Self::Auto(_) => "Auto",
-            Self::FixedBlockTime(_) => "FixedBlockTime",
+            MiningMode::None => "None",
+            MiningMode::Auto(_) => "Auto",
+            MiningMode::FixedBlockTime(_) => "FixedBlockTime",
         };
         write!(f, "{kind}")
     }
@@ -102,7 +102,7 @@ impl FixedBlockTimeMiner {
     {
         if self.interval.poll_tick(cx).is_ready() {
             // drain the pool
-            return Poll::Ready(pool.best_transactions().collect());
+            return Poll::Ready(pool.best_transactions().collect())
         }
         Poll::Pending
     }
@@ -141,7 +141,7 @@ impl ReadyTransactionMiner {
         }
 
         if self.has_pending_txs == Some(false) {
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         let transactions = pool.best_transactions().take(self.max_transactions).collect::<Vec<_>>();
@@ -150,7 +150,7 @@ impl ReadyTransactionMiner {
         self.has_pending_txs = Some(transactions.len() >= self.max_transactions);
 
         if transactions.is_empty() {
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         Poll::Ready(transactions)

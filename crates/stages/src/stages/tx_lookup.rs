@@ -8,7 +8,6 @@ use reth_db::{
     RawKey, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, TxHash, TxNumber,
@@ -18,6 +17,7 @@ use reth_provider::{
     TransactionsProvider, TransactionsProviderExt,
 };
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_storage_errors::provider::ProviderError;
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -101,7 +101,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         // 500MB temporary files
@@ -164,7 +164,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                     "Transaction hashes inserted"
                 );
 
-                break;
+                break
             }
         }
 
@@ -191,7 +191,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= unwind_to {
-                break;
+                break
             }
 
             // Delete all transactions that belong to this block
@@ -242,12 +242,12 @@ mod tests {
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
+    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_testing_utils::{
         generators,
         generators::{random_block, random_block_range},
     };
-    use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use std::ops::Sub;
 
     // Implement stage test suite.
@@ -428,10 +428,9 @@ mod tests {
         /// # Panics
         ///
         /// 1. If there are any entries in the [tables::TransactionHashNumbers] table above a given
-        /// block    number.
-        ///
+        ///    block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        /// [tables::TransactionHashNumbers] is    not empty.
+        ///    [tables::TransactionHashNumbers] is    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db
@@ -514,7 +513,7 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(());
+                        return Ok(())
                     }
 
                     let mut body_cursor =

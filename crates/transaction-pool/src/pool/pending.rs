@@ -90,9 +90,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
-    /// an unsatisfied dependency and only returns them if dependency transaction were yielded
-    /// previously. In other words: The nonces of transactions with the same sender will _always_
-    /// increase by exactly 1.
+    ///    an unsatisfied dependency and only returns them if dependency transaction were yielded
+    ///    previously. In other words: The nonces of transactions with the same sender will _always_
+    ///    increase by exactly 1.
     ///
     /// The order of transactions which satisfy (1.) is determent by their computed priority: A
     /// transaction with a higher priority is returned before a transaction with a lower priority.
@@ -190,7 +190,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this;
+                        break 'this
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -233,7 +233,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this;
+                        break 'this
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -415,12 +415,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         }
                     }
 
-                    return;
+                    return
                 }
 
                 if !remove_locals && tx.transaction.is_local() {
                     non_local_senders -= 1;
-                    continue;
+                    continue
                 }
 
                 total_size += tx.transaction.size();
@@ -438,7 +438,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // return if either the pool is under limits or there are no more _eligible_
             // transactions to remove
             if !self.exceeds(limit) || non_local_senders == 0 {
-                return;
+                return
             }
         }
     }
@@ -460,13 +460,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut removed = Vec::new();
         // return early if the pool is already under the limits
         if !self.exceeds(&limit) {
-            return removed;
+            return removed
         }
 
         // first truncate only non-local transactions, returning if the pool end up under the limit
         self.remove_to_limit(&limit, false, &mut removed);
         if !self.exceeds(&limit) {
-            return removed;
+            return removed
         }
 
         // now repeat for local transactions, since local transactions must be removed now for the

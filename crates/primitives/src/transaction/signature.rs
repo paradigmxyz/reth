@@ -88,7 +88,7 @@ impl Signature {
             //
             // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
             if *self == Self::optimism_deposit_tx_signature() {
-                return 0;
+                return 0
             }
             self.odd_y_parity as u64 + 27
         }
@@ -112,7 +112,7 @@ impl Signature {
                 //
                 // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
                 if v == 0 && r.is_zero() && s.is_zero() {
-                    return Ok((Self { r, s, odd_y_parity: false }, None));
+                    return Ok((Self { r, s, odd_y_parity: false }, None))
                 }
             }
         }
@@ -167,7 +167,7 @@ impl Signature {
     /// If the S value is too large, then this will return `None`
     pub fn recover_signer(&self, hash: B256) -> Option<Address> {
         if self.s > SECP256K1N_HALF {
-            return None;
+            return None
         }
 
         self.recover_signer_unchecked(hash)
@@ -203,7 +203,7 @@ pub fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
     if v < 35 {
         // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
         if v != 27 && v != 28 {
-            return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"));
+            return Err(RlpError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
         }
         Ok((v == 28, None))
     } else {

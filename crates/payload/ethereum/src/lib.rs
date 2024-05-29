@@ -13,17 +13,21 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
     BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
+use reth_evm::ConfigureEvm;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
 use reth_primitives::{
     constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH,
+        EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, Requests, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -36,13 +40,29 @@ use revm::{
 use tracing::{debug, trace, warn};
 
 /// Ethereum payload builder
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct EthereumPayloadBuilder;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
+    /// The type responsible for creating the evm.
+    evm_config: EvmConfig,
+}
+
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
+    /// EthereumPayloadBuilder constructor.
+    pub const fn new(evm_config: EvmConfig) -> Self {
+        Self { evm_config }
+    }
+}
+
+impl Default for EthereumPayloadBuilder {
+    fn default() -> Self {
+        Self::new(EthEvmConfig::default())
+    }
+}
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder
+impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
+    EvmConfig: ConfigureEvm,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -53,7 +73,7 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        default_ethereum_payload_builder(args)
+        default_ethereum_payload_builder(self.evm_config.clone(), args)
     }
 
     fn build_empty_payload(
@@ -122,6 +142,14 @@ where
             err
         })?;
 
+        // Calculate the requests and the requests root.
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+            } else {
+                (None, None)
+            };
+
         // merge all transitions into bundle state, this would apply the withdrawal balance
         // changes and 4788 contract call
         db.merge_transitions(BundleRetention::PlainState);
@@ -175,9 +203,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            requests_root,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
         Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
@@ -190,10 +219,12 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload_builder<Pool, Client>(
+pub fn default_ethereum_payload_builder<EvmConfig, Pool, Client>(
+    evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
+    EvmConfig: ConfigureEvm,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -248,12 +279,12 @@ where
             // which also removes all dependent transaction from the iterator before we can
             // continue
             best_txs.mark_invalid(&pool_tx);
-            continue;
+            continue
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled);
+            return Ok(BuildOutcome::Cancelled)
         }
 
         // convert tx to a signed transaction
@@ -270,19 +301,18 @@ where
                 // for regular transactions above.
                 trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(&pool_tx);
-                continue;
+                continue
             }
         }
 
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            tx_env_with_recovered(&tx),
+        );
+
         // Configure the environment for the block.
-        let mut evm = revm::Evm::builder()
-            .with_db(&mut db)
-            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                initialized_cfg.clone(),
-                initialized_block_env.clone(),
-                tx_env_with_recovered(&tx),
-            ))
-            .build();
+        let mut evm = evm_config.evm_with_env(&mut db, env);
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -299,11 +329,11 @@ where
                             best_txs.mark_invalid(&pool_tx);
                         }
 
-                        continue;
+                        continue
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err));
+                        return Err(PayloadBuilderError::EvmExecutionError(err))
                     }
                 }
             }
@@ -352,7 +382,7 @@ where
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
@@ -404,6 +434,14 @@ where
         blob_gas_used = Some(sum_blob_gas_used);
     }
 
+    // todo: compute requests and requests root
+    let (requests, requests_root) =
+        if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+            (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+        } else {
+            (None, None)
+        };
+
     let header = Header {
         parent_hash: parent_block.hash(),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -425,10 +463,11 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

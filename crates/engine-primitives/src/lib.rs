@@ -27,7 +27,7 @@ pub use payload::PayloadOrAttributes;
 
 /// The types that are used by the engine API.
 pub trait EngineTypes:
-    serde::de::DeserializeOwned + Serialize + fmt::Debug + Unpin + Send + Sync + Clone
+    DeserializeOwned + Serialize + fmt::Debug + Unpin + Send + Sync + Clone
 {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
@@ -43,7 +43,8 @@ pub trait EngineTypes:
         + Unpin
         + TryInto<Self::ExecutionPayloadV1>
         + TryInto<Self::ExecutionPayloadV2>
-        + TryInto<Self::ExecutionPayloadV3>;
+        + TryInto<Self::ExecutionPayloadV3>
+        + TryInto<Self::ExecutionPayloadV4>;
 
     /// Execution Payload V1 type.
     type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
@@ -51,6 +52,8 @@ pub trait EngineTypes:
     type ExecutionPayloadV2: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
     /// Execution Payload V3 type.
     type ExecutionPayloadV3: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
+    /// Execution Payload V4 type.
+    type ExecutionPayloadV4: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
 
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
@@ -63,8 +66,9 @@ pub trait EngineTypes:
 
 /// Validates the timestamp depending on the version called:
 ///
-/// * If V2, this ensure that the payload timestamp is pre-Cancun.
+/// * If V2, this ensures that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
+/// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
 ///
 /// Otherwise, this will return [EngineObjectValidationError::UnsupportedFork].
 pub fn validate_payload_timestamp(
@@ -91,7 +95,7 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    payload or payloadAttributes is greater or equal to the Cancun activation timestamp.
-        return Err(EngineObjectValidationError::UnsupportedFork);
+        return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
     if version == EngineApiMessageVersion::V3 && !is_cancun {
@@ -113,7 +117,7 @@ pub fn validate_payload_timestamp(
         //
         // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    the payload does not fall within the time frame of the Cancun fork.
-        return Err(EngineObjectValidationError::UnsupportedFork);
+        return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
     let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
@@ -136,7 +140,7 @@ pub fn validate_payload_timestamp(
         //
         // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of
         //    the payload does not fall within the time frame of the Prague fork.
-        return Err(EngineObjectValidationError::UnsupportedFork);
+        return Err(EngineObjectValidationError::UnsupportedFork)
     }
     Ok(())
 }
@@ -157,17 +161,17 @@ pub fn validate_withdrawals_presence(
         EngineApiMessageVersion::V1 => {
             if has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1));
+                    .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
         }
         EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai));
+                    .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
             if !is_shanghai_active && has_withdrawals {
                 return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai));
+                    .to_error(VersionSpecificValidationError::HasWithdrawalsPreShanghai))
             }
         }
     };
@@ -219,6 +223,11 @@ pub fn validate_withdrawals_presence(
 /// 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the
 ///    payload does not fall within the time frame of the Cancun fork.
 ///
+/// For `engine_newPayloadV4`:
+///
+/// 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the
+///    payload does not fall within the time frame of the Prague fork.
+///
 /// Returning the right error code (ie, if the client should return `-38003: Invalid payload
 /// attributes` is handled by the `message_validation_kind` parameter. If the parameter is
 /// `MessageValidationKind::Payload`, then the error code will be `-32602: Invalid params`. If the
@@ -253,13 +262,13 @@ pub fn validate_parent_beacon_block_root_presence(
             if has_parent_beacon_block_root {
                 return Err(validation_kind.to_error(
                     VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3,
-                ));
+                ))
             }
         }
         EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
-                    .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun));
+                    .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
             }
         }
     };
@@ -334,7 +343,7 @@ where
 }
 
 /// The version of Engine API message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EngineApiMessageVersion {
     /// Version 1
     V1,
@@ -350,4 +359,14 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Prague hardfork.
     V4,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_ord() {
+        assert!(EngineApiMessageVersion::V4 > EngineApiMessageVersion::V3);
+    }
 }

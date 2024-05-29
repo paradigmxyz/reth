@@ -96,7 +96,7 @@ impl FeeHistoryCache {
         if entries.len() == 0 {
             self.inner.upper_bound.store(0, SeqCst);
             self.inner.lower_bound.store(0, SeqCst);
-            return;
+            return
         }
 
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
@@ -143,7 +143,7 @@ impl FeeHistoryCache {
                 .collect::<Vec<_>>();
 
             if result.is_empty() {
-                return None;
+                return None
             }
 
             Some(result)
@@ -178,7 +178,7 @@ pub struct FeeHistoryCacheConfig {
 
 impl Default for FeeHistoryCacheConfig {
     fn default() -> Self {
-        Self { max_blocks: MAX_HEADER_HISTORY + 100, resolution: 4 }
+        FeeHistoryCacheConfig { max_blocks: MAX_HEADER_HISTORY + 100, resolution: 4 }
     }
 }
 
@@ -301,7 +301,7 @@ pub(crate) fn calculate_reward_percentiles_for_block(
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(0);
-            continue;
+            continue
         }
 
         let threshold = (gas_used as f64 * percentile / 100.) as u64;
@@ -352,7 +352,7 @@ impl FeeHistoryEntry {
     ///
     /// Note: This does not calculate the rewards for the block.
     pub fn new(block: &SealedBlock) -> Self {
-        Self {
+        FeeHistoryEntry {
             base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
             gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
             base_fee_per_blob_gas: block.blob_fee(),

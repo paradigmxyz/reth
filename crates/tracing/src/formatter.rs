@@ -57,7 +57,7 @@ impl LogFormat {
                 filter.max_level_hint().map_or(true, |max_level| max_level > tracing::Level::INFO));
 
         match self {
-            Self::Json => {
+            LogFormat::Json => {
                 let layer =
                     tracing_subscriber::fmt::layer().json().with_ansi(ansi).with_target(target);
 
@@ -67,8 +67,8 @@ impl LogFormat {
                     layer.with_filter(filter).boxed()
                 }
             }
-            Self::LogFmt => tracing_logfmt::layer().with_filter(filter).boxed(),
-            Self::Terminal => {
+            LogFormat::LogFmt => tracing_logfmt::layer().with_filter(filter).boxed(),
+            LogFormat::Terminal => {
                 let layer = tracing_subscriber::fmt::layer().with_ansi(ansi).with_target(target);
 
                 if let Some(writer) = file_writer {
@@ -84,9 +84,9 @@ impl LogFormat {
 impl Display for LogFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Json => write!(f, "json"),
-            Self::LogFmt => write!(f, "logfmt"),
-            Self::Terminal => write!(f, "terminal"),
+            LogFormat::Json => write!(f, "json"),
+            LogFormat::LogFmt => write!(f, "logfmt"),
+            LogFormat::Terminal => write!(f, "terminal"),
         }
     }
 }

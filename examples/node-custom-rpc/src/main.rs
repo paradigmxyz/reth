@@ -25,7 +25,7 @@ fn main() {
                 .node(EthereumNode::default())
                 .extend_rpc_modules(move |ctx| {
                     if !args.enable_ext {
-                        return Ok(());
+                        return Ok(())
                     }
 
                     // here we get the configured pool.

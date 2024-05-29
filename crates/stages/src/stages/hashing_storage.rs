@@ -10,7 +10,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StorageHashingCheckpoint},
@@ -18,6 +17,7 @@ use reth_primitives::{
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
@@ -78,7 +78,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
     ) -> Result<ExecOutput, StageError> {
         let tx = provider.tx_ref();
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -223,12 +223,12 @@ mod tests {
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{Address, SealedBlock, U256};
+    use reth_provider::providers::StaticFileWriter;
+    use reth_testing_utils::{
         generators,
         generators::{random_block_range, random_contract_account_range},
     };
-    use reth_primitives::{Address, SealedBlock, U256};
-    use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
@@ -274,7 +274,7 @@ mod tests {
 
                     // Continue from checkpoint
                     input.checkpoint = Some(checkpoint);
-                    continue;
+                    continue
                 } else {
                     assert_eq!(checkpoint.block_number, previous_stage);
                     assert_matches!(checkpoint.storage_hashing_stage_checkpoint(), Some(StorageHashingCheckpoint {
@@ -292,7 +292,7 @@ mod tests {
                         "execution validation"
                     );
 
-                    break;
+                    break
                 }
             }
             panic!("Failed execution");
@@ -425,7 +425,7 @@ mod tests {
                 let start_block = input.checkpoint().block_number + 1;
                 let end_block = output.checkpoint.block_number;
                 if start_block > end_block {
-                    return Ok(());
+                    return Ok(())
                 }
             }
             self.check_hashed_storage()
@@ -526,7 +526,7 @@ mod tests {
 
                 while let Some((bn_address, entry)) = rev_changeset_walker.next().transpose()? {
                     if bn_address.block_number() < target_block {
-                        break;
+                        break
                     }
 
                     if storage_cursor

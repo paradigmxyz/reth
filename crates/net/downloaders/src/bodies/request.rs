@@ -1,7 +1,7 @@
 use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
 use futures::{Future, FutureExt};
 use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::{DownloadError, DownloadResult},
     priority::Priority,
@@ -128,14 +128,14 @@ where
         // next one exceed the soft response limit, if not then peer either does not have the next
         // block or deliberately sent a single block.
         if bodies.is_empty() {
-            return Err(DownloadError::EmptyResponse);
+            return Err(DownloadError::EmptyResponse)
         }
 
         if response_len > request_len {
             return Err(DownloadError::TooManyBodies(GotExpected {
                 got: response_len,
                 expected: request_len,
-            }));
+            }))
         }
 
         // Buffer block responses
@@ -180,7 +180,7 @@ where
 
                 let block = SealedBlock::new(next_header, next_body);
 
-                if let Err(error) = self.consensus.validate_block(&block) {
+                if let Err(error) = self.consensus.validate_block_pre_execution(&block) {
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
                     let number = block.number;
@@ -189,7 +189,7 @@ where
                         hash,
                         number,
                         error: Box::new(error),
-                    });
+                    })
                 }
 
                 self.buffer.push(BlockResponse::Full(block));
@@ -215,7 +215,7 @@ where
 
         loop {
             if this.pending_headers.is_empty() {
-                return Poll::Ready(Ok(std::mem::take(&mut this.buffer)));
+                return Poll::Ready(Ok(std::mem::take(&mut this.buffer)))
             }
 
             // Check if there is a pending requests. It might not exist if all
@@ -230,7 +230,7 @@ where
                     }
                     Err(error) => {
                         if error.is_channel_closed() {
-                            return Poll::Ready(Err(error.into()));
+                            return Poll::Ready(Err(error.into()))
                         }
 
                         this.on_error(error.into(), None);
@@ -255,7 +255,7 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::{generators, generators::random_header_range};
+    use reth_testing_utils::{generators, generators::random_header_range};
 
     /// Check if future returns empty bodies without dispatching any requests.
     #[tokio::test]

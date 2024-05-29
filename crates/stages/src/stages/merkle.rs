@@ -108,7 +108,7 @@ impl MerkleStage {
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(None);
+            return Ok(None)
         }
 
         let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
@@ -138,10 +138,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         match self {
-            Self::Execution { .. } => StageId::MerkleExecute,
-            Self::Unwind => StageId::MerkleUnwind,
+            MerkleStage::Execution { .. } => StageId::MerkleExecute,
+            MerkleStage::Unwind => StageId::MerkleUnwind,
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { .. } => StageId::Other("MerkleBoth"),
+            MerkleStage::Both { .. } => StageId::Other("MerkleBoth"),
         }
     }
 
@@ -152,13 +152,13 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let threshold = match self {
-            Self::Unwind => {
+            MerkleStage::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())));
+                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            Self::Execution { clean_threshold } => *clean_threshold,
+            MerkleStage::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { clean_threshold } => *clean_threshold,
+            MerkleStage::Both { clean_threshold } => *clean_threshold,
         };
 
         let range = input.next_block_range();
@@ -237,7 +237,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                             .checkpoint()
                             .with_entities_stage_checkpoint(entities_checkpoint),
                         done: false,
-                    });
+                    })
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     updates.flush(tx)?;
@@ -292,9 +292,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
         let range = input.unwind_block_range();
-        if matches!(self, Self::Execution { .. }) {
+        if matches!(self, MerkleStage::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) });
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
 
         let mut entities_checkpoint =
@@ -313,7 +313,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput {
                 checkpoint: StageCheckpoint::new(input.unwind_to)
                     .with_entities_stage_checkpoint(entities_checkpoint),
-            });
+            })
         }
 
         // Unwind trie only if there are transitions
@@ -368,16 +368,16 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{
+        keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
+    };
+    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_testing_utils::{
         generators,
         generators::{
             random_block, random_block_range, random_changeset_range, random_contract_account_range,
         },
     };
-    use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
-    };
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_trie::test_utils::{state_root, state_root_prehashed};
     use std::collections::BTreeMap;
 
@@ -516,7 +516,7 @@ mod tests {
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
-            let SealedBlock { header, body, ommers, withdrawals } = random_block(
+            let SealedBlock { header, body, ommers, withdrawals, requests } = random_block(
                 &mut rng,
                 stage_progress,
                 preblocks.last().map(|b| b.hash()),
@@ -531,7 +531,8 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed_head = SealedBlock { header: header.seal_slow(), body, ommers, withdrawals };
+            let sealed_head =
+                SealedBlock { header: header.seal_slow(), body, ommers, withdrawals, requests };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
@@ -623,7 +624,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if bn_address.block_number() < target_block {
-                            break;
+                            break
                         }
 
                         tree.entry(keccak256(bn_address.address()))
@@ -654,7 +655,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if block_number < target_block {
-                            break;
+                            break
                         }
 
                         if let Some(acc) = account_before_tx.info {

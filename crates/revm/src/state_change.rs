@@ -1,5 +1,5 @@
 use reth_consensus_common::calc;
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header, Withdrawal,
     B256, U256,
@@ -68,7 +68,7 @@ where
     DB::Error: std::fmt::Display,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(());
+        return Ok(())
     }
 
     let parent_beacon_block_root =
@@ -81,9 +81,9 @@ where
             return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
                 parent_beacon_block_root,
             }
-            .into());
+            .into())
         }
-        return Ok(());
+        return Ok(())
     }
 
     // get previous env
@@ -100,7 +100,7 @@ where
                 parent_beacon_block_root: Box::new(parent_beacon_block_root),
                 message: e.to_string(),
             }
-            .into());
+            .into())
         }
     };
 

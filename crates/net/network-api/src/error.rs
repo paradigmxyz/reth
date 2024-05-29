@@ -11,12 +11,12 @@ pub enum NetworkError {
 
 impl<T> From<mpsc::error::SendError<T>> for NetworkError {
     fn from(_: mpsc::error::SendError<T>) -> Self {
-        Self::ChannelClosed
+        NetworkError::ChannelClosed
     }
 }
 
 impl From<oneshot::error::RecvError> for NetworkError {
     fn from(_: oneshot::error::RecvError) -> Self {
-        Self::ChannelClosed
+        NetworkError::ChannelClosed
     }
 }

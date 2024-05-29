@@ -4,12 +4,16 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, PruneCheckpointReader, RequestsProvider, StageCheckpointReader,
+    StateProviderBox, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
-use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_db::{
+    database::Database, init_db, mdbx::DatabaseArguments, models::StoredBlockBodyIndices,
+    DatabaseEnv,
+};
+use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
@@ -17,6 +21,7 @@ use reth_primitives::{
     SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
     TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -29,7 +34,6 @@ mod metrics;
 mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
-use reth_db::mdbx::DatabaseArguments;
 
 /// A common provider that fetches data from a database or static file.
 ///
@@ -46,7 +50,11 @@ pub struct ProviderFactory<DB> {
 
 impl<DB> ProviderFactory<DB> {
     /// Create new database provider factory.
-    pub fn new(db: DB, chain_spec: Arc<ChainSpec>, static_files_path: PathBuf) -> RethResult<Self> {
+    pub fn new(
+        db: DB,
+        chain_spec: Arc<ChainSpec>,
+        static_files_path: PathBuf,
+    ) -> ProviderResult<ProviderFactory<DB>> {
         Ok(Self {
             db: Arc::new(db),
             chain_spec,
@@ -81,8 +89,8 @@ impl ProviderFactory<DatabaseEnv> {
         args: DatabaseArguments,
         static_files_path: PathBuf,
     ) -> RethResult<Self> {
-        Ok(Self {
-            db: Arc::new(init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?),
+        Ok(ProviderFactory::<DatabaseEnv> {
+            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider: StaticFileProvider::new(static_files_path)?,
         })
@@ -164,7 +172,7 @@ impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
         &self,
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
-    ) -> RethResult<HeaderSyncGap> {
+    ) -> ProviderResult<HeaderSyncGap> {
         self.provider()?.sync_gap(mode, highest_uninterrupted_block)
     }
 }
@@ -191,7 +199,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td));
+            return Ok(Some(td))
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -458,6 +466,19 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
     }
 }
 
+impl<DB> RequestsProvider for ProviderFactory<DB>
+where
+    DB: Database,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.provider()?.requests_by_block(id, timestamp)
+    }
+}
+
 impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
@@ -556,7 +577,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 
 impl<DB> Clone for ProviderFactory<DB> {
     fn clone(&self) -> Self {
-        Self {
+        ProviderFactory {
             db: Arc::clone(&self.db),
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
@@ -565,7 +586,7 @@ impl<DB> Clone for ProviderFactory<DB> {
 }
 #[cfg(test)]
 mod tests {
-    use super::ProviderFactory;
+    use super::*;
     use crate::{
         providers::StaticFileWriter, test_utils::create_test_provider_factory, BlockHashReader,
         BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
@@ -578,17 +599,14 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_interfaces::{
-        provider::ProviderError,
-        test_utils::{
-            generators,
-            generators::{random_block, random_header},
-        },
-        RethError,
-    };
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
         TxNumber, B256, U256,
+    };
+    use reth_storage_errors::provider::ProviderError;
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block, random_header},
     };
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
@@ -735,7 +753,7 @@ mod tests {
         // Empty database
         assert_matches!(
             provider.sync_gap(mode.clone(), checkpoint),
-            Err(RethError::Provider(ProviderError::HeaderNotFound(block_number)))
+            Err(ProviderError::HeaderNotFound(block_number))
                 if block_number.as_number().unwrap() == checkpoint
         );
 

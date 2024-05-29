@@ -68,17 +68,17 @@ impl AnyNode {
     /// Returns the peer id of the node.
     pub fn peer_id(&self) -> PeerId {
         match self {
-            Self::NodeRecord(record) => record.id,
-            Self::Enr(enr) => pk2id(&enr.public_key()),
-            Self::PeerId(peer_id) => *peer_id,
+            AnyNode::NodeRecord(record) => record.id,
+            AnyNode::Enr(enr) => pk2id(&enr.public_key()),
+            AnyNode::PeerId(peer_id) => *peer_id,
         }
     }
 
     /// Returns the full node record if available.
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
-            Self::NodeRecord(record) => Some(*record),
-            Self::Enr(enr) => {
+            AnyNode::NodeRecord(record) => Some(*record),
+            AnyNode::Enr(enr) => {
                 let node_record = NodeRecord {
                     address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
@@ -111,16 +111,16 @@ impl FromStr for AnyNode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(rem) = s.strip_prefix("enode://") {
             if let Ok(record) = NodeRecord::from_str(s) {
-                return Ok(Self::NodeRecord(record));
+                return Ok(AnyNode::NodeRecord(record))
             }
             // incomplete enode
             if let Ok(peer_id) = PeerId::from_str(rem) {
-                return Ok(Self::PeerId(peer_id));
+                return Ok(AnyNode::PeerId(peer_id))
             }
-            return Err(format!("invalid public key: {rem}"));
+            return Err(format!("invalid public key: {rem}"))
         }
         if s.starts_with("enr:") {
-            return Enr::from_str(s).map(AnyNode::Enr);
+            return Enr::from_str(s).map(AnyNode::Enr)
         }
         Err("missing 'enr:' prefix for base64-encoded record".to_string())
     }
@@ -129,9 +129,9 @@ impl FromStr for AnyNode {
 impl std::fmt::Display for AnyNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NodeRecord(record) => write!(f, "{record}"),
-            Self::Enr(enr) => write!(f, "{enr}"),
-            Self::PeerId(peer_id) => {
+            AnyNode::NodeRecord(record) => write!(f, "{record}"),
+            AnyNode::Enr(enr) => write!(f, "{enr}"),
+            AnyNode::PeerId(peer_id) => {
                 write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
             }
         }

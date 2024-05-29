@@ -130,7 +130,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                         ?block_range,
                         "No receipts to prune."
                     );
-                    continue;
+                    continue
                 }
             };
             let tx_range = from_tx_number..=tx_range_end;
@@ -177,7 +177,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
             if limiter.is_limit_reached() {
                 done &= end_block == to_block;
-                break;
+                break
             }
 
             from_tx_number = last_pruned_transaction + 1;

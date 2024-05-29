@@ -13,11 +13,11 @@ use crate::{
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
 };
+use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
     ops::Deref,
@@ -250,7 +250,7 @@ impl DatabaseEnv {
         path: &Path,
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<DatabaseEnv, DatabaseError> {
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -272,7 +272,7 @@ impl DatabaseEnv {
             // We grow the database in increments of 4 gigabytes
             growth_step: Some(4 * GIGABYTE as isize),
             // The database never shrinks
-            shrink_threshold: None,
+            shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
         });
         #[cfg(not(windows))]
@@ -371,7 +371,7 @@ impl DatabaseEnv {
                     LogLevel::Extra => 7,
                 });
             } else {
-                return Err(DatabaseError::LogLevelUnavailable(log_level));
+                return Err(DatabaseError::LogLevelUnavailable(log_level))
             }
         }
 
@@ -379,7 +379,7 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
-        let env = Self {
+        let env = DatabaseEnv {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
         };
@@ -415,7 +415,7 @@ impl DatabaseEnv {
     /// Records version that accesses the database with write privileges.
     pub fn record_client_version(&self, version: ClientVersion) -> Result<(), DatabaseError> {
         if version.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
         let tx = self.tx_mut()?;
@@ -455,9 +455,9 @@ mod tests {
         test_utils::*,
         AccountChangeSets,
     };
-    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
+    use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
 

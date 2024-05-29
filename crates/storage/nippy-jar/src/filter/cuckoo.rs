@@ -21,14 +21,14 @@ impl Cuckoo {
         // close to capacity. Therefore, we increase it.
         let max_capacity = max_capacity + 100 + max_capacity / 3;
 
-        Self { remaining: max_capacity, filter: CuckooFilter::with_capacity(max_capacity) }
+        Cuckoo { remaining: max_capacity, filter: CuckooFilter::with_capacity(max_capacity) }
     }
 }
 
 impl InclusionFilter for Cuckoo {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         if self.remaining == 0 {
-            return Err(NippyJarError::FilterMaxCapacity);
+            return Err(NippyJarError::FilterMaxCapacity)
         }
 
         self.remaining -= 1;
@@ -73,7 +73,7 @@ impl<'de> Deserialize<'de> for Cuckoo {
         let (remaining, exported): (usize, ExportedCuckooFilter) =
             Deserialize::deserialize(deserializer)?;
 
-        Ok(Self { remaining, filter: exported.into() })
+        Ok(Cuckoo { remaining, filter: exported.into() })
     }
 }
 

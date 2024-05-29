@@ -11,7 +11,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseEnv, DatabaseError as DbError,
 };
-use reth_interfaces::{provider::ProviderResult, test_utils::generators::ChangeSet};
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
     StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,
@@ -20,6 +19,8 @@ use reth_provider::{
     providers::{StaticFileProviderRWRefMut, StaticFileWriter},
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
+use reth_storage_errors::provider::ProviderResult;
+use reth_testing_utils::generators::ChangeSet;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tempfile::TempDir;
 
@@ -445,7 +446,7 @@ impl StorageKind {
 
     fn tx_offset(&self) -> u64 {
         if let Self::Database(offset) = self {
-            return offset.unwrap_or_default();
+            return offset.unwrap_or_default()
         }
         0
     }

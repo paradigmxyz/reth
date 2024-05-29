@@ -7,11 +7,11 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     trie::AccountProof, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
     StorageValue, B256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{proof::Proof, updates::TrieUpdates, HashedPostState};
 use revm::db::BundleState;
 
@@ -101,7 +101,7 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
         let mut cursor = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
         if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
             if entry.key == storage_key {
-                return Ok(Some(entry.value));
+                return Ok(Some(entry.value))
             }
         }
         Ok(None)

@@ -3,24 +3,20 @@ use crate::{
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
     EvmEnvProvider, FullBundleStateDataProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProviderBox, StateProviderFactory, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider, TreeViewer, WithdrawalsProvider,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
+};
+use reth_blockchain_tree_api::{
+    error::{CanonicalError, InsertBlockError},
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
 };
 use reth_db::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
-    provider::ProviderResult,
-    RethResult,
-};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumber,
@@ -29,9 +25,10 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
@@ -468,6 +465,19 @@ where
     }
 }
 
+impl<DB> RequestsProvider for BlockchainProvider<DB>
+where
+    DB: Database,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.database.requests_by_block(id, timestamp)
+    }
+}
+
 impl<DB> StageCheckpointReader for BlockchainProvider<DB>
 where
     DB: Database,
@@ -621,7 +631,7 @@ where
 
         if let Some(block) = self.tree.pending_block_num_hash() {
             if let Ok(pending) = self.tree.pending_state_provider(block.hash) {
-                return self.pending_with_provider(pending);
+                return self.pending_with_provider(pending)
             }
         }
 
@@ -631,7 +641,7 @@ where
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(state) = self.tree.find_pending_state_provider(block_hash) {
-            return Ok(Some(self.pending_with_provider(state)?));
+            return Ok(Some(self.pending_with_provider(state)?))
         }
         Ok(None)
     }
@@ -669,18 +679,20 @@ where
         self.tree.finalize_block(finalized_block)
     }
 
-    fn update_block_hashes_and_clear_buffered(&self) -> RethResult<BTreeMap<BlockNumber, B256>> {
-        self.tree.update_block_hashes_and_clear_buffered()
-    }
-
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         self.tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block)
     }
 
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> Result<BTreeMap<BlockNumber, B256>, CanonicalError> {
+        self.tree.update_block_hashes_and_clear_buffered()
+    }
+
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         self.tree.connect_buffered_blocks_to_canonical_hashes()
     }
 
@@ -693,10 +705,6 @@ impl<DB> BlockchainTreeViewer for BlockchainProvider<DB>
 where
     DB: Send + Sync,
 {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        self.tree.blocks()
-    }
-
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         self.tree.header_by_hash(hash)
     }
@@ -709,16 +717,8 @@ where
         self.tree.block_with_senders_by_hash(block_hash)
     }
 
-    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
-        self.tree.buffered_block_by_hash(block_hash)
-    }
-
     fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
         self.tree.buffered_header_by_hash(block_hash)
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        self.tree.canonical_blocks()
     }
 
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
@@ -731,10 +731,6 @@ where
 
     fn canonical_tip(&self) -> BlockNumHash {
         self.tree.canonical_tip()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        self.tree.pending_blocks()
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {

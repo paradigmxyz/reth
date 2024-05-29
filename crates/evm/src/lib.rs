@@ -16,6 +16,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId,
 
 pub mod either;
 pub mod execute;
+pub mod provider;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor

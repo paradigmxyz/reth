@@ -1,3 +1,4 @@
+//! Identifier types for transactions and senders.
 use reth_primitives::Address;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -64,7 +65,7 @@ impl SenderId {
 
 impl From<u64> for SenderId {
     fn from(value: u64) -> Self {
-        Self(value)
+        SenderId(value)
     }
 }
 
@@ -92,22 +93,26 @@ impl TransactionId {
     ///
     /// This returns `transaction_nonce - 1` if `transaction_nonce` is higher than the
     /// `on_chain_nonce`
-    pub fn ancestor(transaction_nonce: u64, on_chain_nonce: u64, sender: SenderId) -> Option<Self> {
+    pub fn ancestor(
+        transaction_nonce: u64,
+        on_chain_nonce: u64,
+        sender: SenderId,
+    ) -> Option<TransactionId> {
         if transaction_nonce == on_chain_nonce {
-            return None;
+            return None
         }
         let prev_nonce = transaction_nonce.saturating_sub(1);
         (on_chain_nonce <= prev_nonce).then(|| Self::new(sender, prev_nonce))
     }
 
     /// Returns the `TransactionId` that would come before this transaction.
-    pub(crate) fn unchecked_ancestor(&self) -> Option<Self> {
-        (self.nonce != 0).then(|| Self::new(self.sender, self.nonce - 1))
+    pub(crate) fn unchecked_ancestor(&self) -> Option<TransactionId> {
+        (self.nonce != 0).then(|| TransactionId::new(self.sender, self.nonce - 1))
     }
 
     /// Returns the `TransactionId` that directly follows this transaction: `self.nonce + 1`
-    pub const fn descendant(&self) -> Self {
-        Self::new(self.sender, self.nonce + 1)
+    pub const fn descendant(&self) -> TransactionId {
+        TransactionId::new(self.sender, self.nonce + 1)
     }
 
     /// Returns the nonce that follows immediately after this one.

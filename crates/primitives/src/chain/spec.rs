@@ -1,5 +1,8 @@
 use crate::{
-    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
+    constants::{
+        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS,
+    },
     holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
@@ -465,13 +468,13 @@ pub enum BaseFeeParamsKind {
 
 impl From<BaseFeeParams> for BaseFeeParamsKind {
     fn from(params: BaseFeeParams) -> Self {
-        Self::Constant(params)
+        BaseFeeParamsKind::Constant(params)
     }
 }
 
 impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
     fn from(params: ForkBaseFeeParams) -> Self {
-        Self::Variable(params)
+        BaseFeeParamsKind::Variable(params)
     }
 }
 
@@ -482,7 +485,7 @@ pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 
 impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
     fn from(params: Vec<(Hardfork, BaseFeeParams)>) -> Self {
-        Self(params)
+        ForkBaseFeeParams(params)
     }
 }
 
@@ -530,8 +533,8 @@ pub struct ChainSpec {
 }
 
 impl Default for ChainSpec {
-    fn default() -> Self {
-        Self {
+    fn default() -> ChainSpec {
+        ChainSpec {
             chain: Default::default(),
             genesis_hash: Default::default(),
             genesis: Default::default(),
@@ -612,6 +615,13 @@ impl ChainSpec {
                 (None, None, None)
             };
 
+        // If Prague is activated at genesis we set requests root to an empty trie root.
+        let requests_root = if self.is_prague_active_at_timestamp(self.genesis.timestamp) {
+            Some(EMPTY_ROOT_HASH)
+        } else {
+            None
+        };
+
         Header {
             parent_hash: B256::ZERO,
             number: 0,
@@ -633,6 +643,7 @@ impl ChainSpec {
             parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
+            requests_root,
         }
     }
 
@@ -661,7 +672,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.is_fork_active_at_timestamp(*fork, timestamp) {
-                        return *params;
+                        return *params
                     }
                 }
 
@@ -680,7 +691,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.is_fork_active_at_block(*fork, block_number) {
-                        return *params;
+                        return *params
                     }
                 }
 
@@ -865,7 +876,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block };
+                    return ForkId { hash: forkhash, next: block }
                 }
             }
         }
@@ -886,7 +897,7 @@ impl ChainSpec {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp };
+                return ForkId { hash: forkhash, next: timestamp }
             }
         }
 
@@ -901,7 +912,7 @@ impl ChainSpec {
                 // to satisfy every timestamp ForkCondition, we find the last ForkCondition::Block
                 // if one exists, and include its block_num in the returned Head
                 if let Some(last_block_num) = self.last_block_fork_before_merge_or_timestamp() {
-                    return Head { timestamp, number: last_block_num, ..Default::default() };
+                    return Head { timestamp, number: last_block_num, ..Default::default() }
                 }
                 Head { timestamp, ..Default::default() }
             }
@@ -929,17 +940,17 @@ impl ChainSpec {
                     ForkCondition::TTD { fork_block, .. } => {
                         // handle Sepolia merge netsplit case
                         if fork_block.is_some() {
-                            return *fork_block;
+                            return *fork_block
                         }
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num);
+                            return Some(block_num)
                         }
                     }
                     ForkCondition::Timestamp(_) => {
                         // ensure curr_cond is indeed ForkCondition::Block and return block_num
                         if let ForkCondition::Block(block_num) = curr_cond {
-                            return Some(block_num);
+                            return Some(block_num)
                         }
                     }
                     ForkCondition::Block(_) | ForkCondition::Never => continue,
@@ -1336,7 +1347,7 @@ pub enum ForkCondition {
 impl ForkCondition {
     /// Returns true if the fork condition is timestamp based.
     pub fn is_timestamp(&self) -> bool {
-        matches!(self, Self::Timestamp(_))
+        matches!(self, ForkCondition::Timestamp(_))
     }
 
     /// Checks whether the fork condition is satisfied at the given block.
@@ -1345,15 +1356,15 @@ impl ForkCondition {
     ///
     /// For timestamp conditions, this will always return false.
     pub fn active_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, Self::Block(block)
-        | Self::TTD { fork_block: Some(block), .. } if current_block >= *block)
+        matches!(self, ForkCondition::Block(block)
+        | ForkCondition::TTD { fork_block: Some(block), .. } if current_block >= *block)
     }
 
     /// Checks if the given block is the first block that satisfies the fork condition.
     ///
     /// This will return false for any condition that is not block based.
     pub fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, Self::Block(block) if current_block == *block)
+        matches!(self, ForkCondition::Block(block) if current_block == *block)
     }
 
     /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
@@ -1366,7 +1377,7 @@ impl ForkCondition {
     ///
     /// This will return false for any condition that is not TTD-based.
     pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        matches!(self, Self::TTD { total_difficulty, .. }
+        matches!(self, ForkCondition::TTD { total_difficulty, .. }
             if ttd.saturating_sub(difficulty) >= *total_difficulty)
     }
 
@@ -1374,7 +1385,7 @@ impl ForkCondition {
     ///
     /// This will return false for any condition that is not timestamp-based.
     pub fn active_at_timestamp(&self, timestamp: u64) -> bool {
-        matches!(self, Self::Timestamp(time) if timestamp >= *time)
+        matches!(self, ForkCondition::Timestamp(time) if timestamp >= *time)
     }
 
     /// Checks whether the fork condition is satisfied at the given head block.
@@ -1395,7 +1406,7 @@ impl ForkCondition {
     /// Returns `None` for fork conditions that are not TTD based.
     pub fn ttd(&self) -> Option<U256> {
         match self {
-            Self::TTD { total_difficulty, .. } => Some(*total_difficulty),
+            ForkCondition::TTD { total_difficulty, .. } => Some(*total_difficulty),
             _ => None,
         }
     }
@@ -1403,7 +1414,7 @@ impl ForkCondition {
     /// Returns the timestamp of the fork condition, if it is timestamp based.
     pub fn as_timestamp(&self) -> Option<u64> {
         match self {
-            Self::Timestamp(timestamp) => Some(*timestamp),
+            ForkCondition::Timestamp(timestamp) => Some(*timestamp),
             _ => None,
         }
     }
@@ -1591,7 +1602,7 @@ pub struct DepositContract {
 
 impl DepositContract {
     fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
-        Self { address, block, topic }
+        DepositContract { address, block, topic }
     }
 }
 

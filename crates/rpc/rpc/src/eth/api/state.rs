@@ -45,7 +45,7 @@ where
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
-        if block_id == Some(BlockId::Number(BlockNumberOrTag::Pending)) {
+        if block_id == Some(BlockId::pending()) {
             let address_txs = self.pool().get_transactions_by_sender(address);
             if let Some(highest_nonce) =
                 address_txs.iter().map(|item| item.transaction.nonce()).max()
@@ -53,7 +53,7 @@ where
                 let tx_count = highest_nonce
                     .checked_add(1)
                     .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
-                return Ok(U256::from(tx_count));
+                return Ok(U256::from(tx_count))
             }
         }
 
@@ -96,7 +96,7 @@ where
 
         // TODO: remove when HistoricalStateProviderRef::proof is implemented
         if !is_latest_block {
-            return Err(EthApiError::InvalidBlockRange);
+            return Err(EthApiError::InvalidBlockRange)
         }
 
         let this = self.clone();

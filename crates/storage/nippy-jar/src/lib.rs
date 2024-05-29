@@ -1,4 +1,8 @@
 //! Immutable data store format.
+//!
+//! *Warning*: The `NippyJar` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -140,12 +144,12 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
 impl NippyJar<()> {
     /// Creates a new [`NippyJar`] without an user-defined header data.
     pub fn new_without_header(columns: usize, path: &Path) -> Self {
-        Self::new(columns, path, ())
+        NippyJar::<()>::new(columns, path, ())
     }
 
     /// Loads the file configuration and returns [`Self`] on a jar without user-defined header data.
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
-        Self::load(path)
+        NippyJar::<()>::load(path)
     }
 
     /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
@@ -157,7 +161,7 @@ impl NippyJar<()> {
 impl<H: NippyJarHeader> NippyJar<H> {
     /// Creates a new [`NippyJar`] with a user-defined header data.
     pub fn new(columns: usize, path: &Path, user_header: H) -> Self {
-        Self {
+        NippyJar {
             version: NIPPY_JAR_VERSION,
             user_header,
             columns,
@@ -409,12 +413,12 @@ impl<H: NippyJarHeader> NippyJar<H> {
         columns: &[impl IntoIterator<Item = ColumnResult<Vec<u8>>>],
     ) -> Result<(), NippyJarError> {
         if columns.len() != self.columns {
-            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()));
+            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
         if let Some(compression) = &self.compressor {
             if !compression.is_ready() {
-                return Err(NippyJarError::CompressorNotReady);
+                return Err(NippyJarError::CompressorNotReady)
             }
         }
 
@@ -472,7 +476,7 @@ pub struct DataReader {
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
     /// Number of bytes that represent one offset.
-    offset_size: u64,
+    offset_size: u8,
 }
 
 impl DataReader {
@@ -487,11 +491,11 @@ impl DataReader {
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
         // First byte is the size of one offset in bytes
-        let offset_size = offset_mmap[0] as u64;
+        let offset_size = offset_mmap[0];
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
-            return Err(NippyJarError::OffsetSizeTooBig { offset_size });
+            return Err(NippyJarError::OffsetSizeTooBig { offset_size })
         }
 
         Ok(Self { data_file, data_mmap, offset_file, offset_size, offset_mmap })
@@ -521,7 +525,8 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size) as usize)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+            as usize)
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
@@ -530,7 +535,7 @@ impl DataReader {
 
         let offset_end = index + self.offset_size as usize;
         if offset_end > self.offset_mmap.len() {
-            return Err(NippyJarError::OffsetOutOfBounds { index });
+            return Err(NippyJarError::OffsetOutOfBounds { index })
         }
 
         buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
@@ -538,7 +543,7 @@ impl DataReader {
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u64 {
+    pub fn offset_size(&self) -> u8 {
         self.offset_size
     }
 

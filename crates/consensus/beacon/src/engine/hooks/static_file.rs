@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
 use reth_tasks::TaskSpawner;
@@ -55,7 +55,7 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
                 match result {
                     Ok(_) => EngineHookEvent::Finished(Ok(())),
-                    Err(err) => EngineHookEvent::Finished(Err(err.into())),
+                    Err(err) => EngineHookEvent::Finished(Err(EngineHookError::Common(err.into()))),
                 }
             }
             Err(_) => {
@@ -71,13 +71,13 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
     /// 1. Check if producing static files is needed through
     ///    [StaticFileProducer::get_static_file_targets](reth_static_file::StaticFileProducerInner::get_static_file_targets)
     ///    and then [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
-    /// 2.
-    ///     1. If producing static files is needed, pass static file request to the
-    ///     [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and spawn
-    ///     it in a separate task. Set static file producer state to
-    ///     [StaticFileProducerState::Running].
-    ///     2. If producing static files is not needed, set static file producer state back to
-    ///     [StaticFileProducerState::Idle].
+    ///
+    /// 2.1. If producing static files is needed, pass static file request to the
+    ///      [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and
+    ///      spawn it in a separate task. Set static file producer state to
+    ///      [StaticFileProducerState::Running].
+    /// 2.2. If producing static files is not needed, set static file producer state back to
+    ///      [StaticFileProducerState::Idle].
     ///
     /// If static_file_producer is already running, do nothing.
     fn try_spawn_static_file_producer(
@@ -88,13 +88,12 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
             StaticFileProducerState::Idle(static_file_producer) => {
                 let Some(static_file_producer) = static_file_producer.take() else {
                     trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer is already running but the state is idle");
-                    return Ok(None);
+                    return Ok(None)
                 };
 
-                let Some(mut locked_static_file_producer) = static_file_producer.try_lock_arc()
-                else {
+                let Some(locked_static_file_producer) = static_file_producer.try_lock_arc() else {
                     trace!(target: "consensus::engine::hooks::static_file", "StaticFileProducer lock is already taken");
-                    return Ok(None);
+                    return Ok(None)
                 };
 
                 let targets =
@@ -139,7 +138,7 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     ) -> Poll<RethResult<EngineHookEvent>> {
         let Some(finalized_block_number) = ctx.finalized_block_number else {
             trace!(target: "consensus::engine::hooks::static_file", ?ctx, "Finalized block number is not available");
-            return Poll::Pending;
+            return Poll::Pending
         };
 
         // Try to spawn a static_file_producer

@@ -66,7 +66,7 @@ pub struct CaseResult {
 impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, case: &impl Case, result: Result<(), Error>) -> Self {
-        Self { desc: case.description(), path: path.into(), result }
+        CaseResult { desc: case.description(), path: path.into(), result }
     }
 }
 

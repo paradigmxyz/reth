@@ -1,7 +1,7 @@
 //! Optimism-specific implementation and utilities for the executor
 
 use crate::OptimismBlockExecutionError;
-use reth_interfaces::{executor::BlockExecutionError, RethError};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, B256, U256};
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
@@ -39,7 +39,7 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecut
     if l1_info_tx_data.len() < 4 {
         return Err(OptimismBlockExecutionError::L1BlockInfoError {
             message: "invalid l1 block info transaction calldata in the L2 block".to_string(),
-        });
+        })
     }
 
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
@@ -67,7 +67,7 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     if data.len() != 256 {
         return Err(OptimismBlockExecutionError::L1BlockInfoError {
             message: "unexpected l1 block info tx calldata length found".to_string(),
-        });
+        })
     }
 
     let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or(
@@ -113,7 +113,7 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     if data.len() != 160 {
         return Err(OptimismBlockExecutionError::L1BlockInfoError {
             message: "unexpected l1 block info tx calldata length found".to_string(),
-        });
+        })
     }
 
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[8..12]).ok_or(
@@ -187,10 +187,12 @@ impl RethL1BlockInfo for L1BlockInfo {
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
         if is_deposit {
-            return Ok(U256::ZERO);
+            return Ok(U256::ZERO)
         }
 
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+            SpecId::FJORD
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
             SpecId::ECOTONE
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
@@ -200,7 +202,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Err(OptimismBlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
             }
-            .into());
+            .into())
         };
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
@@ -211,7 +213,9 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+            SpecId::FJORD
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
@@ -219,7 +223,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Err(OptimismBlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
             }
-            .into());
+            .into())
         };
         Ok(self.data_gas(input, spec_id))
     }
@@ -232,7 +236,7 @@ pub fn ensure_create2_deployer<DB>(
     chain_spec: Arc<ChainSpec>,
     timestamp: u64,
     db: &mut revm::State<DB>,
-) -> Result<(), RethError>
+) -> Result<(), DB::Error>
 where
     DB: revm::Database,
 {
@@ -246,9 +250,7 @@ where
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 
         // Load the create2 deployer account from the cache.
-        let acc = db
-            .load_cache_account(CREATE_2_DEPLOYER_ADDR)
-            .map_err(|_| RethError::Custom("Failed to load account".to_string()))?;
+        let acc = db.load_cache_account(CREATE_2_DEPLOYER_ADDR)?;
 
         // Update the account info with the create2 deployer codehash and bytecode.
         let mut acc_info = acc.account_info().unwrap_or_default();
@@ -261,7 +263,7 @@ where
 
         // Commit the create2 deployer account to the database.
         db.commit(HashMap::from([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
-        return Ok(());
+        return Ok(())
     }
 
     Ok(())
@@ -282,6 +284,7 @@ mod tests {
             body: vec![l1_info_tx],
             ommers: Vec::default(),
             withdrawals: None,
+            requests: None,
         };
 
         let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();
@@ -303,6 +306,7 @@ mod tests {
             body: vec![l1_info_tx],
             ommers: Vec::default(),
             withdrawals: None,
+            requests: None,
         };
 
         let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();

@@ -118,10 +118,10 @@ impl Environment {
                     warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
                 }
                 sleep(Duration::from_millis(250));
-                continue;
+                continue
             }
 
-            break res;
+            break res
         }?;
         Ok(Transaction::new_from_ptr(self.clone(), txn.0))
     }
@@ -216,7 +216,7 @@ impl Environment {
         for result in cursor.iter_slices() {
             let (_key, value) = result?;
             if value.len() < size_of::<usize>() {
-                return Err(Error::Corrupted);
+                return Err(Error::Corrupted)
             }
 
             let s = &value[..size_of::<usize>()];
@@ -281,14 +281,14 @@ impl EnvironmentKind {
     /// Returns true if the environment was opened as WRITEMAP.
     #[inline]
     pub const fn is_write_map(&self) -> bool {
-        matches!(self, Self::WriteMap)
+        matches!(self, EnvironmentKind::WriteMap)
     }
 
     /// Additional flags required when opening the environment.
     pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
         match self {
-            Self::Default => ffi::MDBX_ENV_DEFAULTS,
-            Self::WriteMap => ffi::MDBX_WRITEMAP,
+            EnvironmentKind::Default => ffi::MDBX_ENV_DEFAULTS,
+            EnvironmentKind::WriteMap => ffi::MDBX_WRITEMAP,
         }
     }
 }
@@ -307,8 +307,8 @@ pub struct Stat(ffi::MDBX_stat);
 
 impl Stat {
     /// Create a new Stat with zero'd inner struct `ffi::MDB_stat`.
-    pub(crate) fn new() -> Self {
-        unsafe { Self(mem::zeroed()) }
+    pub(crate) fn new() -> Stat {
+        unsafe { Stat(mem::zeroed()) }
     }
 
     /// Returns a mut pointer to `ffi::MDB_stat`.
@@ -708,7 +708,7 @@ impl EnvironmentBuilder {
             })() {
                 ffi::mdbx_env_close_ex(env, false);
 
-                return Err(e);
+                return Err(e)
             }
         }
 
@@ -859,8 +859,8 @@ pub(crate) mod read_transactions {
     impl MaxReadTransactionDuration {
         pub fn as_duration(&self) -> Option<Duration> {
             match self {
-                Self::Unbounded => None,
-                Self::Set(duration) => Some(*duration),
+                MaxReadTransactionDuration::Unbounded => None,
+                MaxReadTransactionDuration::Set(duration) => Some(*duration),
             }
         }
     }

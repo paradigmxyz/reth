@@ -13,10 +13,11 @@ use reth_primitives::{
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
-    OptimismPayloadAttributes, PayloadId,
+    OptimismExecutionPayloadEnvelopeV4, OptimismPayloadAttributes, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
+    convert_block_to_payload_field_v2,
 };
 use revm::primitives::HandlerCfg;
 use std::sync::Arc;
@@ -105,8 +106,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
         // configure evm env based on parent block
-        let mut cfg = CfgEnv::default();
-        cfg.chain_id = chain_spec.chain().id();
+        let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
 
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
@@ -239,7 +239,10 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, .. } = value;
 
-        Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
+        ExecutionPayloadEnvelopeV2 {
+            block_value: fees,
+            execution_payload: convert_block_to_payload_field_v2(block),
+        }
     }
 }
 
@@ -253,8 +256,35 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
             } else {
                 B256::ZERO
             };
-        Self {
-            execution_payload: block_to_payload_v3(block),
+        OptimismExecutionPayloadEnvelopeV3 {
+            execution_payload: block_to_payload_v3(block).0,
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            parent_beacon_block_root,
+        }
+    }
+}
+impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
+    fn from(value: OptimismBuiltPayload) -> Self {
+        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+
+        let parent_beacon_block_root =
+            if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
+                attributes.parent_beacon_block_root().unwrap_or(B256::ZERO)
+            } else {
+                B256::ZERO
+            };
+        OptimismExecutionPayloadEnvelopeV4 {
+            execution_payload: block_to_payload_v4(block),
             block_value: fees,
             // From the engine API spec:
             //

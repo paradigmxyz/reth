@@ -1,9 +1,8 @@
 //! clap [Args](clap::Args) for database configuration
 
-use clap::Args;
-use reth_interfaces::db::LogLevel;
-
 use crate::version::default_client_version;
+use clap::Args;
+use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]

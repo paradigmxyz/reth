@@ -17,10 +17,9 @@ use reth_provider::{
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::{EventSender, EventStream};
 use std::pin::Pin;
 use tokio::sync::watch;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod builder;
@@ -75,8 +74,8 @@ pub struct Pipeline<DB: Database> {
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<DB>,
-    /// All listeners for events the pipeline emits.
-    listeners: EventListeners<PipelineEvent>,
+    /// Sender for events the pipeline emits.
+    event_sender: EventSender<PipelineEvent>,
     /// Keeps track of the progress of the pipeline.
     progress: PipelineProgress,
     /// A receiver for the current chain tip to sync to.
@@ -108,8 +107,8 @@ where
     }
 
     /// Listen for events on the pipeline.
-    pub fn events(&mut self) -> UnboundedReceiverStream<PipelineEvent> {
-        self.listeners.new_listener()
+    pub fn events(&self) -> EventStream<PipelineEvent> {
+        self.event_sender.new_listener()
     }
 
     /// Registers progress metrics for each registered stage
@@ -142,14 +141,14 @@ where
                     PipelineTarget::Sync(tip) => self.set_tip(tip),
                     PipelineTarget::Unwind(target) => {
                         if let Err(err) = self.move_to_static_files() {
-                            return (self, Err(err.into()));
+                            return (self, Err(err.into()))
                         }
                         if let Err(err) = self.unwind(target, None) {
-                            return (self, Err(err));
+                            return (self, Err(err))
                         }
                         self.progress.update(target);
 
-                        return (self, Ok(ControlFlow::Continue { block_number: target }));
+                        return (self, Ok(ControlFlow::Continue { block_number: target }))
                     }
                 }
             }
@@ -183,7 +182,7 @@ where
                     max_block = ?self.max_block,
                     "Terminating pipeline."
                 );
-                return Ok(());
+                return Ok(())
             }
         }
     }
@@ -221,7 +220,7 @@ where
                 ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
                     self.unwind(target, Some(bad_block.number))?;
-                    return Ok(ControlFlow::Unwind { target, bad_block });
+                    return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
 
@@ -251,7 +250,7 @@ where
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
     pub fn move_to_static_files(&self) -> RethResult<()> {
-        let mut static_file_producer = self.static_file_producer.lock();
+        let static_file_producer = self.static_file_producer.lock();
 
         // Copies data from database to static files
         let lowest_static_file_height = {
@@ -312,8 +311,9 @@ where
                     %to,
                     "Unwind point too far for stage"
                 );
-                self.listeners.notify(PipelineEvent::Skipped { stage_id });
-                continue;
+                self.event_sender.notify(PipelineEvent::Skipped { stage_id });
+
+                continue
             }
 
             debug!(
@@ -325,7 +325,7 @@ where
             );
             while checkpoint.block_number > to {
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
-                self.listeners.notify(PipelineEvent::Unwind { stage_id, input });
+                self.event_sender.notify(PipelineEvent::Unwind { stage_id, input });
 
                 let output = stage.unwind(&provider_rw, input);
                 match output {
@@ -350,7 +350,7 @@ where
                         }
                         provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
-                        self.listeners
+                        self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         self.provider_factory.static_file_provider().commit()?;
@@ -359,8 +359,9 @@ where
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
-                        self.listeners.notify(PipelineEvent::Error { stage_id });
-                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))));
+                        self.event_sender.notify(PipelineEvent::Error { stage_id });
+
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
                     }
                 }
             }
@@ -395,17 +396,17 @@ where
                     prev_block = prev_checkpoint.map(|progress| progress.block_number),
                     "Stage reached target block, skipping."
                 );
-                self.listeners.notify(PipelineEvent::Skipped { stage_id });
+                self.event_sender.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
                     block_number: prev_checkpoint.map(|progress| progress.block_number),
-                });
+                })
             }
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
 
-            self.listeners.notify(PipelineEvent::Prepare {
+            self.event_sender.notify(PipelineEvent::Prepare {
                 pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
                     total: total_stages,
@@ -416,14 +417,15 @@ where
             });
 
             if let Err(err) = stage.execute_ready(exec_input).await {
-                self.listeners.notify(PipelineEvent::Error { stage_id });
+                self.event_sender.notify(PipelineEvent::Error { stage_id });
+
                 match on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)? {
                     Some(ctrl) => return Ok(ctrl),
                     None => continue,
                 };
             }
 
-            self.listeners.notify(PipelineEvent::Run {
+            self.event_sender.notify(PipelineEvent::Run {
                 pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
                     total: total_stages,
@@ -448,7 +450,7 @@ where
                     }
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
-                    self.listeners.notify(PipelineEvent::Ran {
+                    self.event_sender.notify(PipelineEvent::Ran {
                         pipeline_stages_progress: PipelineStagesProgress {
                             current: stage_index + 1,
                             total: total_stages,
@@ -466,16 +468,17 @@ where
                             ControlFlow::Continue { block_number }
                         } else {
                             ControlFlow::NoProgress { block_number: Some(block_number) }
-                        });
+                        })
                     }
                 }
                 Err(err) => {
                     drop(provider_rw);
-                    self.listeners.notify(PipelineEvent::Error { stage_id });
+                    self.event_sender.notify(PipelineEvent::Error { stage_id });
+
                     if let Some(ctrl) =
                         on_stage_error(&self.provider_factory, stage_id, prev_checkpoint, err)?
                     {
-                        return Ok(ctrl);
+                        return Ok(ctrl)
                     }
                 }
             }
@@ -575,7 +578,7 @@ impl<DB: Database> std::fmt::Debug for Pipeline<DB> {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
-            .field("listeners", &self.listeners)
+            .field("event_sender", &self.event_sender)
             .finish()
     }
 }

@@ -35,7 +35,7 @@ impl ToRpcError for SequencerRpcError {
 
 impl From<SequencerRpcError> for EthApiError {
     fn from(err: SequencerRpcError) -> Self {
-        Self::other(err)
+        EthApiError::other(err)
     }
 }
 
@@ -108,7 +108,7 @@ impl SequencerClient {
 #[async_trait::async_trait]
 impl RawTransactionForwarder for SequencerClient {
     async fn forward_raw_transaction(&self, tx: &[u8]) -> EthResult<()> {
-        Self::forward_raw_transaction(self, tx).await?;
+        SequencerClient::forward_raw_transaction(self, tx).await?;
         Ok(())
     }
 }

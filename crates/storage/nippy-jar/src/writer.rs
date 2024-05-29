@@ -7,7 +7,7 @@ use std::{
 };
 
 /// Size of one offset in bytes.
-const OFFSET_SIZE_BYTES: u64 = 8;
+const OFFSET_SIZE_BYTES: u8 = 8;
 
 /// Writer of [`NippyJar`]. Handles table data and offsets only.
 ///
@@ -112,7 +112,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
 
         // First byte of the offset file is the size of one offset in bytes
-        offsets_file.write_all(&[OFFSET_SIZE_BYTES as u8])?;
+        offsets_file.write_all(&[OFFSET_SIZE_BYTES])?;
         offsets_file.seek(SeekFrom::End(0))?;
 
         Ok((data_file, offsets_file, is_created))
@@ -130,12 +130,12 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         // When an offset size is smaller than the initial (8), we are dealing with immutable
         // data.
         if reader.offset_size() != OFFSET_SIZE_BYTES {
-            return Err(NippyJarError::FrozenJar);
+            return Err(NippyJarError::FrozenJar)
         }
 
-        let expected_offsets_file_size = 1 + // first byte is the size of one offset
-            OFFSET_SIZE_BYTES * self.jar.rows as u64 * self.jar.columns as u64 + // `offset size * num rows * num columns`
-            OFFSET_SIZE_BYTES; // expected size of the data file
+        let expected_offsets_file_size: u64 = (1 + // first byte is the size of one offset
+            OFFSET_SIZE_BYTES as usize* self.jar.rows * self.jar.columns + // `offset size * num rows * num columns`
+            OFFSET_SIZE_BYTES as usize) as u64; // expected size of the data file
         let actual_offsets_file_size = self.offsets_file.get_ref().metadata()?.len();
 
         // Offsets configuration wasn't properly committed
@@ -151,9 +151,9 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                 // `num rows = (file size - 1 - size of one offset) / num columns`
                 self.jar.rows = ((actual_offsets_file_size.
                     saturating_sub(1). // first byte is the size of one offset
-                    saturating_sub(OFFSET_SIZE_BYTES) / // expected size of the data file
+                    saturating_sub(OFFSET_SIZE_BYTES as u64) / // expected size of the data file
                     (self.jar.columns as u64)) /
-                    OFFSET_SIZE_BYTES) as usize;
+                    OFFSET_SIZE_BYTES as u64) as usize;
 
                 // Freeze row count changed
                 self.jar.freeze_config()?;
@@ -183,7 +183,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                             .get_ref()
                             .metadata()?
                             .len()
-                            .saturating_sub(OFFSET_SIZE_BYTES * (index as u64 + 1));
+                            .saturating_sub(OFFSET_SIZE_BYTES as u64 * (index as u64 + 1));
                         self.offsets_file.get_mut().set_len(new_len)?;
 
                         drop(reader);
@@ -191,7 +191,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                         // Since we decrease the offset list, we need to check the consistency of
                         // `self.jar.rows` again
                         self.check_consistency_and_heal()?;
-                        break;
+                        break
                     }
                 }
             }
@@ -318,13 +318,13 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             // Handle non-empty offset file
             if length > 1 {
                 // first byte is reserved for `bytes_per_offset`, which is 8 initially.
-                let num_offsets = (length - 1) / OFFSET_SIZE_BYTES;
+                let num_offsets = (length - 1) / OFFSET_SIZE_BYTES as u64;
 
                 if remaining_to_prune as u64 > num_offsets {
                     return Err(NippyJarError::InvalidPruning(
                         num_offsets,
                         remaining_to_prune as u64,
-                    ));
+                    ))
                 }
 
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
@@ -336,10 +336,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     self.data_file.get_mut().set_len(0)?;
                 } else {
                     // Calculate the new length for the on-disk offset list
-                    let new_len = 1 + new_num_offsets * OFFSET_SIZE_BYTES;
+                    let new_len = 1 + new_num_offsets * OFFSET_SIZE_BYTES as u64;
                     // Seek to the position of the last offset
                     self.offsets_file
-                        .seek(SeekFrom::Start(new_len.saturating_sub(OFFSET_SIZE_BYTES)))?;
+                        .seek(SeekFrom::Start(new_len.saturating_sub(OFFSET_SIZE_BYTES as u64)))?;
                     // Read the last offset value
                     let mut last_offset = [0u8; OFFSET_SIZE_BYTES as usize];
                     self.offsets_file.get_ref().read_exact(&mut last_offset)?;
@@ -350,7 +350,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     self.data_file.get_mut().set_len(last_offset)?;
                 }
             } else {
-                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64));
+                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
             }
         }
 
@@ -440,7 +440,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         for offset in self.offsets.drain(..) {
             if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
                 if last_offset_ondisk == offset {
-                    continue;
+                    continue
                 }
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;

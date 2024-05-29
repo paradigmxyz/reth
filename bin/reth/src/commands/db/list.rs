@@ -61,7 +61,7 @@ impl Command {
             .as_ref()
             .map(|search| {
                 if let Some(search) = search.strip_prefix("0x") {
-                    return hex::decode(search).unwrap();
+                    return hex::decode(search).unwrap()
                 }
                 search.as_bytes().to_vec()
             })
@@ -90,8 +90,6 @@ impl TableViewer<()> for ListTableViewer<'_> {
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {
         self.tool.provider_factory.db_ref().view(|tx| {
-            // Disable timeout because we are entering a TUI which might read for a long time
-            tx.inner.disable_timeout();
             let table_db = tx.inner.open_db(Some(self.args.table.name())).wrap_err("Could not open db.")?;
             let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", stringify!($table)))?;
             let total_entries = stats.entries();

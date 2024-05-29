@@ -110,7 +110,7 @@ where
             return Err(P2PStreamError::MessageTooBig {
                 message_size: first_message_bytes.len(),
                 max_size: MAX_PAYLOAD_SIZE,
-            });
+            })
         }
 
         // The first message sent MUST be a hello OR disconnect message
@@ -152,7 +152,7 @@ where
             return Err(P2PStreamError::MismatchedProtocolVersion(GotExpected {
                 got: their_hello.protocol_version,
                 expected: hello.protocol_version,
-            }));
+            }))
         }
 
         // determine shared capabilities (currently returns only one capability)
@@ -394,7 +394,7 @@ where
 
         if this.disconnecting {
             // if disconnecting, stop reading messages
-            return Poll::Ready(None);
+            return Poll::Ready(None)
         }
 
         // we should loop here to ensure we don't return Poll::Pending if we have a message to
@@ -408,7 +408,7 @@ where
 
             if bytes.is_empty() {
                 // empty messages are not allowed
-                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)));
+                return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage)))
             }
 
             // first decode disconnect reasons, because they can be encoded in a variety of forms
@@ -429,7 +429,7 @@ where
                 // message is snappy compressed. Failure handling in that step is the primary point
                 // where an error is returned if the disconnect reason is malformed.
                 if let Ok(reason) = DisconnectReason::decode(&mut &bytes[1..]) {
-                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))));
+                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
                 }
             }
 
@@ -440,7 +440,7 @@ where
                 return Poll::Ready(Some(Err(P2PStreamError::MessageTooBig {
                     message_size: decompressed_len,
                     max_size: MAX_PAYLOAD_SIZE,
-                })));
+                })))
             }
 
             // create a buffer to hold the decompressed message, adding a byte to the length for
@@ -471,7 +471,7 @@ where
                     // an error
                     return Poll::Ready(Some(Err(P2PStreamError::HandshakeError(
                         P2PHandshakeError::HelloNotInHandshake,
-                    ))));
+                    ))))
                 }
                 _ if id == P2PMessageID::Pong as u8 => {
                     // if we were waiting for a pong, this will reset the pinger state
@@ -489,11 +489,11 @@ where
                         );
                         err
                     })?;
-                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))));
+                    return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
                 }
                 _ if id > MAX_P2P_MESSAGE_ID && id <= MAX_RESERVED_MESSAGE_ID => {
                     // we have received an unknown reserved message
-                    return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))));
+                    return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(id))))
                 }
                 _ => {
                     // we have received a message that is outside the `p2p` reserved message space,
@@ -521,7 +521,7 @@ where
                     //
                     decompress_buf[0] = bytes[0] - MAX_RESERVED_MESSAGE_ID - 1;
 
-                    return Poll::Ready(Some(Ok(decompress_buf)));
+                    return Poll::Ready(Some(Ok(decompress_buf)))
                 }
             }
         }
@@ -550,7 +550,7 @@ where
                 this.start_disconnect(DisconnectReason::PingTimeout)?;
 
                 // End the stream after ping related error
-                return Poll::Ready(Ok(()));
+                return Poll::Ready(Ok(()))
             }
         }
 
@@ -560,7 +560,7 @@ where
             Poll::Ready(Ok(())) => {
                 let flushed = this.poll_flush(cx);
                 if flushed.is_ready() {
-                    return flushed;
+                    return flushed
                 }
             }
         }
@@ -578,17 +578,17 @@ where
             return Err(P2PStreamError::MessageTooBig {
                 message_size: item.len(),
                 max_size: MAX_PAYLOAD_SIZE,
-            });
+            })
         }
 
         if item.is_empty() {
             // empty messages are not allowed
-            return Err(P2PStreamError::EmptyProtocolMessage);
+            return Err(P2PStreamError::EmptyProtocolMessage)
         }
 
         // ensure we have free capacity
         if !self.has_outgoing_capacity() {
-            return Err(P2PStreamError::SendBufferFull);
+            return Err(P2PStreamError::SendBufferFull)
         }
 
         let this = self.project();
@@ -624,10 +624,10 @@ where
                 Err(err) => return Poll::Ready(Err(err.into())),
                 Ok(()) => {
                     let Some(message) = this.outgoing_messages.pop_front() else {
-                        return Poll::Ready(Ok(()));
+                        return Poll::Ready(Ok(()))
                     };
                     if let Err(err) = this.inner.as_mut().start_send(message) {
-                        return Poll::Ready(Err(err.into()));
+                        return Poll::Ready(Err(err.into()))
                     }
                 }
             }
@@ -665,10 +665,10 @@ impl P2PMessage {
     /// Gets the [`P2PMessageID`] for the given message.
     pub fn message_id(&self) -> P2PMessageID {
         match self {
-            Self::Hello(_) => P2PMessageID::Hello,
-            Self::Disconnect(_) => P2PMessageID::Disconnect,
-            Self::Ping => P2PMessageID::Ping,
-            Self::Pong => P2PMessageID::Pong,
+            P2PMessage::Hello(_) => P2PMessageID::Hello,
+            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
+            P2PMessage::Ping => P2PMessageID::Ping,
+            P2PMessage::Pong => P2PMessageID::Pong,
         }
     }
 }
@@ -681,15 +681,15 @@ impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         (self.message_id() as u8).encode(out);
         match self {
-            Self::Hello(msg) => msg.encode(out),
-            Self::Disconnect(msg) => msg.encode(out),
-            Self::Ping => {
+            P2PMessage::Hello(msg) => msg.encode(out),
+            P2PMessage::Disconnect(msg) => msg.encode(out),
+            P2PMessage::Ping => {
                 // Ping payload is _always_ snappy encoded
                 out.put_u8(0x01);
                 out.put_u8(0x00);
                 out.put_u8(EMPTY_LIST_CODE);
             }
-            Self::Pong => {
+            P2PMessage::Pong => {
                 // Pong payload is _always_ snappy encoded
                 out.put_u8(0x01);
                 out.put_u8(0x00);
@@ -700,11 +700,11 @@ impl Encodable for P2PMessage {
 
     fn length(&self) -> usize {
         let payload_len = match self {
-            Self::Hello(msg) => msg.length(),
-            Self::Disconnect(msg) => msg.length(),
+            P2PMessage::Hello(msg) => msg.length(),
+            P2PMessage::Disconnect(msg) => msg.length(),
             // id + snappy encoded payload
-            Self::Ping => 3, // len([0x01, 0x00, 0xc0]) = 3
-            Self::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
+            P2PMessage::Ping => 3, // len([0x01, 0x00, 0xc0]) = 3
+            P2PMessage::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
         };
         payload_len + 1 // (1 for length of p2p message id)
     }
@@ -721,10 +721,10 @@ impl Decodable for P2PMessage {
         /// Removes the snappy prefix from the Ping/Pong buffer
         fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> alloy_rlp::Result<()> {
             if buf.len() < 3 {
-                return Err(RlpError::InputTooShort);
+                return Err(RlpError::InputTooShort)
             }
             if buf[..3] != [0x01, 0x00, EMPTY_LIST_CODE] {
-                return Err(RlpError::Custom("expected snappy payload"));
+                return Err(RlpError::Custom("expected snappy payload"))
             }
             buf.advance(3);
             Ok(())
@@ -735,15 +735,15 @@ impl Decodable for P2PMessage {
             .or(Err(RlpError::Custom("unknown p2p message id")))?;
         buf.advance(1);
         match id {
-            P2PMessageID::Hello => Ok(Self::Hello(HelloMessage::decode(buf)?)),
-            P2PMessageID::Disconnect => Ok(Self::Disconnect(DisconnectReason::decode(buf)?)),
+            P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
+            P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
             P2PMessageID::Ping => {
                 advance_snappy_ping_pong_payload(buf)?;
-                Ok(Self::Ping)
+                Ok(P2PMessage::Ping)
             }
             P2PMessageID::Pong => {
                 advance_snappy_ping_pong_payload(buf)?;
-                Ok(Self::Pong)
+                Ok(P2PMessage::Pong)
             }
         }
     }
@@ -768,10 +768,10 @@ pub enum P2PMessageID {
 impl From<P2PMessage> for P2PMessageID {
     fn from(msg: P2PMessage) -> Self {
         match msg {
-            P2PMessage::Hello(_) => Self::Hello,
-            P2PMessage::Disconnect(_) => Self::Disconnect,
-            P2PMessage::Ping => Self::Ping,
-            P2PMessage::Pong => Self::Pong,
+            P2PMessage::Hello(_) => P2PMessageID::Hello,
+            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
+            P2PMessage::Ping => P2PMessageID::Ping,
+            P2PMessage::Pong => P2PMessageID::Pong,
         }
     }
 }
@@ -781,10 +781,10 @@ impl TryFrom<u8> for P2PMessageID {
 
     fn try_from(id: u8) -> Result<Self, Self::Error> {
         match id {
-            0x00 => Ok(Self::Hello),
-            0x01 => Ok(Self::Disconnect),
-            0x02 => Ok(Self::Ping),
-            0x03 => Ok(Self::Pong),
+            0x00 => Ok(P2PMessageID::Hello),
+            0x01 => Ok(P2PMessageID::Disconnect),
+            0x02 => Ok(P2PMessageID::Ping),
+            0x03 => Ok(P2PMessageID::Pong),
             _ => Err(P2PStreamError::UnknownReservedMessageId(id)),
         }
     }
@@ -822,8 +822,8 @@ impl Decodable for ProtocolVersion {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let version = u8::decode(buf)?;
         match version {
-            4 => Ok(Self::V4),
-            5 => Ok(Self::V5),
+            4 => Ok(ProtocolVersion::V4),
+            5 => Ok(ProtocolVersion::V5),
             _ => Err(RlpError::Custom("unknown p2p protocol version")),
         }
     }

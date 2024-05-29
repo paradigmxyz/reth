@@ -38,7 +38,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
-                return Ok(PruneOutput::done());
+                return Ok(PruneOutput::done())
             }
         }
         .into_inner();
@@ -60,7 +60,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         if hashes.len() != tx_count {
             return Err(PrunerError::InconsistentData(
                 "Unexpected number of transaction hashes retrieved by transaction number range",
-            ));
+            ))
         }
 
         let mut limiter = input.limiter;

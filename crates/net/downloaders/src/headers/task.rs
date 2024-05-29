@@ -1,7 +1,7 @@
 use futures::{FutureExt, Stream};
 use futures_util::StreamExt;
 use pin_project::pin_project;
-use reth_interfaces::p2p::headers::{
+use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
     error::HeadersDownloaderResult,
 };
@@ -45,7 +45,7 @@ impl TaskDownloader {
     /// # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloader;
     /// # use reth_downloaders::headers::task::TaskDownloader;
     /// # use reth_consensus::Consensus;
-    /// # use reth_interfaces::p2p::headers::client::HeadersClient;
+    /// # use reth_network_p2p::headers::client::HeadersClient;
     /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
     ///        client,
@@ -127,7 +127,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                     Poll::Ready(None) => {
                         // channel closed, this means [TaskDownloader] was dropped, so we can also
                         // exit
-                        return Poll::Ready(());
+                        return Poll::Ready(())
                     }
                     Poll::Ready(Some(update)) => match update {
                         DownloaderUpdates::UpdateSyncGap(head, target) => {
@@ -153,7 +153,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                             if this.headers_tx.send_item(headers).is_err() {
                                 // channel closed, this means [TaskDownloader] was dropped, so we
                                 // can also exit
-                                return Poll::Ready(());
+                                return Poll::Ready(())
                             }
                         }
                         None => return Poll::Pending,
@@ -162,7 +162,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                 Err(_) => {
                     // channel closed, this means [TaskDownloader] was dropped, so
                     // we can also exit
-                    return Poll::Ready(());
+                    return Poll::Ready(())
                 }
             }
         }
@@ -184,7 +184,7 @@ mod tests {
         reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header,
     };
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::TestHeadersClient;
+    use reth_network_p2p::test_utils::TestHeadersClient;
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
