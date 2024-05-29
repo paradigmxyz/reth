@@ -10,10 +10,7 @@ use reth_db::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::{
-    p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError},
-    provider::ProviderError,
-};
+use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
@@ -28,6 +25,7 @@ use reth_provider::{
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
+use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -383,13 +381,13 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{self, random_header, random_header_range};
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
     };
     use reth_provider::{
         BlockWriter, BundleStateWithReceipts, ProviderFactory, StaticFileProviderFactory,
     };
+    use reth_testing_utils::generators::{self, random_header, random_header_range};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use test_runner::HeadersTestRunner;
 
@@ -401,7 +399,7 @@ mod tests {
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
-        use reth_interfaces::test_utils::{TestHeaderDownloader, TestHeadersClient};
+        use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
         use reth_provider::BlockNumReader;
         use tokio::sync::watch;
 

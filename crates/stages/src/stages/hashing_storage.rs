@@ -10,7 +10,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     keccak256,
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StorageHashingCheckpoint},
@@ -18,6 +17,7 @@ use reth_primitives::{
 };
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
     sync::mpsc::{self, Receiver},
@@ -223,12 +223,12 @@ mod tests {
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{Address, SealedBlock, U256};
+    use reth_provider::providers::StaticFileWriter;
+    use reth_testing_utils::{
         generators,
         generators::{random_block_range, random_contract_account_range},
     };
-    use reth_primitives::{Address, SealedBlock, U256};
-    use reth_provider::providers::StaticFileWriter;
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 

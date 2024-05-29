@@ -8,7 +8,6 @@ use reth_db::{
     RawKey, RawValue,
 };
 use reth_etl::Collector;
-use reth_interfaces::provider::ProviderError;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, TxHash, TxNumber,
@@ -18,6 +17,7 @@ use reth_provider::{
     TransactionsProvider, TransactionsProviderExt,
 };
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_storage_errors::provider::ProviderError;
 use tracing::*;
 
 /// The transaction lookup stage.
@@ -242,12 +242,12 @@ mod tests {
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
+    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_testing_utils::{
         generators,
         generators::{random_block, random_block_range},
     };
-    use reth_primitives::{stage::StageUnitCheckpoint, BlockNumber, SealedBlock, B256};
-    use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use std::ops::Sub;
 
     // Implement stage test suite.
