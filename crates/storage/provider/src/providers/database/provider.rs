@@ -28,7 +28,7 @@ use reth_db::{
     BlockNumberList, DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::p2p::headers::downloader::SyncTarget;
+use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
