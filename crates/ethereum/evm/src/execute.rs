@@ -202,9 +202,12 @@ where
             );
         }
 
-        // Collect all EIP-7685 requests
-        let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
-        let requests = withdrawal_requests;
+        let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+            // Collect all EIP-7685 requests
+            apply_withdrawal_requests_contract_call(&mut evm)?
+        } else {
+            vec![]
+        };
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
