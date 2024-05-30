@@ -160,7 +160,7 @@ use crate::{
     metrics::RpcRequestMetrics, RpcModuleSelection::Selection,
 };
 use constants::*;
-use error::{RpcError, ServerKind};
+use error::{ConflictingModules, RpcError, ServerKind};
 use hyper::{header::AUTHORIZATION, HeaderMap};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
@@ -704,7 +704,7 @@ impl RpcModuleSelection {
     /// Returns an iterator over all configured [RethRpcModule]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
-            Self::All => Box::new(Self::all_modules().into_iter().copied()),
+            Self::All => Box::new(Self::all_modules().iter().copied()),
             Self::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             Self::Selection(s) => Box::new(s.iter().copied()),
         }
@@ -1930,14 +1930,16 @@ impl TransportRpcModuleConfig {
                 self.http.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
             let ws_modules =
                 self.ws.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
+
             let http_not_ws = http_modules.difference(&ws_modules).copied().collect();
             let ws_not_http = ws_modules.difference(&http_modules).copied().collect();
-            Err(WsHttpSamePortError::ConflictingModules {
-                http_modules,
-                ws_modules,
+            let overlap = http_modules.intersection(&ws_modules).copied().collect();
+
+            Err(WsHttpSamePortError::ConflictingModules(Box::new(ConflictingModules {
+                overlap,
                 http_not_ws,
                 ws_not_http,
-            })
+            })))
         }
     }
 }
