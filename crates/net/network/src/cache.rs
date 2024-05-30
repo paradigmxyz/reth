@@ -65,7 +65,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// configured, this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
-        self.inner.pop_oldest().map(|(k, _v)| k)
+        self.inner.pop_oldest().map(|(k, ())| k)
     }
 
     /// Expels the given value. Returns true if the value existed.
@@ -80,7 +80,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
 
     /// Returns an iterator over all cached entries in lru order
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.inner.iter().map(|(k, _v)| k)
+        self.inner.iter().map(|(k, ())| k)
     }
 
     /// Returns number of elements currently in cache.
