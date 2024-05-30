@@ -2344,8 +2344,8 @@ mod tests {
             Some(&RpcModuleSelection::Standard),
         ));
         assert!(RpcModuleSelection::are_identical(
-            dbg!(Some(&RpcModuleSelection::Selection(RpcModuleSelection::Standard.to_selection()))),
-            dbg!(Some(&RpcModuleSelection::Standard)),
+            Some(&RpcModuleSelection::Selection(RpcModuleSelection::Standard.to_selection())),
+            Some(&RpcModuleSelection::Standard),
         ));
         assert!(RpcModuleSelection::are_identical(
             Some(&RpcModuleSelection::Selection([RethRpcModule::Eth].into())),
