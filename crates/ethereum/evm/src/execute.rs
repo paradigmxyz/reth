@@ -207,10 +207,9 @@ where
             crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
         // Collect all EIP-7685 requests
-        let withdrawal_requests =
-            apply_withdrawal_requests_contract_call(&self.chain_spec, block.timestamp, &mut evm)?;
-        // Requests are ordered by Request Type ID.
-        let requests = [deposit_requests, withdrawal_requests].concat();
+        let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
+
+        let requests = withdrawal_requests;
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
