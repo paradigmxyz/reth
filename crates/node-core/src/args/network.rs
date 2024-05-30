@@ -196,7 +196,7 @@ impl NetworkArgs {
 
     /// Sets the p2p port to zero, to allow the OS to assign a random unused port when
     /// the network components bind to a socket.
-    pub fn with_unused_p2p_port(mut self) -> Self {
+    pub const fn with_unused_p2p_port(mut self) -> Self {
         self.port = 0;
         self
     }
@@ -324,7 +324,7 @@ impl DiscoveryArgs {
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
     /// discovery binds to the socket.
-    pub fn with_unused_discovery_port(mut self) -> Self {
+    pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
         self
     }

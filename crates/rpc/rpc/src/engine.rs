@@ -24,7 +24,7 @@ pub struct EngineEthApi<Eth, EthFilter> {
 
 impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
     /// Create a new `EngineEthApi` instance.
-    pub fn new(eth: Eth, eth_filter: EthFilter) -> Self {
+    pub const fn new(eth: Eth, eth_filter: EthFilter) -> Self {
         Self { eth, eth_filter }
     }
 }

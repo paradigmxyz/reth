@@ -57,18 +57,18 @@ impl BlockchainTreeConfig {
     }
 
     /// Return the maximum reorg depth.
-    pub fn max_reorg_depth(&self) -> u64 {
+    pub const fn max_reorg_depth(&self) -> u64 {
         self.max_reorg_depth
     }
 
     /// Return the maximum number of blocks in one chain.
-    pub fn max_blocks_in_chain(&self) -> u64 {
+    pub const fn max_blocks_in_chain(&self) -> u64 {
         self.max_blocks_in_chain
     }
 
     /// Return number of additional canonical block hashes that we need to retain
     /// in order to have enough information for EVM execution.
-    pub fn num_of_additional_canonical_block_hashes(&self) -> u64 {
+    pub const fn num_of_additional_canonical_block_hashes(&self) -> u64 {
         self.num_of_additional_canonical_block_hashes
     }
 
@@ -84,7 +84,7 @@ impl BlockchainTreeConfig {
     }
 
     /// Return max number of unconnected blocks that we are buffering
-    pub fn max_unconnected_blocks(&self) -> u32 {
+    pub const fn max_unconnected_blocks(&self) -> u32 {
         self.max_unconnected_blocks
     }
 }

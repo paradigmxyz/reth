@@ -81,7 +81,7 @@ pub struct ExecutionStage<E> {
 
 impl<E> ExecutionStage<E> {
     /// Create new execution stage with specified config.
-    pub fn new(
+    pub const fn new(
         executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,

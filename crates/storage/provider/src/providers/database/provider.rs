@@ -108,7 +108,7 @@ pub struct DatabaseProvider<TX> {
 
 impl<TX> DatabaseProvider<TX> {
     /// Returns a static file provider
-    pub fn static_file_provider(&self) -> &StaticFileProvider {
+    pub const fn static_file_provider(&self) -> &StaticFileProvider {
         &self.static_file_provider
     }
 }
@@ -311,7 +311,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     }
 
     /// Pass `DbTx` or `DbTxMut` immutable reference.
-    pub fn tx_ref(&self) -> &TX {
+    pub const fn tx_ref(&self) -> &TX {
         &self.tx
     }
 

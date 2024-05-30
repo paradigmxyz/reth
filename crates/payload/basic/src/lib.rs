@@ -120,7 +120,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     }
 
     /// Returns a reference to the tasks type
-    pub fn tasks(&self) -> &Tasks {
+    pub const fn tasks(&self) -> &Tasks {
         &self.executor
     }
 
@@ -264,13 +264,13 @@ pub struct BasicPayloadJobGeneratorConfig {
 
 impl BasicPayloadJobGeneratorConfig {
     /// Sets the interval at which the job should build a new payload after the last.
-    pub fn interval(mut self, interval: Duration) -> Self {
+    pub const fn interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
     }
 
     /// Sets the deadline when this job should resolve.
-    pub fn deadline(mut self, deadline: Duration) -> Self {
+    pub const fn deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
         self
     }
@@ -799,7 +799,7 @@ pub struct WithdrawalsOutcome {
 
 impl WithdrawalsOutcome {
     /// No withdrawals pre shanghai
-    pub fn pre_shanghai() -> Self {
+    pub const fn pre_shanghai() -> Self {
         Self { withdrawals: None, withdrawals_root: None }
     }
 

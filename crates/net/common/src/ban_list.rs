@@ -6,7 +6,7 @@ use std::{collections::HashMap, net::IpAddr, time::Instant};
 
 /// Determines whether or not the IP is globally routable.
 /// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.
-pub fn is_global(ip: &IpAddr) -> bool {
+pub const fn is_global(ip: &IpAddr) -> bool {
     if ip.is_unspecified() || ip.is_loopback() {
         return false
     }
@@ -40,7 +40,7 @@ impl BanList {
     }
 
     /// Creates a new ban list that bans the given peers and ips with an optional timeout.
-    pub fn new_with_timeout(
+    pub const fn new_with_timeout(
         banned_peers: HashMap<PeerId, Option<Instant>>,
         banned_ips: HashMap<IpAddr, Option<Instant>>,
     ) -> Self {

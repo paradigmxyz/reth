@@ -38,7 +38,7 @@ pub enum MessageId {
 
 impl MessageId {
     /// Converts the byte that represents the message id to the enum.
-    fn from_u8(msg: u8) -> Result<Self, u8> {
+    const fn from_u8(msg: u8) -> Result<Self, u8> {
         Ok(match msg {
             1 => Self::Ping,
             2 => Self::Pong,
@@ -209,7 +209,7 @@ impl From<NodeRecord> for NodeEndpoint {
 
 impl NodeEndpoint {
     /// Creates a new [`NodeEndpoint`] from a given UDP address and TCP port.
-    pub fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
+    pub const fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
         Self { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
     }
 }
