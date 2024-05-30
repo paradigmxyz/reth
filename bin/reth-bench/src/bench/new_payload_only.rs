@@ -105,13 +105,9 @@ impl Command {
             }
         };
 
-        info!(?next_block, "Starting benchmark");
-
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
-            info!("Starting block fetch loop");
             while benchmark_mode.contains(next_block) {
-                info!(?next_block, "Fetching block");
                 let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
                 let block = block_res.unwrap().unwrap();
                 let block = match block.header.hash {
@@ -134,9 +130,7 @@ impl Command {
         // TODO: just accumulate on the fly
         let mut results = Vec::new();
 
-        info!("Starting payload loop");
         while let Some(block) = receiver.recv().await {
-            info!(?block.header.number, "Processing block");
             // just put gas used here
             let gas_used = block.header.gas_used as f64;
 
