@@ -50,9 +50,6 @@ http-body.workspace = true
 hyper.workspace = true
 jsonwebtoken = "8"
 
-## required for optimism sequencer delegation
-reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
-
 # async
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
