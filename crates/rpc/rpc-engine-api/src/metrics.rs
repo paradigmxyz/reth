@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::EngineApiError;
 use metrics::{Counter, Histogram};
 use reth_metrics::Metrics;
@@ -92,14 +94,27 @@ pub(crate) struct NewPayloadStatusResponseMetrics {
     /// The total count of new payload messages that were unsuccessful, i.e. we responded with an
     /// error type that is not a [PayloadStatusEnum].
     pub(crate) new_payload_error: Counter,
+    /// The total gas of valid new payload messages received.
+    pub(crate) new_payload_total_gas: Histogram,
+    /// The gas per second of valid new payload messages received.
+    pub(crate) new_payload_gas_per_second: Histogram,
 }
 
 impl NewPayloadStatusResponseMetrics {
     /// Increment the newPayload counter based on the given rpc result
-    pub(crate) fn update_response_metrics(&self, result: &Result<PayloadStatus, EngineApiError>) {
+    pub(crate) fn update_response_metrics(
+        &self,
+        result: &Result<PayloadStatus, EngineApiError>,
+        gas_used: u64,
+        time: Duration,
+    ) {
         match result {
             Ok(status) => match status.status {
-                PayloadStatusEnum::Valid => self.new_payload_valid.increment(1),
+                PayloadStatusEnum::Valid => {
+                    self.new_payload_valid.increment(1);
+                    self.new_payload_total_gas.record(gas_used as f64);
+                    self.new_payload_gas_per_second.record(gas_used as f64 / time.as_secs_f64());
+                }
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
                 PayloadStatusEnum::Invalid { .. } => self.new_payload_invalid.increment(1),
