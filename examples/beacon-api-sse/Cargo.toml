@@ -8,10 +8,11 @@ license.workspace = true
 [dependencies]
 reth.workspace = true
 reth-node-ethereum.workspace = true
+
 alloy-rpc-types-beacon.workspace = true
 
 clap.workspace = true
-tracing.workspace = true
 futures-util.workspace = true
+mev-share-sse = { version = "0.3.0", default-features = false }
 tokio = { workspace = true, features = ["time"] }
-mev-share-sse = {  version = "0.2.0" , default-features = false }
+tracing.workspace = true
