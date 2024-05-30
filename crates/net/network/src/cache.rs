@@ -48,6 +48,17 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
         (new, evicted)
     }
 
+    /// Gets the given element, if exists, and promotes to lru.
+    pub fn get(&mut self, entry: &T) -> Option<&T> {
+        let _ = self.inner.get(entry)?;
+        self.inner.iter().next().map(|(key, ())| key)
+    }
+
+    /// Gets the given element, if exists, without promoting to lru.
+    pub fn peek(&self, entry: &T) -> Option<&T> {
+        self.inner.iter().find_map(|(key, ())| (key == entry).then_some(key))
+    }
+
     /// Remove the least recently used entry and return it.
     ///
     /// If the `LruCache` is empty or if the eviction feedback is
