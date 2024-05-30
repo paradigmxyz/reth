@@ -78,6 +78,7 @@ pub mod mdbx;
 
 pub use abstraction::*;
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
+pub use table::*;
 pub use tables::*;
 pub use utils::is_database_empty;
 
