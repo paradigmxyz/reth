@@ -532,7 +532,7 @@ mod tests {
     fn test_rpc_server_args_parser_none() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "none"]).args;
         let apis = args.http_api.unwrap();
-        let expected = Selection(vec![]);
+        let expected = Selection(Default::default());
         assert_eq!(apis, expected);
     }
 
@@ -547,8 +547,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -566,8 +566,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -585,8 +585,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
