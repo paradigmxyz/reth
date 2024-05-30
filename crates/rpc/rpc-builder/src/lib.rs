@@ -686,6 +686,15 @@ impl RpcModuleSelection {
         selection.into_iter().map(TryInto::try_into).collect()
     }
 
+    /// Returns the number of modules in the selection
+    pub fn len(&self) -> usize {
+        match self {
+            Self::All => RethRpcModule::variant_count(),
+            Self::Standard => Self::STANDARD_MODULES.len(),
+            Self::Selection(s) => s.len(),
+        }
+    }
+
     /// Returns true if no selection is configured
     pub fn is_empty(&self) -> bool {
         match self {
@@ -715,15 +724,21 @@ impl RpcModuleSelection {
     /// Returns true if both selections are identical.
     fn are_identical(http: Option<&Self>, ws: Option<&Self>) -> bool {
         match (http, ws) {
+            // Shortcut for common case to avoid iterating later
+            (Some(Self::All), Some(other)) | (Some(other), Some(Self::All)) => {
+                other.len() == RethRpcModule::variant_count()
+            }
+
+            // If either side is disabled, shortcut here
+            (Some(some), None) | (None, Some(some)) => some.is_empty(),
+
             (Some(http), Some(ws)) => {
                 let http = http.clone().iter_selection().collect::<HashSet<_>>();
                 let ws = ws.clone().iter_selection().collect::<HashSet<_>>();
 
                 http == ws
             }
-            (Some(http), None) => http.is_empty(),
-            (None, Some(ws)) => ws.is_empty(),
-            _ => true,
+            (None, None) => true,
         }
     }
 }
@@ -831,6 +846,11 @@ pub enum RethRpcModule {
 // === impl RethRpcModule ===
 
 impl RethRpcModule {
+    /// Returns the number of variants in the enum
+    pub const fn variant_count() -> usize {
+        <Self as VariantArray>::VARIANTS.len()
+    }
+
     /// Returns all variant names of the enum
     pub const fn all_variant_names() -> &'static [&'static str] {
         <Self as VariantNames>::VARIANTS
@@ -1828,6 +1848,26 @@ impl TransportRpcModuleConfig {
         self
     }
 
+    /// Takes the http transport configuration, leaving `None` in its place.
+    pub fn take_http(&mut self) -> Option<RpcModuleSelection> {
+        self.http.take()
+    }
+
+    /// Takes the ws transport configuration, leaving `None` in its place.
+    pub fn take_ws(&mut self) -> Option<RpcModuleSelection> {
+        self.ws.take()
+    }
+
+    /// Takes the ipc transport configuration, leaving `None` in its place.
+    pub fn take_ipc(&mut self) -> Option<RpcModuleSelection> {
+        self.ipc.take()
+    }
+
+    /// Takes the module configuration, leaving `None` in its place.
+    pub fn take_config(&mut self) -> Option<RpcModuleConfig> {
+        self.config.take()
+    }
+
     /// Returns true if no transports are configured
     pub fn is_empty(&self) -> bool {
         self.http.is_none() && self.ws.is_none() && self.ipc.is_none()
@@ -1846,6 +1886,11 @@ impl TransportRpcModuleConfig {
     /// Returns the [RpcModuleSelection] for the ipc transport
     pub fn ipc(&self) -> Option<&RpcModuleSelection> {
         self.ipc.as_ref()
+    }
+
+    /// Returns the [RpcModuleConfig] for the configured modules
+    pub fn config(&self) -> Option<&RpcModuleConfig> {
+        self.config.as_ref()
     }
 
     /// Ensures that both http and ws are configured and that they are configured to use the same
@@ -2271,9 +2316,24 @@ mod tests {
             Some(&RpcModuleSelection::Standard),
         ));
         assert!(RpcModuleSelection::are_identical(
-            Some(&RpcModuleSelection::Selection(RpcModuleSelection::Standard.into_selection())),
-            Some(&RpcModuleSelection::Standard),
+            dbg!(Some(&RpcModuleSelection::Selection(
+                RpcModuleSelection::Standard.into_selection()
+            ))),
+            dbg!(Some(&RpcModuleSelection::Standard)),
         ));
+        assert!(RpcModuleSelection::are_identical(
+            Some(&RpcModuleSelection::Selection(vec![RethRpcModule::Eth])),
+            Some(&RpcModuleSelection::Selection(vec![RethRpcModule::Eth])),
+        ));
+        assert!(RpcModuleSelection::are_identical(
+            None,
+            Some(&RpcModuleSelection::Selection(vec![])),
+        ));
+        assert!(RpcModuleSelection::are_identical(
+            Some(&RpcModuleSelection::Selection(vec![])),
+            None,
+        ));
+        assert!(RpcModuleSelection::are_identical(None, None));
     }
 
     #[test]
