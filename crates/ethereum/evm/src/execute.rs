@@ -209,7 +209,7 @@ where
         // Collect all EIP-7685 requests
         let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
 
-        let requests = withdrawal_requests;
+        let requests = [deposit_requests, withdrawal_requests].concat();
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
