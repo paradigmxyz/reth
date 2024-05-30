@@ -1,6 +1,10 @@
 use crate::{cors::CorsDomainError, RethRpcModule};
 use reth_ipc::server::IpcServerStartError;
-use std::{io, io::ErrorKind, net::SocketAddr};
+use std::{
+    collections::HashSet,
+    io::{self, ErrorKind},
+    net::SocketAddr,
+};
 
 /// Rpc server kind.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -81,6 +85,31 @@ impl RpcError {
     }
 }
 
+/// Conflicting modules between http and ws servers.
+#[derive(Debug)]
+pub struct ConflictingModules {
+    /// Modules present in both http and ws.
+    pub overlap: HashSet<RethRpcModule>,
+    /// Modules present in http but not in ws.
+    pub http_not_ws: HashSet<RethRpcModule>,
+    /// Modules present in ws but not in http.
+    pub ws_not_http: HashSet<RethRpcModule>,
+}
+
+impl std::fmt::Display for ConflictingModules {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "different API modules for HTTP and WS on the same port is currently not supported: \
+            Overlap: {:?}, \
+            HTTP modules not present in WS: {:?} \
+            WS modules not present in HTTP: {:?}
+            ",
+            self.overlap, self.http_not_ws, self.ws_not_http
+        )
+    }
+}
+
 /// Errors when trying to launch ws and http server on the same port.
 #[derive(Debug, thiserror::Error)]
 pub enum WsHttpSamePortError {
@@ -96,16 +125,8 @@ pub enum WsHttpSamePortError {
         ws_cors_domains: Option<String>,
     },
     /// Ws and http server configured on same port but with different modules.
-    #[error(
-        "different API modules for HTTP and WS on the same port is currently not supported: \
-         HTTP: {http_modules:?}, WS: {ws_modules:?}"
-    )]
-    ConflictingModules {
-        /// Http modules.
-        http_modules: Vec<RethRpcModule>,
-        /// Ws modules.
-        ws_modules: Vec<RethRpcModule>,
-    },
+    #[error("{0}")]
+    ConflictingModules(Box<ConflictingModules>),
 }
 
 #[cfg(test)]
