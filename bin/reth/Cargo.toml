@@ -75,7 +75,7 @@ confy.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # metrics
-metrics-process = "=1.0.14"
+metrics-process.workspace = true
 
 # test vectors generation
 proptest.workspace = true

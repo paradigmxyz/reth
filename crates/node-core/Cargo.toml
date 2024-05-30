@@ -47,12 +47,11 @@ tokio-util.workspace = true
 pin-project.workspace = true
 
 # metrics
-metrics-exporter-prometheus = "0.12.1"
-once_cell.workspace = true
-metrics-util = "0.15.0"
-metrics-process = "=1.0.14"
-metrics.workspace = true
 reth-metrics.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+metrics-process.workspace = true
+metrics-util.workspace = true
 
 # misc
 eyre.workspace = true
@@ -62,6 +61,7 @@ thiserror.workspace = true
 const-str = "0.5.6"
 rand.workspace = true
 derive_more.workspace = true
+once_cell.workspace = true
 
 # io
 dirs-next = "2.0.0"
