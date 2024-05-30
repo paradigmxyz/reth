@@ -343,12 +343,12 @@ where
     /// Handler for: `eth_feeHistory`
     async fn fee_history(
         &self,
-        block_count: u64,
+        block_count: U64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(Self::fee_history(self, block_count, newest_block, reward_percentiles).await?)
+        return Ok(Self::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?)
     }
 
     /// Handler for: `eth_mining`
