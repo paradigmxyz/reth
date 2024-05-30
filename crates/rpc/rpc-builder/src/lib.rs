@@ -1888,22 +1888,22 @@ impl TransportRpcModuleConfig {
     }
 
     /// Returns the [RpcModuleSelection] for the http transport
-    pub fn http(&self) -> Option<&RpcModuleSelection> {
+    pub const fn http(&self) -> Option<&RpcModuleSelection> {
         self.http.as_ref()
     }
 
     /// Returns the [RpcModuleSelection] for the ws transport
-    pub fn ws(&self) -> Option<&RpcModuleSelection> {
+    pub const fn ws(&self) -> Option<&RpcModuleSelection> {
         self.ws.as_ref()
     }
 
     /// Returns the [RpcModuleSelection] for the ipc transport
-    pub fn ipc(&self) -> Option<&RpcModuleSelection> {
+    pub const fn ipc(&self) -> Option<&RpcModuleSelection> {
         self.ipc.as_ref()
     }
 
     /// Returns the [RpcModuleConfig] for the configured modules
-    pub fn config(&self) -> Option<&RpcModuleConfig> {
+    pub const fn config(&self) -> Option<&RpcModuleConfig> {
         self.config.as_ref()
     }
 
