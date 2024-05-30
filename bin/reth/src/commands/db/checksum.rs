@@ -55,7 +55,7 @@ pub(crate) struct ChecksumViewer<'a, DB: Database> {
 }
 
 impl<DB: Database> ChecksumViewer<'_, DB> {
-    pub(crate) fn new(tool: &'_ DbTool<DB>) -> ChecksumViewer<'_, DB> {
+    pub(crate) const fn new(tool: &'_ DbTool<DB>) -> ChecksumViewer<'_, DB> {
         ChecksumViewer { tool, start_key: None, end_key: None, limit: None }
     }
 

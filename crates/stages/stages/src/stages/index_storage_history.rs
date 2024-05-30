@@ -34,7 +34,7 @@ pub struct IndexStorageHistoryStage {
 
 impl IndexStorageHistoryStage {
     /// Create new instance of [IndexStorageHistoryStage].
-    pub fn new(
+    pub const fn new(
         config: IndexHistoryConfig,
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,
@@ -179,17 +179,17 @@ mod tests {
     const LAST_BLOCK_IN_FULL_SHARD: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber;
     const MAX_BLOCK: BlockNumber = NUM_OF_INDICES_IN_SHARD as BlockNumber + 2;
 
-    fn storage(key: B256) -> StorageEntry {
+    const fn storage(key: B256) -> StorageEntry {
         // Value is not used in indexing stage.
         StorageEntry { key, value: U256::ZERO }
     }
 
-    fn block_number_address(block_number: u64) -> BlockNumberAddress {
+    const fn block_number_address(block_number: u64) -> BlockNumberAddress {
         BlockNumberAddress((block_number, ADDRESS))
     }
 
     /// Shard for account
-    fn shard(shard_index: u64) -> StorageShardedKey {
+    const fn shard(shard_index: u64) -> StorageShardedKey {
         StorageShardedKey {
             address: ADDRESS,
             sharded_key: ShardedKey { key: STORAGE_KEY, highest_block_number: shard_index },

@@ -45,7 +45,7 @@ impl Default for TransactionLookupStage {
 
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
-    pub fn new(
+    pub const fn new(
         config: TransactionLookupConfig,
         etl_config: EtlConfig,
         prune_mode: Option<PruneMode>,

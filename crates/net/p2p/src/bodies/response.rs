@@ -11,7 +11,7 @@ pub enum BlockResponse {
 
 impl BlockResponse {
     /// Return the reference to the response header
-    pub fn header(&self) -> &SealedHeader {
+    pub const fn header(&self) -> &SealedHeader {
         match self {
             Self::Full(block) => &block.header,
             Self::Empty(header) => header,

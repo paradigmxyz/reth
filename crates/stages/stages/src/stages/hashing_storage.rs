@@ -45,7 +45,7 @@ pub struct StorageHashingStage {
 
 impl StorageHashingStage {
     /// Create new instance of [StorageHashingStage].
-    pub fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
+    pub const fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
         Self {
             clean_threshold: config.clean_threshold,
             commit_threshold: config.commit_threshold,

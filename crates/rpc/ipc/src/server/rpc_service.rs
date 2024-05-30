@@ -36,7 +36,7 @@ pub(crate) enum RpcServiceCfg {
 
 impl RpcService {
     /// Create a new service.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         methods: Methods,
         max_response_body_size: usize,
         conn_id: usize,

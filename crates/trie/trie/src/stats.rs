@@ -10,17 +10,17 @@ pub struct TrieStats {
 
 impl TrieStats {
     /// Duration for root calculation.
-    pub fn duration(&self) -> Duration {
+    pub const fn duration(&self) -> Duration {
         self.duration
     }
 
     /// Number of leaves added to the hash builder during the calculation.
-    pub fn leaves_added(&self) -> u64 {
+    pub const fn leaves_added(&self) -> u64 {
         self.leaves_added
     }
 
     /// Number of branches added to the hash builder during the calculation.
-    pub fn branches_added(&self) -> u64 {
+    pub const fn branches_added(&self) -> u64 {
         self.branches_added
     }
 }
