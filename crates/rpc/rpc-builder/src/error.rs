@@ -1,6 +1,10 @@
 use crate::{cors::CorsDomainError, RethRpcModule};
 use reth_ipc::server::IpcServerStartError;
-use std::{io, io::ErrorKind, net::SocketAddr};
+use std::{
+    collections::HashSet,
+    io::{self, ErrorKind},
+    net::SocketAddr,
+};
 
 /// Rpc server kind.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -98,13 +102,19 @@ pub enum WsHttpSamePortError {
     /// Ws and http server configured on same port but with different modules.
     #[error(
         "different API modules for HTTP and WS on the same port is currently not supported: \
-         HTTP: {http_modules:?}, WS: {ws_modules:?}"
+         HTTP: {http_modules:?}, WS: {ws_modules:?} \
+         HTTP modules not present in WS: {http_not_ws:?} \
+         WS modules not present in HTTP: {ws_not_http:?}"
     )]
     ConflictingModules {
         /// Http modules.
-        http_modules: Vec<RethRpcModule>,
+        http_modules: HashSet<RethRpcModule>,
         /// Ws modules.
-        ws_modules: Vec<RethRpcModule>,
+        ws_modules: HashSet<RethRpcModule>,
+        /// Modules present in http but not in ws.
+        http_not_ws: HashSet<RethRpcModule>,
+        /// Modules present in ws but not in http.
+        ws_not_http: HashSet<RethRpcModule>,
     },
 }
 

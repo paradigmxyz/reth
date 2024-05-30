@@ -616,7 +616,7 @@ pub enum RpcModuleSelection {
     #[default]
     Standard,
     /// Only use the configured modules.
-    Selection(Vec<RethRpcModule>),
+    Selection(HashSet<RethRpcModule>),
 }
 
 // === impl RpcModuleSelection ===
@@ -627,14 +627,14 @@ impl RpcModuleSelection {
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
     /// Returns a selection of [RethRpcModule] with all [RethRpcModule::all_variants].
-    pub fn all_modules() -> Vec<RethRpcModule> {
+    pub fn all_modules() -> HashSet<RethRpcModule> {
         Self::try_from_selection(RethRpcModule::all_variants().iter().copied())
             .expect("valid selection")
             .into_selection()
     }
 
     /// Returns the [RpcModuleSelection::STANDARD_MODULES] as a selection.
-    pub fn standard_modules() -> Vec<RethRpcModule> {
+    pub fn standard_modules() -> HashSet<RethRpcModule> {
         Self::try_from_selection(Self::STANDARD_MODULES.iter().copied())
             .expect("valid selection")
             .into_selection()
@@ -643,7 +643,7 @@ impl RpcModuleSelection {
     /// All modules that are available by default on IPC.
     ///
     /// By default all modules are available on IPC.
-    pub fn default_ipc_modules() -> Vec<RethRpcModule> {
+    pub fn default_ipc_modules() -> HashSet<RethRpcModule> {
         Self::all_modules()
     }
 
@@ -683,16 +683,7 @@ impl RpcModuleSelection {
         I: IntoIterator<Item = T>,
         T: TryInto<RethRpcModule>,
     {
-        let mut unique = HashSet::new();
-
-        let mut s = Vec::new();
-        for item in selection.into_iter() {
-            let item = item.try_into()?;
-            if unique.insert(item) {
-                s.push(item);
-            }
-        }
-        Ok(Self::Selection(s))
+        selection.into_iter().map(TryInto::try_into).collect()
     }
 
     /// Returns true if no selection is configured
@@ -713,11 +704,11 @@ impl RpcModuleSelection {
     }
 
     /// Returns the list of configured [RethRpcModule]
-    pub fn into_selection(self) -> Vec<RethRpcModule> {
+    pub fn into_selection(self) -> HashSet<RethRpcModule> {
         match self {
             Self::All => Self::all_modules(),
             Self::Selection(s) => s,
-            Self::Standard => Self::STANDARD_MODULES.to_vec(),
+            Self::Standard => HashSet::from(Self::STANDARD_MODULES),
         }
     }
 
@@ -747,18 +738,36 @@ where
     }
 }
 
+impl<'a> FromIterator<&'a RethRpcModule> for RpcModuleSelection {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = &'a RethRpcModule>,
+    {
+        iter.into_iter().copied().collect()
+    }
+}
+
+impl FromIterator<RethRpcModule> for RpcModuleSelection {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = RethRpcModule>,
+    {
+        Self::Selection(iter.into_iter().collect())
+    }
+}
+
 impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Selection(vec![]))
+            return Ok(Selection(Default::default()))
         }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
         match first {
             "all" | "All" => Ok(Self::All),
-            "none" | "None" => Ok(Selection(vec![])),
+            "none" | "None" => Ok(Selection(Default::default())),
             _ => Self::try_from_selection(modules),
         }
     }
@@ -1849,7 +1858,14 @@ impl TransportRpcModuleConfig {
                 self.http.clone().map(RpcModuleSelection::into_selection).unwrap_or_default();
             let ws_modules =
                 self.ws.clone().map(RpcModuleSelection::into_selection).unwrap_or_default();
-            Err(WsHttpSamePortError::ConflictingModules { http_modules, ws_modules })
+            let http_not_ws = http_modules.difference(&ws_modules).copied().collect();
+            let ws_not_http = ws_modules.difference(&http_modules).copied().collect();
+            Err(WsHttpSamePortError::ConflictingModules {
+                http_modules,
+                ws_modules,
+                http_not_ws,
+                ws_not_http,
+            })
         }
     }
 }
