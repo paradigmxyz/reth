@@ -77,15 +77,9 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
-    /// EVM error during [EIP-2935] pre-block state transition.
-    ///
-    /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
-    #[error("failed to apply EIP-2935 pre-block state transition: {message}")]
-    // todo: better variant name
-    Eip2935StateTransition {
-        /// The error message.
-        message: String,
-    },
+    /// Provider error during the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) block hash account loading.
+    #[error(transparent)]
+    BlockHashAccountLoadingFailed(#[from] ProviderError),
 }
 
 /// BlockExecutor Errors

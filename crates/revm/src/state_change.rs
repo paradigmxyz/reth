@@ -5,6 +5,7 @@ use reth_primitives::{
     revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header, Withdrawal,
     B256, U256,
 };
+use reth_storage_errors::provider::ProviderError;
 use revm::{
     interpreter::Host,
     primitives::{Account, AccountInfo, Bytecode, EvmStorageSlot},
@@ -69,7 +70,7 @@ pub const HISTORY_SERVE_WINDOW: u64 = 8192;
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
-pub fn apply_blockhashes_update<DB: Database + DatabaseCommit>(
+pub fn apply_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_timestamp: u64,
@@ -91,7 +92,7 @@ where
     // nonce of 1, so it does not get deleted.
     let mut account: Account = db
         .basic(HISTORY_STORAGE_ADDRESS)
-        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?
+        .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?
         .unwrap_or_else(|| AccountInfo {
             nonce: 1,
             code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
@@ -100,8 +101,7 @@ where
         .into();
 
     // Insert the state change for the slot
-    let (slot, value) = eip2935_block_hash_slot(db, block_number - 1, parent_block_hash)
-        .map_err(|err| BlockValidationError::Eip2935StateTransition { message: err.to_string() })?;
+    let (slot, value) = eip2935_block_hash_slot(db, block_number - 1, parent_block_hash)?;
     account.storage.insert(slot, value);
 
     // Mark the account as touched and commit the state change
@@ -116,13 +116,15 @@ where
 ///
 /// This calculates the correct storage slot in the `BLOCKHASH` history storage address, fetches the
 /// blockhash and creates a [`EvmStorageSlot`] with appropriate previous and new values.
-fn eip2935_block_hash_slot<DB: Database>(
+fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
     db: &mut DB,
     block_number: u64,
     block_hash: B256,
-) -> Result<(U256, EvmStorageSlot), DB::Error> {
+) -> Result<(U256, EvmStorageSlot), BlockValidationError> {
     let slot = U256::from(block_number % HISTORY_SERVE_WINDOW);
-    let current_hash = db.storage(HISTORY_STORAGE_ADDRESS, slot)?;
+    let current_hash = db
+        .storage(HISTORY_STORAGE_ADDRESS, slot)
+        .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?;
 
     Ok((slot, EvmStorageSlot::new_changed(current_hash, block_hash.into())))
 }

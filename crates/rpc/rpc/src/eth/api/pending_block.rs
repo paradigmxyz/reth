@@ -1,6 +1,7 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::{EthApiError, EthResult};
+use reth_errors::ProviderError;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
@@ -335,7 +336,7 @@ where
 /// and [BlockEnv].
 ///
 /// This uses [apply_blockhashes_update].
-fn pre_block_blockhashes_update<DB: Database + DatabaseCommit>(
+fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     initialized_block_env: &BlockEnv,
