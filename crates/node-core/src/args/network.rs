@@ -144,8 +144,9 @@ impl NetworkArgs {
                 self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             ),
         };
+
         // Configure basic network stack
-        let mut network_config_builder = NetworkConfigBuilder::new(secret_key)
+        NetworkConfigBuilder::new(secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
             ))
@@ -156,37 +157,42 @@ impl NetworkArgs {
             .peer_config(peers_config)
             .boot_nodes(boot_nodes.clone())
             .chain_spec(chain_spec.clone())
-            .transactions_manager_config(transactions_manager_config);
+            .transactions_manager_config(transactions_manager_config)
+            // Configure node identity
+            .apply(|builder| {
+                let peer_id = builder.get_peer_id();
+                builder.hello_message(
+                    HelloMessageWithProtocols::builder(peer_id)
+                        .client_version(&self.identity)
+                        .build(),
+                )
+            })
+            // apply discovery settings
+            .apply(|builder| {
+                let rlpx_socket = (self.addr, self.port).into();
+                let mut builder = self.discovery.apply_to_builder(builder, rlpx_socket);
 
-        // Configure node identity
-        let peer_id = network_config_builder.get_peer_id();
-        network_config_builder = network_config_builder.hello_message(
-            HelloMessageWithProtocols::builder(peer_id).client_version(&self.identity).build(),
-        );
+                if chain_spec.is_optimism() && !self.discovery.disable_discovery {
+                    builder = builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
+                }
 
-        let rlpx_socket = (self.addr, self.port).into();
-        network_config_builder =
-            self.discovery.apply_to_builder(network_config_builder, rlpx_socket);
+                builder
+            })
+            // modify discv5 settings if enabled in previous step
+            .map_discv5_config_builder(|builder| {
+                let DiscoveryArgs {
+                    discv5_lookup_interval,
+                    discv5_bootstrap_lookup_interval,
+                    discv5_bootstrap_lookup_countdown,
+                    ..
+                } = self.discovery;
 
-        if chain_spec.is_optimism() && !self.discovery.disable_discovery {
-            network_config_builder =
-                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
-        }
-
-        network_config_builder.map_discv5_config_builder(|builder| {
-            let DiscoveryArgs {
-                discv5_lookup_interval,
-                discv5_bootstrap_lookup_interval,
-                discv5_bootstrap_lookup_countdown,
-                ..
-            } = self.discovery;
-
-            builder
-                .add_unsigned_boot_nodes(boot_nodes.into_iter())
-                .lookup_interval(discv5_lookup_interval)
-                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
-                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
-        })
+                builder
+                    .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                    .lookup_interval(discv5_lookup_interval)
+                    .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
+                    .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
+            })
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
