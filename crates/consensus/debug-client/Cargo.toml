@@ -24,6 +24,7 @@ alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips.workspace = true
 alloy-provider = { workspace = true, features = ["ws"] }
 
+auto_impl.workspace = true
 futures.workspace = true
 eyre.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "json"] }
