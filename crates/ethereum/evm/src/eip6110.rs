@@ -3,9 +3,19 @@ use alloy_consensus::Request;
 use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
 use alloy_sol_types::{sol, SolEvent};
 use reth_evm::execute::BlockValidationError;
-use reth_interfaces::executor::BlockValidationError;
 use reth_primitives::{ChainSpec, Receipt};
 use revm_primitives::Log;
+
+sol! {
+    #[allow(missing_docs)]
+    event DepositEvent(
+        bytes pubkey,
+        bytes withdrawal_credentials,
+        bytes amount,
+        bytes signature,
+        bytes index
+    );
+}
 
 /// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa) Deposits from receipts,
 /// and returns them as a `Request`.
@@ -17,7 +27,7 @@ where
     I: IntoIterator<Item = &'a Receipt>,
 {
     let res = receipts
-        .iter()
+        .into_iter()
         .flat_map(|receipt| receipt.logs.iter())
         // No need to filter for topic because there's only one event and that's the Deposit event
         // in the deposit contract.
@@ -39,17 +49,6 @@ where
             BlockValidationError::DepositRequestDecode(err.to_string())
         })?;
     Ok(res)
-}
-
-sol! {
-    #[allow(missing_docs)]
-    event DepositEvent(
-        bytes pubkey,
-        bytes withdrawal_credentials,
-        bytes amount,
-        bytes signature,
-        bytes index
-    );
 }
 
 fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
@@ -121,6 +120,7 @@ mod tests {
                 ..Default::default()
             },
         ];
+
         let requests = parse_deposits_from_receipts(&MAINNET, &receipts).unwrap();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].as_deposit_request().unwrap().amount, 32e9 as u64);
