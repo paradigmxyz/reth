@@ -27,17 +27,11 @@ pub use chain::{
 mod spec;
 pub use spec::ChainSpecProvider;
 
-mod stage_checkpoint;
-pub use stage_checkpoint::{StageCheckpointReader, StageCheckpointWriter};
-
 mod hashing;
 pub use hashing::HashingWriter;
 
 mod history;
 pub use history::HistoryWriter;
-
-mod prune_checkpoint;
-pub use prune_checkpoint::{PruneCheckpointReader, PruneCheckpointWriter};
 
 mod database_provider;
 pub use database_provider::DatabaseProviderFactory;
