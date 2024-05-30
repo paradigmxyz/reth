@@ -35,7 +35,7 @@ pub struct DebugArgs {
         help_heading = "Debug",
         conflicts_with = "tip",
         conflicts_with = "rpc_consensus_ws",
-        value_name = "ETHERSCAN_API_URL",
+        value_name = "ETHERSCAN_API_URL"
     )]
     pub etherscan: Option<Option<String>>,
 
@@ -44,7 +44,7 @@ pub struct DebugArgs {
         long = "debug.rpc-consensus-ws",
         help_heading = "Debug",
         conflicts_with = "tip",
-        conflicts_with = "etherscan",
+        conflicts_with = "etherscan"
     )]
     pub rpc_consensus_ws: Option<String>,
 
