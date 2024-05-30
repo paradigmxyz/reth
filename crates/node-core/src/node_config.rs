@@ -177,13 +177,13 @@ impl NodeConfig {
     }
 
     /// Set the metrics address for the node
-    pub fn with_metrics(mut self, metrics: SocketAddr) -> Self {
+    pub const fn with_metrics(mut self, metrics: SocketAddr) -> Self {
         self.metrics = Some(metrics);
         self
     }
 
     /// Set the instance for the node
-    pub fn with_instance(mut self, instance: u16) -> Self {
+    pub const fn with_instance(mut self, instance: u16) -> Self {
         self.instance = instance;
         self
     }
@@ -219,19 +219,19 @@ impl NodeConfig {
     }
 
     /// Set the database args for the node
-    pub fn with_db(mut self, db: DatabaseArgs) -> Self {
+    pub const fn with_db(mut self, db: DatabaseArgs) -> Self {
         self.db = db;
         self
     }
 
     /// Set the dev args for the node
-    pub fn with_dev(mut self, dev: DevArgs) -> Self {
+    pub const fn with_dev(mut self, dev: DevArgs) -> Self {
         self.dev = dev;
         self
     }
 
     /// Set the pruning args for the node
-    pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
+    pub const fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
         self
     }

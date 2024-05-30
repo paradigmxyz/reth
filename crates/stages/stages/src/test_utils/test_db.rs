@@ -436,11 +436,11 @@ pub enum StorageKind {
 
 impl StorageKind {
     #[allow(dead_code)]
-    fn is_database(&self) -> bool {
+    const fn is_database(&self) -> bool {
         matches!(self, Self::Database(_))
     }
 
-    fn is_static(&self) -> bool {
+    const fn is_static(&self) -> bool {
         matches!(self, Self::Static)
     }
 

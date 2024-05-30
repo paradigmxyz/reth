@@ -104,12 +104,12 @@ impl MockDiscovery {
     }
 
     /// Returns the local socket address associated with the service.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
     /// Returns the local [`NodeRecord`] associated with the service.
-    pub fn local_enr(&self) -> NodeRecord {
+    pub const fn local_enr(&self) -> NodeRecord {
         self.local_enr
     }
 

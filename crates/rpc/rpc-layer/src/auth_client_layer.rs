@@ -14,7 +14,7 @@ pub struct AuthClientLayer {
 
 impl AuthClientLayer {
     /// Create a new AuthClientLayer with the given `secret`.
-    pub fn new(secret: JwtSecret) -> Self {
+    pub const fn new(secret: JwtSecret) -> Self {
         Self { secret }
     }
 }
@@ -35,7 +35,7 @@ pub struct AuthClientService<S> {
 }
 
 impl<S> AuthClientService<S> {
-    fn new(secret: JwtSecret, inner: S) -> Self {
+    const fn new(secret: JwtSecret, inner: S) -> Self {
         Self { secret, inner }
     }
 }

@@ -21,7 +21,7 @@ pub struct AccountHistory {
 }
 
 impl AccountHistory {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }

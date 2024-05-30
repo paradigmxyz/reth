@@ -153,6 +153,7 @@ unused_peekable = "warn"
 unused_rounding = "warn"
 useless_let_if_seq = "warn"
 use_self = "warn"
+missing_const_for_fn = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -165,7 +166,6 @@ empty_line_after_doc_comments = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
 iter_on_single_items = "allow"
-missing_const_for_fn = "allow"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
 option_if_let_else = "allow"

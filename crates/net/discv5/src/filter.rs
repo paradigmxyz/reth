@@ -19,7 +19,7 @@ pub enum FilterOutcome {
 
 impl FilterOutcome {
     /// Returns `true` for [`FilterOutcome::Ok`].
-    pub fn is_ok(&self) -> bool {
+    pub const fn is_ok(&self) -> bool {
         matches!(self, Self::Ok)
     }
 }

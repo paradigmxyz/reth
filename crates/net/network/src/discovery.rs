@@ -179,7 +179,7 @@ impl Discovery {
     }
 
     /// Returns the id with which the local node identifies itself in the network
-    pub(crate) fn local_id(&self) -> PeerId {
+    pub(crate) const fn local_id(&self) -> PeerId {
         self.local_enr.id // local discv4 and discv5 have same id, since signed with same secret key
     }
 

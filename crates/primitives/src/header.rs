@@ -192,7 +192,7 @@ impl Header {
     /// Checks if the block's timestamp is in the past compared to the parent block's timestamp.
     ///
     /// Note: This check is relevant only pre-merge.
-    pub fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
+    pub const fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
         self.timestamp <= parent_timestamp
     }
 
@@ -201,12 +201,12 @@ impl Header {
     /// Clock can drift but this can be consensus issue.
     ///
     /// Note: This check is relevant only pre-merge.
-    pub fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
+    pub const fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
         self.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS
     }
 
     /// Returns the parent block's number and hash
-    pub fn parent_num_hash(&self) -> BlockNumHash {
+    pub const fn parent_num_hash(&self) -> BlockNumHash {
         BlockNumHash { number: self.number.saturating_sub(1), hash: self.parent_hash }
     }
 
@@ -272,7 +272,7 @@ impl Header {
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
     #[inline]
-    pub fn seal(self, hash: B256) -> SealedHeader {
+    pub const fn seal(self, hash: B256) -> SealedHeader {
         SealedHeader { header: self, hash }
     }
 
@@ -618,7 +618,7 @@ impl SealedHeader {
 
     /// Returns the sealed Header fields.
     #[inline]
-    pub fn header(&self) -> &Header {
+    pub const fn header(&self) -> &Header {
         &self.header
     }
 
@@ -970,12 +970,12 @@ pub enum HeadersDirection {
 
 impl HeadersDirection {
     /// Returns true for rising block numbers
-    pub fn is_rising(&self) -> bool {
+    pub const fn is_rising(&self) -> bool {
         matches!(self, Self::Rising)
     }
 
     /// Returns true for falling block numbers
-    pub fn is_falling(&self) -> bool {
+    pub const fn is_falling(&self) -> bool {
         matches!(self, Self::Falling)
     }
 
@@ -985,7 +985,7 @@ impl HeadersDirection {
     ///
     /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
     /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
-    pub fn new(reverse: bool) -> Self {
+    pub const fn new(reverse: bool) -> Self {
         if reverse {
             Self::Falling
         } else {

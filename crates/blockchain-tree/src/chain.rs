@@ -53,7 +53,7 @@ impl DerefMut for AppendableChain {
 
 impl AppendableChain {
     /// Create a new appendable chain from a given chain.
-    pub fn new(chain: Chain) -> Self {
+    pub const fn new(chain: Chain) -> Self {
         Self { chain }
     }
 
