@@ -90,7 +90,7 @@ pub(crate) enum MakeCanonicalAction {
 }
 
 impl MakeCanonicalAction {
-    fn as_str(&self) -> &'static str {
+    const fn as_str(&self) -> &'static str {
         match self {
             Self::CloneOldBlocks => "clone old blocks",
             Self::FindCanonicalHeader => "find canonical header",

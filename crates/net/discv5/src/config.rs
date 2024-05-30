@@ -154,7 +154,7 @@ impl ConfigBuilder {
 
     /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
-    pub fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+    pub const fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
         self.fork = Some((fork_key, fork_id));
         self
     }
@@ -162,7 +162,7 @@ impl ConfigBuilder {
     /// Sets the tcp socket to advertise in the local [`Enr`](discv5::enr::Enr). The IP address of
     /// this socket will overwrite the discovery address of the same IP version, if one is
     /// configured.
-    pub fn tcp_socket(mut self, socket: SocketAddr) -> Self {
+    pub const fn tcp_socket(mut self, socket: SocketAddr) -> Self {
         self.tcp_socket = socket;
         self
     }
@@ -176,20 +176,20 @@ impl ConfigBuilder {
 
     /// Sets the interval at which to run lookup queries, in order to fill kbuckets. Lookup queries
     /// are done periodically at the given interval for the whole run of the program.
-    pub fn lookup_interval(mut self, seconds: u64) -> Self {
+    pub const fn lookup_interval(mut self, seconds: u64) -> Self {
         self.lookup_interval = Some(seconds);
         self
     }
 
     /// Sets the interval at which to run boost lookup queries at start up. Queries will be started
     /// at this interval for the configured number of times after start up.
-    pub fn bootstrap_lookup_interval(mut self, seconds: u64) -> Self {
+    pub const fn bootstrap_lookup_interval(mut self, seconds: u64) -> Self {
         self.bootstrap_lookup_interval = Some(seconds);
         self
     }
 
     /// Sets the the number of times at which to run boost lookup queries to bootstrap the node.
-    pub fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
+    pub const fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
         self.bootstrap_lookup_countdown = Some(counts);
         self
     }
@@ -310,13 +310,13 @@ impl Config {
 
     /// Returns the RLPx (TCP) socket contained in the [`discv5::Config`]. This socket will be
     /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
-    pub fn rlpx_socket(&self) -> &SocketAddr {
+    pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
     }
 }
 
 /// Returns the IPv4 discovery socket if one is configured.
-pub fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
+pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
     match listen_config {
         ListenConfig::Ipv4 { ip, port } |
         ListenConfig::DualStack { ipv4: ip, ipv4_port: port, .. } => {
@@ -327,7 +327,7 @@ pub fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
 }
 
 /// Returns the IPv6 discovery socket if one is configured.
-pub fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
+pub const fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     match listen_config {
         ListenConfig::Ipv4 { .. } => None,
         ListenConfig::Ipv6 { ip, port } |

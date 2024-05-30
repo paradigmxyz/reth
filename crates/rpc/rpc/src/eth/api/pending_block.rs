@@ -335,7 +335,7 @@ pub(crate) enum PendingBlockEnvOrigin {
 
 impl PendingBlockEnvOrigin {
     /// Returns true if the origin is the actual pending block as received from the CL.
-    pub(crate) fn is_actual_pending(&self) -> bool {
+    pub(crate) const fn is_actual_pending(&self) -> bool {
         matches!(self, Self::ActualPending(_))
     }
 

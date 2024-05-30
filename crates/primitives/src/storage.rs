@@ -16,7 +16,7 @@ pub struct StorageEntry {
 
 impl StorageEntry {
     /// Create a new StorageEntry with given key and value.
-    pub fn new(key: B256, value: U256) -> Self {
+    pub const fn new(key: B256, value: U256) -> Self {
         Self { key, value }
     }
 }

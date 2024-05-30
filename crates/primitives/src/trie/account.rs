@@ -65,7 +65,7 @@ impl From<GenesisAccount> for TrieAccount {
 
 impl TrieAccount {
     /// Get account's storage root.
-    pub fn storage_root(&self) -> B256 {
+    pub const fn storage_root(&self) -> B256 {
         self.storage_root
     }
 }

@@ -602,7 +602,7 @@ where
     ///
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
-    fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
+    const fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
         block > local_tip && block - local_tip > self.pipeline_run_threshold
     }
 
@@ -692,7 +692,7 @@ where
     /// Returns how far the local tip is from the given block. If the local tip is at the same
     /// height or its block number is greater than the given block, this returns None.
     #[inline]
-    fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
+    const fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
         if block > local_tip {
             Some(block - local_tip)
         } else {
