@@ -179,7 +179,14 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::hash::Hasher;
+
+    use derive_more::{Constructor, Display};
+
     use super::*;
+
+    #[derive(Debug, Hash, PartialEq, Eq, Display, Clone, Copy)]
+    struct Key(i8);
 
     #[test]
     fn test_cache_should_insert_into_empty_set() {
@@ -222,11 +229,6 @@ mod test {
     #[test]
     #[allow(dead_code)]
     fn test_debug_impl_lru_map() {
-        use derive_more::Display;
-
-        #[derive(Debug, Hash, PartialEq, Eq, Display)]
-        struct Key(i8);
-
         #[derive(Debug)]
         struct Value(i8);
 
@@ -244,9 +246,6 @@ mod test {
     #[test]
     #[allow(dead_code)]
     fn test_debug_impl_lru_cache() {
-        #[derive(Debug, Hash, PartialEq, Eq)]
-        struct Key(i8);
-
         let mut cache = LruCache::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
@@ -257,5 +256,103 @@ mod test {
             "LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }",
             format!("{cache:?}")
         )
+    }
+
+    #[test]
+    fn get() {
+        let mut cache = LruCache::new(2);
+        let key_1 = Key(1);
+        cache.insert(key_1);
+        let key_2 = Key(2);
+        cache.insert(key_2);
+
+        // promotes key 1 to lru
+        _ = cache.get(&key_1);
+
+        assert_eq!(
+            "LruCache { limit: 2, res_fn_iter: Iter: { Key(1), Key(2) } }",
+            format!("{cache:?}")
+        )
+    }
+
+    #[test]
+    fn get_ty_custom_eq_impl() {
+        #[derive(Debug, Eq, Constructor, Clone, Copy)]
+        struct CompoundKey {
+            // type unique for id
+            id: i8,
+            other: i8,
+        }
+
+        impl PartialEq for CompoundKey {
+            fn eq(&self, other: &Self) -> bool {
+                self.id == other.id
+            }
+        }
+
+        impl Hash for CompoundKey {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                self.id.hash(state)
+            }
+        }
+
+        let mut cache = LruCache::new(2);
+        let key_1 = CompoundKey::new(1, 11);
+        cache.insert(key_1);
+        let key_2 = CompoundKey::new(2, 22);
+        cache.insert(key_2);
+
+        let key = cache.get(&key_1);
+
+        assert_eq!(key_1.other, key.unwrap().other)
+    }
+
+    #[test]
+    fn peek() {
+        let mut cache = LruCache::new(2);
+        let key_1 = Key(1);
+        cache.insert(key_1);
+        let key_2 = Key(2);
+        cache.insert(key_2);
+
+        // doesn't promote key 1 to lru
+        _ = cache.peek(&key_1);
+
+        assert_eq!(
+            "LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }",
+            format!("{cache:?}")
+        )
+    }
+
+    #[test]
+    fn peek_ty_custom_eq_impl() {
+        #[derive(Debug, Eq, Constructor, Clone, Copy)]
+        struct CompoundKey {
+            // type unique for id
+            id: i8,
+            other: i8,
+        }
+
+        impl PartialEq for CompoundKey {
+            fn eq(&self, other: &Self) -> bool {
+                self.id == other.id
+            }
+        }
+
+        impl Hash for CompoundKey {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                self.id.hash(state)
+            }
+        }
+
+        let mut cache = LruCache::new(2);
+        let key_1 = CompoundKey::new(1, 11);
+        cache.insert(key_1);
+        let key_2 = CompoundKey::new(2, 22);
+        cache.insert(key_2);
+
+        let key = cache.peek(&key_1);
+
+        assert_eq!(key_1.other, key.unwrap().other)
     }
 }
