@@ -669,7 +669,7 @@ impl StaticFileProviderRW {
     }
 
     /// Helper function to access [`SegmentHeader`].
-    pub fn user_header(&self) -> &SegmentHeader {
+    pub const fn user_header(&self) -> &SegmentHeader {
         self.writer.user_header()
     }
 

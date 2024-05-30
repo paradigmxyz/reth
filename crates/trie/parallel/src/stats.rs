@@ -12,17 +12,17 @@ pub struct ParallelTrieStats {
 
 impl ParallelTrieStats {
     /// Return general trie stats.
-    pub fn trie_stats(&self) -> TrieStats {
+    pub const fn trie_stats(&self) -> TrieStats {
         self.trie
     }
 
     /// The number of pre-computed storage roots.
-    pub fn precomputed_storage_roots(&self) -> u64 {
+    pub const fn precomputed_storage_roots(&self) -> u64 {
         self.precomputed_storage_roots
     }
 
     /// The number of added leaf nodes for which we did not precompute the storage root.
-    pub fn missed_leaves(&self) -> u64 {
+    pub const fn missed_leaves(&self) -> u64 {
         self.missed_leaves
     }
 }

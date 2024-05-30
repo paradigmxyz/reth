@@ -21,7 +21,7 @@ pub(crate) struct OptimismTxMeta {
 
 impl OptimismTxMeta {
     /// Creates a new [OptimismTxMeta].
-    pub(crate) fn new(
+    pub(crate) const fn new(
         l1_block_info: Option<L1BlockInfo>,
         l1_fee: Option<u128>,
         l1_data_gas: Option<u128>,

@@ -130,7 +130,7 @@ impl StaticFileProviderInner {
         Ok(provider)
     }
 
-    pub fn is_read_only(&self) -> bool {
+    pub const fn is_read_only(&self) -> bool {
         self.access.is_read_only()
     }
 }

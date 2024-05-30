@@ -68,7 +68,7 @@ pub struct BodyStage<D: BodyDownloader> {
 
 impl<D: BodyDownloader> BodyStage<D> {
     /// Create new bodies stage from downloader.
-    pub fn new(downloader: D) -> Self {
+    pub const fn new(downloader: D) -> Self {
         Self { downloader, buffer: None }
     }
 }

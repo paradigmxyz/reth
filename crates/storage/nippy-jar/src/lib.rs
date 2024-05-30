@@ -153,7 +153,7 @@ impl NippyJar<()> {
     }
 
     /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
-    pub fn uses_filters(&self) -> bool {
+    pub const fn uses_filters(&self) -> bool {
         self.filter.is_some() && self.phf.is_some()
     }
 }
@@ -207,17 +207,17 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the user header.
-    pub fn user_header(&self) -> &H {
+    pub const fn user_header(&self) -> &H {
         &self.user_header
     }
 
     /// Gets total columns in jar.
-    pub fn columns(&self) -> usize {
+    pub const fn columns(&self) -> usize {
         self.columns
     }
 
     /// Gets total rows in jar.
-    pub fn rows(&self) -> usize {
+    pub const fn rows(&self) -> usize {
         self.rows
     }
 
@@ -232,7 +232,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the compressor.
-    pub fn compressor(&self) -> Option<&Compressors> {
+    pub const fn compressor(&self) -> Option<&Compressors> {
         self.compressor.as_ref()
     }
 
@@ -543,7 +543,7 @@ impl DataReader {
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u8 {
+    pub const fn offset_size(&self) -> u8 {
         self.offset_size
     }
 

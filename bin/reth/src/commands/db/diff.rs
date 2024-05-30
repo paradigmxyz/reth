@@ -418,7 +418,7 @@ enum ExtraTableElement<T: Table> {
 
 impl<T: Table> ExtraTableElement<T> {
     /// Return the key for the extra element
-    fn key(&self) -> &T::Key {
+    const fn key(&self) -> &T::Key {
         match self {
             Self::First { key, .. } => key,
             Self::Second { key, .. } => key,

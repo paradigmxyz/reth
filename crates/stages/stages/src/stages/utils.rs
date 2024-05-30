@@ -238,7 +238,7 @@ pub(crate) enum LoadMode {
 }
 
 impl LoadMode {
-    fn is_flush(&self) -> bool {
+    const fn is_flush(&self) -> bool {
         matches!(self, Self::Flush)
     }
 }

@@ -280,7 +280,7 @@ impl Default for EtlConfig {
 
 impl EtlConfig {
     /// Creates an ETL configuration
-    pub fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
+    pub const fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
         Self { dir, file_size }
     }
 

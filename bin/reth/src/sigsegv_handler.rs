@@ -148,6 +148,6 @@ fn min_sigstack_size() -> usize {
 
 /// Not all OS support hardware where this is needed.
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
-fn min_sigstack_size() -> usize {
+const fn min_sigstack_size() -> usize {
     libc::MINSIGSTKSZ
 }

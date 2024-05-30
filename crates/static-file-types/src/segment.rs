@@ -161,7 +161,7 @@ pub struct SegmentHeader {
 
 impl SegmentHeader {
     /// Returns [`SegmentHeader`].
-    pub fn new(
+    pub const fn new(
         expected_block_range: SegmentRangeInclusive,
         block_range: Option<SegmentRangeInclusive>,
         tx_range: Option<SegmentRangeInclusive>,
@@ -171,27 +171,27 @@ impl SegmentHeader {
     }
 
     /// Returns the static file segment kind.
-    pub fn segment(&self) -> StaticFileSegment {
+    pub const fn segment(&self) -> StaticFileSegment {
         self.segment
     }
 
     /// Returns the block range.
-    pub fn block_range(&self) -> Option<&SegmentRangeInclusive> {
+    pub const fn block_range(&self) -> Option<&SegmentRangeInclusive> {
         self.block_range.as_ref()
     }
 
     /// Returns the transaction range.
-    pub fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
+    pub const fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
         self.tx_range.as_ref()
     }
 
     /// The expected block start of the segment.
-    pub fn expected_block_start(&self) -> BlockNumber {
+    pub const fn expected_block_start(&self) -> BlockNumber {
         self.expected_block_range.start()
     }
 
     /// The expected block end of the segment.
-    pub fn expected_block_end(&self) -> BlockNumber {
+    pub const fn expected_block_end(&self) -> BlockNumber {
         self.expected_block_range.end()
     }
 
@@ -205,17 +205,17 @@ impl SegmentHeader {
         self.block_range.as_ref().map(|b| b.end())
     }
 
-    /// Returns the first transaction number of the segment.  
+    /// Returns the first transaction number of the segment.
     pub fn tx_start(&self) -> Option<TxNumber> {
         self.tx_range.as_ref().map(|t| t.start())
     }
 
-    /// Returns the last transaction number of the segment.   
+    /// Returns the last transaction number of the segment.
     pub fn tx_end(&self) -> Option<TxNumber> {
         self.tx_range.as_ref().map(|t| t.end())
     }
 
-    /// Number of transactions.  
+    /// Number of transactions.
     pub fn tx_len(&self) -> Option<u64> {
         self.tx_range.as_ref().map(|r| (r.end() + 1) - r.start())
     }
@@ -326,17 +326,17 @@ pub struct SegmentRangeInclusive {
 
 impl SegmentRangeInclusive {
     /// Creates a new [`SegmentRangeInclusive`]
-    pub fn new(start: u64, end: u64) -> Self {
+    pub const fn new(start: u64, end: u64) -> Self {
         Self { start, end }
     }
 
     /// Start of the inclusive range
-    pub fn start(&self) -> u64 {
+    pub const fn start(&self) -> u64 {
         self.start
     }
 
     /// End of the inclusive range
-    pub fn end(&self) -> u64 {
+    pub const fn end(&self) -> u64 {
         self.end
     }
 }

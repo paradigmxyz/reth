@@ -153,6 +153,7 @@ unused_peekable = "warn"
 unused_rounding = "warn"
 useless_let_if_seq = "warn"
 use_self = "warn"
+missing_const_for_fn = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -165,7 +166,6 @@ empty_line_after_doc_comments = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
 iter_on_single_items = "allow"
-missing_const_for_fn = "allow"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
 option_if_let_else = "allow"
@@ -310,7 +310,7 @@ revm = { version = "9.0.0", features = [
 revm-primitives = { version = "4.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "ed5450e" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "dc2bdbc" }
 
 # eth
 alloy-chains = "0.1.15"
@@ -319,21 +319,21 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.4"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "bd39117" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "bd39117" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "7320d4c" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
 
 # misc
 auto_impl = "1"
