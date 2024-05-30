@@ -176,7 +176,11 @@ where
                     RawValue::<BlockNumber>::from_vec(number),
                 )?;
             } else {
-                cursor_header_numbers.insert(
+                // Upsert usage instead of insert:
+                // If an interrupted unwind deletes data from static files, but not from
+                // database, then we will have dangling entries, which would confflict when
+                // trying to advance again the chain.
+                cursor_header_numbers.upsert(
                     RawKey::<BlockHash>::from_vec(hash),
                     RawValue::<BlockNumber>::from_vec(number),
                 )?;
