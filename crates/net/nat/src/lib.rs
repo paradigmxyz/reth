@@ -25,6 +25,12 @@ use std::{
 #[cfg(feature = "serde")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
+/// URLs to `GET` the external IP address.
+///
+/// Taken from: <https://stackoverflow.com/questions/3253701/get-public-external-ip-address>
+const EXTERNAL_IP_APIS: &[&str] =
+    &["http://ipinfo.io/ip", "http://icanhazip.com", "http://ifconfig.me"];
+
 /// All builtin resolvers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(SerializeDisplay, DeserializeFromStr))]
@@ -180,7 +186,16 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
 }
 
 async fn resolve_external_ip() -> Option<IpAddr> {
-    let response = reqwest::get("http://ipinfo.io/ip").await.ok()?;
+    let futures = EXTERNAL_IP_APIS.iter().copied().map(resolve_external_ip_url_res).map(Box::pin);
+    futures_util::future::select_ok(futures).await.ok().map(|(res, _)| res)
+}
+
+async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
+    resolve_external_ip_url(url).await.ok_or(())
+}
+
+async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
+    let response = reqwest::get(url).await.ok()?;
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()

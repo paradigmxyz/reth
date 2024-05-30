@@ -7030,6 +7030,7 @@ dependencies = [
 name = "reth-net-nat"
 version = "0.2.0-beta.7"
 dependencies = [
+ "futures-util",
  "reqwest 0.12.4",
  "reth-tracing",
  "serde_with",
