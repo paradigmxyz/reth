@@ -30,7 +30,7 @@ use reth_primitives::{
     Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
     db::states::bundle_state::BundleRetention,
@@ -127,6 +127,18 @@ where
             err
         })?;
 
+        // apply eip-2935 blockhashes update
+        apply_blockhashes_update(
+            &mut db,
+            &chain_spec,
+            initialized_block_env.timestamp.to::<u64>(),
+            block_number,
+            parent_block.hash(),
+        ).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+            PayloadBuilderError::Internal(err.into())
+        })?;
+
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
             &mut db,
             &chain_spec,
@@ -181,10 +193,8 @@ where
                 // transactions in an empty payload.
                 let withdrawal_requests = post_block_withdrawal_requests_contract_call(
                     &mut db,
-                    &chain_spec,
                     &initialized_cfg,
                     &initialized_block_env,
-                    &attributes,
                 )?;
 
                 let requests = withdrawal_requests;
@@ -282,6 +292,16 @@ where
         &initialized_block_env,
         &attributes,
     )?;
+
+    // apply eip-2935 blockhashes update
+    apply_blockhashes_update(
+        &mut db,
+        &chain_spec,
+        initialized_block_env.timestamp.to::<u64>(),
+        block_number,
+        parent_block.hash(),
+    )
+    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
@@ -403,13 +423,10 @@ where
     {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
-
         let withdrawal_requests = post_block_withdrawal_requests_contract_call(
             &mut db,
-            &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            &attributes,
         )?;
 
         let requests = [deposit_requests, withdrawal_requests].concat();

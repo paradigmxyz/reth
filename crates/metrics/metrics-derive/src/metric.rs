@@ -12,7 +12,7 @@ pub(crate) struct Metric<'a> {
 }
 
 impl<'a> Metric<'a> {
-    pub(crate) fn new(field: &'a Field, description: String, rename: Option<LitStr>) -> Self {
+    pub(crate) const fn new(field: &'a Field, description: String, rename: Option<LitStr>) -> Self {
         Self { field, description, rename }
     }
 

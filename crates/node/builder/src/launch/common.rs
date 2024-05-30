@@ -40,7 +40,7 @@ impl LaunchContext {
     }
 
     /// Attaches a database to the launch context.
-    pub fn with<DB>(self, database: DB) -> LaunchContextWith<DB> {
+    pub const fn with<DB>(self, database: DB) -> LaunchContextWith<DB> {
         LaunchContextWith { inner: self, attachment: database }
     }
 
@@ -156,12 +156,12 @@ impl<T> LaunchContextWith<T> {
     }
 
     /// Returns the data directory.
-    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.inner.data_dir
     }
 
     /// Returns the task executor.
-    pub fn task_executor(&self) -> &TaskExecutor {
+    pub const fn task_executor(&self) -> &TaskExecutor {
         &self.inner.task_executor
     }
 
@@ -267,7 +267,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Returns true if the node is configured as --dev
-    pub fn is_dev(&self) -> bool {
+    pub const fn is_dev(&self) -> bool {
         self.node_config().dev.dev
     }
 
@@ -357,7 +357,7 @@ where
     }
 
     /// Returns the configured ProviderFactory.
-    pub fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
         self.right()
     }
 

@@ -45,18 +45,18 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     }
 
     /// Sets the rollup's compute pending block configuration option.
-    pub fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+    pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
         self.compute_pending_block = compute_pending_block;
         self
     }
 
     /// Enables the rollup's compute pending block configuration option.
-    pub fn compute_pending_block(self) -> Self {
+    pub const fn compute_pending_block(self) -> Self {
         self.set_compute_pending_block(true)
     }
 
     /// Returns the rollup's compute pending block configuration option.
-    pub fn is_compute_pending_block(&self) -> bool {
+    pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
     }
 

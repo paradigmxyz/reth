@@ -371,7 +371,7 @@ enum PeerState {
 
 impl PeerState {
     /// Returns true if the peer is currently idle.
-    fn is_idle(&self) -> bool {
+    const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)
     }
 
@@ -421,7 +421,7 @@ pub(crate) enum DownloadRequest {
 
 impl DownloadRequest {
     /// Returns the corresponding state for a peer that handles the request.
-    fn peer_state(&self) -> PeerState {
+    const fn peer_state(&self) -> PeerState {
         match self {
             Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
             Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
@@ -429,7 +429,7 @@ impl DownloadRequest {
     }
 
     /// Returns the requested priority of this request
-    fn get_priority(&self) -> &Priority {
+    const fn get_priority(&self) -> &Priority {
         match self {
             Self::GetBlockHeaders { priority, .. } => priority,
             Self::GetBlockBodies { priority, .. } => priority,
@@ -437,7 +437,7 @@ impl DownloadRequest {
     }
 
     /// Returns `true` if this request is normal priority.
-    fn is_normal_priority(&self) -> bool {
+    const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
     }
 }

@@ -15,7 +15,7 @@ pub struct Web3Api<N> {
 
 impl<N> Web3Api<N> {
     /// Creates a new instance of `Web3Api`.
-    pub fn new(network: N) -> Self {
+    pub const fn new(network: N) -> Self {
         Self { network }
     }
 }

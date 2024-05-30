@@ -50,12 +50,12 @@ pub struct DatabaseMetadataValue {
 
 impl DatabaseMetadataValue {
     /// Creates a new [DatabaseMetadataValue] with the given freelist size.
-    pub fn new(freelist_size: Option<usize>) -> Self {
+    pub const fn new(freelist_size: Option<usize>) -> Self {
         Self { freelist_size }
     }
 
     /// Returns the freelist size, if available.
-    pub fn freelist_size(&self) -> Option<usize> {
+    pub const fn freelist_size(&self) -> Option<usize> {
         self.freelist_size
     }
 }

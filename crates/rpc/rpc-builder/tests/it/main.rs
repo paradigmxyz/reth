@@ -4,4 +4,4 @@ mod serde;
 mod startup;
 pub mod utils;
 
-fn main() {}
+const fn main() {}

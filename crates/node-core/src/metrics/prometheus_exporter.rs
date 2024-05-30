@@ -279,10 +279,10 @@ fn describe_io_stats() {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn collect_io_stats() {}
+const fn collect_io_stats() {}
 
 #[cfg(not(target_os = "linux"))]
-fn describe_io_stats() {}
+const fn describe_io_stats() {}
 
 #[cfg(test)]
 mod tests {
