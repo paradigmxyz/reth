@@ -159,7 +159,6 @@ use crate::{
     auth::AuthRpcModule, cors::CorsDomainError, error::WsHttpSamePortError,
     metrics::RpcRequestMetrics, RpcModuleSelection::Selection,
 };
-use constants::*;
 use error::{ConflictingModules, RpcError, ServerKind};
 use hyper::{header::AUTHORIZATION, HeaderMap};
 pub use jsonrpsee::server::ServerBuilder;
@@ -192,6 +191,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
+use reth_rpc_server_types::constants::*;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -225,9 +225,6 @@ pub mod error;
 
 /// Eth utils
 mod eth;
-
-/// Common RPC constants.
-pub mod constants;
 
 // Rpc server metrics
 mod metrics;

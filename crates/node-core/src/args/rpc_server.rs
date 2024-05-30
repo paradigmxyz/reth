@@ -18,10 +18,11 @@ use reth_rpc::eth::{
     cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_builder::{
-    auth::AuthServerConfig, constants, error::RpcError, EthConfig, Identity, IpcServerBuilder,
+    auth::AuthServerConfig, error::RpcError, EthConfig, Identity, IpcServerBuilder,
     RethRpcModule, RpcModuleConfig, RpcModuleSelection, RpcServerConfig, ServerBuilder,
     TransportRpcModuleConfig,
 };
+use reth_rpc_server_types::constants;
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},

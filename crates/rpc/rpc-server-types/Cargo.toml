@@ -12,3 +12,5 @@ description = "RPC server types and constants"
 workspace = true
 
 [dependencies]
+# reth
+reth-rpc.workspace = true
