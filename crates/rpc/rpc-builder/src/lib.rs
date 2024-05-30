@@ -203,7 +203,7 @@ use std::{
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
-    sync::{Arc, OnceLock},
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
@@ -621,33 +621,25 @@ pub enum RpcModuleSelection {
 
 // === impl RpcModuleSelection ===
 
-/// The standard modules to instantiate by default `eth`, `net`, `web3`
-// TODO: replace with LazyLock
-static STANDARD_SELECTION: OnceLock<HashSet<RethRpcModule>> = OnceLock::new();
-
-/// All modules.
-// TODO: replace with LazyLock
-static ALL_SELECTION: OnceLock<HashSet<RethRpcModule>> = OnceLock::new();
-
 impl RpcModuleSelection {
     /// The standard modules to instantiate by default `eth`, `net`, `web3`
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
     /// Returns a selection of [RethRpcModule] with all [RethRpcModule::all_variants].
-    pub fn all_modules() -> &'static HashSet<RethRpcModule> {
-        ALL_SELECTION.get_or_init(|| RethRpcModule::modules().into_iter().collect())
+    pub fn all_modules() -> HashSet<RethRpcModule> {
+        RethRpcModule::modules().into_iter().collect()
     }
 
     /// Returns the [RpcModuleSelection::STANDARD_MODULES] as a selection.
-    pub fn standard_modules() -> &'static HashSet<RethRpcModule> {
-        STANDARD_SELECTION.get_or_init(|| HashSet::from(Self::STANDARD_MODULES))
+    pub fn standard_modules() -> HashSet<RethRpcModule> {
+        HashSet::from(Self::STANDARD_MODULES)
     }
 
     /// All modules that are available by default on IPC.
     ///
     /// By default all modules are available on IPC.
-    pub fn default_ipc_modules() -> &'static HashSet<RethRpcModule> {
+    pub fn default_ipc_modules() -> HashSet<RethRpcModule> {
         Self::all_modules()
     }
 
@@ -704,31 +696,26 @@ impl RpcModuleSelection {
     /// Returns an iterator over all configured [RethRpcModule]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
-            Self::All => Box::new(Self::all_modules().iter().copied()),
+            Self::All => Box::new(RethRpcModule::modules().into_iter()),
             Self::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             Self::Selection(s) => Box::new(s.iter().copied()),
         }
     }
 
-    /// Returns the set of configured [RethRpcModule].
-    pub fn as_selection(&self) -> &HashSet<RethRpcModule> {
+    /// Clones the set of configured [RethRpcModule].
+    pub fn to_selection(&self) -> HashSet<RethRpcModule> {
         match self {
             Self::All => Self::all_modules(),
             Self::Standard => Self::standard_modules(),
-            Self::Selection(s) => s,
+            Self::Selection(s) => s.clone(),
         }
-    }
-
-    /// Clones the set of configured [RethRpcModule].
-    pub fn to_selection(&self) -> HashSet<RethRpcModule> {
-        self.as_selection().clone()
     }
 
     /// Converts the selection into a [HashSet].
     pub fn into_selection(self) -> HashSet<RethRpcModule> {
         match self {
-            Self::All => Self::all_modules().clone(),
-            Self::Standard => Self::standard_modules().clone(),
+            Self::All => Self::all_modules(),
+            Self::Standard => Self::standard_modules(),
             Self::Selection(s) => s,
         }
     }
@@ -741,10 +728,10 @@ impl RpcModuleSelection {
                 other.len() == RethRpcModule::variant_count()
             }
 
-            // If either side is disabled, shortcut here
+            // If either side is disabled, then the other must be empty
             (Some(some), None) | (None, Some(some)) => some.is_empty(),
 
-            (Some(http), Some(ws)) => http.as_selection() == ws.as_selection(),
+            (Some(http), Some(ws)) => http.to_selection() == ws.to_selection(),
             (None, None) => true,
         }
     }
@@ -1875,24 +1862,24 @@ impl TransportRpcModuleConfig {
         self
     }
 
-    /// Takes the http transport configuration, leaving `None` in its place.
-    pub fn take_http(&mut self) -> Option<RpcModuleSelection> {
-        self.http.take()
+    /// Get a mutable reference to the
+    pub fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+        &mut self.http
     }
 
-    /// Takes the ws transport configuration, leaving `None` in its place.
-    pub fn take_ws(&mut self) -> Option<RpcModuleSelection> {
-        self.ws.take()
+    /// Get a mutable reference to the
+    pub fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+        &mut self.ws
     }
 
-    /// Takes the ipc transport configuration, leaving `None` in its place.
-    pub fn take_ipc(&mut self) -> Option<RpcModuleSelection> {
-        self.ipc.take()
+    /// Get a mutable reference to the
+    pub fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
+        &mut self.ipc
     }
 
-    /// Takes the module configuration, leaving `None` in its place.
-    pub fn take_config(&mut self) -> Option<RpcModuleConfig> {
-        self.config.take()
+    /// Get a mutable reference to the
+    pub fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
+        &mut self.config
     }
 
     /// Returns true if no transports are configured

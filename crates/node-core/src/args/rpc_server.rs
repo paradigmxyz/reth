@@ -329,7 +329,7 @@ impl RethRpcConfig for RpcServerArgs {
         }
 
         if self.is_ipc_enabled() {
-            config = config.with_ipc(RpcModuleSelection::default_ipc_modules().clone());
+            config = config.with_ipc(RpcModuleSelection::default_ipc_modules());
         }
 
         config
@@ -550,7 +550,7 @@ mod tests {
         let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
         assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
-            &config.ws().cloned().unwrap().into_selection(),
+            config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
         );
     }
@@ -569,7 +569,7 @@ mod tests {
         let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
         assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
-            &config.ws().cloned().unwrap().into_selection(),
+            config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
         );
     }
@@ -588,7 +588,7 @@ mod tests {
         let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
         assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
-            &config.ws().cloned().unwrap().into_selection(),
+            config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
         );
     }
