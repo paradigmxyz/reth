@@ -14,8 +14,9 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
+
 revm.workspace = true
-revm-jit.workspace = true
+revm-jit = { workspace = true, features = ["llvm-prefer-dynamic"] }
 
 confy.workspace = true
 libloading = "0.8"
