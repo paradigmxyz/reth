@@ -203,7 +203,7 @@ use std::{
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
@@ -621,29 +621,33 @@ pub enum RpcModuleSelection {
 
 // === impl RpcModuleSelection ===
 
+/// The standard modules to instantiate by default `eth`, `net`, `web3`
+// TODO: replace with LazyLock
+static STANDARD_SELECTION: OnceLock<HashSet<RethRpcModule>> = OnceLock::new();
+
+/// All modules.
+// TODO: replace with LazyLock
+static ALL_SELECTION: OnceLock<HashSet<RethRpcModule>> = OnceLock::new();
+
 impl RpcModuleSelection {
     /// The standard modules to instantiate by default `eth`, `net`, `web3`
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
     /// Returns a selection of [RethRpcModule] with all [RethRpcModule::all_variants].
-    pub fn all_modules() -> HashSet<RethRpcModule> {
-        Self::try_from_selection(RethRpcModule::all_variants().iter().copied())
-            .expect("valid selection")
-            .into_selection()
+    pub fn all_modules() -> &'static HashSet<RethRpcModule> {
+        ALL_SELECTION.get_or_init(|| RethRpcModule::modules().into_iter().collect())
     }
 
     /// Returns the [RpcModuleSelection::STANDARD_MODULES] as a selection.
-    pub fn standard_modules() -> HashSet<RethRpcModule> {
-        Self::try_from_selection(Self::STANDARD_MODULES.iter().copied())
-            .expect("valid selection")
-            .into_selection()
+    pub fn standard_modules() -> &'static HashSet<RethRpcModule> {
+        STANDARD_SELECTION.get_or_init(|| HashSet::from(Self::STANDARD_MODULES))
     }
 
     /// All modules that are available by default on IPC.
     ///
     /// By default all modules are available on IPC.
-    pub fn default_ipc_modules() -> HashSet<RethRpcModule> {
+    pub fn default_ipc_modules() -> &'static HashSet<RethRpcModule> {
         Self::all_modules()
     }
 
@@ -661,10 +665,7 @@ impl RpcModuleSelection {
     /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(
-    ///     config,
-    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
-    /// );
+    /// assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));
     /// ```
     ///
     /// Create a unique selection from the [RethRpcModule] string identifiers
@@ -673,10 +674,7 @@ impl RpcModuleSelection {
     /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin", "eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(
-    ///     config,
-    ///     RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
-    /// );
+    /// assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));
     /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
@@ -706,18 +704,32 @@ impl RpcModuleSelection {
     /// Returns an iterator over all configured [RethRpcModule]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
-            Self::All => Box::new(Self::all_modules().into_iter()),
+            Self::All => Box::new(Self::all_modules().into_iter().copied()),
             Self::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             Self::Selection(s) => Box::new(s.iter().copied()),
         }
     }
 
-    /// Returns the list of configured [RethRpcModule]
-    pub fn into_selection(self) -> HashSet<RethRpcModule> {
+    /// Returns the set of configured [RethRpcModule].
+    pub fn as_selection(&self) -> &HashSet<RethRpcModule> {
         match self {
             Self::All => Self::all_modules(),
+            Self::Standard => Self::standard_modules(),
             Self::Selection(s) => s,
-            Self::Standard => HashSet::from(Self::STANDARD_MODULES),
+        }
+    }
+
+    /// Clones the set of configured [RethRpcModule].
+    pub fn to_selection(&self) -> HashSet<RethRpcModule> {
+        self.as_selection().clone()
+    }
+
+    /// Converts the selection into a [HashSet].
+    pub fn into_selection(self) -> HashSet<RethRpcModule> {
+        match self {
+            Self::All => Self::all_modules().clone(),
+            Self::Standard => Self::standard_modules().clone(),
+            Self::Selection(s) => s,
         }
     }
 
@@ -732,24 +744,39 @@ impl RpcModuleSelection {
             // If either side is disabled, shortcut here
             (Some(some), None) | (None, Some(some)) => some.is_empty(),
 
-            (Some(http), Some(ws)) => {
-                let http = http.clone().iter_selection().collect::<HashSet<_>>();
-                let ws = ws.clone().iter_selection().collect::<HashSet<_>>();
-
-                http == ws
-            }
+            (Some(http), Some(ws)) => http.as_selection() == ws.as_selection(),
             (None, None) => true,
         }
     }
 }
 
-impl<I, T> From<I> for RpcModuleSelection
-where
-    I: IntoIterator<Item = T>,
-    T: Into<RethRpcModule>,
-{
-    fn from(value: I) -> Self {
-        Self::Selection(value.into_iter().map(Into::into).collect())
+impl From<&HashSet<RethRpcModule>> for RpcModuleSelection {
+    fn from(s: &HashSet<RethRpcModule>) -> Self {
+        Self::from(s.clone())
+    }
+}
+
+impl From<HashSet<RethRpcModule>> for RpcModuleSelection {
+    fn from(s: HashSet<RethRpcModule>) -> Self {
+        Self::Selection(s)
+    }
+}
+
+impl From<&[RethRpcModule]> for RpcModuleSelection {
+    fn from(s: &[RethRpcModule]) -> Self {
+        Self::Selection(s.iter().copied().collect())
+    }
+}
+
+impl From<Vec<RethRpcModule>> for RpcModuleSelection {
+    fn from(s: Vec<RethRpcModule>) -> Self {
+        Self::Selection(s.into_iter().collect())
+    }
+}
+
+impl<const N: usize> From<[RethRpcModule; N]> for RpcModuleSelection {
+    fn from(s: [RethRpcModule; N]) -> Self {
+        Self::Selection(s.iter().copied().collect())
     }
 }
 
@@ -1900,9 +1927,9 @@ impl TransportRpcModuleConfig {
             Ok(())
         } else {
             let http_modules =
-                self.http.clone().map(RpcModuleSelection::into_selection).unwrap_or_default();
+                self.http.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
             let ws_modules =
-                self.ws.clone().map(RpcModuleSelection::into_selection).unwrap_or_default();
+                self.ws.as_ref().map(RpcModuleSelection::to_selection).unwrap_or_default();
             let http_not_ws = http_modules.difference(&ws_modules).copied().collect();
             let ws_not_http = ws_modules.difference(&http_modules).copied().collect();
             Err(WsHttpSamePortError::ConflictingModules {
@@ -2271,12 +2298,15 @@ mod tests {
         let selection = "eth,admin,debug,eth-call-bundle".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(
             selection,
-            RpcModuleSelection::Selection(vec![
-                RethRpcModule::Eth,
-                RethRpcModule::Admin,
-                RethRpcModule::Debug,
-                RethRpcModule::EthCallBundle,
-            ])
+            RpcModuleSelection::Selection(
+                [
+                    RethRpcModule::Eth,
+                    RethRpcModule::Admin,
+                    RethRpcModule::Debug,
+                    RethRpcModule::EthCallBundle,
+                ]
+                .into()
+            )
         );
     }
 
@@ -2289,7 +2319,7 @@ mod tests {
     #[test]
     fn parse_rpc_module_selection_none() {
         let selection = "none".parse::<RpcModuleSelection>().unwrap();
-        assert_eq!(selection, Selection(vec![]));
+        assert_eq!(selection, Selection(Default::default()));
     }
 
     #[test]
@@ -2297,11 +2327,9 @@ mod tests {
         let selection = "eth,admin,eth,net".parse::<RpcModuleSelection>().unwrap();
         assert_eq!(
             selection,
-            RpcModuleSelection::Selection(vec![
-                RethRpcModule::Eth,
-                RethRpcModule::Admin,
-                RethRpcModule::Net,
-            ])
+            RpcModuleSelection::Selection(
+                [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Net,].into()
+            )
         );
     }
 
@@ -2316,21 +2344,19 @@ mod tests {
             Some(&RpcModuleSelection::Standard),
         ));
         assert!(RpcModuleSelection::are_identical(
-            dbg!(Some(&RpcModuleSelection::Selection(
-                RpcModuleSelection::Standard.into_selection()
-            ))),
+            dbg!(Some(&RpcModuleSelection::Selection(RpcModuleSelection::Standard.to_selection()))),
             dbg!(Some(&RpcModuleSelection::Standard)),
         ));
         assert!(RpcModuleSelection::are_identical(
-            Some(&RpcModuleSelection::Selection(vec![RethRpcModule::Eth])),
-            Some(&RpcModuleSelection::Selection(vec![RethRpcModule::Eth])),
+            Some(&RpcModuleSelection::Selection([RethRpcModule::Eth].into())),
+            Some(&RpcModuleSelection::Selection([RethRpcModule::Eth].into())),
         ));
         assert!(RpcModuleSelection::are_identical(
             None,
-            Some(&RpcModuleSelection::Selection(vec![])),
+            Some(&RpcModuleSelection::Selection(Default::default())),
         ));
         assert!(RpcModuleSelection::are_identical(
-            Some(&RpcModuleSelection::Selection(vec![])),
+            Some(&RpcModuleSelection::Selection(Default::default())),
             None,
         ));
         assert!(RpcModuleSelection::are_identical(None, None));
@@ -2363,8 +2389,8 @@ mod tests {
 
     #[test]
     fn test_default_selection() {
-        let selection = RpcModuleSelection::Standard.into_selection();
-        assert_eq!(selection, vec![RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3,])
+        let selection = RpcModuleSelection::Standard.to_selection();
+        assert_eq!(selection, [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3].into())
     }
 
     #[test]
@@ -2373,7 +2399,7 @@ mod tests {
         let config = RpcModuleSelection::try_from_selection(selection).unwrap();
         assert_eq!(
             config,
-            RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+            RpcModuleSelection::Selection([RethRpcModule::Eth, RethRpcModule::Admin].into())
         );
     }
 
@@ -2384,10 +2410,9 @@ mod tests {
         assert_eq!(
             config,
             TransportRpcModuleConfig {
-                http: Some(RpcModuleSelection::Selection(vec![
-                    RethRpcModule::Eth,
-                    RethRpcModule::Admin
-                ])),
+                http: Some(RpcModuleSelection::Selection(
+                    [RethRpcModule::Eth, RethRpcModule::Admin].into()
+                )),
                 ws: None,
                 ipc: None,
                 config: None,
@@ -2401,7 +2426,7 @@ mod tests {
         assert_eq!(
             config,
             TransportRpcModuleConfig {
-                http: Some(RpcModuleSelection::Selection(vec![])),
+                http: Some(RpcModuleSelection::Selection(Default::default())),
                 ws: None,
                 ipc: None,
                 config: None,

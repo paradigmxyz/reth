@@ -329,7 +329,7 @@ impl RethRpcConfig for RpcServerArgs {
         }
 
         if self.is_ipc_enabled() {
-            config = config.with_ipc(RpcModuleSelection::default_ipc_modules());
+            config = config.with_ipc(RpcModuleSelection::default_ipc_modules().clone());
         }
 
         config
@@ -548,9 +548,9 @@ mod tests {
         .args;
         let config = args.transport_rpc_module_config();
         let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(config.http().cloned().unwrap().into_selection_set(), expected);
         assert_eq!(
-            config.ws().cloned().unwrap().into_selection(),
+            config.ws().cloned().unwrap().into_selection_set(),
             RpcModuleSelection::standard_modules()
         );
     }
@@ -567,9 +567,9 @@ mod tests {
         .args;
         let config = args.transport_rpc_module_config();
         let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(config.http().cloned().unwrap().into_selection_set(), expected);
         assert_eq!(
-            config.ws().cloned().unwrap().into_selection(),
+            config.ws().cloned().unwrap().into_selection_set(),
             RpcModuleSelection::standard_modules()
         );
     }
@@ -586,9 +586,9 @@ mod tests {
         .args;
         let config = args.transport_rpc_module_config();
         let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(config.http().cloned().unwrap().into_selection_set(), expected);
         assert_eq!(
-            config.ws().cloned().unwrap().into_selection(),
+            config.ws().cloned().unwrap().into_selection_set(),
             RpcModuleSelection::standard_modules()
         );
     }
