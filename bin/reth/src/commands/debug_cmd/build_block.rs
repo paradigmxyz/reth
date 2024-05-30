@@ -39,8 +39,6 @@ use reth_provider::{
     BundleStateWithReceipts, ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
-#[cfg(feature = "optimism")]
-use reth_rpc_types::engine::OptimismPayloadAttributes;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -257,7 +255,7 @@ impl Command {
             #[cfg(feature = "optimism")]
             reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
                 best_block.hash(),
-                OptimismPayloadAttributes {
+                reth_rpc_types::engine::OptimismPayloadAttributes {
                     payload_attributes: payload_attrs,
                     transactions: None,
                     no_tx_pool: None,

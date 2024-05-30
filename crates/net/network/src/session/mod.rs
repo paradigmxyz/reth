@@ -172,12 +172,12 @@ impl SessionManager {
     }
 
     /// Returns the current status of the session.
-    pub fn status(&self) -> Status {
+    pub const fn status(&self) -> Status {
         self.status
     }
 
     /// Returns the secret key used for authenticating sessions.
-    pub fn secret_key(&self) -> SecretKey {
+    pub const fn secret_key(&self) -> SecretKey {
         self.secret_key
     }
 
@@ -753,7 +753,7 @@ pub enum PendingSessionHandshakeError {
 
 impl PendingSessionHandshakeError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
-    pub fn as_disconnected(&self) -> Option<DisconnectReason> {
+    pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
         match self {
             Self::Eth(eth_err) => eth_err.as_disconnected(),
             _ => None,

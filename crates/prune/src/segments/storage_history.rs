@@ -25,7 +25,7 @@ pub struct StorageHistory {
 }
 
 impl StorageHistory {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }

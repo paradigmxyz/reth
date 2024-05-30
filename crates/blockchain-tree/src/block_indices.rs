@@ -58,12 +58,12 @@ impl BlockIndices {
     }
 
     /// Return fork to child indices
-    pub fn fork_to_child(&self) -> &HashMap<BlockHash, LinkedHashSet<BlockHash>> {
+    pub const fn fork_to_child(&self) -> &HashMap<BlockHash, LinkedHashSet<BlockHash>> {
         &self.fork_to_child
     }
 
     /// Return block to chain id
-    pub fn blocks_to_chain(&self) -> &HashMap<BlockHash, BlockchainId> {
+    pub const fn blocks_to_chain(&self) -> &HashMap<BlockHash, BlockchainId> {
         &self.blocks_to_chain
     }
 
@@ -94,7 +94,7 @@ impl BlockIndices {
     }
 
     /// Last finalized block
-    pub fn last_finalized_block(&self) -> BlockNumber {
+    pub const fn last_finalized_block(&self) -> BlockNumber {
         self.last_finalized_block
     }
 
@@ -366,7 +366,7 @@ impl BlockIndices {
 
     /// Canonical chain needed for execution of EVM. It should contain last 256 block hashes.
     #[inline]
-    pub(crate) fn canonical_chain(&self) -> &CanonicalChain {
+    pub(crate) const fn canonical_chain(&self) -> &CanonicalChain {
         &self.canonical_chain
     }
 }

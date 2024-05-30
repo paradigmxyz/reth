@@ -34,7 +34,7 @@ pub struct UnauthedEthStream<S> {
 
 impl<S> UnauthedEthStream<S> {
     /// Create a new `UnauthedEthStream` from a type `S` which implements `Stream` and `Sink`.
-    pub fn new(inner: S) -> Self {
+    pub const fn new(inner: S) -> Self {
         Self { inner }
     }
 
@@ -197,19 +197,19 @@ impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
     #[inline]
-    pub fn new(version: EthVersion, inner: S) -> Self {
+    pub const fn new(version: EthVersion, inner: S) -> Self {
         Self { version, inner }
     }
 
     /// Returns the eth version.
     #[inline]
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns the underlying stream.
     #[inline]
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 

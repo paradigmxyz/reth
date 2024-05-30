@@ -44,16 +44,16 @@ macro_rules! impl_iai_callgrind_inner {
                 }
 
                 #[allow(dead_code)]
-                pub fn $seqread() {}
+                pub const fn $seqread() {}
 
                 #[allow(dead_code)]
-                pub fn $randread() {}
+                pub const fn $randread() {}
 
                 #[allow(dead_code)]
-                pub fn $seqwrite() {}
+                pub const fn $seqwrite() {}
 
                 #[allow(dead_code)]
-                pub fn $randwrite() {}
+                pub const fn $randwrite() {}
 
 
                 library_benchmark_group!(
