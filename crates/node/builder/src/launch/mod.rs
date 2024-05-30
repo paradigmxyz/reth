@@ -479,10 +479,8 @@ where
                 rpc_consensus_client.run::<T::Engine>().await
             });
         }
-        if let (Some(rpc_http_url), Some(rpc_ws_url)) =
-            (&ctx.node_config().debug.rpc_consensus_http, &ctx.node_config().debug.rpc_consensus_ws)
-        {
-            let block_provider = RpcBlockProvider::new(rpc_http_url.clone(), rpc_ws_url.clone());
+        if let Some(rpc_ws_url) = &ctx.node_config().debug.rpc_consensus_ws {
+            let block_provider = RpcBlockProvider::new(rpc_ws_url.clone());
             let rpc_consensus_client = DebugConsensusClient::new(
                 rpc_server_handles.auth.clone(),
                 Arc::new(block_provider),

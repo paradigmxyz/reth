@@ -35,29 +35,16 @@ pub struct DebugArgs {
         long = "debug.etherscan",
         help_heading = "Debug",
         conflicts_with = "tip",
-        conflicts_with = "rpc_consensus_http"
+        conflicts_with = "rpc_consensus_ws"
     )]
     pub etherscan: Option<Option<String>>,
 
-    /// Runs a fake consensus client using blocks from an RPC endpoint. HTTP endpoint for getting
-    /// past blocks.
-    #[arg(
-        long = "debug.rpc-consensus-http",
-        help_heading = "Debug",
-        conflicts_with = "tip",
-        conflicts_with = "etherscan",
-        requires = "rpc_consensus_ws"
-    )]
-    pub rpc_consensus_http: Option<String>,
-
-    /// Runs a fake consensus client using blocks from an RPC endpoint. WS endpoint for getting new
-    /// blocks.
+    /// Runs a fake consensus client using blocks fetched from an RPC WebSocket endpoint.
     #[arg(
         long = "debug.rpc-consensus-ws",
         help_heading = "Debug",
         conflicts_with = "tip",
-        conflicts_with = "etherscan",
-        requires = "rpc_consensus_http"
+        conflicts_with = "etherscan"
     )]
     pub rpc_consensus_ws: Option<String>,
 
