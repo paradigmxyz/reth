@@ -189,6 +189,8 @@ where
     /// Pending forkchoice update.
     /// It is recorded if we cannot process the forkchoice update because
     /// the hook with database read-write access is active.
+    /// This is a temporary solution to always process missed FCUs.
+    #[allow(clippy::type_complexity)]
     pending_forkchoice_update: Option<(
         ForkchoiceState,
         Option<EngineT::PayloadAttributes>,
