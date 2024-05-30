@@ -14,8 +14,8 @@ use clap::{Parser, Subcommand};
 use discv5::ListenConfig;
 use reth_config::Config;
 use reth_db::create_db;
-use reth_interfaces::p2p::bodies::client::BodiesClient;
 use reth_network::NetworkConfigBuilder;
+use reth_network_p2p::bodies::client::BodiesClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec};
 use reth_provider::ProviderFactory;
 use std::{

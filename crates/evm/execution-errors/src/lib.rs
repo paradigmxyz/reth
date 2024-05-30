@@ -11,6 +11,7 @@
 use reth_consensus::ConsensusError;
 use reth_primitives::{revm_primitives::EVMError, BlockNumHash, PruneSegmentError, B256};
 use reth_storage_errors::provider::ProviderError;
+use std::fmt::Display;
 use thiserror::Error;
 
 pub mod trie;
@@ -66,7 +67,9 @@ pub enum BlockValidationError {
         /// The beacon block root
         parent_beacon_block_root: B256,
     },
-    /// EVM error during beacon root contract call
+    /// EVM error during [EIP-4788] beacon root contract call.
+    ///
+    /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
     #[error("failed to apply beacon root contract call at {parent_beacon_block_root}: {message}")]
     BeaconRootContractCall {
         /// The beacon block root
@@ -74,6 +77,24 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
+    /// Provider error during the [EIP-2935] block hash account loading.
+    ///
+    /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
+    #[error(transparent)]
+    BlockHashAccountLoadingFailed(#[from] ProviderError),
+    /// EVM error during withdrawal requests contract call [EIP-7002]
+    ///
+    /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002
+    #[error("failed to apply withdrawal requests contract call: {message}")]
+    WithdrawalRequestsContractCall {
+        /// The error message.
+        message: String,
+    },
+    /// Error when decoding deposit requests from receipts [EIP-6110]
+    ///
+    /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
+    #[error("failed to decode deposit requests from receipts: {0}")]
+    DepositRequestDecode(String),
 }
 
 /// BlockExecutor Errors
@@ -118,7 +139,7 @@ pub enum BlockExecutionError {
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
-    /// Optimism Block Executor Errors
+    /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -132,6 +153,11 @@ impl BlockExecutionError {
         Self::Other(Box::new(error))
     }
 
+    /// Create a new [BlockExecutionError::Other] from a given message.
+    pub fn msg(msg: impl Display) -> Self {
+        Self::Other(msg.to_string().into())
+    }
+
     /// Returns the inner `BlockValidationError` if the error is a validation error.
     pub const fn as_validation(&self) -> Option<&BlockValidationError> {
         match self {
@@ -143,12 +169,12 @@ impl BlockExecutionError {
     /// Returns `true` if the error is fatal.
     ///
     /// This represents an unrecoverable database related error.
-    pub fn is_fatal(&self) -> bool {
+    pub const fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
     }
 
     /// Returns `true` if the error is a state root error.
-    pub fn is_state_root_error(&self) -> bool {
+    pub const fn is_state_root_error(&self) -> bool {
         matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
     }
 }

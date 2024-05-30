@@ -125,7 +125,7 @@ where
     }
 
     /// Get the remote id
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id
     }
 }

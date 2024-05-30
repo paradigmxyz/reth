@@ -52,7 +52,7 @@ pub enum DatabaseEnvKind {
 
 impl DatabaseEnvKind {
     /// Returns `true` if the environment is read-write.
-    pub fn is_rw(&self) -> bool {
+    pub const fn is_rw(&self) -> bool {
         matches!(self, Self::RW)
     }
 }
@@ -91,7 +91,7 @@ pub struct DatabaseArguments {
 
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub fn new(client_version: ClientVersion) -> Self {
+    pub const fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
             log_level: None,
@@ -101,13 +101,13 @@ impl DatabaseArguments {
     }
 
     /// Set the log level.
-    pub fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+    pub const fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
         self.log_level = log_level;
         self
     }
 
     /// Set the maximum duration of a read transaction.
-    pub fn with_max_read_transaction_duration(
+    pub const fn with_max_read_transaction_duration(
         mut self,
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
@@ -116,13 +116,13 @@ impl DatabaseArguments {
     }
 
     /// Set the mdbx exclusive flag.
-    pub fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
+    pub const fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
         self.exclusive = exclusive;
         self
     }
 
     /// Returns the client version if any.
-    pub fn client_version(&self) -> &ClientVersion {
+    pub const fn client_version(&self) -> &ClientVersion {
         &self.client_version
     }
 }
@@ -160,7 +160,7 @@ impl Database for DatabaseEnv {
 impl DatabaseMetrics for DatabaseEnv {
     fn report_metrics(&self) {
         for (name, value, labels) in self.gauge_metrics() {
-            gauge!(name, value, labels);
+            gauge!(name, labels).set(value);
         }
     }
 

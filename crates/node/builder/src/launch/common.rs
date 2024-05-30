@@ -18,8 +18,8 @@ use reth_prune::PrunerBuilder;
 use reth_rpc_layer::JwtSecret;
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{error, info, warn};
-use std::{cmp::max, sync::Arc, thread::available_parallelism};
+use reth_tracing::tracing::{debug, error, info, warn};
+use std::{sync::Arc, thread::available_parallelism};
 use tokio::sync::mpsc::Receiver;
 
 /// Reusable setup for launching a node.
@@ -40,7 +40,7 @@ impl LaunchContext {
     }
 
     /// Attaches a database to the launch context.
-    pub fn with<DB>(self, database: DB) -> LaunchContextWith<DB> {
+    pub const fn with<DB>(self, database: DB) -> LaunchContextWith<DB> {
         LaunchContextWith { inner: self, attachment: database }
     }
 
@@ -112,15 +112,24 @@ impl LaunchContext {
     pub fn configure_globals(&self) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        let _ = fdlimit::raise_fd_limit();
+        match fdlimit::raise_fd_limit() {
+            Ok(fdlimit::Outcome::LimitRaised { from, to }) => {
+                debug!(from, to, "Raised file descriptor limit");
+            }
+            Ok(fdlimit::Outcome::Unsupported) => {}
+            Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
+        }
 
         // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
-        let _ = ThreadPoolBuilder::new()
-            .num_threads(
-                available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
-            )
+        let num_threads =
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(2));
+        if let Err(err) = ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("reth-rayon-{i}"))
             .build_global()
-            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
+        {
+            error!(%err, "Failed to build global thread pool")
+        }
     }
 }
 
@@ -147,12 +156,12 @@ impl<T> LaunchContextWith<T> {
     }
 
     /// Returns the data directory.
-    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.inner.data_dir
     }
 
     /// Returns the task executor.
-    pub fn task_executor(&self) -> &TaskExecutor {
+    pub const fn task_executor(&self) -> &TaskExecutor {
         &self.inner.task_executor
     }
 
@@ -258,7 +267,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Returns true if the node is configured as --dev
-    pub fn is_dev(&self) -> bool {
+    pub const fn is_dev(&self) -> bool {
         self.node_config().dev.dev
     }
 
@@ -348,7 +357,7 @@ where
     }
 
     /// Returns the configured ProviderFactory.
-    pub fn provider_factory(&self) -> &ProviderFactory<DB> {
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
         self.right()
     }
 

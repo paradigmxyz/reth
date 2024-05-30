@@ -188,7 +188,7 @@ pub(crate) struct PruneOutputCheckpoint {
 
 impl PruneOutputCheckpoint {
     /// Converts [PruneOutputCheckpoint] to [PruneCheckpoint] with the provided [PruneMode]
-    pub(crate) fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
+    pub(crate) const fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
         PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
     }
 }

@@ -24,7 +24,7 @@ where
 {
     /// Construct a [PayloadOrAttributes] from an [ExecutionPayload] and optional parent beacon
     /// block root.
-    pub fn from_execution_payload(
+    pub const fn from_execution_payload(
         payload: &'a ExecutionPayload,
         parent_beacon_block_root: Option<B256>,
     ) -> Self {
@@ -56,7 +56,7 @@ where
     }
 
     /// Return a [MessageValidationKind] for the payload or attributes.
-    pub fn message_validation_kind(&self) -> MessageValidationKind {
+    pub const fn message_validation_kind(&self) -> MessageValidationKind {
         match self {
             Self::ExecutionPayload { .. } => MessageValidationKind::Payload,
             Self::PayloadAttributes(_) => MessageValidationKind::PayloadAttributes,

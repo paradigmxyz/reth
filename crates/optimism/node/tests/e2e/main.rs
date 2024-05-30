@@ -4,4 +4,4 @@ mod p2p;
 #[cfg(feature = "optimism")]
 mod utils;
 
-fn main() {}
+const fn main() {}

@@ -30,15 +30,15 @@ pub(crate) fn zip_blocks<'a>(
         .collect()
 }
 
-pub(crate) fn create_raw_bodies<'a>(
-    headers: impl Iterator<Item = &'a SealedHeader>,
+pub(crate) fn create_raw_bodies(
+    headers: impl IntoIterator<Item = SealedHeader>,
     bodies: &mut HashMap<B256, BlockBody>,
 ) -> Vec<Block> {
     headers
         .into_iter()
         .map(|header| {
             let body = bodies.remove(&header.hash()).expect("body exists");
-            body.create_block(header.as_ref().clone())
+            body.create_block(header.unseal())
         })
         .collect()
 }

@@ -22,7 +22,7 @@ pub struct EngineSkipFcu<S> {
 
 impl<S> EngineSkipFcu<S> {
     /// Creates new [EngineSkipFcu] stream wrapper.
-    pub fn new(stream: S, threshold: usize) -> Self {
+    pub const fn new(stream: S, threshold: usize) -> Self {
         Self {
             stream,
             threshold,
