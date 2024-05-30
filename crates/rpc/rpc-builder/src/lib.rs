@@ -162,7 +162,6 @@ use crate::{
 use constants::*;
 use error::{RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
-pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     core::RegisterMethodError,
     server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, Server, ServerHandle},
@@ -171,9 +170,6 @@ use jsonrpsee::{
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{
-    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
-};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
@@ -207,9 +203,14 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
-pub use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
+
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{
+    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
+};
+pub use tower::layer::util::{Identity, Stack};
 
 // re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
