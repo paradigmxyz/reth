@@ -65,7 +65,7 @@ impl StageId {
     ];
 
     /// Return stage id formatted as string.
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             #[allow(deprecated)]
             Self::StaticFile => "StaticFile",
@@ -86,17 +86,17 @@ impl StageId {
     }
 
     /// Returns true if it's a downloading stage [StageId::Headers] or [StageId::Bodies]
-    pub fn is_downloading_stage(&self) -> bool {
+    pub const fn is_downloading_stage(&self) -> bool {
         matches!(self, Self::Headers | Self::Bodies)
     }
 
     /// Returns `true` if it's [TransactionLookup](StageId::TransactionLookup) stage.
-    pub fn is_tx_lookup(&self) -> bool {
+    pub const fn is_tx_lookup(&self) -> bool {
         matches!(self, Self::TransactionLookup)
     }
 
     /// Returns true indicating if it's the finish stage [StageId::Finish]
-    pub fn is_finish(&self) -> bool {
+    pub const fn is_finish(&self) -> bool {
         matches!(self, Self::Finish)
     }
 }

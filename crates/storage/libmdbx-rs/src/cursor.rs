@@ -55,7 +55,7 @@ where
     ///
     /// The caller **must** ensure that the pointer is not used after the
     /// lifetime of the cursor.
-    pub fn cursor(&self) -> *mut ffi::MDBX_cursor {
+    pub const fn cursor(&self) -> *mut ffi::MDBX_cursor {
         self.cursor
     }
 
@@ -491,7 +491,7 @@ where
     }
 }
 
-unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
+const unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDBX_val {
     match slice {
         Some(slice) => {
             ffi::MDBX_val { iov_len: slice.len(), iov_base: slice.as_ptr() as *mut c_void }

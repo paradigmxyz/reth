@@ -77,6 +77,7 @@ impl Signature {
 
     /// Output the `v` of the signature depends on chain_id
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
         if let Some(chain_id) = chain_id {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
@@ -191,7 +192,7 @@ impl Signature {
 
     /// Calculates a heuristic for the in-memory size of the [Signature].
     #[inline]
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         std::mem::size_of::<Self>()
     }
 }
@@ -199,7 +200,7 @@ impl Signature {
 /// Outputs (odd_y_parity, chain_id) from the `v` value.
 /// This doesn't check validity of the `v` value for optimism.
 #[inline]
-pub fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
+pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {
     if v < 35 {
         // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
         if v != 27 && v != 28 {

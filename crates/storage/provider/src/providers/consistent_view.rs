@@ -34,7 +34,7 @@ where
     Provider: DatabaseProviderFactory<DB>,
 {
     /// Creates new consistent database view.
-    pub fn new(provider: Provider, tip: Option<B256>) -> Self {
+    pub const fn new(provider: Provider, tip: Option<B256>) -> Self {
         Self { database: PhantomData, provider, tip }
     }
 

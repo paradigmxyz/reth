@@ -119,7 +119,7 @@ where
     }
 
     /// Returns the configuration of the gas price oracle.
-    pub fn config(&self) -> &GasPriceOracleConfig {
+    pub const fn config(&self) -> &GasPriceOracleConfig {
         &self.oracle_config
     }
 

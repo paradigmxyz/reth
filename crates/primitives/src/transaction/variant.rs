@@ -24,7 +24,7 @@ pub enum TransactionSignedVariant {
 
 impl TransactionSignedVariant {
     /// Returns the raw transaction object
-    pub fn as_raw(&self) -> &Transaction {
+    pub const fn as_raw(&self) -> &Transaction {
         match self {
             Self::SignedNoHash(tx) => &tx.transaction,
             Self::Signed(tx) => &tx.transaction,
@@ -54,7 +54,7 @@ impl TransactionSignedVariant {
 
     /// Returns [TransactionSigned] type
     /// else None
-    pub fn as_signed(&self) -> Option<&TransactionSigned> {
+    pub const fn as_signed(&self) -> Option<&TransactionSigned> {
         match self {
             Self::Signed(tx) => Some(tx),
             _ => None,
@@ -63,7 +63,7 @@ impl TransactionSignedVariant {
 
     /// Returns `TransactionSignedEcRecovered` type
     /// else None
-    pub fn as_signed_ec_recovered(&self) -> Option<&TransactionSignedEcRecovered> {
+    pub const fn as_signed_ec_recovered(&self) -> Option<&TransactionSignedEcRecovered> {
         match self {
             Self::SignedEcRecovered(tx) => Some(tx),
             _ => None,
@@ -71,17 +71,17 @@ impl TransactionSignedVariant {
     }
 
     /// Returns true if the transaction is of [TransactionSigned] variant
-    pub fn is_signed(&self) -> bool {
+    pub const fn is_signed(&self) -> bool {
         matches!(self, Self::Signed(_))
     }
 
     /// Returns true if the transaction is of [TransactionSignedNoHash] variant
-    pub fn is_signed_no_hash(&self) -> bool {
+    pub const fn is_signed_no_hash(&self) -> bool {
         matches!(self, Self::SignedNoHash(_))
     }
 
     /// Returns true if the transaction is of [TransactionSignedEcRecovered] variant
-    pub fn is_signed_ec_recovered(&self) -> bool {
+    pub const fn is_signed_ec_recovered(&self) -> bool {
         matches!(self, Self::SignedEcRecovered(_))
     }
 

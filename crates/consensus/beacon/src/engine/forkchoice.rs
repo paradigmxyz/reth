@@ -76,12 +76,12 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns the last received ForkchoiceState to which we need to sync.
-    pub(crate) fn sync_target_state(&self) -> Option<ForkchoiceState> {
+    pub(crate) const fn sync_target_state(&self) -> Option<ForkchoiceState> {
         self.last_syncing
     }
 
     /// Returns true if no forkchoice state has been received yet.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.latest.is_none()
     }
 }
@@ -106,20 +106,20 @@ pub enum ForkchoiceStatus {
 }
 
 impl ForkchoiceStatus {
-    pub(crate) fn is_valid(&self) -> bool {
+    pub(crate) const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid)
     }
 
-    pub(crate) fn is_invalid(&self) -> bool {
+    pub(crate) const fn is_invalid(&self) -> bool {
         matches!(self, Self::Invalid)
     }
 
-    pub(crate) fn is_syncing(&self) -> bool {
+    pub(crate) const fn is_syncing(&self) -> bool {
         matches!(self, Self::Syncing)
     }
 
     /// Converts the general purpose [PayloadStatusEnum] into a [ForkchoiceStatus].
-    pub(crate) fn from_payload_status(status: &PayloadStatusEnum) -> Self {
+    pub(crate) const fn from_payload_status(status: &PayloadStatusEnum) -> Self {
         match status {
             PayloadStatusEnum::Valid | PayloadStatusEnum::Accepted => {
                 // `Accepted` is only returned on `newPayload`. It would be a valid state here.
@@ -160,7 +160,7 @@ impl ForkchoiceStateHash {
     }
 
     /// Returns true if this is the head hash of the [ForkchoiceState]
-    pub(crate) fn is_head(&self) -> bool {
+    pub(crate) const fn is_head(&self) -> bool {
         matches!(self, Self::Head(_))
     }
 }

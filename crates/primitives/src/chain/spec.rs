@@ -549,13 +549,13 @@ impl Default for ChainSpec {
 
 impl ChainSpec {
     /// Get information about the chain itself
-    pub fn chain(&self) -> Chain {
+    pub const fn chain(&self) -> Chain {
         self.chain
     }
 
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
-    pub fn is_eth(&self) -> bool {
+    pub const fn is_eth(&self) -> bool {
         matches!(
             self.chain.kind(),
             ChainKind::Named(
@@ -573,7 +573,7 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Optimism configuration.
     #[inline]
-    pub fn is_optimism(&self) -> bool {
+    pub const fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
     }
 
@@ -586,7 +586,7 @@ impl ChainSpec {
     /// Get the genesis block specification.
     ///
     /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
-    pub fn genesis(&self) -> &Genesis {
+    pub const fn genesis(&self) -> &Genesis {
         &self.genesis
     }
 
@@ -706,7 +706,7 @@ impl ChainSpec {
     }
 
     /// Get the timestamp of the genesis block.
-    pub fn genesis_timestamp(&self) -> u64 {
+    pub const fn genesis_timestamp(&self) -> u64 {
         self.genesis.timestamp
     }
 
@@ -735,7 +735,7 @@ impl ChainSpec {
     }
 
     /// Returns the forks in this specification and their activation conditions.
-    pub fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
+    pub const fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
         &self.hardforks
     }
 
@@ -1121,7 +1121,7 @@ impl ChainSpecBuilder {
     }
 
     /// Set the chain ID
-    pub fn chain(mut self, chain: Chain) -> Self {
+    pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
         self
     }
@@ -1346,7 +1346,7 @@ pub enum ForkCondition {
 
 impl ForkCondition {
     /// Returns true if the fork condition is timestamp based.
-    pub fn is_timestamp(&self) -> bool {
+    pub const fn is_timestamp(&self) -> bool {
         matches!(self, Self::Timestamp(_))
     }
 
@@ -1355,7 +1355,7 @@ impl ForkCondition {
     /// For TTD conditions, this will only return true if the activation block is already known.
     ///
     /// For timestamp conditions, this will always return false.
-    pub fn active_at_block(&self, current_block: BlockNumber) -> bool {
+    pub const fn active_at_block(&self, current_block: BlockNumber) -> bool {
         matches!(self, Self::Block(block)
         | Self::TTD { fork_block: Some(block), .. } if current_block >= *block)
     }
@@ -1363,7 +1363,7 @@ impl ForkCondition {
     /// Checks if the given block is the first block that satisfies the fork condition.
     ///
     /// This will return false for any condition that is not block based.
-    pub fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
+    pub const fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
         matches!(self, Self::Block(block) if current_block == *block)
     }
 
@@ -1384,7 +1384,7 @@ impl ForkCondition {
     /// Checks whether the fork condition is satisfied at the given timestamp.
     ///
     /// This will return false for any condition that is not timestamp-based.
-    pub fn active_at_timestamp(&self, timestamp: u64) -> bool {
+    pub const fn active_at_timestamp(&self, timestamp: u64) -> bool {
         matches!(self, Self::Timestamp(time) if timestamp >= *time)
     }
 
@@ -1404,7 +1404,7 @@ impl ForkCondition {
     /// Get the total terminal difficulty for this fork condition.
     ///
     /// Returns `None` for fork conditions that are not TTD based.
-    pub fn ttd(&self) -> Option<U256> {
+    pub const fn ttd(&self) -> Option<U256> {
         match self {
             Self::TTD { total_difficulty, .. } => Some(*total_difficulty),
             _ => None,
@@ -1412,7 +1412,7 @@ impl ForkCondition {
     }
 
     /// Returns the timestamp of the fork condition, if it is timestamp based.
-    pub fn as_timestamp(&self) -> Option<u64> {
+    pub const fn as_timestamp(&self) -> Option<u64> {
         match self {
             Self::Timestamp(timestamp) => Some(*timestamp),
             _ => None,
@@ -1601,7 +1601,7 @@ pub struct DepositContract {
 }
 
 impl DepositContract {
-    fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
+    const fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
         Self { address, block, topic }
     }
 }

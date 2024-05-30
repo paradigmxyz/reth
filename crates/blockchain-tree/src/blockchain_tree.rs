@@ -227,7 +227,7 @@ where
 
     /// Expose internal indices of the BlockchainTree.
     #[inline]
-    pub fn block_indices(&self) -> &BlockIndices {
+    pub const fn block_indices(&self) -> &BlockIndices {
         self.state.block_indices()
     }
 
@@ -1463,7 +1463,7 @@ mod tests {
     }
 
     impl TreeTester {
-        fn with_chain_num(mut self, chain_num: usize) -> Self {
+        const fn with_chain_num(mut self, chain_num: usize) -> Self {
             self.chain_num = Some(chain_num);
             self
         }

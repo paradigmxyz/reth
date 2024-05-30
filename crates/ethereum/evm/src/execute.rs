@@ -20,8 +20,8 @@ use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     state_change::{
-        apply_beacon_root_contract_call, apply_withdrawal_requests_contract_call,
-        post_block_balance_increments,
+        apply_beacon_root_contract_call, apply_blockhashes_update,
+        apply_withdrawal_requests_contract_call, post_block_balance_increments,
     },
     Evm, State,
 };
@@ -147,6 +147,13 @@ where
             block.number,
             block.parent_beacon_block_root,
             &mut evm,
+        )?;
+        apply_blockhashes_update(
+            evm.db_mut(),
+            &self.chain_spec,
+            block.timestamp,
+            block.number,
+            block.parent_hash,
         )?;
 
         // execute transactions
@@ -440,15 +447,17 @@ where
 mod tests {
     use super::*;
     use alloy_eips::{
+        eip2935::HISTORY_STORAGE_ADDRESS,
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
     use reth_primitives::{
-        constants::ETH_TO_WEI, keccak256, public_key_to_address, Account, Block, ChainSpecBuilder,
-        ForkCondition, Transaction, TxKind, TxLegacy, B256,
+        constants::ETH_TO_WEI, keccak256, public_key_to_address, trie::EMPTY_ROOT_HASH, Account,
+        Block, ChainSpecBuilder, ForkCondition, Transaction, TxKind, TxLegacy, B256,
     };
     use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
+        database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,
+        test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use revm_primitives::{b256, fixed_bytes, Bytes};
@@ -612,8 +621,8 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         provider
-            .executor(StateProviderDatabase::new(&db))
-            .execute(
+            .batch_executor(StateProviderDatabase::new(&db), PruneModes::none())
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block {
@@ -662,22 +671,26 @@ mod tests {
             ..Header::default()
         };
 
-        let mut executor = provider.executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_without_verification(
-                &BlockWithSenders {
-                    block: Block {
-                        header,
-                        body: vec![],
-                        ommers: vec![],
-                        withdrawals: None,
-                        requests: None,
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
                     },
-                    senders: vec![],
-                },
-                U256::ZERO,
+                    U256::ZERO,
+                )
+                    .into(),
             )
             .expect(
                 "Executing a block with no transactions while cancun is active should not fail",
@@ -701,9 +714,7 @@ mod tests {
         );
 
         let mut header = chain_spec.genesis_header();
-
         let provider = executor_provider(chain_spec);
-
         let mut executor =
             provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
@@ -838,6 +849,380 @@ mod tests {
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .unwrap();
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+    }
+
+    fn create_state_provider_with_block_hashes(latest_block: u64) -> StateProviderTest {
+        let mut db = StateProviderTest::default();
+        for block_number in 0..=latest_block {
+            db.insert_block_hash(block_number, keccak256(block_number.to_string()));
+        }
+        db
+    }
+
+    #[test]
+    fn eip_2935_pre_fork() {
+        let db = create_state_provider_with_block_hashes(1);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Never)
+                .build(),
+        );
+
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // construct the header for block one
+        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+
+        // attempt to execute an empty block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // ensure that the block hash was *not* written to storage, since this is before the fork
+        // was activated
+        //
+        // we load the account first, which should also not exist, because revm expects it to be
+        // loaded
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_2935_fork_activation_genesis() {
+        let db = create_state_provider_with_block_hashes(0);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let header = chain_spec.genesis_header();
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // attempt to execute genesis block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // ensure that the block hash was *not* written to storage, since there are no blocks
+        // preceding genesis
+        //
+        // we load the account first, which should also not exist, because revm expects it to be
+        // loaded
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_2935_fork_activation_within_window_bounds() {
+        let fork_activation_block = HISTORY_SERVE_WINDOW - 10;
+        let db = create_state_provider_with_block_hashes(fork_activation_block);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let header = Header {
+            parent_hash: B256::random(),
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // attempt to execute the fork activation block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the hash for the ancestor of the fork activation block should be present
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor
+                .state_mut()
+                .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block - 1))
+                .unwrap(),
+            U256::ZERO
+        );
+
+        // the hash of the block itself should not be in storage
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_2935_fork_activation_outside_window_bounds() {
+        let fork_activation_block = HISTORY_SERVE_WINDOW + 256;
+        let db = create_state_provider_with_block_hashes(fork_activation_block);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        let header = Header {
+            parent_hash: B256::random(),
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+
+        // attempt to execute the fork activation block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the hash for the ancestor of the fork activation block should be present
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor
+                .state_mut()
+                .storage(
+                    HISTORY_STORAGE_ADDRESS,
+                    U256::from(fork_activation_block % HISTORY_SERVE_WINDOW - 1)
+                )
+                .unwrap(),
+            U256::ZERO
+        );
+    }
+
+    #[test]
+    fn eip_2935_state_transition_inside_fork() {
+        let db = create_state_provider_with_block_hashes(2);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let mut header = chain_spec.genesis_header();
+        header.requests_root = Some(EMPTY_ROOT_HASH);
+        let header_hash = header.hash_slow();
+
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // attempt to execute the genesis block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // nothing should be written as the genesis has no ancestors
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
+            .unwrap()
+            .is_zero());
+
+        // attempt to execute block 1, this should not fail
+        let header = Header {
+            parent_hash: header_hash,
+            timestamp: 1,
+            number: 1,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+        let header_hash = header.hash_slow();
+
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the block hash of genesis should now be in storage, but not block 1
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
+            .unwrap()
+            .is_zero());
+
+        // attempt to execute block 2, this should not fail
+        let header = Header {
+            parent_hash: header_hash,
+            timestamp: 1,
+            number: 2,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the block hash of genesis and block 1 should now be in storage, but not block 2
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert_ne!(
+            executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap(),
+            U256::ZERO
+        );
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(2))
+            .unwrap()
+            .is_zero());
     }
 
     #[test]

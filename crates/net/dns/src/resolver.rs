@@ -52,7 +52,7 @@ pub struct DnsResolver(TokioAsyncResolver);
 
 impl DnsResolver {
     /// Create a new resolver by wrapping the given [AsyncResolver]
-    pub fn new(resolver: TokioAsyncResolver) -> Self {
+    pub const fn new(resolver: TokioAsyncResolver) -> Self {
         Self(resolver)
     }
 
