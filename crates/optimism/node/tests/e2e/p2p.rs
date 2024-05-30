@@ -1,18 +1,15 @@
-use crate::utils::{advance_chain, setup};
-use reth::blockchain_tree::error::BlockchainTreeError;
+use reth::{blockchain_tree::error::BlockchainTreeError, tasks::TaskManager};
+use reth_e2e_test_utils::TestNetworkBuilder;
 use reth_rpc_types::engine::PayloadStatusEnum;
 use std::sync::Arc;
 
-use crate::utils::{advance_chain, setup};
 use reth::primitives::BASE_MAINNET;
-use reth_e2e_test_utils::wallet::WalletGenerator;
-use reth_interfaces::blockchain_tree::error::BlockchainTreeError;
 use reth_node_optimism::OptimismNode;
 use reth_primitives::{ChainId, ChainSpecBuilder, Genesis};
-use reth_rpc_types::engine::PayloadStatusEnum;
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
+
+use crate::utils::optimism_payload_attributes;
 
 #[tokio::test]
 async fn can_sync() -> eyre::Result<()> {
