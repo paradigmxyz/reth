@@ -353,8 +353,12 @@ where
                         self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        self.provider_factory.static_file_provider().commit()?;
+                        // For unwinds it makes more sense to commit the database first, since if
+                        // the unwind is interrupted before the static file commit,
+                        // we can just truncate the static files according
+                        // to the checkpoints on the next start-up.
                         provider_rw.commit()?;
+                        self.provider_factory.static_file_provider().commit()?;
 
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
