@@ -52,7 +52,7 @@ impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]
     #[track_caller]
-    pub fn new_with_metrics(
+    pub(crate) fn new_with_metrics(
         inner: Transaction<K>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
