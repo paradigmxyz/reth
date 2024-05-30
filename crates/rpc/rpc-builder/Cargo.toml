@@ -28,7 +28,7 @@ reth-engine-primitives.workspace = true
 jsonrpsee = { workspace = true, features = ["server"] }
 tower-http = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["full"] }
-hyper.workspace = true
+http.workspace = true
 pin-project.workspace = true
 
 # metrics

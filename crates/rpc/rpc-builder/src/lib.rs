@@ -161,7 +161,7 @@ use crate::{
 };
 use constants::*;
 use error::{RpcError, ServerKind};
-use hyper::{header::AUTHORIZATION, HeaderMap};
+use http::{header::AUTHORIZATION, HeaderMap};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     core::RegisterMethodError,
@@ -2178,6 +2178,7 @@ impl RpcServerHandle {
 
         client.expect("failed to create http client").into()
     }
+
     /// Returns a ws client connected to the server.
     pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
         let url = self.ws_url()?;

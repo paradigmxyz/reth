@@ -158,12 +158,11 @@ mod tests {
     use super::*;
     use crate::JwtAuthValidator;
     use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
-    use http::{header, Method, Request, StatusCode};
-    use hyper::{body, Body};
     use jsonrpsee::{
         server::{RandomStringIdProvider, ServerBuilder, ServerHandle},
         RpcModule,
     };
+    use reqwest::{header, StatusCode};
     use std::{
         net::SocketAddr,
         time::{SystemTime, UNIX_EPOCH},
@@ -234,25 +233,20 @@ mod tests {
 
     async fn send_request(jwt: Option<String>) -> (StatusCode, String) {
         let server = spawn_server().await;
-        let client = hyper::Client::new();
+        let client =
+            reqwest::Client::builder().timeout(std::time::Duration::from_secs(1)).build().unwrap();
 
-        let jwt = jwt.unwrap_or_default();
-        let address = format!("http://{AUTH_ADDR}:{AUTH_PORT}");
-        let bearer = format!("Bearer {jwt}");
         let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;
-
-        let req = Request::builder()
-            .method(Method::POST)
-            .header(header::AUTHORIZATION, bearer)
+        let response = client
+            .post(&format!("http://{AUTH_ADDR}:{AUTH_PORT}"))
+            .bearer_auth(jwt.unwrap_or_default())
+            .body(body)
             .header(header::CONTENT_TYPE, "application/json")
-            .uri(address)
-            .body(Body::from(body))
+            .send()
+            .await
             .unwrap();
-
-        let res = client.request(req).await.unwrap();
-        let status = res.status();
-        let body_bytes = body::to_bytes(res.into_body()).await.unwrap();
-        let body = String::from_utf8(body_bytes.to_vec()).expect("response was not valid utf-8");
+        let status = response.status();
+        let body = response.text().await.unwrap();
 
         server.stop().unwrap();
         server.stopped().await;

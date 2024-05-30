@@ -22,7 +22,7 @@ pin-project.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-hyper = { workspace = true }
+reqwest.workspace = true
 assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 tempfile.workspace = true

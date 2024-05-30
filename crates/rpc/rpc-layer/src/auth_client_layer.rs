@@ -1,11 +1,10 @@
 use crate::{Claims, JwtSecret};
-use http::HeaderValue;
-use hyper::{header::AUTHORIZATION, service::Service};
+use http::{header::AUTHORIZATION, HeaderValue};
 use std::{
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tower::Layer;
+use tower::{Layer, Service};
 
 /// A layer that adds a new JWT token to every request using AuthClientService.
 #[derive(Debug)]

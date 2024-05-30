@@ -4,18 +4,13 @@ use crate::{
     error::{RpcError, ServerKind},
     EthConfig,
 };
-
-use hyper::header::AUTHORIZATION;
-pub use jsonrpsee::server::ServerBuilder;
+use http::header::AUTHORIZATION;
 use jsonrpsee::{
     core::RegisterMethodError,
-    http_client::HeaderMap,
+    http_client::{transport::HttpBackend, HeaderMap},
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
-pub use reth_ipc::server::Builder as IpcServerBuilder;
-
-use jsonrpsee::http_client::transport::HttpBackend;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{NetworkInfo, Peers};
@@ -39,6 +34,9 @@ use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
+
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
