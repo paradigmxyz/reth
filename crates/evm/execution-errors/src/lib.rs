@@ -80,6 +80,12 @@ pub enum BlockValidationError {
     /// Provider error during the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) block hash account loading.
     #[error(transparent)]
     BlockHashAccountLoadingFailed(#[from] ProviderError),
+    /// EVM error during withdrawal requests contract call
+    #[error("failed to apply withdrawal requests contract call: {message}")]
+    WithdrawalRequestsContractCall {
+        /// The error message.
+        message: String,
+    },
 }
 
 /// BlockExecutor Errors

@@ -7036,7 +7036,9 @@ dependencies = [
  "reth-evm",
  "reth-primitives",
  "reth-revm",
+ "reth-testing-utils",
  "revm-primitives",
+ "secp256k1 0.28.2",
 ]
 
 [[package]]
@@ -7714,6 +7716,7 @@ name = "reth-revm"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=7320d4c)",
+ "alloy-rlp",
  "reth-consensus-common",
  "reth-execution-errors",
  "reth-primitives",

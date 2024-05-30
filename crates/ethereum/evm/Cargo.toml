@@ -21,6 +21,7 @@ reth-ethereum-consensus.workspace = true
 revm-primitives.workspace = true
 
 [dev-dependencies]
+reth-testing-utils.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"] }
 alloy-eips.workspace = true
-
+secp256k1.workspace = true
