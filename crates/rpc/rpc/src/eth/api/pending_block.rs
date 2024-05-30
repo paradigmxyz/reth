@@ -1,6 +1,7 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::{EthApiError, EthResult};
+use reth_errors::ProviderError;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
@@ -15,7 +16,10 @@ use reth_primitives::{
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
-    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update,
+        post_block_withdrawals_balance_increments,
+    },
 };
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
@@ -93,6 +97,13 @@ impl PendingBlockEnv {
         } else {
             None
         };
+        pre_block_blockhashes_update(
+            &mut db,
+            chain_spec.as_ref(),
+            &block_env,
+            block_number,
+            parent_hash,
+        )?;
 
         let mut receipts = Vec::new();
 
@@ -283,7 +294,7 @@ impl PendingBlockEnv {
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
 /// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
-/// and [BlockEnv]) to execute the pre block contract call.
+/// and [BlockEnv] to execute the pre block contract call.
 ///
 /// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
 /// change.
@@ -315,6 +326,32 @@ where
         block_number,
         parent_beacon_block_root,
         &mut evm_pre_block,
+    )
+    .map_err(|err| EthApiError::Internal(err.into()))
+}
+
+/// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block state transitions.
+///
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
+/// and [BlockEnv].
+///
+/// This uses [apply_blockhashes_update].
+fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
+    db: &mut DB,
+    chain_spec: &ChainSpec,
+    initialized_block_env: &BlockEnv,
+    block_number: u64,
+    parent_block_hash: B256,
+) -> EthResult<()>
+where
+    DB::Error: std::fmt::Display,
+{
+    apply_blockhashes_update(
+        db,
+        chain_spec,
+        initialized_block_env.timestamp.to::<u64>(),
+        block_number,
+        parent_block_hash,
     )
     .map_err(|err| EthApiError::Internal(err.into()))
 }
