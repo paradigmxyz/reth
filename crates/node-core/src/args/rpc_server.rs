@@ -177,19 +177,19 @@ pub struct RpcServerArgs {
 
 impl RpcServerArgs {
     /// Enables the HTTP-RPC server.
-    pub fn with_http(mut self) -> Self {
+    pub const fn with_http(mut self) -> Self {
         self.http = true;
         self
     }
 
     /// Enables the WS-RPC server.
-    pub fn with_ws(mut self) -> Self {
+    pub const fn with_ws(mut self) -> Self {
         self.ws = true;
         self
     }
 
     /// Enables the Auth IPC
-    pub fn with_auth_ipc(mut self) -> Self {
+    pub const fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
         self
     }
@@ -225,21 +225,21 @@ impl RpcServerArgs {
 
     /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_http_unused_port(mut self) -> Self {
+    pub const fn with_http_unused_port(mut self) -> Self {
         self.http_port = 0;
         self
     }
 
     /// Set the ws port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_ws_unused_port(mut self) -> Self {
+    pub const fn with_ws_unused_port(mut self) -> Self {
         self.ws_port = 0;
         self
     }
 
     /// Set the auth port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_auth_unused_port(mut self) -> Self {
+    pub const fn with_auth_unused_port(mut self) -> Self {
         self.auth_port = 0;
         self
     }

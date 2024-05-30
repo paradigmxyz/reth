@@ -42,17 +42,17 @@ pub struct EvmOverrides {
 
 impl EvmOverrides {
     /// Creates a new instance with the given overrides
-    pub fn new(state: Option<StateOverride>, block: Option<Box<BlockOverrides>>) -> Self {
+    pub const fn new(state: Option<StateOverride>, block: Option<Box<BlockOverrides>>) -> Self {
         Self { state, block }
     }
 
     /// Creates a new instance with the given state overrides.
-    pub fn state(state: Option<StateOverride>) -> Self {
+    pub const fn state(state: Option<StateOverride>) -> Self {
         Self { state, block: None }
     }
 
     /// Returns `true` if the overrides contain state overrides.
-    pub fn has_state(&self) -> bool {
+    pub const fn has_state(&self) -> bool {
         self.state.is_some()
     }
 }

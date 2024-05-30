@@ -11,7 +11,7 @@ pub struct HashedPostStateCursorFactory<'a, CF> {
 
 impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
     /// Create a new factory.
-    pub fn new(cursor_factory: CF, post_state: &'a HashedPostStateSorted) -> Self {
+    pub const fn new(cursor_factory: CF, post_state: &'a HashedPostStateSorted) -> Self {
         Self { cursor_factory, post_state }
     }
 }
@@ -51,7 +51,7 @@ pub struct HashedPostStateAccountCursor<'b, C> {
 
 impl<'b, C> HashedPostStateAccountCursor<'b, C> {
     /// Create new instance of [HashedPostStateAccountCursor].
-    pub fn new(cursor: C, post_state: &'b HashedPostStateSorted) -> Self {
+    pub const fn new(cursor: C, post_state: &'b HashedPostStateSorted) -> Self {
         Self { cursor, post_state, last_account: None, post_state_account_index: 0 }
     }
 
@@ -195,7 +195,11 @@ pub struct HashedPostStateStorageCursor<'b, C> {
 
 impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     /// Create new instance of [HashedPostStateStorageCursor] for the given hashed address.
-    pub fn new(cursor: C, post_state: &'b HashedPostStateSorted, hashed_address: B256) -> Self {
+    pub const fn new(
+        cursor: C,
+        post_state: &'b HashedPostStateSorted,
+        hashed_address: B256,
+    ) -> Self {
         Self { cursor, post_state, hashed_address, last_slot: None, post_state_storage_index: 0 }
     }
 

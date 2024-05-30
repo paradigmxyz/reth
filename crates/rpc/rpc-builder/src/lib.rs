@@ -293,7 +293,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 {
     /// Create a new instance of the builder
-    pub fn new(
+    pub const fn new(
         provider: Provider,
         pool: Pool,
         network: Network,
@@ -571,7 +571,7 @@ impl RpcModuleConfig {
         RpcModuleConfigBuilder::default()
     }
     /// Returns a new RPC module config given the eth namespace config
-    pub fn new(eth: EthConfig) -> Self {
+    pub const fn new(eth: EthConfig) -> Self {
         Self { eth }
     }
 }
@@ -586,7 +586,7 @@ pub struct RpcModuleConfigBuilder {
 
 impl RpcModuleConfigBuilder {
     /// Configures a custom eth namespace config
-    pub fn eth(mut self, eth: EthConfig) -> Self {
+    pub const fn eth(mut self, eth: EthConfig) -> Self {
         self.eth = Some(eth);
         self
     }
@@ -952,22 +952,22 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     }
 
     /// Returns a reference to the pool
-    pub fn pool(&self) -> &Pool {
+    pub const fn pool(&self) -> &Pool {
         &self.pool
     }
 
     /// Returns a reference to the events type
-    pub fn events(&self) -> &Events {
+    pub const fn events(&self) -> &Events {
         &self.events
     }
 
     /// Returns a reference to the tasks type
-    pub fn tasks(&self) -> &Tasks {
+    pub const fn tasks(&self) -> &Tasks {
         &self.executor
     }
 
     /// Returns a reference to the provider
-    pub fn provider(&self) -> &Provider {
+    pub const fn provider(&self) -> &Provider {
         &self.provider
     }
 
@@ -1506,7 +1506,7 @@ impl RpcServerConfig {
     /// Configures the [SocketAddr] of the http server
     ///
     /// Default is [Ipv4Addr::LOCALHOST] and [DEFAULT_HTTP_RPC_PORT]
-    pub fn with_http_address(mut self, addr: SocketAddr) -> Self {
+    pub const fn with_http_address(mut self, addr: SocketAddr) -> Self {
         self.http_addr = Some(addr);
         self
     }
@@ -1514,7 +1514,7 @@ impl RpcServerConfig {
     /// Configures the [SocketAddr] of the ws server
     ///
     /// Default is [Ipv4Addr::LOCALHOST] and [DEFAULT_WS_RPC_PORT]
-    pub fn with_ws_address(mut self, addr: SocketAddr) -> Self {
+    pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
         self
     }
@@ -1557,7 +1557,7 @@ impl RpcServerConfig {
     }
 
     /// Configures the JWT secret for authentication.
-    pub fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
+    pub const fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
         self.jwt_secret = secret;
         self
     }
@@ -1565,19 +1565,19 @@ impl RpcServerConfig {
     /// Returns true if any server is configured.
     ///
     /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
-    pub fn has_server(&self) -> bool {
+    pub const fn has_server(&self) -> bool {
         self.http_server_config.is_some() ||
             self.ws_server_config.is_some() ||
             self.ipc_server_config.is_some()
     }
 
     /// Returns the [SocketAddr] of the http server
-    pub fn http_address(&self) -> Option<SocketAddr> {
+    pub const fn http_address(&self) -> Option<SocketAddr> {
         self.http_addr
     }
 
     /// Returns the [SocketAddr] of the ws server
-    pub fn ws_address(&self) -> Option<SocketAddr> {
+    pub const fn ws_address(&self) -> Option<SocketAddr> {
         self.ws_addr
     }
 
@@ -1814,28 +1814,28 @@ impl TransportRpcModuleConfig {
     }
 
     /// Sets a custom [RpcModuleConfig] for the configured modules.
-    pub fn with_config(mut self, config: RpcModuleConfig) -> Self {
+    pub const fn with_config(mut self, config: RpcModuleConfig) -> Self {
         self.config = Some(config);
         self
     }
 
     /// Returns true if no transports are configured
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.http.is_none() && self.ws.is_none() && self.ipc.is_none()
     }
 
     /// Returns the [RpcModuleSelection] for the http transport
-    pub fn http(&self) -> Option<&RpcModuleSelection> {
+    pub const fn http(&self) -> Option<&RpcModuleSelection> {
         self.http.as_ref()
     }
 
     /// Returns the [RpcModuleSelection] for the ws transport
-    pub fn ws(&self) -> Option<&RpcModuleSelection> {
+    pub const fn ws(&self) -> Option<&RpcModuleSelection> {
         self.ws.as_ref()
     }
 
     /// Returns the [RpcModuleSelection] for the ipc transport
-    pub fn ipc(&self) -> Option<&RpcModuleSelection> {
+    pub const fn ipc(&self) -> Option<&RpcModuleSelection> {
         self.ipc.as_ref()
     }
 
@@ -1871,7 +1871,7 @@ pub struct TransportRpcModules<Context = ()> {
 
 impl TransportRpcModules {
     /// Returns the [TransportRpcModuleConfig] used to configure this instance.
-    pub fn module_config(&self) -> &TransportRpcModuleConfig {
+    pub const fn module_config(&self) -> &TransportRpcModuleConfig {
         &self.config
     }
 
@@ -2025,16 +2025,16 @@ impl RpcServer {
     }
 
     /// Returns the [`SocketAddr`] of the http server if started.
-    pub fn http_local_addr(&self) -> Option<SocketAddr> {
+    pub const fn http_local_addr(&self) -> Option<SocketAddr> {
         self.ws_http.http_local_addr
     }
     /// Return the JwtSecret of the server
-    pub fn jwt(&self) -> Option<JwtSecret> {
+    pub const fn jwt(&self) -> Option<JwtSecret> {
         self.ws_http.jwt_secret
     }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
-    pub fn ws_local_addr(&self) -> Option<SocketAddr> {
+    pub const fn ws_local_addr(&self) -> Option<SocketAddr> {
         self.ws_http.ws_local_addr
     }
 
@@ -2123,12 +2123,12 @@ impl RpcServerHandle {
         })
     }
     /// Returns the [`SocketAddr`] of the http server if started.
-    pub fn http_local_addr(&self) -> Option<SocketAddr> {
+    pub const fn http_local_addr(&self) -> Option<SocketAddr> {
         self.http_local_addr
     }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
-    pub fn ws_local_addr(&self) -> Option<SocketAddr> {
+    pub const fn ws_local_addr(&self) -> Option<SocketAddr> {
         self.ws_local_addr
     }
 

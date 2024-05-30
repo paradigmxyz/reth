@@ -20,7 +20,7 @@ pub struct BlockchainTests {
 
 impl BlockchainTests {
     /// Create a new handler for a subset of the blockchain test suite.
-    pub fn new(suite: String) -> Self {
+    pub const fn new(suite: String) -> Self {
         Self { suite }
     }
 }

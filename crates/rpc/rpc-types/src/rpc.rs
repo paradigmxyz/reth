@@ -11,7 +11,7 @@ pub struct RpcModules {
 
 impl RpcModules {
     /// Create a new instance of RPCModules
-    pub fn new(module_map: HashMap<String, String>) -> Self {
+    pub const fn new(module_map: HashMap<String, String>) -> Self {
         Self { module_map }
     }
 

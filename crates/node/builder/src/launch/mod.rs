@@ -66,7 +66,7 @@ pub struct DefaultNodeLauncher {
 
 impl DefaultNodeLauncher {
     /// Create a new instance of the default node launcher.
-    pub fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }

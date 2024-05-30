@@ -12,7 +12,7 @@ pub struct Fmph {
 }
 
 impl Fmph {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { function: None }
     }
 }

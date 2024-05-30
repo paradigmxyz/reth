@@ -56,7 +56,11 @@ struct NodeState<DB> {
 }
 
 impl<DB> NodeState<DB> {
-    fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
+    const fn new(
+        db: DB,
+        network: Option<NetworkHandle>,
+        latest_block: Option<BlockNumber>,
+    ) -> Self {
         Self {
             db,
             network,
