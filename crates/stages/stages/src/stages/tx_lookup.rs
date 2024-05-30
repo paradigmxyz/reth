@@ -155,11 +155,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                     if append_only {
                         txhash_cursor.append(key, RawValue::<TxNumber>::from_vec(number))?
                     } else {
-                        // Upsert usage instead of insert:
-                        // If an interrupted unwind deletes data from static files, but not from
-                        // database, then we will have dangling entries, which would confflict when
-                        // trying to advance again the chain.
-                        txhash_cursor.upsert(key, RawValue::<TxNumber>::from_vec(number))?
+                        txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))?
                     }
                 }
 
