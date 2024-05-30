@@ -41,7 +41,7 @@ use reth_primitives::{
     stage::StageCheckpoint,
     trie::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
-    PruneSegment, Receipt, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
+    PruneSegment, Receipt, Requests, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
 use std::fmt;
 
@@ -101,6 +101,7 @@ pub trait TableViewer<R> {
     }
 }
 
+#[macro_export]
 /// Defines all the tables in the database.
 macro_rules! tables {
     (@bool) => { false };
@@ -376,6 +377,9 @@ tables! {
 
     /// Stores the history of client versions that have accessed the database with write privileges by unix timestamp in seconds.
     table VersionHistory<Key = u64, Value = ClientVersion>;
+
+    /// Stores EIP-7685 EL -> CL requests, indexed by block number.
+    table BlockRequests<Key = BlockNumber, Value = Requests>;
 }
 
 // Alias types.

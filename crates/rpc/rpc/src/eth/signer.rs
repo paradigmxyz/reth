@@ -53,7 +53,7 @@ impl DevSigner {
     /// Generates a random dev signer which satisfies [EthSigner] trait
     pub(crate) fn random() -> Box<dyn EthSigner> {
         let mut signers = Self::random_signers(1);
-        signers.pop().expect("expect to generate at leas one signer")
+        signers.pop().expect("expect to generate at least one signer")
     }
 
     /// Generates provided number of random dev signers
@@ -66,7 +66,7 @@ impl DevSigner {
             let address = reth_primitives::public_key_to_address(pk);
             let addresses = vec![address];
             let accounts = HashMap::from([(address, sk)]);
-            signers.push(Box::new(DevSigner { addresses, accounts }) as Box<dyn EthSigner>);
+            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner>);
         }
         signers
     }

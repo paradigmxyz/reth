@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StatsReader, TransactionVariant, TransactionsProvider,
+    ReceiptProvider, RequestsProvider, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
@@ -16,7 +16,6 @@ use reth_db::{
     table::Table,
     tables,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
@@ -26,6 +25,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
     ops::{Deref, Range, RangeBounds, RangeInclusive},
@@ -132,16 +132,16 @@ impl StaticFileProvider {
 
                 entries += jar_provider.rows();
 
-                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
+                let data_size = reth_fs_util::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
+                let index_size = reth_fs_util::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
+                let offsets_size = reth_fs_util::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
+                let config_size = reth_fs_util::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
@@ -622,7 +622,7 @@ impl StaticFileProvider {
         fetch_from_database: FD,
     ) -> ProviderResult<Option<T>>
     where
-        FS: Fn(&StaticFileProvider) -> ProviderResult<Option<T>>,
+        FS: Fn(&Self) -> ProviderResult<Option<T>>,
         FD: Fn() -> ProviderResult<Option<T>>,
     {
         // If there is, check the maximum block or transaction number of the segment.
@@ -661,7 +661,7 @@ impl StaticFileProvider {
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        FS: Fn(&StaticFileProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FS: Fn(&Self, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
         FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
@@ -881,22 +881,12 @@ impl TransactionsProviderExt for StaticFileProvider {
         // chunks are too big, there will be idle threads waiting for work. Choosing an
         // arbitrary smaller value to make sure it doesn't happen.
         let chunk_size = 100;
+        let mut channels = Vec::new();
 
+        // iterator over the chunks
         let chunks = (tx_range.start..tx_range.end)
             .step_by(chunk_size)
-            .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end))
-            .collect::<Vec<Range<u64>>>();
-        let mut channels = Vec::with_capacity(chunk_size);
-
-        #[inline]
-        fn calculate_hash(
-            entry: (TxNumber, TransactionSignedNoHash),
-            rlp_buf: &mut Vec<u8>,
-        ) -> Result<(B256, TxNumber), Box<ProviderError>> {
-            let (tx_id, tx) = entry;
-            tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
-            Ok((keccak256(rlp_buf), tx_id))
-        }
+            .map(|start| start..std::cmp::min(start + chunk_size as u64, tx_range.end));
 
         for chunk_range in chunks {
             let (channel_tx, channel_rx) = mpsc::channel();
@@ -1008,15 +998,6 @@ impl TransactionsProvider for StaticFileProvider {
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Address>> {
-        let txes = self.transactions_by_tx_range(range)?;
-        TransactionSignedNoHash::recover_signers(&txes, txes.len())
-            .ok_or(ProviderError::SenderRecoveryError)
-    }
-
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
@@ -1029,6 +1010,15 @@ impl TransactionsProvider for StaticFileProvider {
             },
             |_| true,
         )
+    }
+
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
+        let txes = self.transactions_by_tx_range(range)?;
+        TransactionSignedNoHash::recover_signers(&txes, txes.len())
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
@@ -1113,6 +1103,13 @@ impl BlockReader for StaticFileProvider {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<BlockWithSenders>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl WithdrawalsProvider for StaticFileProvider {
@@ -1126,6 +1123,17 @@ impl WithdrawalsProvider for StaticFileProvider {
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl RequestsProvider for StaticFileProvider {
+    fn requests_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1152,4 +1160,15 @@ impl StatsReader for StaticFileProvider {
             _ => Err(ProviderError::UnsupportedProvider),
         }
     }
+}
+
+/// Calculates the tx hash for the given transaction and its id.
+#[inline]
+fn calculate_hash(
+    entry: (TxNumber, TransactionSignedNoHash),
+    rlp_buf: &mut Vec<u8>,
+) -> Result<(B256, TxNumber), Box<ProviderError>> {
+    let (tx_id, tx) = entry;
+    tx.transaction.encode_with_signature(&tx.signature, rlp_buf, false);
+    Ok((keccak256(rlp_buf), tx_id))
 }

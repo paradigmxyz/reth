@@ -10,11 +10,11 @@ use reth_db::{
     codecs::CompactU256,
     static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     ops::{Deref, RangeBounds},
     sync::Arc,
@@ -63,7 +63,7 @@ impl<'a> StaticFileJarProvider<'a> {
     }
 
     /// Adds a new auxiliary static file to help query data from the main one
-    pub fn with_auxiliary(mut self, auxiliary_jar: StaticFileJarProvider<'a>) -> Self {
+    pub fn with_auxiliary(mut self, auxiliary_jar: Self) -> Self {
         self.auxiliary_jar = Some(Box::new(auxiliary_jar));
         self
     }
@@ -255,15 +255,6 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn senders_by_tx_range(
-        &self,
-        range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Address>> {
-        let txs = self.transactions_by_tx_range(range)?;
-        TransactionSignedNoHash::recover_signers(&txs, txs.len())
-            .ok_or(ProviderError::SenderRecoveryError)
-    }
-
     fn transactions_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
@@ -280,6 +271,15 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
             }
         }
         Ok(txes)
+    }
+
+    fn senders_by_tx_range(
+        &self,
+        range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
+        let txs = self.transactions_by_tx_range(range)?;
+        TransactionSignedNoHash::recover_signers(&txs, txs.len())
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {

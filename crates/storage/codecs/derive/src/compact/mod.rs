@@ -63,8 +63,9 @@ pub fn get_fields(data: &Data) -> FieldList {
                 assert_eq!(fields.len(), data_fields.named.len());
             }
             syn::Fields::Unnamed(ref data_fields) => {
-                assert!(
-                    data_fields.unnamed.len() == 1,
+                assert_eq!(
+                    data_fields.unnamed.len(),
+                    1,
                     "Compact only allows one unnamed field. Consider making it a struct."
                 );
                 load_field(&data_fields.unnamed[0], &mut fields, false);
@@ -80,8 +81,9 @@ pub fn get_fields(data: &Data) -> FieldList {
                         panic!("Not allowed to have Enum Variants with multiple named fields. Make it a struct instead.")
                     }
                     syn::Fields::Unnamed(data_fields) => {
-                        assert!(
-                            data_fields.unnamed.len() == 1,
+                        assert_eq!(
+                            data_fields.unnamed.len(),
+                            1,
                             "Compact only allows one unnamed field. Consider making it a struct."
                         );
                         load_field(&data_fields.unnamed[0], &mut fields, true);
@@ -143,8 +145,16 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash"]
-                        .contains(&path.ident.to_string().as_str())
+                    if [
+                        "B256",
+                        "Address",
+                        "Address",
+                        "Bloom",
+                        "TxHash",
+                        "BlockHash",
+                        "CompactPlaceholder",
+                    ]
+                    .contains(&path.ident.to_string().as_str())
                     {
                         return true
                     }
@@ -159,7 +169,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
 /// length.
 pub fn get_bit_size(ftype: &str) -> u8 {
     match ftype {
-        "TransactionKind" | "bool" | "Option" | "Signature" => 1,
+        "TransactionKind" | "TxKind" | "bool" | "Option" | "Signature" => 1,
         "TxType" => 2,
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
@@ -183,18 +193,18 @@ mod tests {
     #[test]
     fn gen() {
         let f_struct = quote! {
-            #[derive(Debug, PartialEq, Clone)]
-            pub struct TestStruct {
-                f_u64: u64,
-                f_u256: U256,
-                f_bool_t: bool,
-                f_bool_f: bool,
-                f_option_none: Option<U256>,
-                f_option_some: Option<B256>,
-                f_option_some_u64: Option<u64>,
-                f_vec_empty: Vec<U256>,
-                f_vec_some: Vec<Address>,
-            }
+             #[derive(Debug, PartialEq, Clone)]
+             pub struct TestStruct {
+                 f_u64: u64,
+                 f_u256: U256,
+                 f_bool_t: bool,
+                 f_bool_f: bool,
+                 f_option_none: Option<U256>,
+                 f_option_some: Option<B256>,
+                 f_option_some_u64: Option<u64>,
+                 f_vec_empty: Vec<U256>,
+                 f_vec_some: Vec<Address>,
+             }
         };
 
         // Generate code that will impl the `Compact` trait.
@@ -206,7 +216,15 @@ mod tests {
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
+            impl TestStruct {
+                #[doc = "Used bytes by [`TestStructFlags`]"]
+                pub const fn bitflag_encoded_bytes() -> usize {
+                    2u8 as usize
+                }
+            }
+
             pub use TestStruct_flags::TestStructFlags;
+
             #[allow(non_snake_case)]
             mod TestStruct_flags {
                 use bytes::Buf;

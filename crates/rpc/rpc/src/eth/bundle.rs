@@ -52,7 +52,7 @@ where
                 EthBundleError::EmptyBundleTransactions.to_string(),
             ))
         }
-        if block_number.to::<u64>() == 0 {
+        if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             ))
@@ -216,7 +216,7 @@ where
     Eth: EthTransactions + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        Ok(EthBundle::call_bundle(self, request).await?)
+        Ok(Self::call_bundle(self, request).await?)
     }
 }
 

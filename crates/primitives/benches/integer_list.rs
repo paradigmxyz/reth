@@ -121,7 +121,8 @@ mod elias_fano {
             let mut builder = EliasFanoBuilder::new(
                 list.as_ref().iter().max().map_or(0, |max| max + 1),
                 list.as_ref().len(),
-            )?;
+            )
+            .map_err(|err| EliasFanoError::InvalidInput(err.to_string()))?;
             builder.extend(list.as_ref().iter().copied());
             Ok(Self(builder.build()))
         }
@@ -211,7 +212,7 @@ mod elias_fano {
     }
 
     impl<'de> Deserialize<'de> for IntegerList {
-        fn deserialize<D>(deserializer: D) -> Result<IntegerList, D::Error>
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -241,8 +242,8 @@ mod elias_fano {
     #[derive(Debug, thiserror::Error)]
     pub enum EliasFanoError {
         /// The provided input is invalid.
-        #[error(transparent)]
-        InvalidInput(#[from] anyhow::Error),
+        #[error("{0}")]
+        InvalidInput(String),
         /// Failed to deserialize data into type.
         #[error("failed to deserialize data into type")]
         FailedDeserialize,

@@ -1,13 +1,14 @@
 //! Dummy blocks and data for tests
 use crate::{BundleStateWithReceipts, DatabaseProviderRW};
+use alloy_primitives::Log;
 use alloy_rlp::Decodable;
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
-    b256,
+    alloy_primitives, b256,
     hex_literal::hex,
     proofs::{state_root_unhashed, storage_root_unhashed},
     revm::compat::into_reth_acc,
-    Address, BlockNumber, Bytes, Header, Log, Receipt, Receipts, SealedBlock,
+    Address, BlockNumber, Bytes, Header, Receipt, Receipts, Requests, SealedBlock,
     SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::{
@@ -36,6 +37,7 @@ pub fn assert_genesis_block<DB: Database>(provider: &DatabaseProviderRW<DB>, g: 
     );
     assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
+    assert_eq!(tx.table::<tables::BlockRequests>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::TransactionBlocks>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::TransactionHashNumbers>().unwrap(), vec![]);
@@ -61,14 +63,14 @@ const BLOCK_RLP: [u8; 610] = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd1
 /// Test chain with genesis, blocks, execution results
 /// that have valid changesets.
 #[derive(Debug)]
-pub struct BlockChainTestData {
+pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
     pub blocks: Vec<(SealedBlockWithSenders, BundleStateWithReceipts)>,
 }
 
-impl BlockChainTestData {
+impl BlockchainTestData {
     /// Create test data with two blocks that are connected, specifying their block numbers.
     pub fn default_from_number(first: BlockNumber) -> Self {
         let one = block1(first);
@@ -84,7 +86,7 @@ impl BlockChainTestData {
     }
 }
 
-impl Default for BlockChainTestData {
+impl Default for BlockchainTestData {
     fn default() -> Self {
         let one = block1(1);
         let mut extended_state = one.1.clone();
@@ -107,6 +109,7 @@ pub fn genesis() -> SealedBlock {
         body: vec![],
         ommers: vec![],
         withdrawals: Some(Withdrawals::default()),
+        requests: Some(Requests::default()),
     }
 }
 
@@ -150,11 +153,11 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             tx_type: TxType::Eip2930,
             success: true,
             cumulative_gas_used: 300,
-            logs: vec![Log {
-                address: Address::new([0x60; 20]),
-                topics: vec![B256::with_last_byte(1), B256::with_last_byte(2)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x60; 20]),
+                vec![B256::with_last_byte(1), B256::with_last_byte(2)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -208,11 +211,11 @@ fn block2(
             tx_type: TxType::Eip1559,
             success: false,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -266,7 +269,9 @@ fn block3(
                         .clone()
                         .map(|slot| (U256::from(slot), (U256::ZERO, U256::from(slot)))),
                 ),
-            );
+            )
+            .revert_account_info(number, address, Some(None))
+            .revert_storage(number, address, Vec::new());
     }
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
@@ -274,11 +279,11 @@ fn block3(
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -363,11 +368,11 @@ fn block4(
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
@@ -447,11 +452,11 @@ fn block5(
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
-            logs: vec![Log {
-                address: Address::new([0x61; 20]),
-                topics: vec![B256::with_last_byte(3), B256::with_last_byte(4)],
-                data: Bytes::default(),
-            }],
+            logs: vec![Log::new_unchecked(
+                Address::new([0x61; 20]),
+                vec![B256::with_last_byte(3), B256::with_last_byte(4)],
+                Bytes::default(),
+            )],
             #[cfg(feature = "optimism")]
             deposit_nonce: None,
             #[cfg(feature = "optimism")]

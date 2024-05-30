@@ -16,26 +16,21 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_interfaces::{
-    consensus::{Consensus, ConsensusError},
-    executor::{BlockExecutionError, BlockValidationError},
-};
-use reth_node_api::{ConfigureEvm, EngineTypes};
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
+use reth_engine_primitives::EngineTypes;
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
+    constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
-    ChainSpec, Header, ReceiptWithBloom, SealedBlock, SealedHeader, TransactionSigned, B256,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
+    ChainSpec, Header, Receipts, Requests, SealedBlock, SealedHeader, TransactionSigned,
+    Withdrawals, B256, U256,
 };
 use reth_provider::{
-    BlockExecutor, BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender,
-    StateProviderFactory,
+    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
+    StateRootProvider,
 };
-use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
-    processor::EVMProcessor, State,
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use std::{
     collections::HashMap,
@@ -51,6 +46,7 @@ mod task;
 
 pub use crate::client::AutoSealClient;
 pub use mode::{FixedBlockTimeMiner, MiningMode, ReadyTransactionMiner};
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 pub use task::MiningTask;
 
 /// A consensus implementation intended for local development and testing purposes.
@@ -89,7 +85,15 @@ impl Consensus for AutoSealConsensus {
         Ok(())
     }
 
-    fn validate_block(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+        Ok(())
+    }
+
+    fn validate_block_post_execution(
+        &self,
+        _block: &BlockWithSenders,
+        _input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
         Ok(())
     }
 }
@@ -271,24 +275,38 @@ impl StorageInner {
     pub(crate) fn build_header_template(
         &self,
         transactions: &[TransactionSigned],
+        ommers: &[Header],
+        withdrawals: Option<&Withdrawals>,
+        requests: Option<&Requests>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         // check previous block for base fee
-        let base_fee_per_gas = self
-            .headers
-            .get(&self.best_block)
-            .and_then(|parent| parent.next_block_base_fee(chain_spec.base_fee_params(timestamp)));
+        let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
+            parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
+        });
+
+        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(timestamp) {
+            let mut sum_blob_gas_used = 0;
+            for tx in transactions {
+                if let Some(blob_tx) = tx.transaction.as_eip4844() {
+                    sum_blob_gas_used += blob_tx.blob_gas();
+                }
+            }
+            Some(sum_blob_gas_used)
+        } else {
+            None
+        };
 
         let mut header = Header {
             parent_hash: self.best_hash,
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
+            ommers_hash: proofs::calculate_ommers_root(ommers),
             beneficiary: Default::default(),
             state_root: Default::default(),
             transactions_root: Default::default(),
             receipts_root: Default::default(),
-            withdrawals_root: None,
+            withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             logs_bloom: Default::default(),
             difficulty: U256::from(2),
             number: self.best_block + 1,
@@ -298,10 +316,11 @@ impl StorageInner {
             mix_hash: Default::default(),
             nonce: 0,
             base_fee_per_gas,
-            blob_gas_used: None,
+            blob_gas_used,
             excess_blob_gas: None,
             extra_data: Default::default(),
             parent_beacon_block_root: None,
+            requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
         };
 
         if chain_spec.is_cancun_active_at_timestamp(timestamp) {
@@ -334,146 +353,68 @@ impl StorageInner {
         header
     }
 
-    /// Executes the block with the given block and senders, on the provided [EVMProcessor].
-    ///
-    /// This returns the poststate from execution and post-block changes, as well as the gas used.
-    pub(crate) fn execute<EvmConfig>(
-        &mut self,
-        block: &BlockWithSenders,
-        executor: &mut EVMProcessor<'_, EvmConfig>,
-    ) -> Result<(BundleStateWithReceipts, u64), BlockExecutionError>
-    where
-        EvmConfig: ConfigureEvm,
-    {
-        trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
-        // TODO: there isn't really a parent beacon block root here, so not sure whether or not to
-        // call the 4788 beacon contract
-
-        // set the first block to find the correct index in bundle state
-        executor.set_first_block(block.number);
-
-        let (receipts, gas_used) = executor.execute_transactions(block, U256::ZERO)?;
-
-        // Save receipts.
-        executor.save_receipts(receipts)?;
-
-        // add post execution state change
-        // Withdrawals, rewards etc.
-        executor.apply_post_execution_state_change(block, U256::ZERO)?;
-
-        // merge transitions
-        executor.db_mut().merge_transitions(BundleRetention::Reverts);
-
-        // apply post block changes
-        Ok((executor.take_output_state(), gas_used))
-    }
-
-    /// Fills in the post-execution header fields based on the given BundleState and gas used.
-    /// In doing this, the state root is calculated and the final header is returned.
-    pub(crate) fn complete_header<S: StateProviderFactory>(
-        &self,
-        mut header: Header,
-        bundle_state: &BundleStateWithReceipts,
-        client: &S,
-        gas_used: u64,
-        blob_gas_used: Option<u64>,
-        #[cfg(feature = "optimism")] chain_spec: &ChainSpec,
-    ) -> Result<Header, BlockExecutionError> {
-        let receipts = bundle_state.receipts_by_block(header.number);
-        header.receipts_root = if receipts.is_empty() {
-            EMPTY_RECEIPTS
-        } else {
-            let receipts_with_bloom = receipts
-                .iter()
-                .map(|r| (*r).clone().expect("receipts have not been pruned").into())
-                .collect::<Vec<ReceiptWithBloom>>();
-            header.logs_bloom =
-                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
-            #[cfg(feature = "optimism")]
-            {
-                proofs::calculate_receipt_root_optimism(
-                    &receipts_with_bloom,
-                    chain_spec,
-                    header.timestamp,
-                )
-            }
-            #[cfg(not(feature = "optimism"))]
-            {
-                proofs::calculate_receipt_root(&receipts_with_bloom)
-            }
-        };
-
-        header.gas_used = gas_used;
-        header.blob_gas_used = blob_gas_used;
-
-        // calculate the state root
-        let state_root = client
-            .latest()
-            .map_err(|_| BlockExecutionError::ProviderError)?
-            .state_root(bundle_state.state())
-            .unwrap();
-        header.state_root = state_root;
-        Ok(header)
-    }
-
-    /// Builds and executes a new block with the given transactions, on the provided [EVMProcessor].
+    /// Builds and executes a new block with the given transactions, on the provided executor.
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
-    pub(crate) fn build_and_execute<EvmConfig>(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_and_execute<Provider, Executor>(
         &mut self,
         transactions: Vec<TransactionSigned>,
-        client: &impl StateProviderFactory,
+        ommers: Vec<Header>,
+        withdrawals: Option<Withdrawals>,
+        requests: Option<Requests>,
+        provider: &Provider,
         chain_spec: Arc<ChainSpec>,
-        evm_config: EvmConfig,
+        executor: &Executor,
     ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
     where
-        EvmConfig: ConfigureEvm,
+        Executor: BlockExecutorProvider,
+        Provider: StateProviderFactory,
     {
-        let header = self.build_header_template(&transactions, chain_spec.clone());
+        let header = self.build_header_template(
+            &transactions,
+            &ommers,
+            withdrawals.as_ref(),
+            requests.as_ref(),
+            chain_spec,
+        );
 
-        let block = Block { header, body: transactions, ommers: vec![], withdrawals: None }
-            .with_recovered_senders()
-            .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
+        let block = Block {
+            header,
+            body: transactions,
+            ommers: ommers.clone(),
+            withdrawals: withdrawals.clone(),
+            requests: requests.clone(),
+        }
+        .with_recovered_senders()
+        .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
 
         trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-        // now execute the block
-        let db = State::builder()
-            .with_database_boxed(Box::new(StateProviderDatabase::new(client.latest().unwrap())))
-            .with_bundle_update()
-            .build();
-        let mut executor = EVMProcessor::new_with_state(chain_spec.clone(), db, evm_config);
+        let mut db = StateProviderDatabase::new(
+            provider.latest().map_err(BlockExecutionError::LatestBlock)?,
+        );
 
-        let (bundle_state, gas_used) = self.execute(&block, &mut executor)?;
+        // execute the block
+        let BlockExecutionOutput { state, receipts, .. } =
+            executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
+        let bundle_state = BundleStateWithReceipts::new(
+            state,
+            Receipts::from_block_receipt(receipts),
+            block.number,
+        );
 
-        let Block { header, body, .. } = block.block;
-        let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
+        // todo(onbjerg): we should not pass requests around as this is building a block, which
+        // means we need to extract the requests from the execution output and compute the requests
+        // root here
 
-        let blob_gas_used = if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            let mut sum_blob_gas_used = 0;
-            for tx in &body.transactions {
-                if let Some(blob_tx) = tx.transaction.as_eip4844() {
-                    sum_blob_gas_used += blob_tx.blob_gas();
-                }
-            }
-            Some(sum_blob_gas_used)
-        } else {
-            None
-        };
+        let Block { mut header, body, .. } = block.block;
+        let body = BlockBody { transactions: body, ommers, withdrawals, requests };
 
         trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
 
-        // fill in the rest of the fields
-        let header = self.complete_header(
-            header,
-            &bundle_state,
-            client,
-            gas_used,
-            blob_gas_used,
-            #[cfg(feature = "optimism")]
-            chain_spec.as_ref(),
-        )?;
-
+        // calculate the state root
+        header.state_root = db.state_root(bundle_state.state())?;
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage

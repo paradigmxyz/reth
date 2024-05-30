@@ -195,11 +195,14 @@ where
         };
 
         // Reject transactions over defined size to prevent DOS attacks
-        if transaction.size() > self.max_tx_input_bytes {
-            let size = transaction.size();
+        let transaction_size = transaction.size();
+        if transaction_size > self.max_tx_input_bytes {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::OversizedData(size, self.max_tx_input_bytes),
+                InvalidPoolTransactionError::OversizedData(
+                    transaction_size,
+                    self.max_tx_input_bytes,
+                ),
             )
         }
 
@@ -211,11 +214,14 @@ where
         }
 
         // Checks for gas limit
-        if transaction.gas_limit() > self.block_gas_limit {
-            let gas_limit = transaction.gas_limit();
+        let transaction_gas_limit = transaction.gas_limit();
+        if transaction_gas_limit > self.block_gas_limit {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
+                InvalidPoolTransactionError::ExceedsGasLimit(
+                    transaction_gas_limit,
+                    self.block_gas_limit,
+                ),
             )
         }
 
@@ -361,25 +367,17 @@ where
                     }
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
-                    if let Some(eip4844) = transaction.as_eip4844() {
-                        // validate the blob
-                        if let Err(err) = eip4844.validate_blob(&blob, &self.kzg_settings) {
-                            return TransactionValidationOutcome::Invalid(
-                                transaction,
-                                InvalidPoolTransactionError::Eip4844(
-                                    Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                                ),
-                            )
-                        }
-                        // store the extracted blob
-                        maybe_blob_sidecar = Some(blob);
-                    } else {
-                        // this should not happen
+                    // validate the blob
+                    if let Err(err) = transaction.validate_blob(&blob, &self.kzg_settings) {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
-                            InvalidTransactionError::TxTypeNotSupported.into(),
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                            ),
                         )
                     }
+                    // store the extracted blob
+                    maybe_blob_sidecar = Some(blob);
                 }
             }
         }
@@ -445,10 +443,14 @@ pub struct EthTransactionValidatorBuilder {
 
 impl EthTransactionValidatorBuilder {
     /// Creates a new builder for the given [ChainSpec]
+    ///
+    /// By default this assumes the network is on the `Cancun` hardfork and the following
+    /// transactions are allowed:
+    ///  - Legacy
+    ///  - EIP-2718
+    ///  - EIP-1559
+    ///  - EIP-4844
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        // If cancun is enabled at genesis, enable it
-        let cancun = chain_spec.is_cancun_active_at_timestamp(chain_spec.genesis_timestamp());
-
         Self {
             chain_spec,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
@@ -466,8 +468,8 @@ impl EthTransactionValidatorBuilder {
             // shanghai is activated by default
             shanghai: true,
 
-            // TODO: can hard enable by default once mainnet transitioned
-            cancun,
+            // cancun is activated by default
+            cancun: true,
         }
     }
 
@@ -477,7 +479,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Whether to allow exemptions for local transaction exemptions.
-    pub fn set_local_transactions_config(
+    pub fn with_local_transactions_config(
         mut self,
         local_transactions_config: LocalTransactionConfig,
     ) -> Self {
@@ -502,24 +504,35 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Disables the eip2718 support.
+    /// Disables the support for EIP-2718 transactions.
     pub const fn no_eip2718(self) -> Self {
         self.set_eip2718(false)
     }
 
-    /// Set eip2718 support.
+    /// Set the support for EIP-2718 transactions.
     pub const fn set_eip2718(mut self, eip2718: bool) -> Self {
         self.eip2718 = eip2718;
         self
     }
 
-    /// Disables the eip1559 support.
+    /// Disables the support for EIP-1559 transactions.
     pub const fn no_eip1559(self) -> Self {
         self.set_eip1559(false)
     }
 
-    /// Set the eip1559 support.
+    /// Set the support for EIP-1559 transactions.
     pub const fn set_eip1559(mut self, eip1559: bool) -> Self {
+        self.eip1559 = eip1559;
+        self
+    }
+
+    /// Disables the support for EIP-4844 transactions.
+    pub const fn no_eip4844(self) -> Self {
+        self.set_eip1559(false)
+    }
+
+    /// Set the support for EIP-4844 transactions.
+    pub const fn set_eip4844(mut self, eip1559: bool) -> Self {
         self.eip1559 = eip1559;
         self
     }
@@ -695,7 +708,7 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     if transaction.gas_limit() <
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
-            transaction.kind(),
+            &transaction.kind(),
             &access_list,
             is_shanghai,
         )

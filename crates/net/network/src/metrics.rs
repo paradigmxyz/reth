@@ -118,7 +118,9 @@ pub struct TransactionsManagerMetrics {
     /* ================ POOL IMPORTS ================ */
     /// Number of transactions about to be imported into the pool.
     pub(crate) pending_pool_imports: Gauge,
-    /// Total number of bad imports.
+    /// Total number of bad imports, imports that fail because the transaction is badly formed
+    /// (i.e. have no chance of passing validation, unlike imports that fail due to e.g. nonce
+    /// gaps).
     pub(crate) bad_imports: Counter,
     /// Number of inflight requests at which the
     /// [`TransactionPool`](reth_transaction_pool::TransactionPool) is considered to be at
@@ -200,7 +202,12 @@ pub struct TransactionFetcherMetrics {
     pub(crate) egress_peer_channel_full: Counter,
     /// Total number of hashes pending fetch.
     pub(crate) hashes_pending_fetch: Gauge,
-
+    /// Total number of fetched transactions.
+    pub(crate) fetched_transactions: Counter,
+    /// Total number of transactions that were received in
+    /// [`PooledTransactions`](reth_eth_wire::PooledTransactions) responses, that weren't
+    /// requested.
+    pub(crate) unsolicited_transactions: Counter,
     /* ================ SEARCH DURATION ================ */
     /// Time spent searching for an idle peer in call to
     /// [`TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash`](crate::transactions::TransactionFetcher::find_any_idle_fallback_peer_for_any_pending_hash).
@@ -303,11 +310,17 @@ impl DisconnectMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct EthRequestHandlerMetrics {
-    /// Number of received headers requests
-    pub(crate) received_headers_requests: Counter,
+    /// Number of GetBlockHeaders requests received
+    pub(crate) eth_headers_requests_received_total: Counter,
 
-    /// Number of received bodies requests
-    pub(crate) received_bodies_requests: Counter,
+    /// Number of GetReceipts requests received
+    pub(crate) eth_receipts_requests_received_total: Counter,
+
+    /// Number of GetBlockBodies requests received
+    pub(crate) eth_bodies_requests_received_total: Counter,
+
+    /// Number of GetNodeData requests received
+    pub(crate) eth_node_data_requests_received_total: Counter,
 }
 
 /// Eth67 announcement metrics, track entries by TxType

@@ -11,10 +11,11 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use reth_fs_util::FsPathError;
 use reth_primitives::{
-    fs::FsPathError, Address, BlockHash, BlockNumber, BlockNumberOrTag,
-    FromRecoveredPooledTransaction, FromRecoveredTransaction, IntoRecoveredTransaction,
-    PooledTransactionsElementEcRecovered, TransactionSigned,
+    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
+    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, TransactionSigned,
+    TryFromRecoveredTransaction,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
@@ -109,7 +110,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number,
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params(latest.timestamp + 12))
+                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
                 .unwrap_or_default(),
             pending_blob_fee: latest.next_block_blob_fee(),
         };
@@ -265,7 +266,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // fees for the next block: `new_tip+1`
                 let pending_block_base_fee = new_tip
-                    .next_block_base_fee(chain_spec.base_fee_params(new_tip.timestamp + 12))
+                    .next_block_base_fee(
+                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp + 12),
+                    )
                     .unwrap_or_default();
                 let pending_block_blob_fee = new_tip.next_block_blob_fee();
 
@@ -333,9 +336,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                                     <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
                                 )
                         } else {
-                            Some(<P as TransactionPool>::Transaction::from_recovered_transaction(
+                            <P as TransactionPool>::Transaction::try_from_recovered_transaction(
                                 tx,
-                            ))
+                            ).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -370,7 +373,9 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = tip
-                    .next_block_base_fee(chain_spec.base_fee_params(tip.timestamp + 12))
+                    .next_block_base_fee(
+                        chain_spec.base_fee_params_at_timestamp(tip.timestamp + 12),
+                    )
                     .unwrap_or_default();
                 let pending_block_blob_fee = tip.next_block_blob_fee();
 
@@ -480,7 +485,7 @@ impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
     #[inline]
     const fn is_drifted(&self) -> bool {
-        matches!(self, MaintainedPoolState::Drifted)
+        matches!(self, Self::Drifted)
     }
 }
 
@@ -574,7 +579,7 @@ where
     }
 
     debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
-    let data = reth_primitives::fs::read(file_path)?;
+    let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
         return Ok(())
@@ -584,12 +589,17 @@ where
 
     let pool_transactions = txs_signed
         .into_iter()
-        .filter_map(|tx| tx.try_ecrecovered().map(<P::Transaction>::from_recovered_transaction))
+        .filter_map(|tx| tx.try_ecrecovered())
+        .filter_map(|tx| {
+            // Filter out errors
+            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx).ok()
+        })
         .collect::<Vec<_>>();
+
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
-    reth_primitives::fs::remove_file(file_path)?;
+    reth_fs_util::remove_file(file_path)?;
     Ok(())
 }
 
@@ -614,7 +624,7 @@ where
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
 
-    match parent_dir.map(|_| reth_primitives::fs::write(file_path, buf)) {
+    match parent_dir.map(|_| reth_fs_util::write(file_path, buf)) {
         Ok(_) => {
             info!(target: "txpool", txs_file=?file_path, "Wrote local transactions to file");
         }
@@ -671,7 +681,8 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use reth_primitives::{fs, hex, PooledTransactionsElement, MAINNET, U256};
+    use reth_fs_util as fs;
+    use reth_primitives::{hex, PooledTransactionsElement, MAINNET, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

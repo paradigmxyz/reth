@@ -1,6 +1,6 @@
 //! Additional support for tracking nodes.
 
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use std::{collections::HashMap, net::IpAddr, time::Instant};
 
 /// Keeps track of nodes from which we have received a `Pong` message.

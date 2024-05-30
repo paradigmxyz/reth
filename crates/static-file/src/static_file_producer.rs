@@ -4,23 +4,22 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     ProviderFactory,
 };
-use reth_tokio_util::EventListeners;
+use reth_storage_errors::provider::ProviderResult;
+use reth_tokio_util::{EventSender, EventStream};
 use std::{
     ops::{Deref, RangeInclusive},
     sync::Arc,
     time::Instant,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, trace};
 
 /// Result of [StaticFileProducerInner::run] execution.
-pub type StaticFileProducerResult = RethResult<StaticFileTargets>;
+pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
 /// The [StaticFileProducer] instance itself with the result of [StaticFileProducerInner::run]
 pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
@@ -64,7 +63,7 @@ pub struct StaticFileProducerInner<DB> {
     /// needed in [StaticFileProducerInner] to prevent attempting to move prunable data to static
     /// files. See [StaticFileProducerInner::get_static_file_targets].
     prune_modes: PruneModes,
-    listeners: EventListeners<StaticFileProducerEvent>,
+    event_sender: EventSender<StaticFileProducerEvent>,
 }
 
 /// Static File targets, per data part, measured in [`BlockNumber`].
@@ -107,12 +106,17 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         static_file_provider: StaticFileProvider,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { provider_factory, static_file_provider, prune_modes, listeners: Default::default() }
+        Self {
+            provider_factory,
+            static_file_provider,
+            prune_modes,
+            event_sender: Default::default(),
+        }
     }
 
     /// Listen for events on the static_file_producer.
-    pub fn events(&mut self) -> UnboundedReceiverStream<StaticFileProducerEvent> {
-        self.listeners.new_listener()
+    pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
+        self.event_sender.new_listener()
     }
 
     /// Run the static_file_producer.
@@ -123,12 +127,17 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
-    pub fn run(&mut self, targets: StaticFileTargets) -> StaticFileProducerResult {
+    pub fn run(&self, targets: StaticFileTargets) -> StaticFileProducerResult {
+        // If there are no targets, do not produce any static files and return early
+        if !targets.any() {
+            return Ok(targets)
+        }
+
         debug_assert!(targets.is_contiguous_to_highest_static_files(
             self.static_file_provider.get_highest_static_files()
         ));
 
-        self.listeners.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
+        self.event_sender.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
 
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
@@ -145,7 +154,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             segments.push((Box::new(segments::Receipts), block_range));
         }
 
-        segments.par_iter().try_for_each(|(segment, block_range)| -> RethResult<()> {
+        segments.par_iter().try_for_each(|(segment, block_range)| -> ProviderResult<()> {
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, "StaticFileProducer segment");
             let start = Instant::now();
 
@@ -168,7 +177,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics
         debug!(target: "static_file", ?targets, ?elapsed, "StaticFileProducer finished");
 
-        self.listeners
+        self.event_sender
             .notify(StaticFileProducerEvent::Finished { targets: targets.clone(), elapsed });
 
         Ok(targets)
@@ -180,7 +189,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     pub fn get_static_file_targets(
         &self,
         finalized_block_numbers: HighestStaticFiles,
-    ) -> RethResult<StaticFileTargets> {
+    ) -> ProviderResult<StaticFileTargets> {
         let highest_static_files = self.static_file_provider.get_highest_static_files();
 
         let targets = StaticFileTargets {
@@ -237,22 +246,18 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{database::Database, test_utils::TempDatabase, transaction::DbTx, DatabaseEnv};
-    use reth_interfaces::{
-        provider::ProviderError,
-        test_utils::{
-            generators,
-            generators::{random_block_range, random_receipt},
-        },
-        RethError,
-    };
     use reth_primitives::{
         static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
-        ProviderFactory,
+        ProviderError, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block_range, random_receipt},
+    };
     use std::{
         sync::{mpsc::channel, Arc},
         time::Duration,
@@ -267,12 +272,13 @@ mod tests {
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works
-        db.factory
-            .static_file_provider()
+        let static_file_provider = db.factory.static_file_provider();
+        let mut static_file_writer = static_file_provider
             .latest_writer(StaticFileSegment::Headers)
-            .expect("get static file writer for headers")
-            .prune_headers(blocks.len() as u64)
-            .expect("prune headers");
+            .expect("get static file writer for headers");
+        static_file_writer.prune_headers(blocks.len() as u64).unwrap();
+        static_file_writer.commit().expect("prune headers");
+
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
         blocks.iter().for_each(|block| {
             TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
@@ -298,7 +304,7 @@ mod tests {
     fn run() {
         let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
 
-        let mut static_file_producer = StaticFileProducerInner::new(
+        let static_file_producer = StaticFileProducerInner::new(
             provider_factory,
             static_file_provider.clone(),
             PruneModes::default(),
@@ -363,7 +369,7 @@ mod tests {
         );
         assert_matches!(
             static_file_producer.run(targets),
-            Err(RethError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
+            Err(ProviderError::BlockBodyIndicesNotFound(4))
         );
         assert_eq!(
             static_file_provider.get_highest_static_files(),
@@ -386,7 +392,7 @@ mod tests {
             let tx = tx.clone();
 
             std::thread::spawn(move || {
-                let mut locked_producer = producer.lock();
+                let locked_producer = producer.lock();
                 if i == 0 {
                     // Let other threads spawn as well.
                     std::thread::sleep(Duration::from_millis(100));

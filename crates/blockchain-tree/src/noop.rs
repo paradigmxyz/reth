@@ -1,28 +1,37 @@
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
-    provider::ProviderError,
-    RethResult,
+use reth_blockchain_tree_api::{
+    self,
+    error::{BlockchainTreeError, CanonicalError, InsertBlockError, ProviderError},
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateNotificationSender,
-    CanonStateNotifications, CanonStateSubscriptions,
+    BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
+    CanonStateSubscriptions, FullBundleStateDataProvider,
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 /// A BlockchainTree that does nothing.
 ///
 /// Caution: this is only intended for testing purposes, or for wiring components together.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct NoopBlockchainTree {}
+pub struct NoopBlockchainTree {
+    /// Broadcast channel for canon state changes notifications.
+    pub canon_state_notification_sender: Option<CanonStateNotificationSender>,
+}
+
+impl NoopBlockchainTree {
+    /// Create a new NoopBlockchainTree with a canon state notification sender.
+    pub fn with_canon_state_notifications(
+        canon_state_notification_sender: CanonStateNotificationSender,
+    ) -> Self {
+        Self { canon_state_notification_sender: Some(canon_state_notification_sender) }
+    }
+}
 
 impl BlockchainTreeEngine for NoopBlockchainTree {
     fn buffer_block(&self, _block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
@@ -45,28 +54,26 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         _last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         Ok(())
     }
 
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         Ok(())
     }
 
-    fn make_canonical(&self, block_hash: &BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
-        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
+    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
+        Err(BlockchainTreeError::BlockHashNotFoundInChain { block_hash }.into())
     }
 
-    fn unwind(&self, _unwind_to: BlockNumber) -> RethResult<()> {
-        Ok(())
+    fn update_block_hashes_and_clear_buffered(
+        &self,
+    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError> {
+        Ok(BTreeMap::new())
     }
 }
 
 impl BlockchainTreeViewer for NoopBlockchainTree {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        Default::default()
-    }
-
     fn header_by_hash(&self, _hash: BlockHash) -> Option<SealedHeader> {
         None
     }
@@ -79,19 +86,7 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
         None
     }
 
-    fn buffered_block_by_hash(&self, _block_hash: BlockHash) -> Option<SealedBlock> {
-        None
-    }
-
     fn buffered_header_by_hash(&self, _block_hash: BlockHash) -> Option<SealedHeader> {
-        None
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        Default::default()
-    }
-
-    fn find_canonical_ancestor(&self, _parent_hash: BlockHash) -> Option<BlockHash> {
         None
     }
 
@@ -105,10 +100,6 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
 
     fn canonical_tip(&self) -> BlockNumHash {
         Default::default()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        (0, vec![])
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
@@ -128,13 +119,16 @@ impl BlockchainTreePendingStateProvider for NoopBlockchainTree {
     fn find_pending_state_provider(
         &self,
         _block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
         None
     }
 }
 
 impl CanonStateSubscriptions for NoopBlockchainTree {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
-        CanonStateNotificationSender::new(1).subscribe()
+        self.canon_state_notification_sender
+            .as_ref()
+            .map(|sender| sender.subscribe())
+            .unwrap_or_else(|| CanonStateNotificationSender::new(1).subscribe())
     }
 }

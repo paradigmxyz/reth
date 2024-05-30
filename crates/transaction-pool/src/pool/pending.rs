@@ -90,9 +90,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
-    /// an unsatisfied dependency and only returns them if dependency transaction were yielded
-    /// previously. In other words: The nonces of transactions with the same sender will _always_
-    /// increase by exactly 1.
+    ///    an unsatisfied dependency and only returns them if dependency transaction were yielded
+    ///    previously. In other words: The nonces of transactions with the same sender will _always_
+    ///    increase by exactly 1.
     ///
     /// The order of transactions which satisfy (1.) is determent by their computed priority: A
     /// transaction with a higher priority is returned before a transaction with a lower priority.
@@ -165,7 +165,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Updates the pool with the new blob fee. Removes
     /// from the subpool all transactions and their dependents that no longer satisfy the given
-    /// base fee (`tx.max_blob_fee < blob_fee`).
+    /// blob fee (`tx.max_blob_fee < blob_fee`).
     ///
     /// Note: the transactions are not returned in a particular order.
     ///
@@ -399,7 +399,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             unique_senders = self.highest_nonces.len();
             non_local_senders -= unique_removed;
 
-            // we can re-use the temp array
+            // we can reuse the temp array
             removed.clear();
 
             // loop through the highest nonces set, removing transactions until we reach the limit

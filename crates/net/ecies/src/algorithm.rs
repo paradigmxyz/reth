@@ -3,7 +3,7 @@
 use crate::{
     error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},
-    util::{hmac_sha256, id2pk, pk2id, sha256},
+    util::{hmac_sha256, sha256},
     ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
@@ -13,6 +13,7 @@ use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
 use educe::Educe;
 use rand::{thread_rng, Rng};
+use reth_network_types::{id2pk, pk2id};
 use reth_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
     B128, B256, B512 as PeerId,
@@ -44,8 +45,8 @@ fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
 /// # Panics
 /// * If the `dest` is empty
 /// * If the `dest` len is greater than or equal to the hash output len * the max counter value. In
-/// this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
-/// cannot have a len greater than 32 * 2^32 - 1.
+///   this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
+///   cannot have a len greater than 32 * 2^32 - 1.
 fn kdf(secret: B256, s1: &[u8], dest: &mut [u8]) {
     concat_kdf::derive_key_into::<Sha256>(secret.as_slice(), s1, dest).unwrap();
 }
@@ -399,7 +400,7 @@ impl ECIES {
         let msg = x ^ self.nonce;
         let (rec_id, sig) = SECP256K1
             .sign_ecdsa_recoverable(
-                &secp256k1::Message::from_slice(msg.as_slice()).unwrap(),
+                &secp256k1::Message::from_digest(msg.0),
                 &self.ephemeral_secret_key,
             )
             .serialize_compact();
@@ -473,7 +474,7 @@ impl ECIES {
 
         let x = ecdh_x(&self.remote_public_key.unwrap(), &self.secret_key);
         self.remote_ephemeral_public_key = Some(SECP256K1.recover_ecdsa(
-            &secp256k1::Message::from_slice((x ^ self.remote_nonce.unwrap()).as_ref()).unwrap(),
+            &secp256k1::Message::from_digest((x ^ self.remote_nonce.unwrap()).0),
             &signature,
         )?);
         self.ephemeral_shared_secret =
@@ -630,8 +631,8 @@ impl ECIES {
         self.egress_mac.as_mut().unwrap().update_header(&header);
         let tag = self.egress_mac.as_mut().unwrap().digest();
 
-        out.reserve(ECIES::header_len());
-        out.extend_from_slice(&header);
+        out.reserve(Self::header_len());
+        out.extend_from_slice(&header[..]);
         out.extend_from_slice(tag.as_slice());
     }
 

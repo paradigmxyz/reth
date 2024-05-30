@@ -15,7 +15,6 @@ workspace = true
 
 # async/net
 futures.workspace = true
-parity-tokio-ipc = "0.9.0"
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tokio-stream.workspace = true
@@ -29,6 +28,10 @@ serde_json.workspace = true
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
+futures-util = "0.3.30"
+interprocess = { version = "1.2.1", features = ["tokio_support"] }
 
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }
+reth-tracing.workspace = true
+rand.workspace = true

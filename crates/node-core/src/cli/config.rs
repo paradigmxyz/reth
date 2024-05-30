@@ -1,14 +1,12 @@
 //! Config traits for various node components.
 
+use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use reth_network::protocol::IntoRlpxSubProtocol;
 use reth_primitives::Bytes;
-use reth_rpc::{
-    eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig},
-    JwtError, JwtSecret,
-};
+use reth_rpc::eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig};
 use reth_rpc_builder::{
-    auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcServerConfig,
-    ServerBuilder, TransportRpcModuleConfig,
+    auth::AuthServerConfig, error::RpcError, EthConfig, Identity, IpcServerBuilder,
+    RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, path::PathBuf, time::Duration};
@@ -46,10 +44,10 @@ pub trait RethRpcConfig {
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig;
 
     /// Returns the default server builder for http/ws
-    fn http_ws_server_builder(&self) -> ServerBuilder;
+    fn http_ws_server_builder(&self) -> ServerBuilder<Identity, Identity>;
 
     /// Returns the default ipc server builder
-    fn ipc_server_builder(&self) -> IpcServerBuilder;
+    fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
 
     /// Creates the [RpcServerConfig] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
@@ -124,7 +122,7 @@ pub trait RethNetworkConfig {
 
 impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
-        reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
+        Self::add_rlpx_sub_protocol(self, protocol);
     }
 
     fn secret_key(&self) -> secp256k1::SecretKey {

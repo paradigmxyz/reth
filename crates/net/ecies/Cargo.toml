@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 reth-primitives.workspace = true
 reth-net-common.workspace = true
+reth-network-types.workspace = true
 
 alloy-rlp = { workspace = true, features = ["derive"] }
 futures.workspace = true
@@ -26,7 +27,7 @@ educe = "0.4.19"
 tracing.workspace = true
 
 # HeaderBytes
-generic-array = "0.14.6"
+generic-array.workspace = true
 typenum = "1.15.0"
 byteorder = "1.4.3"
 

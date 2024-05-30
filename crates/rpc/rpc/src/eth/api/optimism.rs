@@ -1,4 +1,5 @@
-use reth_primitives::U256;
+//! Optimism helpers.
+
 use revm::L1BlockInfo;
 
 /// Optimism Transaction Metadata
@@ -13,17 +14,17 @@ pub(crate) struct OptimismTxMeta {
     /// The L1 block info.
     pub(crate) l1_block_info: Option<L1BlockInfo>,
     /// The L1 fee for the block.
-    pub(crate) l1_fee: Option<U256>,
+    pub(crate) l1_fee: Option<u128>,
     /// The L1 data gas for the block.
-    pub(crate) l1_data_gas: Option<U256>,
+    pub(crate) l1_data_gas: Option<u128>,
 }
 
 impl OptimismTxMeta {
     /// Creates a new [OptimismTxMeta].
     pub(crate) fn new(
         l1_block_info: Option<L1BlockInfo>,
-        l1_fee: Option<U256>,
-        l1_data_gas: Option<U256>,
+        l1_fee: Option<u128>,
+        l1_data_gas: Option<u128>,
     ) -> Self {
         Self { l1_block_info, l1_fee, l1_data_gas }
     }

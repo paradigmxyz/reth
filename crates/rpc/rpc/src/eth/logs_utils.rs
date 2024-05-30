@@ -1,6 +1,6 @@
 use super::filter::FilterError;
 use alloy_primitives::TxHash;
-use reth_primitives::{BlockNumHash, ChainInfo, Receipt, U256};
+use reth_primitives::{BlockNumHash, ChainInfo, Receipt};
 use reth_provider::{BlockReader, ProviderError};
 use reth_rpc_types::{FilteredParams, Log};
 
@@ -16,22 +16,21 @@ where
 {
     let mut all_logs = Vec::new();
     // Tracks the index of a log in the entire block.
-    let mut log_index: u32 = 0;
+    let mut log_index: u64 = 0;
     // Iterate over transaction hashes and receipts and append matching logs.
     for (receipt_idx, (tx_hash, receipt)) in tx_hashes_and_receipts.into_iter().enumerate() {
         for log in receipt.logs.iter() {
             if log_matches_filter(block_num_hash, log, filter) {
                 let log = Log {
-                    address: log.address,
-                    topics: log.topics.clone(),
-                    data: log.data.clone(),
+                    inner: log.clone(),
                     block_hash: Some(block_num_hash.hash),
-                    block_number: Some(U256::from(block_num_hash.number)),
+                    block_number: Some(block_num_hash.number),
                     transaction_hash: Some(tx_hash),
                     // The transaction and receipt index is always the same.
-                    transaction_index: Some(U256::from(receipt_idx)),
-                    log_index: Some(U256::from(log_index)),
+                    transaction_index: Some(receipt_idx as u64),
+                    log_index: Some(log_index),
                     removed,
+                    block_timestamp: None,
                 };
                 all_logs.push(log);
             }
@@ -50,9 +49,10 @@ pub(crate) fn append_matching_block_logs(
     block_num_hash: BlockNumHash,
     receipts: &[Receipt],
     removed: bool,
+    block_timestamp: u64,
 ) -> Result<(), FilterError> {
     // Tracks the index of a log in the entire block.
-    let mut log_index: u32 = 0;
+    let mut log_index: u64 = 0;
 
     // Lazy loaded number of the first transaction in the block.
     // This is useful for blocks with multiple matching logs because it prevents
@@ -90,16 +90,15 @@ pub(crate) fn append_matching_block_logs(
                 }
 
                 let log = Log {
-                    address: log.address,
-                    topics: log.topics.clone(),
-                    data: log.data.clone(),
+                    inner: log.clone(),
                     block_hash: Some(block_num_hash.hash),
-                    block_number: Some(U256::from(block_num_hash.number)),
+                    block_number: Some(block_num_hash.number),
                     transaction_hash,
                     // The transaction and receipt index is always the same.
-                    transaction_index: Some(U256::from(receipt_idx)),
-                    log_index: Some(U256::from(log_index)),
+                    transaction_index: Some(receipt_idx as u64),
+                    log_index: Some(log_index),
                     removed,
+                    block_timestamp: Some(block_timestamp),
                 };
                 all_logs.push(log);
             }
@@ -119,7 +118,7 @@ pub(crate) fn log_matches_filter(
         (!params.filter_block_range(block.number) ||
             !params.filter_block_hash(block.hash) ||
             !params.filter_address(&log.address) ||
-            !params.filter_topics(&log.topics))
+            !params.filter_topics(log.topics()))
     {
         return false
     }
@@ -154,9 +153,9 @@ pub(crate) fn get_filter_block_range(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use reth_rpc_types::Filter;
+
+    use super::*;
 
     #[test]
     fn test_log_range_from_and_to() {

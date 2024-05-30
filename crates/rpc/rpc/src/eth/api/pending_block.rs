@@ -8,8 +8,9 @@ use reth_primitives::{
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
+    trie::EMPTY_ROOT_HASH,
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Receipts, Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -52,8 +53,8 @@ impl PendingBlockEnv {
 
         let parent_hash = origin.build_target_hash();
         let state_provider = client.history_by_block_hash(parent_hash)?;
-        let state = StateProviderDatabase::new(&state_provider);
-        let mut db = State::builder().with_database(Box::new(state)).with_bundle_update().build();
+        let state = StateProviderDatabase::new(state_provider);
+        let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
@@ -230,6 +231,7 @@ impl PendingBlockEnv {
         let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
+        let state_provider = &db.database;
         let state_root = state_provider.state_root(bundle.state())?;
 
         // create the block header
@@ -238,6 +240,15 @@ impl PendingBlockEnv {
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
             if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+
+        // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
+        // set these to empty
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(block_env.timestamp.to::<u64>()) {
+                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+            } else {
+                (None, None)
+            };
 
         let header = Header {
             parent_hash,
@@ -260,10 +271,11 @@ impl PendingBlockEnv {
             excess_blob_gas: block_env.get_blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root,
+            requests_root,
         };
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
         Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
     }
 }
@@ -324,13 +336,13 @@ pub(crate) enum PendingBlockEnvOrigin {
 impl PendingBlockEnvOrigin {
     /// Returns true if the origin is the actual pending block as received from the CL.
     pub(crate) fn is_actual_pending(&self) -> bool {
-        matches!(self, PendingBlockEnvOrigin::ActualPending(_))
+        matches!(self, Self::ActualPending(_))
     }
 
     /// Consumes the type and returns the actual pending block.
     pub(crate) fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => Some(block),
+            Self::ActualPending(block) => Some(block),
             _ => None,
         }
     }
@@ -341,8 +353,8 @@ impl PendingBlockEnvOrigin {
     /// identify the block by its hash (latest block).
     pub(crate) fn state_block_id(&self) -> BlockId {
         match self {
-            PendingBlockEnvOrigin::ActualPending(_) => BlockNumberOrTag::Pending.into(),
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
+            Self::ActualPending(_) => BlockNumberOrTag::Pending.into(),
+            Self::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
         }
     }
 
@@ -352,16 +364,16 @@ impl PendingBlockEnvOrigin {
     /// For the [PendingBlockEnvOrigin::DerivedFromLatest] this is the hash of the _latest_ header.
     fn build_target_hash(&self) -> B256 {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash(),
+            Self::ActualPending(block) => block.parent_hash,
+            Self::DerivedFromLatest(header) => header.hash(),
         }
     }
 
     /// Returns the header this pending block is based on.
     pub(crate) fn header(&self) -> &SealedHeader {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => &block.header,
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => header,
+            Self::ActualPending(block) => &block.header,
+            Self::DerivedFromLatest(header) => header,
         }
     }
 }

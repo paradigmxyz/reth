@@ -14,11 +14,13 @@ use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::{PeerId, MAINNET};
+use reth_network_types::PeerId;
+use reth_primitives::MAINNET;
 use reth_provider::{
     test_utils::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
 use reth_tasks::TokioTaskExecutor;
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
     test_utils::{TestPool, TestPoolBuilder},
@@ -39,7 +41,6 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A test network consisting of multiple peers.
 pub struct Testnet<C, Pool> {
@@ -226,7 +227,7 @@ impl Testnet<NoopProvider, TestPool> {
 
     /// Creates a new [`Testnet`] with the given number of peers
     pub async fn try_create(num_peers: usize) -> Result<Self, NetworkError> {
-        let mut this = Testnet::default();
+        let mut this = Self::default();
 
         this.extend_peer_with_config((0..num_peers).map(|_| Default::default())).await?;
         Ok(this)
@@ -502,7 +503,7 @@ impl<Pool> PeerHandle<Pool> {
     }
 
     /// Creates a new [`NetworkEvent`] listener channel.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
+    pub fn event_listener(&self) -> EventStream<NetworkEvent> {
         self.network.event_listener()
     }
 
@@ -530,7 +531,7 @@ where
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
-        let PeerConfig { config, client, secret_key } = self;
+        let Self { config, client, secret_key } = self;
         let network = NetworkManager::new(config).await?;
         let peer = Peer {
             network,
@@ -590,14 +591,14 @@ impl Default for PeerConfig {
 /// This makes it easier to await established connections
 #[derive(Debug)]
 pub struct NetworkEventStream {
-    inner: UnboundedReceiverStream<NetworkEvent>,
+    inner: EventStream<NetworkEvent>,
 }
 
 // === impl NetworkEventStream ===
 
 impl NetworkEventStream {
     /// Create a new [`NetworkEventStream`] from the given network event receiver stream.
-    pub fn new(inner: UnboundedReceiverStream<NetworkEvent>) -> Self {
+    pub fn new(inner: EventStream<NetworkEvent>) -> Self {
         Self { inner }
     }
 

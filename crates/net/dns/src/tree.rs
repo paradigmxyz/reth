@@ -22,7 +22,7 @@ use crate::error::{
     ParseEntryResult,
 };
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
-use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
+use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey, Error as EnrError};
 use reth_primitives::{hex, Bytes};
 use secp256k1::SecretKey;
 #[cfg(feature = "serde")]
@@ -58,10 +58,10 @@ pub enum DnsEntry<K: EnrKeyUnambiguous> {
 impl<K: EnrKeyUnambiguous> fmt::Display for DnsEntry<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DnsEntry::Root(entry) => entry.fmt(f),
-            DnsEntry::Link(entry) => entry.fmt(f),
-            DnsEntry::Branch(entry) => entry.fmt(f),
-            DnsEntry::Node(entry) => entry.fmt(f),
+            Self::Root(entry) => entry.fmt(f),
+            Self::Link(entry) => entry.fmt(f),
+            Self::Branch(entry) => entry.fmt(f),
+            Self::Node(entry) => entry.fmt(f),
         }
     }
 }

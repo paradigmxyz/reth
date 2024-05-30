@@ -1,4 +1,5 @@
-use crate::U8;
+use crate::{U64, U8};
+use alloy_rlp::{Decodable, Encodable};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
@@ -48,15 +49,15 @@ pub enum TxType {
 
 impl TxType {
     /// The max type reserved by an EIP.
-    pub const MAX_RESERVED_EIP: TxType = Self::Eip4844;
+    pub const MAX_RESERVED_EIP: Self = Self::Eip4844;
 
     /// Check if the transaction type has an access list.
     pub const fn has_access_list(&self) -> bool {
         match self {
-            TxType::Legacy => false,
-            TxType::Eip2930 | TxType::Eip1559 | TxType::Eip4844 => true,
+            Self::Legacy => false,
+            Self::Eip2930 | Self::Eip1559 | Self::Eip4844 => true,
             #[cfg(feature = "optimism")]
-            TxType::Deposit => false,
+            Self::Deposit => false,
         }
     }
 }
@@ -76,7 +77,7 @@ impl From<TxType> for u8 {
 
 impl From<TxType> for U8 {
     fn from(value: TxType) -> Self {
-        U8::from(u8::from(value))
+        Self::from(u8::from(value))
     }
 }
 
@@ -85,21 +86,38 @@ impl TryFrom<u8> for TxType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         #[cfg(feature = "optimism")]
-        if value == TxType::Deposit as u8 {
-            return Ok(TxType::Deposit)
+        if value == Self::Deposit {
+            return Ok(Self::Deposit)
         }
 
-        if value == TxType::Legacy as u8 {
-            return Ok(TxType::Legacy)
-        } else if value == TxType::Eip2930 as u8 {
-            return Ok(TxType::Eip2930)
-        } else if value == TxType::Eip1559 as u8 {
-            return Ok(TxType::Eip1559)
-        } else if value == TxType::Eip4844 as u8 {
-            return Ok(TxType::Eip4844)
+        if value == Self::Legacy {
+            return Ok(Self::Legacy)
+        } else if value == Self::Eip2930 {
+            return Ok(Self::Eip2930)
+        } else if value == Self::Eip1559 {
+            return Ok(Self::Eip1559)
+        } else if value == Self::Eip4844 {
+            return Ok(Self::Eip4844)
         }
 
         Err("invalid tx type")
+    }
+}
+
+impl TryFrom<u64> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        let value: u8 = value.try_into().map_err(|_| "invalid tx type")?;
+        Self::try_from(value)
+    }
+}
+
+impl TryFrom<U64> for TxType {
+    type Error = &'static str;
+
+    fn try_from(value: U64) -> Result<Self, Self::Error> {
+        value.to::<u64>().try_into()
     }
 }
 
@@ -109,10 +127,10 @@ impl Compact for TxType {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         match self {
-            TxType::Legacy => 0,
-            TxType::Eip2930 => 1,
-            TxType::Eip1559 => 2,
-            TxType::Eip4844 => {
+            Self::Legacy => 0,
+            Self::Eip2930 => 1,
+            Self::Eip1559 => 2,
+            Self::Eip4844 => {
                 // Write the full transaction type to the buffer when encoding > 3.
                 // This allows compat decoding the [TyType] from a single byte as
                 // opposed to 2 bits for the backwards-compatible encoding.
@@ -120,7 +138,7 @@ impl Compact for TxType {
                 3
             }
             #[cfg(feature = "optimism")]
-            TxType::Deposit => {
+            Self::Deposit => {
                 buf.put_u8(self as u8);
                 3
             }
@@ -133,15 +151,15 @@ impl Compact for TxType {
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         (
             match identifier {
-                0 => TxType::Legacy,
-                1 => TxType::Eip2930,
-                2 => TxType::Eip1559,
+                0 => Self::Legacy,
+                1 => Self::Eip2930,
+                2 => Self::Eip1559,
                 3 => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
-                        EIP4844_TX_TYPE_ID => TxType::Eip4844,
+                        EIP4844_TX_TYPE_ID => Self::Eip4844,
                         #[cfg(feature = "optimism")]
-                        DEPOSIT_TX_TYPE_ID => TxType::Deposit,
+                        DEPOSIT_TX_TYPE_ID => Self::Deposit,
                         _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
                     }
                 }
@@ -152,9 +170,65 @@ impl Compact for TxType {
     }
 }
 
+impl PartialEq<u8> for TxType {
+    fn eq(&self, other: &u8) -> bool {
+        *self as u8 == *other
+    }
+}
+
+impl PartialEq<TxType> for u8 {
+    fn eq(&self, other: &TxType) -> bool {
+        *self == *other as Self
+    }
+}
+
+impl Encodable for TxType {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        (*self as u8).encode(out);
+    }
+
+    fn length(&self) -> usize {
+        1
+    }
+}
+
+impl Decodable for TxType {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let ty = u8::decode(buf)?;
+
+        Self::try_from(ty).map_err(alloy_rlp::Error::Custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
+
+    use crate::hex;
+
     use super::*;
+
+    #[test]
+    fn test_u64_to_tx_type() {
+        // Test for Legacy transaction
+        assert_eq!(TxType::try_from(U64::from(0)).unwrap(), TxType::Legacy);
+
+        // Test for EIP2930 transaction
+        assert_eq!(TxType::try_from(U64::from(1)).unwrap(), TxType::Eip2930);
+
+        // Test for EIP1559 transaction
+        assert_eq!(TxType::try_from(U64::from(2)).unwrap(), TxType::Eip1559);
+
+        // Test for EIP4844 transaction
+        assert_eq!(TxType::try_from(U64::from(3)).unwrap(), TxType::Eip4844);
+
+        // Test for Deposit transaction
+        #[cfg(feature = "optimism")]
+        assert_eq!(TxType::try_from(U64::from(126)).unwrap(), TxType::Deposit);
+
+        // For transactions with unsupported values
+        assert!(TxType::try_from(U64::from(4)).is_err());
+    }
 
     #[test]
     fn test_txtype_to_compat() {
@@ -196,6 +270,38 @@ mod tests {
                 remaining_buf.is_empty(),
                 "Buffer not fully consumed for identifier {identifier}",
             );
+        }
+    }
+
+    #[test]
+    fn decode_tx_type() {
+        // Test for Legacy transaction
+        let tx_type = TxType::decode(&mut &hex!("80")[..]).unwrap();
+        assert_eq!(tx_type, TxType::Legacy);
+
+        // Test for EIP2930 transaction
+        let tx_type = TxType::decode(&mut &[1u8][..]).unwrap();
+        assert_eq!(tx_type, TxType::Eip2930);
+
+        // Test for EIP1559 transaction
+        let tx_type = TxType::decode(&mut &[2u8][..]).unwrap();
+        assert_eq!(tx_type, TxType::Eip1559);
+
+        // Test for EIP4844 transaction
+        let tx_type = TxType::decode(&mut &[3u8][..]).unwrap();
+        assert_eq!(tx_type, TxType::Eip4844);
+
+        // Test random byte not in range
+        let buf = [rand::thread_rng().gen_range(4..=u8::MAX)];
+        println!("{buf:?}");
+        assert!(TxType::decode(&mut &buf[..]).is_err());
+
+        // Test for Deposit transaction
+        #[cfg(feature = "optimism")]
+        {
+            let buf = [126u8];
+            let tx_type = TxType::decode(&mut &buf[..]).unwrap();
+            assert_eq!(tx_type, TxType::Deposit);
         }
     }
 }

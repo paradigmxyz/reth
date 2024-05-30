@@ -96,11 +96,10 @@ impl Command {
             });
 
         let db = open_db_read_only(
-            data_dir.db_path().as_path(),
+            data_dir.db().as_path(),
             db_args.with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )?;
-        let provider_factory =
-            Arc::new(ProviderFactory::new(db, chain, data_dir.static_files_path())?);
+        let provider_factory = Arc::new(ProviderFactory::new(db, chain, data_dir.static_files())?);
 
         {
             if !self.only_bench {

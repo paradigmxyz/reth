@@ -7,7 +7,6 @@ use crate::{
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{providers::StaticFileWriter, HashingWriter, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
@@ -43,7 +42,7 @@ pub struct BlockchainTestCase {
 
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(BlockchainTestCase {
+        Ok(Self {
             tests: {
                 let s = fs::read_to_string(path)
                     .map_err(|error| Error::Io { path: path.into(), error })?;
@@ -93,17 +92,15 @@ impl Case for BlockchainTestCase {
                 .unwrap();
 
                 // Insert initial test state into the provider.
-                provider
-                    .insert_historical_block(
-                        SealedBlock::new(
-                            case.genesis_block_header.clone().into(),
-                            BlockBody::default(),
-                        )
-                        .try_seal_with_senders()
-                        .unwrap(),
-                        None,
+                provider.insert_historical_block(
+                    SealedBlock::new(
+                        case.genesis_block_header.clone().into(),
+                        BlockBody::default(),
                     )
-                    .map_err(|err| Error::RethError(err.into()))?;
+                    .try_seal_with_senders()
+                    .unwrap(),
+                    None,
+                )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
                 // Initialize receipts static file with genesis
@@ -119,12 +116,10 @@ impl Case for BlockchainTestCase {
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                    provider
-                        .insert_historical_block(
-                            decoded.clone().try_seal_with_senders().unwrap(),
-                            None,
-                        )
-                        .map_err(|err| Error::RethError(err.into()))?;
+                    provider.insert_historical_block(
+                        decoded.clone().try_seal_with_senders().unwrap(),
+                        None,
+                    )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
@@ -136,10 +131,11 @@ impl Case for BlockchainTestCase {
 
                 // Execute the execution stage using the EVM processor factory for the test case
                 // network.
-                let _ = ExecutionStage::new_with_factory(reth_revm::EvmProcessorFactory::new(
-                    Arc::new(case.network.clone().into()),
-                    EthEvmConfig::default(),
-                ))
+                let _ = ExecutionStage::new_with_executor(
+                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(Arc::new(
+                        case.network.clone().into(),
+                    )),
+                )
                 .execute(
                     &provider,
                     ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
@@ -156,13 +152,11 @@ impl Case for BlockchainTestCase {
                     (None, Some(expected_state_root)) => {
                         // Insert state hashes into the provider based on the expected state root.
                         let last_block = last_block.unwrap_or_default();
-                        provider
-                            .insert_hashes(
-                                0..=last_block.number,
-                                last_block.hash(),
-                                *expected_state_root,
-                            )
-                            .map_err(|err| Error::RethError(err.into()))?;
+                        provider.insert_hashes(
+                            0..=last_block.number,
+                            last_block.hash(),
+                            *expected_state_root,
+                        )?;
                     }
                     _ => return Err(Error::MissingPostState),
                 }

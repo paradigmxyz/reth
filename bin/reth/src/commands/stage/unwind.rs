@@ -1,17 +1,36 @@
 //! Unwinding a certain block range
 
+use clap::{Parser, Subcommand};
+use reth_beacon_consensus::EthBeaconConsensus;
+use reth_config::Config;
+use reth_consensus::Consensus;
+use reth_db::{database::Database, open_db};
+use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_exex::ExExManagerHandle;
+use reth_node_core::args::NetworkArgs;
+use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
+use reth_provider::{
+    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
+    StaticFileProviderFactory,
+};
+use reth_stages::{
+    sets::DefaultStages,
+    stages::{ExecutionStage, ExecutionStageThresholds},
+    Pipeline, StageSet,
+};
+use reth_static_file::StaticFileProducer;
+use std::{ops::RangeInclusive, sync::Arc};
+use tokio::sync::watch;
+use tracing::info;
+
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
+    macros::block_executor,
 };
-use clap::{Parser, Subcommand};
-use reth_db::{cursor::DbCursorRO, database::Database, open_db, tables, transaction::DbTx};
-use reth_primitives::{BlockHashOrNumber, ChainSpec};
-use reth_provider::{BlockExecutionWriter, ProviderFactory};
-use std::{ops::RangeInclusive, sync::Arc};
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -42,6 +61,9 @@ pub struct Command {
     #[command(flatten)]
     db: DatabaseArgs,
 
+    #[command(flatten)]
+    network: NetworkArgs,
+
     #[command(subcommand)]
     command: Subcommands,
 }
@@ -51,41 +73,115 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         if !db_path.exists() {
             eyre::bail!("Database {db_path:?} does not exist.")
         }
+        let config_path = data_dir.config();
+        let config: Config = confy::load_path(config_path).unwrap_or_default();
 
-        let db = open_db(db_path.as_ref(), self.db.database_args())?;
+        let db = Arc::new(open_db(db_path.as_ref(), self.db.database_args())?);
+        let provider_factory =
+            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
 
-        let range = self.command.unwind_range(&db)?;
-
+        let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
-        let provider = factory.provider_rw()?;
+        // Only execute a pipeline unwind if the start of the range overlaps the existing static
+        // files. If that's the case, then copy all available data from MDBX to static files, and
+        // only then, proceed with the unwind.
+        if let Some(highest_static_block) = provider_factory
+            .static_file_provider()
+            .get_highest_static_files()
+            .max()
+            .filter(|highest_static_file_block| highest_static_file_block >= range.start())
+        {
+            info!(target: "reth::cli", ?range, ?highest_static_block, "Executing a pipeline unwind.");
+            let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
 
-        let blocks_and_execution = provider
-            .take_block_and_execution_range(&self.chain, range)
-            .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
+            // Move all applicable data from database to static files.
+            pipeline.move_to_static_files()?;
 
-        provider.commit()?;
+            pipeline.unwind((*range.start()).saturating_sub(1), None)?;
+        } else {
+            info!(target: "reth::cli", ?range, "Executing a database unwind.");
+            let provider = provider_factory.provider_rw()?;
 
-        println!("Unwound {} blocks", blocks_and_execution.len());
+            let _ = provider
+                .take_block_and_execution_range(range.clone())
+                .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
+
+            provider.commit()?;
+        }
+
+        println!("Unwound {} blocks", range.count());
 
         Ok(())
+    }
+
+    async fn build_pipeline<DB: Database + 'static>(
+        self,
+        config: Config,
+        provider_factory: ProviderFactory<Arc<DB>>,
+    ) -> Result<Pipeline<Arc<DB>>, eyre::Error> {
+        let consensus: Arc<dyn Consensus> =
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
+        let stage_conf = &config.stages;
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+
+        let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
+        let executor = block_executor!(provider_factory.chain_spec());
+
+        let header_mode = HeaderSyncMode::Tip(tip_rx);
+        let pipeline = Pipeline::builder()
+            .with_tip_sender(tip_tx)
+            .add_stages(
+                DefaultStages::new(
+                    provider_factory.clone(),
+                    header_mode,
+                    Arc::clone(&consensus),
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
+                    executor.clone(),
+                    stage_conf.clone(),
+                    prune_modes.clone(),
+                )
+                .set(ExecutionStage::new(
+                    executor,
+                    ExecutionStageThresholds {
+                        max_blocks: None,
+                        max_changes: None,
+                        max_cumulative_gas: None,
+                        max_duration: None,
+                    },
+                    stage_conf.execution_external_clean_threshold(),
+                    prune_modes,
+                    ExExManagerHandle::empty(),
+                )),
+            )
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(
+                    provider_factory.clone(),
+                    provider_factory.static_file_provider(),
+                    PruneModes::default(),
+                ),
+            );
+        Ok(pipeline)
     }
 }
 
 /// `reth stage unwind` subcommand
 #[derive(Subcommand, Debug, Eq, PartialEq)]
 enum Subcommands {
-    /// Unwinds the database until the given block number (range is inclusive).
+    /// Unwinds the database from the latest block, until the given block number or hash has been
+    /// reached, that block is not included.
     #[command(name = "to-block")]
     ToBlock { target: BlockHashOrNumber },
-    /// Unwinds the given number of blocks from the database.
+    /// Unwinds the database from the latest block, until the given number of blocks have been
+    /// reached.
     #[command(name = "num-blocks")]
     NumBlocks { amount: u64 },
 }
@@ -94,21 +190,25 @@ impl Subcommands {
     /// Returns the block range to unwind.
     ///
     /// This returns an inclusive range: [target..=latest]
-    fn unwind_range<DB: Database>(&self, db: DB) -> eyre::Result<RangeInclusive<u64>> {
-        let tx = db.tx()?;
-        let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-        let last = cursor.last()?.ok_or_else(|| eyre::eyre!("No blocks in database"))?;
-
+    fn unwind_range<DB: Database>(
+        &self,
+        factory: ProviderFactory<DB>,
+    ) -> eyre::Result<RangeInclusive<u64>> {
+        let provider = factory.provider()?;
+        let last = provider.last_block_number()?;
         let target = match self {
-            Subcommands::ToBlock { target } => match target {
-                BlockHashOrNumber::Hash(hash) => tx
-                    .get::<tables::HeaderNumbers>(*hash)?
+            Self::ToBlock { target } => match target {
+                BlockHashOrNumber::Hash(hash) => provider
+                    .block_number(*hash)?
                     .ok_or_else(|| eyre::eyre!("Block hash not found in database: {hash:?}"))?,
                 BlockHashOrNumber::Number(num) => *num,
             },
-            Subcommands::NumBlocks { amount } => last.0.saturating_sub(*amount),
+            Self::NumBlocks { amount } => last.saturating_sub(*amount),
         } + 1;
-        Ok(target..=last.0)
+        if target > last {
+            eyre::bail!("Target block number is higher than the latest block number")
+        }
+        Ok(target..=last)
     }
 }
 

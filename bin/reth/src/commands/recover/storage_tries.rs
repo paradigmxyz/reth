@@ -1,15 +1,16 @@
 use crate::{
     args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    core::cli::runner::CliContext,
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use clap::Parser;
+use reth_cli_runner::CliContext;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
     init_db, tables,
     transaction::DbTx,
 };
-use reth_node_core::{args::DatabaseArgs, init::init_genesis};
+use reth_db_common::init::init_genesis;
+use reth_node_core::args::DatabaseArgs;
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
 use reth_trie::StateRoot;
@@ -50,11 +51,11 @@ impl Command {
     /// Execute `storage-tries` recovery command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db_path();
+        let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
 
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files_path())?;
+        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(factory.clone())?;

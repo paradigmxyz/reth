@@ -1,0 +1,41 @@
+[package]
+name = "reth-evm-optimism"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Reth
+reth-evm.workspace = true
+reth-primitives.workspace = true
+reth-revm.workspace = true
+reth-execution-errors.workspace = true
+reth-provider.workspace = true
+reth-consensus-common.workspace = true
+
+# Optimism
+reth-optimism-consensus.workspace = true
+
+# revm
+revm.workspace = true
+revm-primitives.workspace = true
+
+# misc
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+reth-revm = { workspace = true, features = ["test-utils"] }
+
+[features]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-provider/optimism",
+    "reth-optimism-consensus/optimism",
+]

@@ -18,23 +18,27 @@ First, in your home directory, create a file with the name `network_params.json`
 {
   "participants": [
     {
-      "el_client_type": "reth",
-      "el_client_image": "ghcr.io/paradigmxyz/reth",
-      "cl_client_type": "lighthouse",
-      "cl_client_image": "sigp/lighthouse:latest",
+      "el_type": "reth",
+      "el_image": "ghcr.io/paradigmxyz/reth",
+      "cl_type": "lighthouse",
+      "cl_image": "sigp/lighthouse:latest",
       "count": 1
     },
     {
-      "el_client_type": "reth",
-      "el_client_image": "ghcr.io/paradigmxyz/reth",
-      "cl_client_type": "teku",
-      "cl_client_image": "consensys/teku:latest",
+      "el_type": "reth",
+      "el_image": "ghcr.io/paradigmxyz/reth",
+      "cl_type": "teku",
+      "cl_image": "consensys/teku:latest",
       "count": 1
     }
   ],
   "launch_additional_services": false
 }
 ```
+
+> [!TIP]
+> If you would like to use a modified reth node, you can build an image locally with a custom tag. The tag can then be used in the `el_image` field in the `network_params.json` file.
+
 ### Step 2: Spin up your network
 
 Next, run the following command from your command line:

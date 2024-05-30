@@ -1,11 +1,12 @@
 //! Blockchain tree externals.
 
+use reth_consensus::Consensus;
 use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
 };
-use reth_interfaces::{consensus::Consensus, RethResult};
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
-use reth_provider::{ProviderFactory, StatsReader};
+use reth_provider::{ProviderFactory, StaticFileProviderFactory, StatsReader};
+use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// A container for external components.
@@ -18,34 +19,34 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - The executor factory to execute blocks with
 /// - The chain spec
 #[derive(Debug)]
-pub struct TreeExternals<DB, EVM> {
+pub struct TreeExternals<DB, E> {
     /// The provider factory, used to commit the canonical chain, or unwind it.
     pub(crate) provider_factory: ProviderFactory<DB>,
     /// The consensus engine.
     pub(crate) consensus: Arc<dyn Consensus>,
     /// The executor factory to execute blocks with.
-    pub(crate) executor_factory: EVM,
+    pub(crate) executor_factory: E,
 }
 
-impl<DB, EVM> TreeExternals<DB, EVM> {
+impl<DB, E> TreeExternals<DB, E> {
     /// Create new tree externals.
     pub fn new(
         provider_factory: ProviderFactory<DB>,
         consensus: Arc<dyn Consensus>,
-        executor_factory: EVM,
+        executor_factory: E,
     ) -> Self {
         Self { provider_factory, consensus, executor_factory }
     }
 }
 
-impl<DB: Database, EVM> TreeExternals<DB, EVM> {
+impl<DB: Database, E> TreeExternals<DB, E> {
     /// Fetches the latest canonical block hashes by walking backwards from the head.
     ///
     /// Returns the hashes sorted by increasing block numbers
     pub(crate) fn fetch_latest_canonical_hashes(
         &self,
         num_hashes: usize,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+    ) -> ProviderResult<BTreeMap<BlockNumber, BlockHash>> {
         // Fetch the latest canonical hashes from the database
         let mut hashes = self
             .provider_factory

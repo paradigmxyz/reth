@@ -12,17 +12,18 @@ use std::{
     fmt,
     future::Future,
     io,
-    pin::Pin,
+    pin::{pin, Pin},
     task::{ready, Context, Poll},
 };
 
 use crate::{
     capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
+    p2pstream::DisconnectP2P,
     CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
-use futures::{pin_mut, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
 use reth_primitives::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -158,7 +159,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         };
 
         let f = handshake(proxy);
-        pin_mut!(f);
+        let mut f = pin!(f);
 
         // this polls the connection and the primary stream concurrently until the handshake is
         // complete
@@ -166,7 +167,10 @@ impl<St> RlpxProtocolMultiplexer<St> {
             tokio::select! {
                 Some(Ok(msg)) = self.inner.conn.next() => {
                     // Ensure the message belongs to the primary protocol
-                    let offset = msg[0];
+                    let Some(offset) = msg.first().copied()
+                    else {
+                        return Err(P2PStreamError::EmptyProtocolMessage.into())
+                    };
                     if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
                             if cap == shared_cap {
                                 // delegate to primary
@@ -235,7 +239,7 @@ impl<St> MultiplexInner<St> {
     }
 
     /// Delegates a message to the matching protocol.
-    fn delegate_message(&mut self, cap: &SharedCapability, msg: BytesMut) -> bool {
+    fn delegate_message(&self, cap: &SharedCapability, msg: BytesMut) -> bool {
         for proto in &self.protocols {
             if proto.shared_cap == *cap {
                 proto.send_raw(msg);
@@ -297,31 +301,37 @@ impl ProtocolProxy {
             // message must not be empty
             return Err(io::ErrorKind::InvalidInput.into())
         }
-        self.to_wire.send(self.mask_msg_id(msg)).map_err(|_| io::ErrorKind::BrokenPipe.into())
+        self.to_wire.send(self.mask_msg_id(msg)?).map_err(|_| io::ErrorKind::BrokenPipe.into())
     }
 
     /// Masks the message ID of a message to be sent on the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
-    fn mask_msg_id(&self, msg: Bytes) -> Bytes {
+    fn mask_msg_id(&self, msg: Bytes) -> Result<Bytes, io::Error> {
+        if msg.is_empty() {
+            // message must not be empty
+            return Err(io::ErrorKind::InvalidInput.into())
+        }
+
         let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0] + self.shared_cap.relative_message_id_offset();
+        masked_bytes[0] = msg[0]
+            .checked_add(self.shared_cap.relative_message_id_offset())
+            .ok_or(io::ErrorKind::InvalidInput)?;
+
         masked_bytes[1..].copy_from_slice(&msg[1..]);
-        masked_bytes.freeze()
+        Ok(masked_bytes.freeze())
     }
 
     /// Unmasks the message ID of a message received from the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
-    fn unmask_id(&self, mut msg: BytesMut) -> BytesMut {
-        msg[0] -= self.shared_cap.relative_message_id_offset();
-        msg
+    fn unmask_id(&self, mut msg: BytesMut) -> Result<BytesMut, io::Error> {
+        if msg.is_empty() {
+            // message must not be empty
+            return Err(io::ErrorKind::InvalidInput.into())
+        }
+        msg[0] = msg[0]
+            .checked_sub(self.shared_cap.relative_message_id_offset())
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        Ok(msg)
     }
 }
 
@@ -330,7 +340,7 @@ impl Stream for ProtocolProxy {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let msg = ready!(self.from_wire.poll_next_unpin(cx));
-        Poll::Ready(msg.map(|msg| Ok(self.get_mut().unmask_id(msg))))
+        Poll::Ready(msg.map(|msg| self.get_mut().unmask_id(msg)))
     }
 }
 
@@ -456,7 +466,7 @@ where
             let mut conn_ready = true;
             loop {
                 match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(_) => {
+                    Poll::Ready(Ok(())) => {
                         if let Some(msg) = this.inner.out_buffer.pop_front() {
                             if let Err(err) = this.inner.conn.start_send_unpin(msg) {
                                 return Poll::Ready(Some(Err(err.into())))
@@ -464,6 +474,14 @@ where
                         } else {
                             break
                         }
+                    }
+                    Poll::Ready(Err(err)) => {
+                        if let Err(disconnect_err) =
+                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+                        {
+                            return Poll::Ready(Some(Err(disconnect_err.into())))
+                        }
+                        return Poll::Ready(Some(Err(err.into())))
                     }
                     Poll::Pending => {
                         conn_ready = false;
@@ -491,7 +509,10 @@ where
                 let mut proto = this.inner.protocols.swap_remove(idx);
                 loop {
                     match proto.poll_next_unpin(cx) {
-                        Poll::Ready(Some(msg)) => {
+                        Poll::Ready(Some(Err(err))) => {
+                            return Poll::Ready(Some(Err(P2PStreamError::Io(err).into())))
+                        }
+                        Poll::Ready(Some(Ok(msg))) => {
                             this.inner.out_buffer.push_back(msg);
                         }
                         Poll::Ready(None) => return Poll::Ready(None),
@@ -509,7 +530,11 @@ where
                 match this.inner.conn.poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => {
                         delegated = true;
-                        let offset = msg[0];
+                        let Some(offset) = msg.first().copied() else {
+                            return Poll::Ready(Some(Err(
+                                P2PStreamError::EmptyProtocolMessage.into()
+                            )))
+                        };
                         // delegate the multiplexed message to the correct protocol
                         if let Some(cap) =
                             this.inner.conn.shared_capabilities().find_by_relative_offset(offset)
@@ -591,40 +616,44 @@ struct ProtocolStream {
 
 impl ProtocolStream {
     /// Masks the message ID of a message to be sent on the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
-    fn mask_msg_id(&self, mut msg: BytesMut) -> Bytes {
-        msg[0] += self.shared_cap.relative_message_id_offset();
-        msg.freeze()
+    fn mask_msg_id(&self, mut msg: BytesMut) -> Result<Bytes, io::Error> {
+        if msg.is_empty() {
+            // message must not be empty
+            return Err(io::ErrorKind::InvalidInput.into())
+        }
+        msg[0] = msg[0]
+            .checked_add(self.shared_cap.relative_message_id_offset())
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        Ok(msg.freeze())
     }
 
     /// Unmasks the message ID of a message received from the wire.
-    ///
-    /// # Panics
-    ///
-    /// If the message is empty.
     #[inline]
-    fn unmask_id(&self, mut msg: BytesMut) -> BytesMut {
-        msg[0] -= self.shared_cap.relative_message_id_offset();
-        msg
+    fn unmask_id(&self, mut msg: BytesMut) -> Result<BytesMut, io::Error> {
+        if msg.is_empty() {
+            // message must not be empty
+            return Err(io::ErrorKind::InvalidInput.into())
+        }
+        msg[0] = msg[0]
+            .checked_sub(self.shared_cap.relative_message_id_offset())
+            .ok_or(io::ErrorKind::InvalidInput)?;
+        Ok(msg)
     }
 
     /// Sends the message to the satellite stream.
     fn send_raw(&self, msg: BytesMut) {
-        let _ = self.to_satellite.send(self.unmask_id(msg));
+        let _ = self.unmask_id(msg).map(|msg| self.to_satellite.send(msg));
     }
 }
 
 impl Stream for ProtocolStream {
-    type Item = Bytes;
+    type Item = Result<Bytes, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let msg = ready!(this.satellite_st.as_mut().poll_next(cx));
-        Poll::Ready(msg.filter(|msg| !msg.is_empty()).map(|msg| this.mask_msg_id(msg)))
+        Poll::Ready(msg.map(|msg| this.mask_msg_id(msg)))
     }
 }
 

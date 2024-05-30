@@ -1,6 +1,7 @@
 //! Clap parser utilities
 
-use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
+use reth_fs_util as fs;
+use reth_primitives::{AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -9,15 +10,17 @@ use std::{
     time::Duration,
 };
 
+use reth_primitives::DEV;
+
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_SEPOLIA};
+use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
-use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
+use reth_primitives::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
-pub const SUPPORTED_CHAINS: &[&str] = &["base", "base-sepolia", "optimism-sepolia"];
+pub const SUPPORTED_CHAINS: &[&str] = &["optimism", "optimism-sepolia", "base", "base-sepolia"];
 #[cfg(not(feature = "optimism"))]
 /// Chains supported by reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "goerli", "holesky", "dev"];
@@ -43,11 +46,13 @@ pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Er
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
         #[cfg(feature = "optimism")]
+        "optimism" => OP_MAINNET.clone(),
+        #[cfg(feature = "optimism")]
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
+        #[cfg(feature = "optimism")]
+        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         _ => {
             let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
@@ -75,14 +80,15 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "sepolia" => SEPOLIA.clone(),
         #[cfg(not(feature = "optimism"))]
         "holesky" => HOLESKY.clone(),
-        #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
+        #[cfg(feature = "optimism")]
+        "optimism" => OP_MAINNET.clone(),
         #[cfg(feature = "optimism")]
         "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
         #[cfg(feature = "optimism")]
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        #[cfg(feature = "optimism")]
         "base" => BASE_MAINNET.clone(),
+        #[cfg(feature = "optimism")]
+        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         _ => {
             // try to read json from path first
             let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
@@ -135,7 +141,7 @@ pub enum SocketAddressParsingError {
 /// The following formats are checked:
 ///
 /// - If the value can be parsed as a `u16` or starts with `:` it is considered a port, and the
-/// hostname is set to `localhost`.
+///   hostname is set to `localhost`.
 /// - If the value contains `:` it is assumed to be the format `<host>:<port>`
 /// - Otherwise it is assumed to be a hostname
 ///

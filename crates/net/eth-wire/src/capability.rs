@@ -116,7 +116,7 @@ impl fmt::Display for Capability {
 impl From<EthVersion> for Capability {
     #[inline]
     fn from(value: EthVersion) -> Self {
-        Capability::eth(value)
+        Self::eth(value)
     }
 }
 
@@ -137,12 +137,12 @@ impl proptest::arbitrary::Arbitrary for Capability {
         proptest::arbitrary::any_with::<String>(args) // TODO: what possible values?
             .prop_flat_map(move |name| {
                 proptest::arbitrary::any_with::<usize>(()) // TODO: What's the max?
-                    .prop_map(move |version| Capability::new(name.clone(), version))
+                    .prop_map(move |version| Self::new(name.clone(), version))
             })
             .boxed()
     }
 
-    type Strategy = proptest::strategy::BoxedStrategy<Capability>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 /// Represents all capabilities of a node.
@@ -289,8 +289,8 @@ impl SharedCapability {
     /// Returns the capability.
     pub fn capability(&self) -> Cow<'_, Capability> {
         match self {
-            SharedCapability::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
-            SharedCapability::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
+            Self::Eth { version, .. } => Cow::Owned(Capability::eth(*version)),
+            Self::UnknownCapability { cap, .. } => Cow::Borrowed(cap),
         }
     }
 
@@ -298,29 +298,29 @@ impl SharedCapability {
     #[inline]
     pub fn name(&self) -> &str {
         match self {
-            SharedCapability::Eth { .. } => "eth",
-            SharedCapability::UnknownCapability { cap, .. } => cap.name.as_ref(),
+            Self::Eth { .. } => "eth",
+            Self::UnknownCapability { cap, .. } => cap.name.as_ref(),
         }
     }
 
     /// Returns true if the capability is eth.
     #[inline]
     pub fn is_eth(&self) -> bool {
-        matches!(self, SharedCapability::Eth { .. })
+        matches!(self, Self::Eth { .. })
     }
 
     /// Returns the version of the capability.
     pub fn version(&self) -> u8 {
         match self {
-            SharedCapability::Eth { version, .. } => *version as u8,
-            SharedCapability::UnknownCapability { cap, .. } => cap.version as u8,
+            Self::Eth { version, .. } => *version as u8,
+            Self::UnknownCapability { cap, .. } => cap.version as u8,
         }
     }
 
     /// Returns the eth version if it's the `eth` capability.
     pub fn eth_version(&self) -> Option<EthVersion> {
         match self {
-            SharedCapability::Eth { version, .. } => Some(*version),
+            Self::Eth { version, .. } => Some(*version),
             _ => None,
         }
     }
@@ -331,8 +331,8 @@ impl SharedCapability {
     /// message id space.
     pub fn message_id_offset(&self) -> u8 {
         match self {
-            SharedCapability::Eth { offset, .. } => *offset,
-            SharedCapability::UnknownCapability { offset, .. } => *offset,
+            Self::Eth { offset, .. } => *offset,
+            Self::UnknownCapability { offset, .. } => *offset,
         }
     }
 
@@ -345,8 +345,8 @@ impl SharedCapability {
     /// Returns the number of protocol messages supported by this capability.
     pub fn num_messages(&self) -> u8 {
         match self {
-            SharedCapability::Eth { version: _version, .. } => EthMessageID::max() + 1,
-            SharedCapability::UnknownCapability { messages, .. } => *messages,
+            Self::Eth { version: _version, .. } => EthMessageID::max() + 1,
+            Self::UnknownCapability { messages, .. } => *messages,
         }
     }
 }

@@ -81,11 +81,14 @@ pub enum ECIESErrorImpl {
     /// a message from the (partially filled) buffer.
     #[error("stream closed due to not being readable")]
     UnreadableStream,
+    // Error when data is not received from peer for a prolonged period.
+    #[error("never received data from remote peer")]
+    StreamTimeout,
 }
 
 impl From<ECIESErrorImpl> for ECIESError {
     fn from(source: ECIESErrorImpl) -> Self {
-        ECIESError { inner: Box::new(source) }
+        Self { inner: Box::new(source) }
     }
 }
 

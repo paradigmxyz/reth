@@ -1,4 +1,4 @@
-use reth_interfaces::consensus::ForkchoiceState;
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_primitives::SealedHeader;
 use std::time::Instant;
 

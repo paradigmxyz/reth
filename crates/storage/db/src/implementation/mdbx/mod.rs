@@ -13,11 +13,11 @@ use crate::{
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
 };
+use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
     ops::Deref,
@@ -58,7 +58,7 @@ impl DatabaseEnvKind {
 }
 
 /// Arguments for database initialization.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
@@ -222,6 +222,10 @@ impl DatabaseMetrics for DatabaseEnv {
             metrics.push(("db.freelist", freelist as f64, vec![]));
         }
 
+        if let Ok(stat) = self.stat().map_err(|error| error!(%error, "Failed to read db.stat")) {
+            metrics.push(("db.page_size", stat.page_size() as f64, vec![]));
+        }
+
         metrics.push((
             "db.timed_out_not_aborted_transactions",
             self.timed_out_not_aborted_transactions() as f64,
@@ -246,7 +250,7 @@ impl DatabaseEnv {
         path: &Path,
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
-    ) -> Result<DatabaseEnv, DatabaseError> {
+    ) -> Result<Self, DatabaseError> {
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -268,7 +272,7 @@ impl DatabaseEnv {
             // We grow the database in increments of 4 gigabytes
             growth_step: Some(4 * GIGABYTE as isize),
             // The database never shrinks
-            shrink_threshold: None,
+            shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
         });
         #[cfg(not(windows))]
@@ -375,7 +379,7 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
-        let env = DatabaseEnv {
+        let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
         };
@@ -451,9 +455,9 @@ mod tests {
         test_utils::*,
         AccountChangeSets,
     };
-    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
+    use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -478,6 +482,7 @@ mod tests {
     const ERROR_APPEND: &str = "Not able to append the value to the table.";
     const ERROR_UPSERT: &str = "Not able to upsert the value to the table.";
     const ERROR_GET: &str = "Not able to get value from table.";
+    const ERROR_DEL: &str = "Not able to delete from table.";
     const ERROR_COMMIT: &str = "Not able to commit transaction.";
     const ERROR_RETURN_VALUE: &str = "Mismatching result.";
     const ERROR_INIT_TX: &str = "Failed to create a MDBX transaction.";
@@ -503,8 +508,47 @@ mod tests {
         // GET
         let tx = env.tx().expect(ERROR_INIT_TX);
         let result = tx.get::<Headers>(key).expect(ERROR_GET);
-        assert!(result.expect(ERROR_RETURN_VALUE) == value);
+        assert_eq!(result.expect(ERROR_RETURN_VALUE), value);
         tx.commit().expect(ERROR_COMMIT);
+    }
+
+    #[test]
+    fn db_dup_cursor_delete_first() {
+        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+
+        let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(0) };
+        let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+
+        dup_cursor.upsert(Address::with_last_byte(1), entry_0).expect(ERROR_UPSERT);
+        dup_cursor.upsert(Address::with_last_byte(1), entry_1).expect(ERROR_UPSERT);
+
+        assert_eq!(
+            dup_cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>(),
+            Ok(vec![(Address::with_last_byte(1), entry_0), (Address::with_last_byte(1), entry_1),])
+        );
+
+        let mut walker = dup_cursor.walk(None).unwrap();
+        walker.delete_current().expect(ERROR_DEL);
+
+        assert_eq!(walker.next(), Some(Ok((Address::with_last_byte(1), entry_1))));
+
+        // Check the tx view - it correctly holds entry_1
+        assert_eq!(
+            tx.cursor_dup_read::<PlainStorageState>()
+                .unwrap()
+                .walk(None)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>(),
+            Ok(vec![
+                (Address::with_last_byte(1), entry_1), // This is ok - we removed entry_0
+            ])
+        );
+
+        // Check the remainder of walker
+        assert_eq!(walker.next(), None);
     }
 
     #[test]
@@ -1131,9 +1175,9 @@ mod tests {
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
-            assert!(Some(value00) == cursor.next_dup_val().unwrap());
-            assert!(Some(value11) == cursor.next_dup_val().unwrap());
-            assert!(Some(value22) == cursor.next_dup_val().unwrap());
+            assert_eq!(Some(value00), cursor.next_dup_val().unwrap());
+            assert_eq!(Some(value11), cursor.next_dup_val().unwrap());
+            assert_eq!(Some(value22), cursor.next_dup_val().unwrap());
         }
 
         // Seek value with exact subkey

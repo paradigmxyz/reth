@@ -14,16 +14,20 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
+reth-fs-util.workspace = true
+reth-storage-errors.workspace = true
 reth-codecs.workspace = true
-reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
+reth-libmdbx = { workspace = true, optional = true, features = [
+    "return-borrowed",
+    "read-tx-timeouts",
+] }
 reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-modular-bitfield = "0.11.2"
+modular-bitfield.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -36,8 +40,8 @@ thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
 eyre.workspace = true
-paste = "1.0"
-rustc-hash = "1.1.0"
+paste.workspace = true
+rustc-hash.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -50,7 +54,6 @@ once_cell.workspace = true
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-codecs.workspace = true
-reth-interfaces.workspace = true
 
 rand.workspace = true
 serde_json.workspace = true
@@ -58,15 +61,19 @@ serde_json.workspace = true
 tempfile.workspace = true
 test-fuzz.workspace = true
 
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 criterion.workspace = true
-iai = "0.1.1"
+iai-callgrind = "0.10.2"
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 
-paste = "1.0"
+paste.workspace = true
 
 assert_matches.workspace = true
 
@@ -81,6 +88,7 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
+optimism = []
 
 [[bench]]
 name = "hash_keys"

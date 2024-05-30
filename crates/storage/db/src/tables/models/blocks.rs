@@ -96,8 +96,9 @@ mod tests {
         let mut ommer = StoredBlockOmmers::default();
         ommer.ommers.push(Header::default());
         ommer.ommers.push(Header::default());
-        assert!(
-            ommer.clone() == StoredBlockOmmers::decompress::<Vec<_>>(ommer.compress()).unwrap()
+        assert_eq!(
+            ommer.clone(),
+            StoredBlockOmmers::decompress::<Vec<_>>(ommer.compress()).unwrap()
         );
     }
 

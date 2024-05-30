@@ -12,7 +12,6 @@ pub use receipts::Receipts;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, RawKey, RawTable,
 };
-use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     static_file::{
@@ -24,6 +23,7 @@ use reth_primitives::{
 use reth_provider::{
     providers::StaticFileProvider, DatabaseProviderRO, ProviderError, TransactionsProviderExt,
 };
+use reth_storage_errors::provider::ProviderResult;
 use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];

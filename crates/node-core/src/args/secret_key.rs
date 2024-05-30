@@ -1,5 +1,6 @@
+use reth_fs_util::{self as fs, FsPathError};
 use reth_network::config::rng_secret_key;
-use reth_primitives::{fs, fs::FsPathError, hex::encode as hex_encode};
+use reth_primitives::hex::encode as hex_encode;
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
 use std::{
     io,
@@ -37,7 +38,9 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
     match exists {
         Ok(true) => {
             let contents = fs::read_to_string(secret_key_path)?;
-            Ok((contents.as_str().parse::<SecretKey>())
+            Ok(contents
+                .as_str()
+                .parse::<SecretKey>()
                 .map_err(SecretKeyError::SecretKeyDecodeError)?)
         }
         Ok(false) => {

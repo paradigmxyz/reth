@@ -39,8 +39,6 @@ pub struct Collector<K, V>
 where
     K: Encode + Ord,
     V: Compress,
-    <K as Encode>::Encoded: std::fmt::Debug,
-    <V as Compress>::Compressed: std::fmt::Debug,
 {
     /// Parent directory where to create ETL files
     parent_dir: Option<PathBuf>,
@@ -62,8 +60,6 @@ impl<K, V> Collector<K, V>
 where
     K: Key,
     V: Value,
-    <K as Encode>::Encoded: Ord + std::fmt::Debug,
-    <V as Compress>::Compressed: Ord + std::fmt::Debug,
 {
     /// Create a new collector with some capacity.
     ///

@@ -19,7 +19,8 @@ use reth_net_common::{
     bandwidth_meter::{BandwidthMeter, MeteredStream},
     stream::HasRemoteAddr,
 };
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
 use secp256k1::SecretKey;
 use std::{
@@ -77,7 +78,7 @@ pub struct SessionManager {
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
     status: Status,
-    /// THe `HelloMessage` message to send to peers.
+    /// The `HelloMessage` message to send to peers.
     hello_message: HelloMessageWithProtocols,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
     fork_filter: ForkFilter,
@@ -754,7 +755,7 @@ impl PendingSessionHandshakeError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
     pub fn as_disconnected(&self) -> Option<DisconnectReason> {
         match self {
-            PendingSessionHandshakeError::Eth(eth_err) => eth_err.as_disconnected(),
+            Self::Eth(eth_err) => eth_err.as_disconnected(),
             _ => None,
         }
     }

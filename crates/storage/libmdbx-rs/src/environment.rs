@@ -146,7 +146,7 @@ impl Environment {
     where
         F: FnOnce(*mut ffi::MDBX_env) -> T,
     {
-        (f)(self.env_ptr())
+        f(self.env_ptr())
     }
 
     /// Flush the environment data buffers to disk.
@@ -281,14 +281,14 @@ impl EnvironmentKind {
     /// Returns true if the environment was opened as WRITEMAP.
     #[inline]
     pub const fn is_write_map(&self) -> bool {
-        matches!(self, EnvironmentKind::WriteMap)
+        matches!(self, Self::WriteMap)
     }
 
     /// Additional flags required when opening the environment.
     pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
         match self {
-            EnvironmentKind::Default => ffi::MDBX_ENV_DEFAULTS,
-            EnvironmentKind::WriteMap => ffi::MDBX_WRITEMAP,
+            Self::Default => ffi::MDBX_ENV_DEFAULTS,
+            Self::WriteMap => ffi::MDBX_WRITEMAP,
         }
     }
 }
@@ -307,8 +307,8 @@ pub struct Stat(ffi::MDBX_stat);
 
 impl Stat {
     /// Create a new Stat with zero'd inner struct `ffi::MDB_stat`.
-    pub(crate) fn new() -> Stat {
-        unsafe { Stat(mem::zeroed()) }
+    pub(crate) fn new() -> Self {
+        unsafe { Self(mem::zeroed()) }
     }
 
     /// Returns a mut pointer to `ffi::MDB_stat`.
@@ -501,7 +501,7 @@ impl<R> Default for Geometry<R> {
 ///
 /// # Arguments
 ///
-/// * `process_id` – A proceess id of the reader process.
+/// * `process_id` – A process id of the reader process.
 /// * `thread_id` – A thread id of the reader thread.
 /// * `read_txn_id` – An oldest read transaction number on which stalled.
 /// * `gap` – A lag from the last committed txn.
@@ -859,8 +859,8 @@ pub(crate) mod read_transactions {
     impl MaxReadTransactionDuration {
         pub fn as_duration(&self) -> Option<Duration> {
             match self {
-                MaxReadTransactionDuration::Unbounded => None,
-                MaxReadTransactionDuration::Set(duration) => Some(*duration),
+                Self::Unbounded => None,
+                Self::Set(duration) => Some(*duration),
             }
         }
     }
@@ -911,6 +911,7 @@ unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> f
     std::mem::forget(closure);
 
     // Cast the closure to FFI `extern fn` type.
+    #[allow(clippy::missing_transmute_annotations)]
     Some(std::mem::transmute(closure_ptr))
 }
 
@@ -949,8 +950,7 @@ mod tests {
             .open(tempdir.path())
             .unwrap();
 
-        // Insert some data in the database, so the read transaction can lock on the static file of
-        // it
+        // Insert some data in the database, so the read transaction can lock on the snapshot of it
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
@@ -963,8 +963,7 @@ mod tests {
         // Create a read transaction
         let _tx_ro = env.begin_ro_txn().unwrap();
 
-        // Change previously inserted data, so the read transaction would use the previous static
-        // file
+        // Change previously inserted data, so the read transaction would use the previous snapshot
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
@@ -975,7 +974,7 @@ mod tests {
         }
 
         // Insert more data in the database, so we hit the DB size limit error, and MDBX tries to
-        // kick long-lived readers and delete their static_files
+        // kick long-lived readers and delete their snapshots
         {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();

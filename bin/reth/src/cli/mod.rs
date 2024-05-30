@@ -6,15 +6,16 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, node, node::NoArgs, p2p,
-        recover, stage, test_vectors,
+        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state,
+        node::{self, NoArgs},
+        p2p, recover, stage, test_vectors,
     },
-    core::cli::runner::CliRunner,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
+use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_node_builder::{InitState, WithLaunchContext};
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -81,7 +82,7 @@ impl Cli {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        Cli::try_parse_from(itr)
+        Self::try_parse_from(itr)
     }
 }
 
@@ -130,7 +131,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// ````
     pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<Arc<DatabaseEnv>, InitState>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         // add network name to logs dir
@@ -145,10 +146,17 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            #[cfg(feature = "optimism")]
+            Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            #[cfg(feature = "optimism")]
+            Commands::ImportReceiptsOp(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute())
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
@@ -176,9 +184,20 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand),
+    /// Initialize the database from a state dump file.
+    #[command(name = "init-state")]
+    InitState(init_state::InitStateCommand),
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
+    /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
+    #[cfg(feature = "optimism")]
+    #[command(name = "import-op")]
+    ImportOp(crate::commands::import_op::ImportOpCommand),
+    /// This imports RLP encoded receipts from a file.
+    #[cfg(feature = "optimism")]
+    #[command(name = "import-receipts-op")]
+    ImportReceiptsOp(crate::commands::import_receipts_op::ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities

@@ -16,26 +16,33 @@ workspace = true
 reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-net-nat.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
-enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
-rlp = "0.5" # needed for enr
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+    "serde",
+] }
+enr.workspace = true
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
 # misc
+schnellru.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand = { workspace = true, optional = true }
-generic-array = "0.14"
+generic-array.workspace = true
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+assert_matches.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 reth-tracing.workspace = true

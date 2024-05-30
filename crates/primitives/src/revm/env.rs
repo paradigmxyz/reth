@@ -1,11 +1,11 @@
 use crate::{
-    constants::{BEACON_ROOTS_ADDRESS, SYSTEM_ADDRESS},
     recover_signer_unchecked,
     revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, B256, U256,
+    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionSignedEcRecovered, TxKind,
+    B256, U256,
 };
 
+use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
 
@@ -138,12 +138,12 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 /// and therefore:
 ///  * the call must execute to completion
 ///  * the call does not count against the block’s gas limit
-///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
-///  part of the call
+///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as part
+///    of the call
 ///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
 pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
     env.tx = TxEnv {
-        caller: SYSTEM_ADDRESS,
+        caller: alloy_eips::eip4788::SYSTEM_ADDRESS,
         transact_to: TransactTo::Call(BEACON_ROOTS_ADDRESS),
         // Explicitly set nonce to None so revm does not do any nonce checks
         nonce: None,
@@ -208,8 +208,8 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TransactTo::Call(to),
+                TxKind::Create => TransactTo::create(),
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -224,8 +224,8 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TransactTo::Call(to),
+                TxKind::Create => TransactTo::create(),
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -247,8 +247,8 @@ where
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
             tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TransactTo::Call(to),
+                TxKind::Create => TransactTo::create(),
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -269,10 +269,7 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = match tx.to {
-                TransactionKind::Call(to) => TransactTo::Call(to),
-                TransactionKind::Create => TransactTo::create(),
-            };
+            tx_env.transact_to = TransactTo::Call(tx.to);
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
@@ -295,8 +292,8 @@ where
             tx_env.gas_price = U256::ZERO;
             tx_env.gas_priority_fee = None;
             match tx.to {
-                TransactionKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
-                TransactionKind::Create => tx_env.transact_to = TransactTo::create(),
+                TxKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
+                TxKind::Create => tx_env.transact_to = TransactTo::create(),
             }
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();

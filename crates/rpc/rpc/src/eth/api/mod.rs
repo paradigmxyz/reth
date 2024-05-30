@@ -11,11 +11,10 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
-
 use async_trait::async_trait;
-use reth_interfaces::RethResult;
+use reth_errors::{RethError, RethResult};
+use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::ConfigureEvmEnv;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
@@ -49,6 +48,7 @@ mod sign;
 mod state;
 mod transactions;
 
+use crate::eth::traits::RawTransactionForwarder;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -104,6 +104,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -116,6 +117,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
+            raw_transaction_forwarder,
         )
     }
 
@@ -132,6 +134,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -155,8 +158,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            #[cfg(feature = "optimism")]
-            http_client: reqwest::Client::builder().use_rustls_tls().build().unwrap(),
+            raw_transaction_forwarder,
         };
 
         Self { inner: Arc::new(inner) }
@@ -166,6 +168,8 @@ where
     ///
     /// This accepts a closure that creates a new future using a clone of this type and spawns the
     /// future onto a new task that is allowed to block.
+    ///
+    /// Note: This is expected for futures that are dominated by blocking IO operations.
     pub(crate) async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
     where
         C: FnOnce(Self) -> F,
@@ -263,7 +267,7 @@ where
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvmEnv + Clone + 'static,
+    EvmConfig: ConfigureEvm + Clone + 'static,
 {
     /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
     ///
@@ -287,8 +291,9 @@ where
             // base fee of the child block
             let chain_spec = self.provider().chain_spec();
 
-            latest_header.base_fee_per_gas = latest_header
-                .next_block_base_fee(chain_spec.base_fee_params(latest_header.timestamp));
+            latest_header.base_fee_per_gas = latest_header.next_block_base_fee(
+                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp),
+            );
 
             // update excess blob gas consumed above target
             latest_header.excess_blob_gas = latest_header.next_block_excess_blob_gas();
@@ -337,11 +342,6 @@ where
                 }
             }
 
-            // if we're currently syncing, we're unable to build a pending block
-            if this.network().is_syncing() {
-                return Ok(None)
-            }
-
             // we rebuild the block
             let pending_block = match pending.build_block(this.provider(), this.pool()) {
                 Ok(block) => block,
@@ -354,7 +354,7 @@ where
             let now = Instant::now();
             *lock = Some(PendingBlock {
                 block: pending_block.clone(),
-                expires_at: now + Duration::from_secs(3),
+                expires_at: now + Duration::from_secs(1),
             });
 
             Ok(Some(pending_block))
@@ -384,13 +384,13 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvmEnv + 'static,
+    EvmConfig: ConfigureEvm + 'static,
 {
     /// Returns the current ethereum protocol version.
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
     async fn protocol_version(&self) -> RethResult<U64> {
-        let status = self.network().network_status().await?;
+        let status = self.network().network_status().await.map_err(RethError::other)?;
         Ok(U64::from(status.protocol_version))
     }
 
@@ -489,7 +489,6 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     fee_history_cache: FeeHistoryCache,
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
-    /// An http client for communicating with sequencers.
-    #[cfg(feature = "optimism")]
-    http_client: reqwest::Client,
+    /// Allows forwarding received raw transactions
+    raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
 }

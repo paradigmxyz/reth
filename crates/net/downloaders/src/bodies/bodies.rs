@@ -3,16 +3,14 @@ use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
-use reth_interfaces::{
-    consensus::Consensus,
-    p2p::{
-        bodies::{
-            client::BodiesClient,
-            downloader::{BodyDownloader, BodyDownloaderResult},
-            response::BlockResponse,
-        },
-        error::{DownloadError, DownloadResult},
+use reth_consensus::Consensus;
+use reth_network_p2p::{
+    bodies::{
+        client::BodiesClient,
+        downloader::{BodyDownloader, BodyDownloaderResult},
+        response::BlockResponse,
     },
+    error::{DownloadError, DownloadResult},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use reth_provider::HeaderProvider;
@@ -70,7 +68,7 @@ where
     Provider: HeaderProvider + Unpin + 'static,
 {
     /// Returns the next contiguous request.
-    fn next_headers_request(&mut self) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader>>> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
             Some(num) => num + 1,
             None => *self.download_range.start(),
@@ -263,6 +261,19 @@ where
         }
         None
     }
+
+    /// Check if a new request can be submitted, it implements back pressure to prevent overwhelming
+    /// the system and causing memory overload.
+    ///
+    /// Returns true if a new request can be submitted
+    fn can_submit_new_request(&self) -> bool {
+        // requests are issued in order but not necessarily finished in order, so the queued bodies
+        // can grow large if a certain request is slow, so we limit the followup requests if the
+        // queued bodies grew too large
+        self.queued_bodies.len() < 4 * self.stream_batch_size &&
+            self.has_buffer_capacity() &&
+            self.in_progress_queue.len() < self.concurrent_request_limit()
+    }
 }
 
 impl<B, Provider> BodiesDownloader<B, Provider>
@@ -370,10 +381,7 @@ where
             // Loop exit condition
             let mut new_request_submitted = false;
             // Submit new requests
-            let concurrent_requests_limit = this.concurrent_request_limit();
-            'inner: while this.in_progress_queue.len() < concurrent_requests_limit &&
-                this.has_buffer_capacity()
-            {
+            'inner: while this.can_submit_new_request() {
                 match this.next_headers_request() {
                     Ok(Some(request)) => {
                         this.metrics.in_flight_requests.increment(1.);
@@ -497,7 +505,7 @@ impl BodiesDownloaderBuilder {
     /// Creates a new [BodiesDownloaderBuilder] with configurations based on the provided
     /// [BodiesConfig].
     pub fn new(config: BodiesConfig) -> Self {
-        BodiesDownloaderBuilder::default()
+        Self::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
             .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
@@ -596,10 +604,11 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
+    use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_interfaces::test_utils::{generators, generators::random_block_range, TestConsensus};
     use reth_primitives::{BlockBody, B256, MAINNET};
     use reth_provider::ProviderFactory;
+    use reth_testing_utils::{generators, generators::random_block_range};
     use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -646,7 +655,12 @@ mod tests {
             .map(|block| {
                 (
                     block.hash(),
-                    BlockBody { transactions: block.body, ommers: block.ommers, withdrawals: None },
+                    BlockBody {
+                        transactions: block.body,
+                        ommers: block.ommers,
+                        withdrawals: None,
+                        requests: None,
+                    },
                 )
             })
             .collect::<HashMap<_, _>>();

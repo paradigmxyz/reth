@@ -11,12 +11,12 @@ use crate::{
         TransactionListenerKind,
     },
     validate::ValidTransaction,
-    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPooledTransaction,
-    NewTransactionEvent, PoolResult, PoolSize, PoolTransaction, PooledTransactionsElement,
-    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
+    EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
+    PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
+    TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use reth_eth_wire::HandleMempoolData;
+use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, TxHash, U256};
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
@@ -92,11 +92,11 @@ impl TransactionPool for NoopTransactionPool {
         mpsc::channel(1).1
     }
 
-    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
         mpsc::channel(1).1
     }
 
-    fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
         mpsc::channel(1).1
     }
 
@@ -211,6 +211,13 @@ impl TransactionPool for NoopTransactionPool {
         None
     }
 
+    fn get_transactions_by_origin(
+        &self,
+        _origin: TransactionOrigin,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn unique_senders(&self) -> HashSet<Address> {
         Default::default()
     }
@@ -235,13 +242,6 @@ impl TransactionPool for NoopTransactionPool {
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }
-
-    fn get_transactions_by_origin(
-        &self,
-        _origin: TransactionOrigin,
-    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        vec![]
-    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -252,20 +252,21 @@ pub struct MockTransactionValidator<T> {
     _marker: PhantomData<T>,
 }
 
-impl<T: PoolTransaction> TransactionValidator for MockTransactionValidator<T> {
+impl<T: EthPoolTransaction> TransactionValidator for MockTransactionValidator<T> {
     type Transaction = T;
 
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
-        transaction: Self::Transaction,
+        mut transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        let maybe_sidecar = transaction.take_blob().maybe_sidecar().cloned();
         // we return `balance: U256::MAX` to simulate a valid transaction which will never go into
         // overdraft
         TransactionValidationOutcome::Valid {
             balance: U256::MAX,
             state_nonce: 0,
-            transaction: ValidTransaction::Valid(transaction),
+            transaction: ValidTransaction::new(transaction, maybe_sidecar),
             propagate: match origin {
                 TransactionOrigin::External => true,
                 TransactionOrigin::Local => self.propagate_local,
@@ -285,7 +286,7 @@ impl<T> MockTransactionValidator<T> {
 
 impl<T> Default for MockTransactionValidator<T> {
     fn default() -> Self {
-        MockTransactionValidator { propagate_local: true, _marker: Default::default() }
+        Self { propagate_local: true, _marker: Default::default() }
     }
 }
 

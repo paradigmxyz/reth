@@ -35,7 +35,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
-use futures::{pin_mut, Future, StreamExt};
+use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -44,11 +44,12 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{ForkId, NodeRecord, PeerId};
+use reth_network_types::PeerId;
+use reth_primitives::{ForkId, NodeRecord};
 use reth_provider::{BlockNumReader, BlockReader};
-use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
+use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
@@ -83,8 +84,8 @@ pub struct NetworkManager<C> {
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
-    /// All listeners for high level network events.
-    event_listeners: EventListeners<NetworkEvent>,
+    /// Sender for high level network events.
+    event_sender: EventSender<NetworkEvent>,
     /// Sender half to send events to the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager) task, if configured.
     to_transactions_manager: Option<UnboundedMeteredSender<NetworkTransactionEvent>>,
@@ -177,8 +178,9 @@ where
         let NetworkConfig {
             client,
             secret_key,
+            discovery_v4_addr,
             mut discovery_v4_config,
-            discovery_addr,
+            discovery_v5_config,
             listener_addr,
             peers_config,
             sessions_config,
@@ -193,9 +195,7 @@ where
             dns_discovery_config,
             extra_protocols,
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-                optimism_network_config: crate::config::OptimismNetworkConfig { sequencer_endpoint },
-            ..
+            transactions_manager_config: _,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -213,9 +213,14 @@ where
             disc_config
         });
 
-        let discovery =
-            Discovery::new(discovery_addr, secret_key, discovery_v4_config, dns_discovery_config)
-                .await?;
+        let discovery = Discovery::new(
+            discovery_v4_addr,
+            secret_key,
+            discovery_v4_config,
+            discovery_v5_config,
+            dns_discovery_config,
+        )
+        .await?;
         // need to retrieve the addr here since provided port could be `0`
         let local_peer_id = discovery.local_id();
         let discv4 = discovery.discv4();
@@ -241,6 +246,8 @@ where
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
+        let event_sender: EventSender<NetworkEvent> = Default::default();
+
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
             listener_address,
@@ -252,9 +259,8 @@ where
             bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
-            #[cfg(feature = "optimism")]
-            sequencer_endpoint,
             discv4,
+            event_sender.clone(),
         );
 
         Ok(Self {
@@ -262,7 +268,7 @@ where
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
-            event_listeners: Default::default(),
+            event_sender,
             to_transactions_manager: None,
             to_eth_request_handler: None,
             num_active_peers,
@@ -400,7 +406,7 @@ where
     }
 
     /// Handle an incoming request from the peer
-    fn on_eth_request(&mut self, peer_id: PeerId, req: PeerRequest) {
+    fn on_eth_request(&self, peer_id: PeerId, req: PeerRequest) {
         match req {
             PeerRequest::GetBlockHeaders { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetBlockHeaders {
@@ -525,9 +531,6 @@ where
     /// Handler for received messages from a handle
     fn on_handle_message(&mut self, msg: NetworkHandleMessage) {
         match msg {
-            NetworkHandleMessage::EventListener(tx) => {
-                self.event_listeners.push_listener(tx);
-            }
             NetworkHandleMessage::DiscoveryListener(tx) => {
                 self.swarm.state_mut().discovery_mut().add_listener(tx);
             }
@@ -663,7 +666,7 @@ where
             } => {
                 let total_active = self.num_active_peers.fetch_add(1, Ordering::Relaxed) + 1;
                 self.metrics.connected_peers.set(total_active as f64);
-                trace!(
+                debug!(
                     target: "net",
                     ?remote_addr,
                     %client_version,
@@ -687,7 +690,7 @@ where
 
                 self.update_active_connection_metrics();
 
-                self.event_listeners.notify(NetworkEvent::SessionEstablished {
+                self.event_sender.notify(NetworkEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
                     client_version,
@@ -699,12 +702,12 @@ where
             }
             SwarmEvent::PeerAdded(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer added");
-                self.event_listeners.notify(NetworkEvent::PeerAdded(peer_id));
+                self.event_sender.notify(NetworkEvent::PeerAdded(peer_id));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::PeerRemoved(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer dropped");
-                self.event_listeners.notify(NetworkEvent::PeerRemoved(peer_id));
+                self.event_sender.notify(NetworkEvent::PeerRemoved(peer_id));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
@@ -747,7 +750,7 @@ where
                             .saturating_sub(1)
                             as f64,
                     );
-                self.event_listeners.notify(NetworkEvent::SessionClosed { peer_id, reason });
+                self.event_sender.notify(NetworkEvent::SessionClosed { peer_id, reason });
             }
             SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 trace!(
@@ -892,25 +895,26 @@ where
 {
     /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
     ///
-    /// This also run the given function `shutdown_hook` afterwards.
-    pub async fn run_until_graceful_shutdown(
-        self,
+    /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
+    pub async fn run_until_graceful_shutdown<F, R>(
+        mut self,
         shutdown: GracefulShutdown,
-        shutdown_hook: impl FnOnce(&mut Self),
-    ) {
-        let network = self;
-        pin_mut!(network, shutdown);
-
+        shutdown_hook: F,
+    ) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
         let mut graceful_guard = None;
         tokio::select! {
-            _ = &mut network => {},
+            _ = &mut self => {},
             guard = shutdown => {
                 graceful_guard = Some(guard);
             },
         }
 
-        shutdown_hook(&mut network);
+        let res = shutdown_hook(self);
         drop(graceful_guard);
+        res
     }
 }
 
@@ -1025,7 +1029,7 @@ pub enum NetworkEvent {
     PeerRemoved(PeerId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveredEvent {
     EventQueued { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
 }

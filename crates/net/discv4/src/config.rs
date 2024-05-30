@@ -197,6 +197,12 @@ impl Discv4ConfigBuilder {
         self
     }
 
+    /// Sets the expiration duration for lookup neighbor requests
+    pub fn lookup_neighbours_expiration(&mut self, duration: Duration) -> &mut Self {
+        self.config.neighbours_expiration = duration;
+        self
+    }
+
     /// Sets the expiration duration for a bond with a peer
     pub fn bond_expiration(&mut self, duration: Duration) -> &mut Self {
         self.config.bond_expiration = duration;

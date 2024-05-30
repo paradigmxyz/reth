@@ -12,7 +12,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     EthVersion, Status,
 };
-use reth_primitives::PeerId;
+use reth_network_types::PeerId;
 use reth_provider::{BlockNumReader, BlockReader};
 use std::{
     io,
@@ -443,11 +443,11 @@ pub enum NetworkConnectionState {
 impl NetworkConnectionState {
     /// Returns true if the node is active.
     pub(crate) fn is_active(&self) -> bool {
-        matches!(self, NetworkConnectionState::Active)
+        matches!(self, Self::Active)
     }
 
     /// Returns true if the node is shutting down.
     pub(crate) fn is_shutting_down(&self) -> bool {
-        matches!(self, NetworkConnectionState::ShuttingDown)
+        matches!(self, Self::ShuttingDown)
     }
 }
