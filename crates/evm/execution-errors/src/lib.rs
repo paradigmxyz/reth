@@ -18,7 +18,7 @@ pub mod trie;
 pub use trie::{StateRootError, StorageRootError};
 
 /// Transaction validation errors
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, PartialEq)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
@@ -86,10 +86,8 @@ pub enum BlockValidationError {
     /// Error when decoding deposit requests from receipts [EIP-6110]
     ///
     /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
-    // TODO(gakonst): This is an RLP decoding error but we don't import alloy_rlp here,
-    // do we want to?
-    #[error("could not decode deposit request: {0}")]
-    DepositRequestDecode(String),
+    #[error(transparent)]
+    DepositRequestDecode(#[from] alloy_sol_types::Error),
 }
 
 /// BlockExecutor Errors

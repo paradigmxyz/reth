@@ -50,7 +50,7 @@ pub enum BlockchainTreeError {
 }
 
 /// Canonical Errors
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq)]
 pub enum CanonicalError {
     /// Error originating from validation operations.
     #[error(transparent)]

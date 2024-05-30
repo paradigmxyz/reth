@@ -26,7 +26,7 @@ pub fn parse_deposits_from_receipts<'a, I>(
 where
     I: IntoIterator<Item = &'a Receipt>,
 {
-    let res = receipts
+    receipts
         .into_iter()
         .flat_map(|receipt| receipt.logs.iter())
         // No need to filter for topic because there's only one event and that's the Deposit event
@@ -44,11 +44,7 @@ where
             Ok(Request::DepositRequest(deposit))
         })
         .collect::<Result<Vec<_>, _>>()
-        // todo: this is ugly, we should clean it up
-        .map_err(|err: alloy_sol_types::Error| {
-            BlockValidationError::DepositRequestDecode(err.to_string())
-        })?;
-    Ok(res)
+        .map_err(BlockValidationError::DepositRequestDecode)
 }
 
 fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
