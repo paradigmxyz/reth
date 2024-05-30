@@ -181,10 +181,6 @@ pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommi
 where
     DB::Error: std::fmt::Display,
 {
-    if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
-        return Ok(vec![])
-    }
-
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());
 
