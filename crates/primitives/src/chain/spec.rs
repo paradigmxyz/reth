@@ -1,5 +1,8 @@
 use crate::{
-    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
+    constants::{
+        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS,
+    },
     holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
     proofs::state_root_ref_unhashed,
@@ -465,13 +468,13 @@ pub enum BaseFeeParamsKind {
 
 impl From<BaseFeeParams> for BaseFeeParamsKind {
     fn from(params: BaseFeeParams) -> Self {
-        BaseFeeParamsKind::Constant(params)
+        Self::Constant(params)
     }
 }
 
 impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
     fn from(params: ForkBaseFeeParams) -> Self {
-        BaseFeeParamsKind::Variable(params)
+        Self::Variable(params)
     }
 }
 
@@ -482,7 +485,7 @@ pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 
 impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
     fn from(params: Vec<(Hardfork, BaseFeeParams)>) -> Self {
-        ForkBaseFeeParams(params)
+        Self(params)
     }
 }
 
@@ -530,8 +533,8 @@ pub struct ChainSpec {
 }
 
 impl Default for ChainSpec {
-    fn default() -> ChainSpec {
-        ChainSpec {
+    fn default() -> Self {
+        Self {
             chain: Default::default(),
             genesis_hash: Default::default(),
             genesis: Default::default(),
@@ -546,13 +549,13 @@ impl Default for ChainSpec {
 
 impl ChainSpec {
     /// Get information about the chain itself
-    pub fn chain(&self) -> Chain {
+    pub const fn chain(&self) -> Chain {
         self.chain
     }
 
     /// Returns `true` if this chain contains Ethereum configuration.
     #[inline]
-    pub fn is_eth(&self) -> bool {
+    pub const fn is_eth(&self) -> bool {
         matches!(
             self.chain.kind(),
             ChainKind::Named(
@@ -570,7 +573,7 @@ impl ChainSpec {
 
     /// Returns `true` if this chain contains Optimism configuration.
     #[inline]
-    pub fn is_optimism(&self) -> bool {
+    pub const fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
     }
 
@@ -583,7 +586,7 @@ impl ChainSpec {
     /// Get the genesis block specification.
     ///
     /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
-    pub fn genesis(&self) -> &Genesis {
+    pub const fn genesis(&self) -> &Genesis {
         &self.genesis
     }
 
@@ -612,6 +615,13 @@ impl ChainSpec {
                 (None, None, None)
             };
 
+        // If Prague is activated at genesis we set requests root to an empty trie root.
+        let requests_root = if self.is_prague_active_at_timestamp(self.genesis.timestamp) {
+            Some(EMPTY_ROOT_HASH)
+        } else {
+            None
+        };
+
         Header {
             parent_hash: B256::ZERO,
             number: 0,
@@ -633,6 +643,7 @@ impl ChainSpec {
             parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
+            requests_root,
         }
     }
 
@@ -695,7 +706,7 @@ impl ChainSpec {
     }
 
     /// Get the timestamp of the genesis block.
-    pub fn genesis_timestamp(&self) -> u64 {
+    pub const fn genesis_timestamp(&self) -> u64 {
         self.genesis.timestamp
     }
 
@@ -724,7 +735,7 @@ impl ChainSpec {
     }
 
     /// Returns the forks in this specification and their activation conditions.
-    pub fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
+    pub const fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
         &self.hardforks
     }
 
@@ -1110,7 +1121,7 @@ impl ChainSpecBuilder {
     }
 
     /// Set the chain ID
-    pub fn chain(mut self, chain: Chain) -> Self {
+    pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
         self
     }
@@ -1335,8 +1346,8 @@ pub enum ForkCondition {
 
 impl ForkCondition {
     /// Returns true if the fork condition is timestamp based.
-    pub fn is_timestamp(&self) -> bool {
-        matches!(self, ForkCondition::Timestamp(_))
+    pub const fn is_timestamp(&self) -> bool {
+        matches!(self, Self::Timestamp(_))
     }
 
     /// Checks whether the fork condition is satisfied at the given block.
@@ -1344,16 +1355,16 @@ impl ForkCondition {
     /// For TTD conditions, this will only return true if the activation block is already known.
     ///
     /// For timestamp conditions, this will always return false.
-    pub fn active_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, ForkCondition::Block(block)
-        | ForkCondition::TTD { fork_block: Some(block), .. } if current_block >= *block)
+    pub const fn active_at_block(&self, current_block: BlockNumber) -> bool {
+        matches!(self, Self::Block(block)
+        | Self::TTD { fork_block: Some(block), .. } if current_block >= *block)
     }
 
     /// Checks if the given block is the first block that satisfies the fork condition.
     ///
     /// This will return false for any condition that is not block based.
-    pub fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, ForkCondition::Block(block) if current_block == *block)
+    pub const fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
+        matches!(self, Self::Block(block) if current_block == *block)
     }
 
     /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
@@ -1366,15 +1377,15 @@ impl ForkCondition {
     ///
     /// This will return false for any condition that is not TTD-based.
     pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        matches!(self, ForkCondition::TTD { total_difficulty, .. }
+        matches!(self, Self::TTD { total_difficulty, .. }
             if ttd.saturating_sub(difficulty) >= *total_difficulty)
     }
 
     /// Checks whether the fork condition is satisfied at the given timestamp.
     ///
     /// This will return false for any condition that is not timestamp-based.
-    pub fn active_at_timestamp(&self, timestamp: u64) -> bool {
-        matches!(self, ForkCondition::Timestamp(time) if timestamp >= *time)
+    pub const fn active_at_timestamp(&self, timestamp: u64) -> bool {
+        matches!(self, Self::Timestamp(time) if timestamp >= *time)
     }
 
     /// Checks whether the fork condition is satisfied at the given head block.
@@ -1393,17 +1404,17 @@ impl ForkCondition {
     /// Get the total terminal difficulty for this fork condition.
     ///
     /// Returns `None` for fork conditions that are not TTD based.
-    pub fn ttd(&self) -> Option<U256> {
+    pub const fn ttd(&self) -> Option<U256> {
         match self {
-            ForkCondition::TTD { total_difficulty, .. } => Some(*total_difficulty),
+            Self::TTD { total_difficulty, .. } => Some(*total_difficulty),
             _ => None,
         }
     }
 
     /// Returns the timestamp of the fork condition, if it is timestamp based.
-    pub fn as_timestamp(&self) -> Option<u64> {
+    pub const fn as_timestamp(&self) -> Option<u64> {
         match self {
-            ForkCondition::Timestamp(timestamp) => Some(*timestamp),
+            Self::Timestamp(timestamp) => Some(*timestamp),
             _ => None,
         }
     }
@@ -1590,8 +1601,8 @@ pub struct DepositContract {
 }
 
 impl DepositContract {
-    fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
-        DepositContract { address, block, topic }
+    const fn new(address: Address, block: BlockNumber, topic: B256) -> Self {
+        Self { address, block, topic }
     }
 }
 

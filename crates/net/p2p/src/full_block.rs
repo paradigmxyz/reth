@@ -121,7 +121,7 @@ where
     Client: BodiesClient + HeadersClient,
 {
     /// Returns the hash of the block being requested.
-    pub fn hash(&self) -> &B256 {
+    pub const fn hash(&self) -> &B256 {
         &self.hash
     }
 
@@ -313,22 +313,36 @@ fn ensure_valid_body_response(
         ))
     }
 
-    let withdrawals = match &block.withdrawals {
-        Some(withdrawals) => withdrawals.as_slice(),
-        None => &[][..],
-    };
-    if let Some(header_withdrawals_root) = header.withdrawals_root {
-        let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
-        if withdrawals_root != header_withdrawals_root {
-            return Err(ConsensusError::BodyWithdrawalsRootDiff(
-                GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
-            ))
+    match (header.withdrawals_root, &block.withdrawals) {
+        (Some(header_withdrawals_root), Some(withdrawals)) => {
+            let withdrawals = withdrawals.as_slice();
+            let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+            if withdrawals_root != header_withdrawals_root {
+                return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                    GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+                ))
+            }
         }
-        return Ok(())
+        (None, None) => {
+            // this is ok because we assume the fork is not active in this case
+        }
+        _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
     }
 
-    if !withdrawals.is_empty() {
-        return Err(ConsensusError::WithdrawalsRootUnexpected)
+    match (header.requests_root, &block.requests) {
+        (Some(header_requests_root), Some(requests)) => {
+            let requests = requests.0.as_slice();
+            let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
+            if requests_root != header_requests_root {
+                return Err(ConsensusError::BodyRequestsRootDiff(
+                    GotExpected { got: requests_root, expected: header_requests_root }.into(),
+                ))
+            }
+        }
+        (None, None) => {
+            // this is ok because we assume the fork is not active in this case
+        }
+        _ => return Err(ConsensusError::RequestsRootUnexpected),
     }
 
     Ok(())
@@ -510,17 +524,17 @@ where
 
     /// Returns whether or not a bodies request has been started, returning false if there is no
     /// pending request.
-    fn has_bodies_request_started(&self) -> bool {
+    const fn has_bodies_request_started(&self) -> bool {
         self.request.bodies.is_some()
     }
 
     /// Returns the start hash for the request
-    pub fn start_hash(&self) -> B256 {
+    pub const fn start_hash(&self) -> B256 {
         self.start_hash
     }
 
     /// Returns the block count for the request
-    pub fn count(&self) -> u64 {
+    pub const fn count(&self) -> u64 {
         self.count
     }
 }

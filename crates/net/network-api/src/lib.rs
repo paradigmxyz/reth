@@ -154,12 +154,12 @@ pub enum PeerKind {
 impl PeerKind {
     /// Returns `true` if the peer is trusted.
     pub const fn is_trusted(&self) -> bool {
-        matches!(self, PeerKind::Trusted)
+        matches!(self, Self::Trusted)
     }
 
     /// Returns `true` if the peer is basic.
     pub const fn is_basic(&self) -> bool {
-        matches!(self, PeerKind::Basic)
+        matches!(self, Self::Basic)
     }
 }
 
@@ -197,21 +197,21 @@ pub enum Direction {
 
 impl Direction {
     /// Returns `true` if this an incoming connection.
-    pub fn is_incoming(&self) -> bool {
-        matches!(self, Direction::Incoming)
+    pub const fn is_incoming(&self) -> bool {
+        matches!(self, Self::Incoming)
     }
 
     /// Returns `true` if this an outgoing connection.
-    pub fn is_outgoing(&self) -> bool {
-        matches!(self, Direction::Outgoing(_))
+    pub const fn is_outgoing(&self) -> bool {
+        matches!(self, Self::Outgoing(_))
     }
 }
 
 impl std::fmt::Display for Direction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Direction::Incoming => write!(f, "incoming"),
-            Direction::Outgoing(_) => write!(f, "outgoing"),
+            Self::Incoming => write!(f, "incoming"),
+            Self::Outgoing(_) => write!(f, "outgoing"),
         }
     }
 }

@@ -38,66 +38,66 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [StageId; 12] = [
-        StageId::Headers,
-        StageId::Bodies,
-        StageId::SenderRecovery,
-        StageId::Execution,
-        StageId::MerkleUnwind,
-        StageId::AccountHashing,
-        StageId::StorageHashing,
-        StageId::MerkleExecute,
-        StageId::TransactionLookup,
-        StageId::IndexStorageHistory,
-        StageId::IndexAccountHistory,
-        StageId::Finish,
+    pub const ALL: [Self; 12] = [
+        Self::Headers,
+        Self::Bodies,
+        Self::SenderRecovery,
+        Self::Execution,
+        Self::MerkleUnwind,
+        Self::AccountHashing,
+        Self::StorageHashing,
+        Self::MerkleExecute,
+        Self::TransactionLookup,
+        Self::IndexStorageHistory,
+        Self::IndexAccountHistory,
+        Self::Finish,
     ];
 
     /// Stages that require state.
-    pub const STATE_REQUIRED: [StageId; 7] = [
-        StageId::Execution,
-        StageId::MerkleUnwind,
-        StageId::AccountHashing,
-        StageId::StorageHashing,
-        StageId::MerkleExecute,
-        StageId::IndexStorageHistory,
-        StageId::IndexAccountHistory,
+    pub const STATE_REQUIRED: [Self; 7] = [
+        Self::Execution,
+        Self::MerkleUnwind,
+        Self::AccountHashing,
+        Self::StorageHashing,
+        Self::MerkleExecute,
+        Self::IndexStorageHistory,
+        Self::IndexAccountHistory,
     ];
 
     /// Return stage id formatted as string.
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
             #[allow(deprecated)]
-            StageId::StaticFile => "StaticFile",
-            StageId::Headers => "Headers",
-            StageId::Bodies => "Bodies",
-            StageId::SenderRecovery => "SenderRecovery",
-            StageId::Execution => "Execution",
-            StageId::MerkleUnwind => "MerkleUnwind",
-            StageId::AccountHashing => "AccountHashing",
-            StageId::StorageHashing => "StorageHashing",
-            StageId::MerkleExecute => "MerkleExecute",
-            StageId::TransactionLookup => "TransactionLookup",
-            StageId::IndexAccountHistory => "IndexAccountHistory",
-            StageId::IndexStorageHistory => "IndexStorageHistory",
-            StageId::Finish => "Finish",
-            StageId::Other(s) => s,
+            Self::StaticFile => "StaticFile",
+            Self::Headers => "Headers",
+            Self::Bodies => "Bodies",
+            Self::SenderRecovery => "SenderRecovery",
+            Self::Execution => "Execution",
+            Self::MerkleUnwind => "MerkleUnwind",
+            Self::AccountHashing => "AccountHashing",
+            Self::StorageHashing => "StorageHashing",
+            Self::MerkleExecute => "MerkleExecute",
+            Self::TransactionLookup => "TransactionLookup",
+            Self::IndexAccountHistory => "IndexAccountHistory",
+            Self::IndexStorageHistory => "IndexStorageHistory",
+            Self::Finish => "Finish",
+            Self::Other(s) => s,
         }
     }
 
     /// Returns true if it's a downloading stage [StageId::Headers] or [StageId::Bodies]
-    pub fn is_downloading_stage(&self) -> bool {
-        matches!(self, StageId::Headers | StageId::Bodies)
+    pub const fn is_downloading_stage(&self) -> bool {
+        matches!(self, Self::Headers | Self::Bodies)
     }
 
     /// Returns `true` if it's [TransactionLookup](StageId::TransactionLookup) stage.
-    pub fn is_tx_lookup(&self) -> bool {
-        matches!(self, StageId::TransactionLookup)
+    pub const fn is_tx_lookup(&self) -> bool {
+        matches!(self, Self::TransactionLookup)
     }
 
     /// Returns true indicating if it's the finish stage [StageId::Finish]
-    pub fn is_finish(&self) -> bool {
-        matches!(self, StageId::Finish)
+    pub const fn is_finish(&self) -> bool {
+        matches!(self, Self::Finish)
     }
 }
 

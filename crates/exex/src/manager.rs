@@ -436,7 +436,7 @@ impl ExExManagerHandle {
     }
 
     /// Returns `true` if there are ExEx's installed in the node.
-    pub fn has_exexs(&self) -> bool {
+    pub const fn has_exexs(&self) -> bool {
         self.num_exexs > 0
     }
 

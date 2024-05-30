@@ -259,7 +259,7 @@ impl Discv4 {
     }
 
     /// Returns the address of the UDP socket.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
@@ -562,7 +562,7 @@ impl Discv4Service {
 
         let shared_node_record = Arc::new(Mutex::new(local_node_record));
 
-        Discv4Service {
+        Self {
             local_address,
             local_eip_868_enr,
             local_node_record,
@@ -1977,7 +1977,7 @@ struct LookupTargetRotator {
 
 impl LookupTargetRotator {
     /// Returns a rotator that always returns the local target.
-    fn local_only() -> Self {
+    const fn local_only() -> Self {
         Self { interval: 1, counter: 0 }
     }
 }

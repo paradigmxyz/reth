@@ -20,7 +20,7 @@ pub struct BlockchainTests {
 
 impl BlockchainTests {
     /// Create a new handler for a subset of the blockchain test suite.
-    pub fn new(suite: String) -> Self {
+    pub const fn new(suite: String) -> Self {
         Self { suite }
     }
 }
@@ -42,7 +42,7 @@ pub struct BlockchainTestCase {
 
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(BlockchainTestCase {
+        Ok(Self {
             tests: {
                 let s = fs::read_to_string(path)
                     .map_err(|error| Error::Io { path: path.into(), error })?;
@@ -87,23 +87,20 @@ impl Case for BlockchainTestCase {
                     db.as_ref(),
                     Arc::new(case.network.clone().into()),
                     static_files_dir_path,
-                )
-                .map_err(|err| Error::RethError(err.into()))?
+                )?
                 .provider_rw()
                 .unwrap();
 
                 // Insert initial test state into the provider.
-                provider
-                    .insert_historical_block(
-                        SealedBlock::new(
-                            case.genesis_block_header.clone().into(),
-                            BlockBody::default(),
-                        )
-                        .try_seal_with_senders()
-                        .unwrap(),
-                        None,
+                provider.insert_historical_block(
+                    SealedBlock::new(
+                        case.genesis_block_header.clone().into(),
+                        BlockBody::default(),
                     )
-                    .map_err(|err| Error::RethError(err.into()))?;
+                    .try_seal_with_senders()
+                    .unwrap(),
+                    None,
+                )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
                 // Initialize receipts static file with genesis
@@ -119,12 +116,10 @@ impl Case for BlockchainTestCase {
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                    provider
-                        .insert_historical_block(
-                            decoded.clone().try_seal_with_senders().unwrap(),
-                            None,
-                        )
-                        .map_err(|err| Error::RethError(err.into()))?;
+                    provider.insert_historical_block(
+                        decoded.clone().try_seal_with_senders().unwrap(),
+                        None,
+                    )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
@@ -157,13 +152,11 @@ impl Case for BlockchainTestCase {
                     (None, Some(expected_state_root)) => {
                         // Insert state hashes into the provider based on the expected state root.
                         let last_block = last_block.unwrap_or_default();
-                        provider
-                            .insert_hashes(
-                                0..=last_block.number,
-                                last_block.hash(),
-                                *expected_state_root,
-                            )
-                            .map_err(|err| Error::RethError(err.into()))?;
+                        provider.insert_hashes(
+                            0..=last_block.number,
+                            last_block.hash(),
+                            *expected_state_root,
+                        )?;
                     }
                     _ => return Err(Error::MissingPostState),
                 }

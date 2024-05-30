@@ -14,7 +14,7 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_storage_errors::provider::ProviderError;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 pub mod error;
 
@@ -139,18 +139,18 @@ pub enum BlockValidationKind {
 
 impl BlockValidationKind {
     /// Returns true if the state root should be validated if possible.
-    pub fn is_exhaustive(&self) -> bool {
-        matches!(self, BlockValidationKind::Exhaustive)
+    pub const fn is_exhaustive(&self) -> bool {
+        matches!(self, Self::Exhaustive)
     }
 }
 
 impl std::fmt::Display for BlockValidationKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BlockValidationKind::Exhaustive => {
+            Self::Exhaustive => {
                 write!(f, "Exhaustive")
             }
-            BlockValidationKind::SkipStateRootValidation => {
+            Self::SkipStateRootValidation => {
                 write!(f, "SkipStateRootValidation")
             }
         }
@@ -177,24 +177,24 @@ pub enum CanonicalOutcome {
 
 impl CanonicalOutcome {
     /// Returns the header of the block that was made canonical.
-    pub fn header(&self) -> &SealedHeader {
+    pub const fn header(&self) -> &SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
-            CanonicalOutcome::Committed { head } => head,
+            Self::AlreadyCanonical { header, .. } => header,
+            Self::Committed { head } => head,
         }
     }
 
     /// Consumes the outcome and returns the header of the block that was made canonical.
     pub fn into_header(self) -> SealedHeader {
         match self {
-            CanonicalOutcome::AlreadyCanonical { header, .. } => header,
-            CanonicalOutcome::Committed { head } => head,
+            Self::AlreadyCanonical { header, .. } => header,
+            Self::Committed { head } => head,
         }
     }
 
     /// Returns true if the block was already canonical.
-    pub fn is_already_canonical(&self) -> bool {
-        matches!(self, CanonicalOutcome::AlreadyCanonical { .. })
+    pub const fn is_already_canonical(&self) -> bool {
+        matches!(self, Self::AlreadyCanonical { .. })
     }
 }
 
@@ -241,7 +241,7 @@ impl BlockAttachment {
     /// Returns `true` if the block is canonical or a descendant of the canonical head.
     #[inline]
     pub const fn is_canonical(&self) -> bool {
-        matches!(self, BlockAttachment::Canonical)
+        matches!(self, Self::Canonical)
     }
 }
 
@@ -266,11 +266,6 @@ pub enum InsertPayloadOk {
 /// * Pending blocks that extend the canonical chain but are not yet included.
 /// * Future pending blocks that extend the pending blocks.
 pub trait BlockchainTreeViewer: Send + Sync {
-    /// Returns both pending and side-chain block numbers and their hashes.
-    ///
-    /// Caution: This will not return blocks from the canonical chain.
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
-
     /// Returns the header with matching hash from the tree, if it exists.
     ///
     /// Caution: This will not return headers from the canonical chain.
@@ -288,13 +283,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// disconnected from the canonical chain.
     fn block_with_senders_by_hash(&self, hash: BlockHash) -> Option<SealedBlockWithSenders>;
 
-    /// Returns the _buffered_ (disconnected) block with matching hash from the internal buffer if
-    /// it exists.
-    ///
-    /// Caution: Unlike [Self::block_by_hash] this will only return blocks that are currently
-    /// disconnected from the canonical chain.
-    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock>;
-
     /// Returns the _buffered_ (disconnected) header with matching hash from the internal buffer if
     /// it exists.
     ///
@@ -307,9 +295,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
         self.block_by_hash(hash).is_some()
     }
 
-    /// Canonical block number and hashes best known by the tree.
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
-
     /// Return whether or not the block is known and in the canonical chain.
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError>;
 
@@ -321,11 +306,6 @@ pub trait BlockchainTreeViewer: Send + Sync {
 
     /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
     fn canonical_tip(&self) -> BlockNumHash;
-
-    /// Return block hashes that extends the canonical chain tip by one.
-    /// This is used to fetch what is considered the pending blocks, blocks that
-    /// has best chance to become canonical.
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>);
 
     /// Return block number and hash that extends the canonical chain tip by one.
     ///

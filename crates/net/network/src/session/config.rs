@@ -57,7 +57,7 @@ pub struct SessionsConfig {
 
 impl Default for SessionsConfig {
     fn default() -> Self {
-        SessionsConfig {
+        Self {
             // This should be sufficient to slots for handling commands sent to the session task,
             // since the manager is the sender.
             session_command_buffer: 32,
@@ -82,7 +82,7 @@ impl SessionsConfig {
     ///
     /// It is expected, that the background session task will stall if they outpace the manager. The
     /// buffer size provides backpressure on the network I/O.
-    pub fn with_session_event_buffer(mut self, n: usize) -> Self {
+    pub const fn with_session_event_buffer(mut self, n: usize) -> Self {
         self.session_event_buffer = n;
         self
     }
@@ -119,25 +119,25 @@ pub struct SessionLimits {
 
 impl SessionLimits {
     /// Sets the maximum number of pending incoming sessions.
-    pub fn with_max_pending_inbound(mut self, limit: u32) -> Self {
+    pub const fn with_max_pending_inbound(mut self, limit: u32) -> Self {
         self.max_pending_inbound = Some(limit);
         self
     }
 
     /// Sets the maximum number of pending outbound sessions.
-    pub fn with_max_pending_outbound(mut self, limit: u32) -> Self {
+    pub const fn with_max_pending_outbound(mut self, limit: u32) -> Self {
         self.max_pending_outbound = Some(limit);
         self
     }
 
     /// Sets the maximum number of active inbound sessions.
-    pub fn with_max_established_inbound(mut self, limit: u32) -> Self {
+    pub const fn with_max_established_inbound(mut self, limit: u32) -> Self {
         self.max_established_inbound = Some(limit);
         self
     }
 
     /// Sets the maximum number of active outbound sessions.
-    pub fn with_max_established_outbound(mut self, limit: u32) -> Self {
+    pub const fn with_max_established_outbound(mut self, limit: u32) -> Self {
         self.max_established_outbound = Some(limit);
         self
     }
@@ -161,7 +161,7 @@ pub struct SessionCounter {
 // === impl SessionCounter ===
 
 impl SessionCounter {
-    pub(crate) fn new(limits: SessionLimits) -> Self {
+    pub(crate) const fn new(limits: SessionLimits) -> Self {
         Self {
             limits,
             pending_inbound: 0,
@@ -212,15 +212,15 @@ impl SessionCounter {
         }
     }
 
-    pub(crate) fn ensure_pending_outbound(&self) -> Result<(), ExceedsSessionLimit> {
+    pub(crate) const fn ensure_pending_outbound(&self) -> Result<(), ExceedsSessionLimit> {
         Self::ensure(self.pending_outbound, self.limits.max_pending_outbound)
     }
 
-    pub(crate) fn ensure_pending_inbound(&self) -> Result<(), ExceedsSessionLimit> {
+    pub(crate) const fn ensure_pending_inbound(&self) -> Result<(), ExceedsSessionLimit> {
         Self::ensure(self.pending_inbound, self.limits.max_pending_inbound)
     }
 
-    fn ensure(current: u32, limit: Option<u32>) -> Result<(), ExceedsSessionLimit> {
+    const fn ensure(current: u32, limit: Option<u32>) -> Result<(), ExceedsSessionLimit> {
         if let Some(limit) = limit {
             if current >= limit {
                 return Err(ExceedsSessionLimit(limit))

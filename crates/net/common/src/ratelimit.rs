@@ -24,11 +24,11 @@ impl RateLimit {
         let until = tokio::time::Instant::now();
         let state = State::Ready { until, remaining: rate.limit() };
 
-        RateLimit { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
+        Self { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
     }
 
     /// Returns the configured limit of the [RateLimit]
-    pub fn limit(&self) -> u64 {
+    pub const fn limit(&self) -> u64 {
         self.rate.limit()
     }
 
@@ -106,15 +106,15 @@ pub struct Rate {
 
 impl Rate {
     /// Create a new [Rate] with the given `limit/duration` ratio.
-    pub fn new(limit: u64, duration: Duration) -> Self {
-        Rate { limit, duration }
+    pub const fn new(limit: u64, duration: Duration) -> Self {
+        Self { limit, duration }
     }
 
-    fn limit(&self) -> u64 {
+    const fn limit(&self) -> u64 {
         self.limit
     }
 
-    fn duration(&self) -> Duration {
+    const fn duration(&self) -> Duration {
         self.duration
     }
 }

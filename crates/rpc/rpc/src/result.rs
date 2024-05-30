@@ -99,8 +99,8 @@ macro_rules! impl_to_rpc_result {
 }
 
 impl_to_rpc_result!(PayloadError);
-impl_to_rpc_result!(reth_interfaces::RethError);
-impl_to_rpc_result!(reth_interfaces::provider::ProviderError);
+impl_to_rpc_result!(reth_errors::RethError);
+impl_to_rpc_result!(reth_errors::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
 /// Constructs an invalid params JSON-RPC error.
@@ -152,9 +152,9 @@ pub(crate) fn rpc_err(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_interfaces::{RethError, RethResult};
+    use reth_errors::{RethError, RethResult};
 
-    fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
+    const fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
 
     #[test]
     fn can_convert_rpc() {

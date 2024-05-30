@@ -38,7 +38,7 @@ pub enum EthRlpxConnection {
 impl EthRlpxConnection {
     /// Returns the negotiated ETH version.
     #[inline]
-    pub(crate) fn version(&self) -> EthVersion {
+    pub(crate) const fn version(&self) -> EthVersion {
         match self {
             Self::EthOnly(conn) => conn.version(),
             Self::Satellite(conn) => conn.primary().version(),
@@ -65,7 +65,7 @@ impl EthRlpxConnection {
 
     /// Returns  access to the underlying stream.
     #[inline]
-    pub(crate) fn inner(&self) -> &P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
+    pub(crate) const fn inner(&self) -> &P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
         match self {
             Self::EthOnly(conn) => conn.inner(),
             Self::Satellite(conn) => conn.inner(),
@@ -142,14 +142,14 @@ impl Sink<EthMessage> for EthRlpxConnection {
 mod tests {
     use super::*;
 
-    fn assert_eth_stream<St>()
+    const fn assert_eth_stream<St>()
     where
         St: Stream<Item = Result<EthMessage, EthStreamError>> + Sink<EthMessage>,
     {
     }
 
     #[test]
-    fn test_eth_stream_variants() {
+    const fn test_eth_stream_variants() {
         assert_eth_stream::<EthSatelliteConnection>();
         assert_eth_stream::<EthRlpxConnection>();
     }

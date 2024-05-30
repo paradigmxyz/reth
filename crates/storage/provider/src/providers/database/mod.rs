@@ -4,15 +4,16 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, PruneCheckpointReader, RequestsProvider, StageCheckpointReader,
+    StateProviderBox, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use reth_db::{
     database::Database, init_db, mdbx::DatabaseArguments, models::StoredBlockBodyIndices,
     DatabaseEnv,
 };
+use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{RethError, RethResult};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
@@ -53,7 +54,7 @@ impl<DB> ProviderFactory<DB> {
         db: DB,
         chain_spec: Arc<ChainSpec>,
         static_files_path: PathBuf,
-    ) -> ProviderResult<ProviderFactory<DB>> {
+    ) -> ProviderResult<Self> {
         Ok(Self {
             db: Arc::new(db),
             chain_spec,
@@ -88,7 +89,7 @@ impl ProviderFactory<DatabaseEnv> {
         args: DatabaseArguments,
         static_files_path: PathBuf,
     ) -> RethResult<Self> {
-        Ok(ProviderFactory::<DatabaseEnv> {
+        Ok(Self {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider: StaticFileProvider::new(static_files_path)?,
@@ -465,6 +466,19 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
     }
 }
 
+impl<DB> RequestsProvider for ProviderFactory<DB>
+where
+    DB: Database,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.provider()?.requests_by_block(id, timestamp)
+    }
+}
+
 impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
@@ -563,7 +577,7 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
 
 impl<DB> Clone for ProviderFactory<DB> {
     fn clone(&self) -> Self {
-        ProviderFactory {
+        Self {
             db: Arc::clone(&self.db),
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
@@ -585,15 +599,15 @@ mod tests {
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block, random_header},
-    };
     use reth_primitives::{
         hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
         TxNumber, B256, U256,
     };
     use reth_storage_errors::provider::ProviderError;
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block, random_header},
+    };
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
 

@@ -9,27 +9,26 @@ mod storage_history;
 mod transaction_lookup;
 mod transactions;
 
+use crate::PrunerError;
 pub use account_history::AccountHistory;
 pub use headers::Headers;
 pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
-pub use sender_recovery::SenderRecovery;
-pub use set::SegmentSet;
-use std::fmt::Debug;
-pub use storage_history::StorageHistory;
-pub use transaction_lookup::TransactionLookup;
-pub use transactions::Transactions;
-
-use crate::PrunerError;
 use reth_db::database::Database;
-use reth_interfaces::{provider::ProviderResult, RethResult};
 use reth_primitives::{
     BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
     PruneSegment, TxNumber,
 };
-use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
-use std::ops::RangeInclusive;
+use reth_provider::{
+    errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+};
+pub use sender_recovery::SenderRecovery;
+pub use set::SegmentSet;
+use std::{fmt::Debug, ops::RangeInclusive};
+pub use storage_history::StorageHistory;
 use tracing::error;
+pub use transaction_lookup::TransactionLookup;
+pub use transactions::Transactions;
 
 /// A segment represents a pruning of some portion of the data.
 ///
@@ -85,7 +84,7 @@ impl PruneInput {
     pub(crate) fn get_next_tx_num_range<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<DB>,
-    ) -> RethResult<Option<RangeInclusive<TxNumber>>> {
+    ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one
             .and_then(|checkpoint| match checkpoint.tx_number {
@@ -103,7 +102,7 @@ impl PruneInput {
                 let last_tx = body.last_tx_num();
                 if last_tx + body.tx_count() == 0 {
                     // Prevents a scenario where the pruner correctly starts at a finalized block,
-                    // but the first transaction (tx_num = 0) only appears on an unfinalized one.
+                    // but the first transaction (tx_num = 0) only appears on an non-finalized one.
                     // Should only happen on a test/hive scenario.
                     return Ok(None)
                 }
@@ -189,7 +188,7 @@ pub(crate) struct PruneOutputCheckpoint {
 
 impl PruneOutputCheckpoint {
     /// Converts [PruneOutputCheckpoint] to [PruneCheckpoint] with the provided [PruneMode]
-    pub(crate) fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
+    pub(crate) const fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
         PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
     }
 }

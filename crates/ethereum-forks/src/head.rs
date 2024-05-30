@@ -25,7 +25,7 @@ pub struct Head {
 }
 impl Head {
     /// Creates a new `Head` instance.
-    pub fn new(
+    pub const fn new(
         number: BlockNumber,
         hash: B256,
         difficulty: U256,

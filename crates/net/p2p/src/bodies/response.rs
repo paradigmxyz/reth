@@ -11,10 +11,10 @@ pub enum BlockResponse {
 
 impl BlockResponse {
     /// Return the reference to the response header
-    pub fn header(&self) -> &SealedHeader {
+    pub const fn header(&self) -> &SealedHeader {
         match self {
-            BlockResponse::Full(block) => &block.header,
-            BlockResponse::Empty(header) => header,
+            Self::Full(block) => &block.header,
+            Self::Empty(header) => header,
         }
     }
 
@@ -22,8 +22,8 @@ impl BlockResponse {
     #[inline]
     pub fn size(&self) -> usize {
         match self {
-            BlockResponse::Full(block) => SealedBlock::size(block),
-            BlockResponse::Empty(header) => SealedHeader::size(header),
+            Self::Full(block) => SealedBlock::size(block),
+            Self::Empty(header) => SealedHeader::size(header),
         }
     }
 
@@ -35,8 +35,8 @@ impl BlockResponse {
     /// Return the reference to the response header
     pub fn difficulty(&self) -> U256 {
         match self {
-            BlockResponse::Full(block) => block.difficulty,
-            BlockResponse::Empty(header) => header.difficulty,
+            Self::Full(block) => block.difficulty,
+            Self::Empty(header) => header.difficulty,
         }
     }
 }

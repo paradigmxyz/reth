@@ -7,7 +7,7 @@ use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
 use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
         client::{HeadersClient, HeadersRequest},
@@ -576,7 +576,7 @@ where
     }
 
     /// Returns the request for the `sync_target` header.
-    fn get_sync_target_request(&self, start: BlockHashOrNumber) -> HeadersRequest {
+    const fn get_sync_target_request(&self, start: BlockHashOrNumber) -> HeadersRequest {
         HeadersRequest { start, limit: 1, direction: HeadersDirection::Falling }
     }
 
@@ -974,7 +974,7 @@ struct HeadersResponseError {
 
 impl HeadersResponseError {
     /// Returns true if the error was caused by a closed channel to the network.
-    fn is_channel_closed(&self) -> bool {
+    const fn is_channel_closed(&self) -> bool {
         if let DownloadError::RequestError(ref err) = self.error {
             return err.is_channel_closed()
         }
@@ -1001,17 +1001,17 @@ pub enum SyncTargetBlock {
 
 impl SyncTargetBlock {
     /// Create new instance from hash.
-    fn from_hash(hash: B256) -> Self {
+    const fn from_hash(hash: B256) -> Self {
         Self::Hash(hash)
     }
 
     /// Create new instance from number.
-    fn from_number(num: u64) -> Self {
+    const fn from_number(num: u64) -> Self {
         Self::Number(num)
     }
 
     /// Set the hash for the sync target.
-    fn with_hash(self, hash: B256) -> Self {
+    const fn with_hash(self, hash: B256) -> Self {
         match self {
             Self::Hash(_) => Self::Hash(hash),
             Self::Number(number) => Self::HashAndNumber { hash, number },
@@ -1020,7 +1020,7 @@ impl SyncTargetBlock {
     }
 
     /// Set a number on the instance.
-    fn with_number(self, number: u64) -> Self {
+    const fn with_number(self, number: u64) -> Self {
         match self {
             Self::Hash(hash) => Self::HashAndNumber { hash, number },
             Self::Number(_) => Self::Number(number),
@@ -1052,7 +1052,7 @@ impl SyncTargetBlock {
     }
 
     /// Return the hash of the target block, if it is set.
-    fn hash(&self) -> Option<B256> {
+    const fn hash(&self) -> Option<B256> {
         match self {
             Self::Hash(hash) => Some(*hash),
             Self::Number(_) => None,
@@ -1061,7 +1061,7 @@ impl SyncTargetBlock {
     }
 
     /// Return the block number of the sync target, if it is set.
-    fn number(&self) -> Option<u64> {
+    const fn number(&self) -> Option<u64> {
         match self {
             Self::Hash(_) => None,
             Self::Number(number) => Some(*number),
@@ -1090,7 +1090,7 @@ impl ReverseHeadersDownloaderBuilder {
     /// Creates a new [ReverseHeadersDownloaderBuilder] with configurations based on the provided
     /// [HeadersConfig].
     pub fn new(config: HeadersConfig) -> Self {
-        ReverseHeadersDownloaderBuilder::default()
+        Self::default()
             .request_limit(config.downloader_request_limit)
             .min_concurrent_requests(config.downloader_min_concurrent_requests)
             .max_concurrent_requests(config.downloader_max_concurrent_requests)
@@ -1118,7 +1118,7 @@ impl ReverseHeadersDownloaderBuilder {
     ///
     /// This determines the `limit` for a `GetBlockHeaders` requests, the number of headers we ask
     /// for.
-    pub fn request_limit(mut self, limit: u64) -> Self {
+    pub const fn request_limit(mut self, limit: u64) -> Self {
         self.request_limit = limit;
         self
     }
@@ -1128,7 +1128,7 @@ impl ReverseHeadersDownloaderBuilder {
     /// This determines the number of headers the [ReverseHeadersDownloader] will yield on
     /// `Stream::next`. This will be the amount of headers the headers stage will commit at a
     /// time.
-    pub fn stream_batch_size(mut self, size: usize) -> Self {
+    pub const fn stream_batch_size(mut self, size: usize) -> Self {
         self.stream_batch_size = size;
         self
     }
@@ -1137,7 +1137,7 @@ impl ReverseHeadersDownloaderBuilder {
     ///
     /// If there's capacity the [ReverseHeadersDownloader] will keep at least this many requests
     /// active at a time.
-    pub fn min_concurrent_requests(mut self, min_concurrent_requests: usize) -> Self {
+    pub const fn min_concurrent_requests(mut self, min_concurrent_requests: usize) -> Self {
         self.min_concurrent_requests = min_concurrent_requests;
         self
     }
@@ -1145,7 +1145,7 @@ impl ReverseHeadersDownloaderBuilder {
     /// Set the max amount of concurrent requests.
     ///
     /// The downloader's concurrent requests won't exceed the given amount.
-    pub fn max_concurrent_requests(mut self, max_concurrent_requests: usize) -> Self {
+    pub const fn max_concurrent_requests(mut self, max_concurrent_requests: usize) -> Self {
         self.max_concurrent_requests = max_concurrent_requests;
         self
     }
@@ -1156,7 +1156,7 @@ impl ReverseHeadersDownloaderBuilder {
     /// that arrive out of order. The total number of buffered headers is `request_limit *
     /// max_buffered_responses`. If the [ReverseHeadersDownloader]'s buffered responses exceeds this
     /// threshold it waits until there's capacity again before sending new requests.
-    pub fn max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
+    pub const fn max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
         self.max_buffered_responses = max_buffered_responses;
         self
     }
@@ -1220,11 +1220,10 @@ fn calc_next_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::headers::test_utils::child_header;
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::TestHeadersClient;
+    use reth_network_p2p::test_utils::TestHeadersClient;
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]

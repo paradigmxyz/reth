@@ -1,10 +1,10 @@
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
-use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
     NetworkEvents, PeerRequest,
 };
 use reth_network_api::{NetworkInfo, Peers};
+use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_primitives::{Signature, TransactionSigned, B256};
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{

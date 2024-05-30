@@ -74,12 +74,12 @@ pub struct UnauthedP2PStream<S> {
 
 impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
-    pub fn new(inner: S) -> Self {
+    pub const fn new(inner: S) -> Self {
         Self { inner }
     }
 
     /// Returns a reference to the inner stream.
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 }
@@ -275,7 +275,7 @@ impl<S> P2PStream<S> {
     }
 
     /// Returns a reference to the inner stream.
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 
@@ -292,7 +292,7 @@ impl<S> P2PStream<S> {
     ///
     /// This includes all the shared capabilities that were negotiated during the handshake and
     /// their offsets based on the number of messages of each capability.
-    pub fn shared_capabilities(&self) -> &SharedCapabilities {
+    pub const fn shared_capabilities(&self) -> &SharedCapabilities {
         &self.shared_capabilities
     }
 
@@ -663,12 +663,12 @@ pub enum P2PMessage {
 
 impl P2PMessage {
     /// Gets the [`P2PMessageID`] for the given message.
-    pub fn message_id(&self) -> P2PMessageID {
+    pub const fn message_id(&self) -> P2PMessageID {
         match self {
-            P2PMessage::Hello(_) => P2PMessageID::Hello,
-            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
-            P2PMessage::Ping => P2PMessageID::Ping,
-            P2PMessage::Pong => P2PMessageID::Pong,
+            Self::Hello(_) => P2PMessageID::Hello,
+            Self::Disconnect(_) => P2PMessageID::Disconnect,
+            Self::Ping => P2PMessageID::Ping,
+            Self::Pong => P2PMessageID::Pong,
         }
     }
 }
@@ -681,15 +681,15 @@ impl Encodable for P2PMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         (self.message_id() as u8).encode(out);
         match self {
-            P2PMessage::Hello(msg) => msg.encode(out),
-            P2PMessage::Disconnect(msg) => msg.encode(out),
-            P2PMessage::Ping => {
+            Self::Hello(msg) => msg.encode(out),
+            Self::Disconnect(msg) => msg.encode(out),
+            Self::Ping => {
                 // Ping payload is _always_ snappy encoded
                 out.put_u8(0x01);
                 out.put_u8(0x00);
                 out.put_u8(EMPTY_LIST_CODE);
             }
-            P2PMessage::Pong => {
+            Self::Pong => {
                 // Pong payload is _always_ snappy encoded
                 out.put_u8(0x01);
                 out.put_u8(0x00);
@@ -700,11 +700,11 @@ impl Encodable for P2PMessage {
 
     fn length(&self) -> usize {
         let payload_len = match self {
-            P2PMessage::Hello(msg) => msg.length(),
-            P2PMessage::Disconnect(msg) => msg.length(),
+            Self::Hello(msg) => msg.length(),
+            Self::Disconnect(msg) => msg.length(),
             // id + snappy encoded payload
-            P2PMessage::Ping => 3, // len([0x01, 0x00, 0xc0]) = 3
-            P2PMessage::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
+            Self::Ping => 3, // len([0x01, 0x00, 0xc0]) = 3
+            Self::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
         };
         payload_len + 1 // (1 for length of p2p message id)
     }
@@ -735,15 +735,15 @@ impl Decodable for P2PMessage {
             .or(Err(RlpError::Custom("unknown p2p message id")))?;
         buf.advance(1);
         match id {
-            P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
-            P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
+            P2PMessageID::Hello => Ok(Self::Hello(HelloMessage::decode(buf)?)),
+            P2PMessageID::Disconnect => Ok(Self::Disconnect(DisconnectReason::decode(buf)?)),
             P2PMessageID::Ping => {
                 advance_snappy_ping_pong_payload(buf)?;
-                Ok(P2PMessage::Ping)
+                Ok(Self::Ping)
             }
             P2PMessageID::Pong => {
                 advance_snappy_ping_pong_payload(buf)?;
-                Ok(P2PMessage::Pong)
+                Ok(Self::Pong)
             }
         }
     }
@@ -768,10 +768,10 @@ pub enum P2PMessageID {
 impl From<P2PMessage> for P2PMessageID {
     fn from(msg: P2PMessage) -> Self {
         match msg {
-            P2PMessage::Hello(_) => P2PMessageID::Hello,
-            P2PMessage::Disconnect(_) => P2PMessageID::Disconnect,
-            P2PMessage::Ping => P2PMessageID::Ping,
-            P2PMessage::Pong => P2PMessageID::Pong,
+            P2PMessage::Hello(_) => Self::Hello,
+            P2PMessage::Disconnect(_) => Self::Disconnect,
+            P2PMessage::Ping => Self::Ping,
+            P2PMessage::Pong => Self::Pong,
         }
     }
 }
@@ -781,10 +781,10 @@ impl TryFrom<u8> for P2PMessageID {
 
     fn try_from(id: u8) -> Result<Self, Self::Error> {
         match id {
-            0x00 => Ok(P2PMessageID::Hello),
-            0x01 => Ok(P2PMessageID::Disconnect),
-            0x02 => Ok(P2PMessageID::Ping),
-            0x03 => Ok(P2PMessageID::Pong),
+            0x00 => Ok(Self::Hello),
+            0x01 => Ok(Self::Disconnect),
+            0x02 => Ok(Self::Ping),
+            0x03 => Ok(Self::Pong),
             _ => Err(P2PStreamError::UnknownReservedMessageId(id)),
         }
     }
@@ -822,8 +822,8 @@ impl Decodable for ProtocolVersion {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let version = u8::decode(buf)?;
         match version {
-            4 => Ok(ProtocolVersion::V4),
-            5 => Ok(ProtocolVersion::V5),
+            4 => Ok(Self::V4),
+            5 => Ok(Self::V5),
             _ => Err(RlpError::Custom("unknown p2p protocol version")),
         }
     }

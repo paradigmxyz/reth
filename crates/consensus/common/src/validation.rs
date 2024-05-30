@@ -6,7 +6,6 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    op_mainnet::is_dup_tx,
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
 
@@ -52,6 +51,14 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
     }
 
+    if chain_spec.is_prague_active_at_timestamp(header.timestamp) {
+        if header.requests_root.is_none() {
+            return Err(ConsensusError::RequestsRootMissing)
+        }
+    } else if header.requests_root.is_some() {
+        return Err(ConsensusError::RequestsRootUnexpected)
+    }
+
     Ok(())
 }
 
@@ -74,10 +81,8 @@ pub fn validate_block_pre_execution(
     }
 
     // Check transaction root
-    if !chain_spec.is_optimism_mainnet() || !is_dup_tx(block.number) {
-        if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
-        }
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -105,6 +110,19 @@ pub fn validate_block_pre_execution(
                 got: header_blob_gas_used,
                 expected: total_blob_gas,
             }))
+        }
+    }
+
+    // EIP-7685: General purpose execution layer requests
+    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+        let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
+        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
+        let header_requests_root =
+            block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+        if requests_root != *header_requests_root {
+            return Err(ConsensusError::BodyRequestsRootDiff(
+                GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+            ))
         }
     }
 
@@ -169,16 +187,15 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
 mod tests {
     use super::*;
     use mockall::mock;
-    use reth_interfaces::{
-        provider::ProviderResult,
-        test_utils::generators::{self, Rng},
-    };
+    use rand::Rng;
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
         BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
         Withdrawal, Withdrawals, U256,
     };
-    use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
+    use reth_storage_api::{
+        errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
+    };
     use std::ops::RangeBounds;
 
     mock! {
@@ -279,7 +296,7 @@ mod tests {
     }
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = generators::rng();
+        let mut rng = rand::thread_rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -326,6 +343,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None
         };
         // size: 0x9b5
 
@@ -339,7 +357,16 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
+        (
+            SealedBlock {
+                header: header.seal_slow(),
+                body,
+                ommers,
+                withdrawals: None,
+                requests: None,
+            },
+            parent,
+        )
     }
 
     #[test]
@@ -419,6 +446,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            requests: None,
         };
 
         let block = SealedBlock::new(header, body);

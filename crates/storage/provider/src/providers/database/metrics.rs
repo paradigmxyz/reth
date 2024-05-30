@@ -56,6 +56,7 @@ pub(crate) enum Action {
     InsertTransactions,
     InsertTransactionHashNumbers,
     InsertBlockWithdrawals,
+    InsertBlockRequests,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
 
@@ -64,29 +65,30 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    fn as_str(&self) -> &'static str {
+    const fn as_str(&self) -> &'static str {
         match self {
-            Action::InsertStorageHashing => "insert storage hashing",
-            Action::InsertAccountHashing => "insert account hashing",
-            Action::InsertMerkleTree => "insert merkle tree",
-            Action::InsertBlock => "insert block",
-            Action::InsertState => "insert state",
-            Action::InsertHashes => "insert hashes",
-            Action::InsertHistoryIndices => "insert history indices",
-            Action::UpdatePipelineStages => "update pipeline stages",
-            Action::InsertCanonicalHeaders => "insert canonical headers",
-            Action::InsertHeaders => "insert headers",
-            Action::InsertHeaderNumbers => "insert header numbers",
-            Action::InsertHeaderTerminalDifficulties => "insert header TD",
-            Action::InsertBlockOmmers => "insert block ommers",
-            Action::InsertTransactionSenders => "insert tx senders",
-            Action::InsertTransactions => "insert transactions",
-            Action::InsertTransactionHashNumbers => "insert transaction hash numbers",
-            Action::InsertBlockWithdrawals => "insert block withdrawals",
-            Action::InsertBlockBodyIndices => "insert block body indices",
-            Action::InsertTransactionBlocks => "insert transaction blocks",
-            Action::GetNextTxNum => "get next tx num",
-            Action::GetParentTD => "get parent TD",
+            Self::InsertStorageHashing => "insert storage hashing",
+            Self::InsertAccountHashing => "insert account hashing",
+            Self::InsertMerkleTree => "insert merkle tree",
+            Self::InsertBlock => "insert block",
+            Self::InsertState => "insert state",
+            Self::InsertHashes => "insert hashes",
+            Self::InsertHistoryIndices => "insert history indices",
+            Self::UpdatePipelineStages => "update pipeline stages",
+            Self::InsertCanonicalHeaders => "insert canonical headers",
+            Self::InsertHeaders => "insert headers",
+            Self::InsertHeaderNumbers => "insert header numbers",
+            Self::InsertHeaderTerminalDifficulties => "insert header TD",
+            Self::InsertBlockOmmers => "insert block ommers",
+            Self::InsertTransactionSenders => "insert tx senders",
+            Self::InsertTransactions => "insert transactions",
+            Self::InsertTransactionHashNumbers => "insert transaction hash numbers",
+            Self::InsertBlockWithdrawals => "insert block withdrawals",
+            Self::InsertBlockRequests => "insert block withdrawals",
+            Self::InsertBlockBodyIndices => "insert block body indices",
+            Self::InsertTransactionBlocks => "insert transaction blocks",
+            Self::GetNextTxNum => "get next tx num",
+            Self::GetParentTD => "get parent TD",
         }
     }
 }

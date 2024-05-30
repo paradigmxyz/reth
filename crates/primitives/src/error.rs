@@ -30,7 +30,7 @@ impl<T> From<(T, T)> for GotExpected<T> {
 impl<T> GotExpected<T> {
     /// Creates a new error from a pair of values.
     #[inline]
-    pub fn new(got: T, expected: T) -> Self {
+    pub const fn new(got: T, expected: T) -> Self {
         Self { got, expected }
     }
 }

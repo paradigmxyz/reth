@@ -40,7 +40,7 @@ use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
-use reth_interfaces::p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_types::PeerId;
 use reth_primitives::{PooledTransactionsElement, TxHash};
 use schnellru::ByLength;
@@ -124,7 +124,7 @@ impl TransactionFetcher {
 
     /// Sets up transaction fetcher with config
     pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
-        let mut tx_fetcher = TransactionFetcher::default();
+        let mut tx_fetcher = Self::default();
 
         tx_fetcher.info.soft_limit_byte_size_pooled_transactions_response =
             config.soft_limit_byte_size_pooled_transactions_response;
@@ -883,7 +883,7 @@ impl TransactionFetcher {
 
     /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
     /// have capacity for w.r.t. the given version of the protocol.
-    pub fn approx_capacity_get_pooled_transactions_req(
+    pub const fn approx_capacity_get_pooled_transactions_req(
         &self,
         announcement_version: EthVersion,
     ) -> usize {
@@ -1093,7 +1093,7 @@ impl TxFetchMetadata {
     /// [`Eth68`](reth_eth_wire::EthVersion::Eth68) announcement. If the transaction hash has only
     /// been seen in [`Eth66`](reth_eth_wire::EthVersion::Eth66) announcements so far, this will
     /// return `None`.
-    pub fn tx_encoded_len(&self) -> Option<usize> {
+    pub const fn tx_encoded_len(&self) -> Option<usize> {
         self.tx_encoded_length
     }
 }
@@ -1303,7 +1303,7 @@ pub struct TransactionFetcherInfo {
 
 impl TransactionFetcherInfo {
     /// Creates a new max
-    pub fn new(
+    pub const fn new(
         max_inflight_requests: usize,
         soft_limit_byte_size_pooled_transactions_response_on_pack_request: usize,
         soft_limit_byte_size_pooled_transactions_response: usize,

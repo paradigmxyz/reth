@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StatsReader, TransactionVariant, TransactionsProvider,
+    ReceiptProvider, RequestsProvider, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
@@ -622,7 +622,7 @@ impl StaticFileProvider {
         fetch_from_database: FD,
     ) -> ProviderResult<Option<T>>
     where
-        FS: Fn(&StaticFileProvider) -> ProviderResult<Option<T>>,
+        FS: Fn(&Self) -> ProviderResult<Option<T>>,
         FD: Fn() -> ProviderResult<Option<T>>,
     {
         // If there is, check the maximum block or transaction number of the segment.
@@ -661,7 +661,7 @@ impl StaticFileProvider {
         mut predicate: P,
     ) -> ProviderResult<Vec<T>>
     where
-        FS: Fn(&StaticFileProvider, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
+        FS: Fn(&Self, Range<u64>, &mut P) -> ProviderResult<Vec<T>>,
         FD: FnMut(Range<u64>, P) -> ProviderResult<Vec<T>>,
         P: FnMut(&T) -> bool,
     {
@@ -1123,6 +1123,17 @@ impl WithdrawalsProvider for StaticFileProvider {
     }
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl RequestsProvider for StaticFileProvider {
+    fn requests_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }

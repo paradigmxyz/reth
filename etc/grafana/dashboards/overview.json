@@ -7342,7 +7342,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(reth_rpc_server_connections_connections_opened{instance=~\"$instance\"} - reth_rpc_server_connections_connections_closed{instance=~\"$instance\"}) by (transport)",
+          "expr": "sum(reth_rpc_server_connections_connections_opened_total{instance=~\"$instance\"} - reth_rpc_server_connections_connections_closed_total{instance=~\"$instance\"}) by (transport)",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -7933,7 +7933,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(reth_rpc_server_calls_successful{instance =~ \"$instance\"}[$__rate_interval])) by (method) > 0",
+          "expr": "sum(rate(reth_rpc_server_calls_successful_total{instance =~ \"$instance\"}[$__rate_interval])) by (method) > 0",
           "instant": false,
           "legendFormat": "{{method}}",
           "range": true,

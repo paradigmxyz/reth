@@ -11,6 +11,7 @@ members = [
     "crates/consensus/consensus/",
     "crates/e2e-test-utils/",
     "crates/engine-primitives/",
+    "crates/errors/",
     "crates/ethereum-forks/",
     "crates/ethereum/consensus/",
     "crates/ethereum/engine-primitives/",
@@ -20,8 +21,8 @@ members = [
     "crates/evm/compiler/",
     "crates/evm/",
     "crates/evm/execution-errors",
+    "crates/evm/execution-types",
     "crates/exex/",
-    "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
     "crates/net/common/",
@@ -45,6 +46,7 @@ members = [
     "crates/optimism/evm/",
     "crates/optimism/node/",
     "crates/optimism/payload/",
+    "crates/optimism/primitives/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
@@ -61,8 +63,8 @@ members = [
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc/",
-    "crates/stages-api",
-    "crates/stages/",
+    "crates/stages/api/",
+    "crates/stages/stages/",
     "crates/static-file-types/",
     "crates/static-file/",
     "crates/storage/codecs/",
@@ -74,12 +76,14 @@ members = [
     "crates/storage/libmdbx-rs/mdbx-sys/",
     "crates/storage/nippy-jar/",
     "crates/storage/provider/",
+    "crates/storage/storage-api/",
     "crates/tasks/",
     "crates/tokio-util/",
     "crates/tracing/",
     "crates/transaction-pool/",
-    "crates/trie-parallel/",
-    "crates/trie/",
+    "crates/trie/parallel/",
+    "crates/trie/trie",
+    "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
     "examples/custom-dev-node/",
@@ -149,6 +153,8 @@ uninhabited_references = "warn"
 unused_peekable = "warn"
 unused_rounding = "warn"
 useless_let_if_seq = "warn"
+use_self = "warn"
+missing_const_for_fn = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -161,7 +167,6 @@ empty_line_after_doc_comments = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
 iter_on_single_items = "allow"
-missing_const_for_fn = "allow"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
 option_if_let_else = "allow"
@@ -171,7 +176,6 @@ significant_drop_tightening = "allow"
 string_lit_as_bytes = "allow"
 type_repetition_in_bounds = "allow"
 unnecessary_struct_initialization = "allow"
-use_self = "allow"
 
 [workspace.package]
 version = "0.2.0-beta.7"
@@ -234,6 +238,7 @@ reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-engine-primitives = { path = "crates/engine-primitives" }
+reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
@@ -246,9 +251,9 @@ reth-evm-compiler = { path = "crates/evm/compiler" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
+reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex" }
 reth-fs-util = { path = "crates/fs-util" }
-reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
@@ -269,6 +274,7 @@ reth-node-events = { path = "crates/node/events" }
 reth-node-optimism = { path = "crates/optimism/node" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
+reth-optimism-primitives = { path = "crates/optimism/primitives" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
@@ -283,28 +289,30 @@ reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
-reth-stages = { path = "crates/stages" }
-reth-stages-api = { path = "crates/stages-api" }
+reth-stages = { path = "crates/stages/stages" }
+reth-stages-api = { path = "crates/stages/api" }
 reth-static-file = { path = "crates/static-file" }
 reth-static-file-types = { path = "crates/static-file-types" }
+reth-storage-api = { path = "crates/storage/storage-api" }
 reth-storage-errors = { path = "crates/storage/errors" }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
-reth-trie = { path = "crates/trie" }
-reth-trie-parallel = { path = "crates/trie-parallel" }
+reth-trie = { path = "crates/trie/trie" }
+reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
 revm = { version = "9.0.0", features = [
     "std",
     "secp256k1",
+    "blst",
 ], default-features = false }
 revm-primitives = { version = "4.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "5a4fd5e" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "dc2bdbc" }
 
 # compiler
 revm-jit = { path = "../revm-jit/crates/revm-jit" }
@@ -317,21 +325,21 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.4"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "64feb9b" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "64feb9b" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "7320d4c" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "7320d4c" }
 
 # misc
 auto_impl = "1"
@@ -433,3 +441,9 @@ similar-asserts = "1.5.0"
 tempfile = "3.8"
 test-fuzz = "5"
 walkdir = "2.5"
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }

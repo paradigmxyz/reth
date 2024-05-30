@@ -6,7 +6,7 @@ use crate::{
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
+    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers, BlockRequests,
     BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccounts, HashedStorages,
     HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
     PruneCheckpoints, Receipts, StageCheckpointProgresses, StageCheckpoints, StorageChangeSets,
@@ -97,6 +97,9 @@ impl Command {
                 }
                 Tables::BlockWithdrawals => {
                     find_diffs::<BlockWithdrawals>(primary_tx, secondary_tx, output_dir)?
+                }
+                Tables::BlockRequests => {
+                    find_diffs::<BlockRequests>(primary_tx, secondary_tx, output_dir)?
                 }
                 Tables::TransactionBlocks => {
                     find_diffs::<TransactionBlocks>(primary_tx, secondary_tx, output_dir)?
@@ -415,7 +418,7 @@ enum ExtraTableElement<T: Table> {
 
 impl<T: Table> ExtraTableElement<T> {
     /// Return the key for the extra element
-    fn key(&self) -> &T::Key {
+    const fn key(&self) -> &T::Key {
         match self {
             Self::First { key, .. } => key,
             Self::Second { key, .. } => key,

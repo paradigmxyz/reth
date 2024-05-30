@@ -47,7 +47,7 @@ impl<DB: Database> SegmentSet<DB> {
             receipts_log_filter,
         } = prune_modes;
 
-        SegmentSet::default()
+        Self::default()
             // Receipts
             .segment_opt(receipts.map(Receipts::new))
             // Receipts by logs

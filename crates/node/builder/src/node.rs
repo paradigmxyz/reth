@@ -64,12 +64,12 @@ impl<Node: FullNodeComponents> FullNode<Node> {
     }
 
     /// Returns the [RpcServerHandle] to the started rpc server.
-    pub fn rpc_server_handle(&self) -> &RpcServerHandle {
+    pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
         &self.rpc_server_handles.rpc
     }
 
     /// Returns the [AuthServerHandle] to the started authenticated engine API server.
-    pub fn auth_server_handle(&self) -> &AuthServerHandle {
+    pub const fn auth_server_handle(&self) -> &AuthServerHandle {
         &self.rpc_server_handles.auth
     }
 

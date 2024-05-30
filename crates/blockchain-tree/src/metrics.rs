@@ -90,23 +90,19 @@ pub(crate) enum MakeCanonicalAction {
 }
 
 impl MakeCanonicalAction {
-    fn as_str(&self) -> &'static str {
+    const fn as_str(&self) -> &'static str {
         match self {
-            MakeCanonicalAction::CloneOldBlocks => "clone old blocks",
-            MakeCanonicalAction::FindCanonicalHeader => "find canonical header",
-            MakeCanonicalAction::SplitChain => "split chain",
-            MakeCanonicalAction::SplitChainForks => "split chain forks",
-            MakeCanonicalAction::MergeAllChains => "merge all chains",
-            MakeCanonicalAction::UpdateCanonicalIndex => "update canonical index",
-            MakeCanonicalAction::RetrieveStateTrieUpdates => "retrieve state trie updates",
-            MakeCanonicalAction::CommitCanonicalChainToDatabase => {
-                "commit canonical chain to database"
-            }
-            MakeCanonicalAction::RevertCanonicalChainFromDatabase => {
-                "revert canonical chain from database"
-            }
-            MakeCanonicalAction::InsertOldCanonicalChain => "insert old canonical chain",
-            MakeCanonicalAction::ClearTrieUpdatesForOtherChilds => {
+            Self::CloneOldBlocks => "clone old blocks",
+            Self::FindCanonicalHeader => "find canonical header",
+            Self::SplitChain => "split chain",
+            Self::SplitChainForks => "split chain forks",
+            Self::MergeAllChains => "merge all chains",
+            Self::UpdateCanonicalIndex => "update canonical index",
+            Self::RetrieveStateTrieUpdates => "retrieve state trie updates",
+            Self::CommitCanonicalChainToDatabase => "commit canonical chain to database",
+            Self::RevertCanonicalChainFromDatabase => "revert canonical chain from database",
+            Self::InsertOldCanonicalChain => "insert old canonical chain",
+            Self::ClearTrieUpdatesForOtherChilds => {
                 "clear trie updates of other childs chains after fork choice update"
             }
         }

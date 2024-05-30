@@ -3,12 +3,12 @@
 use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
-use reth_interfaces::p2p::{
+use reth_network_api::ReputationChangeKind;
+use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
 };
-use reth_network_api::ReputationChangeKind;
 use reth_network_types::PeerId;
 use reth_primitives::{BlockBody, Header, B256};
 use std::{
@@ -371,8 +371,8 @@ enum PeerState {
 
 impl PeerState {
     /// Returns true if the peer is currently idle.
-    fn is_idle(&self) -> bool {
-        matches!(self, PeerState::Idle)
+    const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
     }
 
     /// Resets the state on a received response.
@@ -381,8 +381,8 @@ impl PeerState {
     ///
     /// Returns `true` if the peer is ready for another request.
     fn on_request_finished(&mut self) -> bool {
-        if !matches!(self, PeerState::Closing) {
-            *self = PeerState::Idle;
+        if !matches!(self, Self::Closing) {
+            *self = Self::Idle;
             return true
         }
         false
@@ -421,23 +421,23 @@ pub(crate) enum DownloadRequest {
 
 impl DownloadRequest {
     /// Returns the corresponding state for a peer that handles the request.
-    fn peer_state(&self) -> PeerState {
+    const fn peer_state(&self) -> PeerState {
         match self {
-            DownloadRequest::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
-            DownloadRequest::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
+            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
         }
     }
 
     /// Returns the requested priority of this request
-    fn get_priority(&self) -> &Priority {
+    const fn get_priority(&self) -> &Priority {
         match self {
-            DownloadRequest::GetBlockHeaders { priority, .. } => priority,
-            DownloadRequest::GetBlockBodies { priority, .. } => priority,
+            Self::GetBlockHeaders { priority, .. } => priority,
+            Self::GetBlockBodies { priority, .. } => priority,
         }
     }
 
     /// Returns `true` if this request is normal priority.
-    fn is_normal_priority(&self) -> bool {
+    const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
     }
 }

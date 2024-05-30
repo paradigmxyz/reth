@@ -1,16 +1,15 @@
 use futures::{stream::BoxStream, Future, StreamExt};
+use reth_blockchain_tree_api::{
+    error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
+    BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
+};
 use reth_db::database::Database;
 use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
-        BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
-    },
-    executor::BlockValidationError,
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-    provider::ProviderResult,
+use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
+use reth_network_p2p::{
+    bodies::client::BodiesClient,
+    headers::client::HeadersClient,
     sync::{NetworkSyncUpdater, SyncState},
-    RethError, RethResult,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -603,7 +602,7 @@ where
     ///
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
-    fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
+    const fn exceeds_pipeline_run_threshold(&self, local_tip: u64, block: u64) -> bool {
         block > local_tip && block - local_tip > self.pipeline_run_threshold
     }
 
@@ -693,7 +692,7 @@ where
     /// Returns how far the local tip is from the given block. If the local tip is at the same
     /// height or its block number is greater than the given block, this returns None.
     #[inline]
-    fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
+    const fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
         if block > local_tip {
             Some(block - local_tip)
         } else {
@@ -1957,12 +1956,12 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{self, Rng};
     use reth_primitives::{stage::StageCheckpoint, ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
     use reth_stages::{ExecOutput, PipelineError, StageError};
+    use reth_testing_utils::generators::{self, Rng};
     use std::{collections::VecDeque, sync::Arc};
     use tokio::sync::oneshot::error::TryRecvError;
 
@@ -2152,9 +2151,9 @@ mod tests {
     mod fork_choice_updated {
         use super::*;
         use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
-        use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::U256;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
+        use reth_testing_utils::generators::random_block;
 
         #[tokio::test]
         async fn empty_head() {
@@ -2452,10 +2451,9 @@ mod tests {
     mod new_payload {
         use super::*;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_interfaces::test_utils::generators::random_block;
         use reth_primitives::{genesis::Genesis, Hardfork, U256};
         use reth_provider::test_utils::blocks::BlockchainTestData;
-        use reth_testing_utils::GenesisAllocator;
+        use reth_testing_utils::{generators::random_block, GenesisAllocator};
 
         #[tokio::test]
         async fn new_payload_before_forkchoice() {

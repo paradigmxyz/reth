@@ -44,8 +44,8 @@ impl SyncState {
     /// Whether the node is currently syncing.
     ///
     /// Note: this does not include keep-up sync when the state is idle.
-    pub fn is_syncing(&self) -> bool {
-        !matches!(self, SyncState::Idle)
+    pub const fn is_syncing(&self) -> bool {
+        !matches!(self, Self::Idle)
     }
 }
 

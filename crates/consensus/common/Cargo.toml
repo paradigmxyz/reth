@@ -13,9 +13,9 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-consensus.workspace=true
+reth-consensus.workspace = true
 
 [dev-dependencies]
-reth-interfaces = { workspace = true, features = ["test-utils"] }
-reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-api.workspace = true
+rand.workspace = true
 mockall = "0.12"

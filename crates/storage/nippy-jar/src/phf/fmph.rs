@@ -12,7 +12,7 @@ pub struct Fmph {
 }
 
 impl Fmph {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { function: None }
     }
 }
@@ -88,12 +88,12 @@ impl<'de> Deserialize<'de> for Fmph {
         D: Deserializer<'de>,
     {
         if let Some(buffer) = <Option<Vec<u8>>>::deserialize(deserializer)? {
-            return Ok(Fmph {
+            return Ok(Self {
                 function: Some(
                     Function::read(&mut std::io::Cursor::new(buffer)).map_err(D::Error::custom)?,
                 ),
             })
         }
-        Ok(Fmph { function: None })
+        Ok(Self { function: None })
     }
 }
