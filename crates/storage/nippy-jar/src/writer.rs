@@ -44,10 +44,9 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
 impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
-    /// If `with_consistency_heal` is set to true, it will self-heal on any inconsistent state. This
-    /// might be undesireable in concurrent situations. If it encounters an issue, it will return an
-    /// error instead.
-    pub fn new(jar: NippyJar<H>, with_consistency_heal: bool) -> Result<Self, NippyJarError> {
+    /// If `read_only` is set to `true`, any inconsistency issue won't be healed, and will return
+    /// [NippyJarError::InconsistentState] instead.
+    pub fn new(jar: NippyJar<H>, read_only: bool) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
@@ -67,8 +66,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         // If we are opening a previously created jar, we need to check its consistency, and make
         // changes if necessary.
         if !is_created {
-            writer.ensure_file_consistency(!with_consistency_heal)?;
-            if with_consistency_heal {
+            writer.ensure_file_consistency(read_only)?;
+            if !read_only {
                 writer.commit()?;
             }
         }
