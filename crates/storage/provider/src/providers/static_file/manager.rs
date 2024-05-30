@@ -662,7 +662,8 @@ impl StaticFileProvider {
         }
 
         // If the checkpoint is behind, then we failed to do a database commit **but committed** to
-        // static files. All we need to do is to unwind those rows.
+        // static files on executing a stage, or the reverse on unwinding a stage.
+        // All we need to do is to prune the extra static file rows.
         if checkpoint_block_number < highest_static_file_block {
             info!(
                 target: "reth::providers",
