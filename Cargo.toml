@@ -22,7 +22,6 @@ members = [
     "crates/evm/execution-errors",
     "crates/evm/execution-types",
     "crates/exex/",
-    "crates/interfaces/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
     "crates/net/common/",
@@ -63,8 +62,8 @@ members = [
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc/",
-    "crates/stages-api",
-    "crates/stages/",
+    "crates/stages/api/",
+    "crates/stages/stages/",
     "crates/static-file-types/",
     "crates/static-file/",
     "crates/storage/codecs/",
@@ -81,8 +80,8 @@ members = [
     "crates/tokio-util/",
     "crates/tracing/",
     "crates/transaction-pool/",
-    "crates/trie-parallel/",
-    "crates/trie/",
+    "crates/trie/parallel/",
+    "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -253,7 +252,6 @@ reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex" }
 reth-fs-util = { path = "crates/fs-util" }
-reth-interfaces = { path = "crates/interfaces" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
@@ -289,8 +287,8 @@ reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
-reth-stages = { path = "crates/stages" }
-reth-stages-api = { path = "crates/stages-api" }
+reth-stages = { path = "crates/stages/stages" }
+reth-stages-api = { path = "crates/stages/api" }
 reth-static-file = { path = "crates/static-file" }
 reth-static-file-types = { path = "crates/static-file-types" }
 reth-storage-api = { path = "crates/storage/storage-api" }
@@ -300,8 +298,8 @@ reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
-reth-trie = { path = "crates/trie" }
-reth-trie-parallel = { path = "crates/trie-parallel" }
+reth-trie = { path = "crates/trie/trie" }
+reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
 revm = { version = "9.0.0", features = [
