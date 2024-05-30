@@ -128,7 +128,7 @@ where
                 } else {
                     debug!(%reason, "Disconnected by peer during handshake");
                 };
-                counter!("p2pstream.disconnected_errors", 1);
+                counter!("p2pstream.disconnected_errors").increment(1);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {

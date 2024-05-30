@@ -203,8 +203,14 @@ where
         }
 
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+            // Collect all EIP-6110 deposits
+            let deposit_requests =
+                crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
+
             // Collect all EIP-7685 requests
-            apply_withdrawal_requests_contract_call(&mut evm)?
+            let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
+
+            [deposit_requests, withdrawal_requests].concat()
         } else {
             vec![]
         };

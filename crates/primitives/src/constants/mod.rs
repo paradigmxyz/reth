@@ -1,6 +1,10 @@
 //! Ethereum protocol-related constants
 
-use crate::{revm_primitives::b256, B256, U256};
+use crate::{
+    chain::DepositContract,
+    revm_primitives::{address, b256},
+    B256, U256,
+};
 use std::time::Duration;
 
 #[cfg(feature = "optimism")]
@@ -63,6 +67,13 @@ pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
+
+/// Deposit contract address
+pub const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::new(
+    address!("00000000219ab540356cbb839cbe05303d7705fa"),
+    11052984,
+    b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+);
 
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
