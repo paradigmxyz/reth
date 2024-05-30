@@ -202,14 +202,18 @@ where
             );
         }
 
-        // Collect all EIP-6110 deposits
-        let deposit_requests =
-            crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
+        let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+            // Collect all EIP-6110 deposits
+            let deposit_requests =
+                crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-        // Collect all EIP-7685 requests
-        let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
+            // Collect all EIP-7685 requests
+            let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
 
-        let requests = [deposit_requests, withdrawal_requests].concat();
+            [deposit_requests, withdrawal_requests].concat()
+        } else {
+            vec![]
+        };
 
         Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
