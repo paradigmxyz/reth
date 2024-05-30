@@ -46,7 +46,10 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     ///
     /// If `read_only` is set to `true`, any inconsistency issue won't be healed, and will return
     /// [NippyJarError::InconsistentState] instead.
-    pub fn new(jar: NippyJar<H>, read_only: bool) -> Result<Self, NippyJarError> {
+    pub fn new(
+        jar: NippyJar<H>,
+        check_mode: ConsistencyFailStrategy,
+    ) -> Result<Self, NippyJarError> {
         let (data_file, offsets_file, is_created) =
             Self::create_or_open_files(jar.data_path(), &jar.offsets_path())?;
 
@@ -66,8 +69,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         // If we are opening a previously created jar, we need to check its consistency, and make
         // changes if necessary.
         if !is_created {
-            writer.ensure_file_consistency(read_only)?;
-            if !read_only {
+            writer.ensure_file_consistency(check_mode)?;
+            if check_mode.should_heal() {
                 writer.commit()?;
             }
         }
@@ -123,17 +126,17 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         Ok((data_file, offsets_file, is_created))
     }
 
-    /// Performs consistency checks on the [`NippyJar`] file and heals upon any issues if
-    /// `read_only` is set to false:
+    /// Performs consistency checks on the [`NippyJar`] file and might self-heal or throw an error
+    /// according to [ConsistencyFailStrategy].
     /// * Is the offsets file size expected?
     /// * Is the data file size expected?
     ///
     /// This is based on the assumption that [`NippyJar`] configuration is **always** the last one
     /// to be updated when something is written, as by the `commit()` function shows.
-    ///
-    /// If `read_only` is set to true and an issue is found it will return a
-    /// [NippyJarError::InconsistentState] error.
-    pub fn ensure_file_consistency(&mut self, read_only: bool) -> Result<(), NippyJarError> {
+    pub fn ensure_file_consistency(
+        &mut self,
+        check_mode: ConsistencyFailStrategy,
+    ) -> Result<(), NippyJarError> {
         let reader = self.jar.open_data_reader()?;
 
         // When an offset size is smaller than the initial (8), we are dealing with immutable
@@ -147,7 +150,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             OFFSET_SIZE_BYTES as usize) as u64; // expected size of the data file
         let actual_offsets_file_size = self.offsets_file.get_ref().metadata()?.len();
 
-        if read_only && expected_offsets_file_size.cmp(&actual_offsets_file_size) != Ordering::Equal
+        if check_mode.should_err() &&
+            expected_offsets_file_size.cmp(&actual_offsets_file_size) != Ordering::Equal
         {
             return Err(NippyJarError::InconsistentState)
         }
@@ -179,7 +183,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         let last_offset = reader.reverse_offset(0)?;
         let data_file_len = self.data_file.get_ref().metadata()?.len();
 
-        if read_only && last_offset.cmp(&data_file_len) != Ordering::Equal {
+        if check_mode.should_err() && last_offset.cmp(&data_file_len) != Ordering::Equal {
             return Err(NippyJarError::InconsistentState)
         }
 
@@ -209,7 +213,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
                         // Since we decrease the offset list, we need to check the consistency of
                         // `self.jar.rows` again
-                        self.ensure_file_consistency(false)?;
+                        self.ensure_file_consistency(ConsistencyFailStrategy::Heal)?;
                         break
                     }
                 }
@@ -507,5 +511,26 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn jar(&self) -> &NippyJar<H> {
         &self.jar
+    }
+}
+
+/// Strategy on encountering an inconsistent state when creating a [NippyJarWriter].
+#[derive(Debug, Copy, Clone)]
+pub enum ConsistencyFailStrategy {
+    /// Writer should heal.
+    Heal,
+    /// Writer should throw an error.
+    ThrowError,
+}
+
+impl ConsistencyFailStrategy {
+    /// Whether writer should heal.
+    fn should_heal(&self) -> bool {
+        matches!(self, Self::Heal)
+    }
+
+    /// Whether writer should throw an error.
+    fn should_err(&self) -> bool {
+        matches!(self, Self::ThrowError)
     }
 }

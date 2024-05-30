@@ -6,7 +6,7 @@ use super::{
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db::codecs::CompactU256;
-use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_nippy_jar::{ConsistencyFailStrategy, NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
     BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
@@ -91,7 +91,13 @@ impl StaticFileProviderRW {
         };
 
         let reader = Self::upgrade_provider_to_strong_reference(&reader);
-        let result = match NippyJarWriter::new(jar, reader.is_read_only()) {
+        let access = if reader.is_read_only() {
+            ConsistencyFailStrategy::ThrowError
+        } else {
+            ConsistencyFailStrategy::Heal
+        };
+
+        let result = match NippyJarWriter::new(jar, access) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This static file has been frozen, so we should
@@ -125,14 +131,20 @@ impl StaticFileProviderRW {
             )
         };
 
-        self.writer.ensure_file_consistency(read_only).map_err(|error| {
+        let check_mode = if read_only {
+            ConsistencyFailStrategy::ThrowError
+        } else {
+            ConsistencyFailStrategy::Heal
+        };
+
+        self.writer.ensure_file_consistency(check_mode).map_err(|error| {
             if matches!(error, NippyJarError::InconsistentState) {
                 return inconsistent_error()
             }
             ProviderError::NippyJar(error.to_string())
         })?;
 
-        // If we have lost rows, we need to update the [SegmentHeader]
+        // If we have lost rows (in this run or previous), we need to update the [SegmentHeader].
         let expected_rows = if self.user_header().segment().is_headers() {
             self.user_header().block_len().unwrap_or_default()
         } else {
