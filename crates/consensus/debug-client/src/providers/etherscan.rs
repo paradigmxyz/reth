@@ -19,16 +19,11 @@ pub struct EtherscanBlockProvider {
 impl EtherscanBlockProvider {
     /// Create a new Etherscan block provider with the given base URL and API key.
     pub fn new(base_url: String, api_key: String) -> Self {
-        EtherscanBlockProvider {
-            http_client: Client::new(),
-            base_url,
-            api_key,
-            interval: Duration::from_secs(3),
-        }
+        Self { http_client: Client::new(), base_url, api_key, interval: Duration::from_secs(3) }
     }
 
     /// Sets the interval at which the provider fetches new blocks.
-    pub fn with_interval(mut self, interval: Duration) -> Self {
+    pub const fn with_interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
     }

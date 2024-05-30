@@ -13,7 +13,7 @@ pub struct RpcBlockProvider {
 
 impl RpcBlockProvider {
     /// Create a new RPC block provider with the given WS RPC URL.
-    pub fn new(ws_rpc_url: String) -> Self {
+    pub const fn new(ws_rpc_url: String) -> Self {
         Self { ws_rpc_url }
     }
 }

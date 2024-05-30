@@ -77,7 +77,7 @@ pub struct DebugConsensusClient<P: BlockProvider> {
 impl<P: BlockProvider> DebugConsensusClient<P> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
-    pub fn new(auth_server: AuthServerHandle, block_provider: P) -> Self {
+    pub const fn new(auth_server: AuthServerHandle, block_provider: P) -> Self {
         Self { auth_server, block_provider }
     }
 }
@@ -167,12 +167,12 @@ struct ExecutionNewPayload {
 
 impl ExecutionNewPayload {
     /// Get block hash from block in the payload
-    fn block_hash(&self) -> B256 {
+    const fn block_hash(&self) -> B256 {
         self.execution_payload_v3.payload_inner.payload_inner.block_hash
     }
 
     /// Get block number from block in the payload
-    fn block_number(&self) -> u64 {
+    const fn block_number(&self) -> u64 {
         self.execution_payload_v3.payload_inner.payload_inner.block_number
     }
 }
