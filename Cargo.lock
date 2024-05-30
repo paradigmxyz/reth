@@ -6497,6 +6497,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "assert_matches",
  "futures",
+ "itertools 0.12.1",
  "metrics",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",
