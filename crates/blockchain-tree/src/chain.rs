@@ -5,14 +5,14 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
-use reth_consensus::{Consensus, ConsensusError};
-use reth_db::database::Database;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_execution_errors::BlockExecutionError;
-use reth_interfaces::blockchain_tree::{
+use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, InsertBlockErrorKind},
     BlockAttachment, BlockValidationKind,
 };
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
+use reth_db::database::Database;
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, Receipts, SealedBlockWithSenders, SealedHeader,
     U256,
@@ -210,8 +210,10 @@ impl AppendableChain {
         let block = block.unseal();
 
         let state = executor.execute((&block, U256::MAX).into())?;
-        let BlockExecutionOutput { state, receipts, .. } = state;
-        externals.consensus.validate_block_post_execution(&block, &receipts)?;
+        let BlockExecutionOutput { state, receipts, requests, .. } = state;
+        externals
+            .consensus
+            .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
 
         let bundle_state = BundleStateWithReceipts::new(
             state,

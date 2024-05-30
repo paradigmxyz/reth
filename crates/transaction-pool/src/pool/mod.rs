@@ -82,7 +82,7 @@ use crate::{
 };
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-use reth_eth_wire::HandleMempoolData;
+use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     Address, BlobTransaction, BlobTransactionSidecar, IntoRecoveredTransaction,
     PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -1023,7 +1023,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns whether the transaction has been added to the pending pool.
     pub(crate) const fn as_pending(&self) -> Option<&AddedPendingTransaction<T>> {
         match self {
-            AddedTransaction::Pending(tx) => Some(tx),
+            Self::Pending(tx) => Some(tx),
             _ => None,
         }
     }
@@ -1031,16 +1031,16 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns the replaced transaction if there was one
     pub(crate) const fn replaced(&self) -> Option<&Arc<ValidPoolTransaction<T>>> {
         match self {
-            AddedTransaction::Pending(tx) => tx.replaced.as_ref(),
-            AddedTransaction::Parked { replaced, .. } => replaced.as_ref(),
+            Self::Pending(tx) => tx.replaced.as_ref(),
+            Self::Parked { replaced, .. } => replaced.as_ref(),
         }
     }
 
     /// Returns the discarded transactions if there were any
     pub(crate) fn discarded_transactions(&self) -> Option<&[Arc<ValidPoolTransaction<T>>]> {
         match self {
-            AddedTransaction::Pending(tx) => Some(&tx.discarded),
-            AddedTransaction::Parked { .. } => None,
+            Self::Pending(tx) => Some(&tx.discarded),
+            Self::Parked { .. } => None,
         }
     }
 
@@ -1052,18 +1052,18 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     /// Returns the hash of the transaction
     pub(crate) fn hash(&self) -> &TxHash {
         match self {
-            AddedTransaction::Pending(tx) => tx.transaction.hash(),
-            AddedTransaction::Parked { transaction, .. } => transaction.hash(),
+            Self::Pending(tx) => tx.transaction.hash(),
+            Self::Parked { transaction, .. } => transaction.hash(),
         }
     }
 
     /// Converts this type into the event type for listeners
     pub(crate) fn into_new_transaction_event(self) -> NewTransactionEvent<T> {
         match self {
-            AddedTransaction::Pending(tx) => {
+            Self::Pending(tx) => {
                 NewTransactionEvent { subpool: SubPool::Pending, transaction: tx.transaction }
             }
-            AddedTransaction::Parked { transaction, subpool, .. } => {
+            Self::Parked { transaction, subpool, .. } => {
                 NewTransactionEvent { transaction, subpool }
             }
         }
@@ -1073,8 +1073,8 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     #[cfg(test)]
     pub(crate) const fn subpool(&self) -> SubPool {
         match self {
-            AddedTransaction::Pending(_) => SubPool::Pending,
-            AddedTransaction::Parked { subpool, .. } => *subpool,
+            Self::Pending(_) => SubPool::Pending,
+            Self::Parked { subpool, .. } => *subpool,
         }
     }
 
@@ -1082,8 +1082,8 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     #[cfg(test)]
     pub(crate) fn id(&self) -> &TransactionId {
         match self {
-            AddedTransaction::Pending(added) => added.transaction.id(),
-            AddedTransaction::Parked { transaction, .. } => transaction.id(),
+            Self::Pending(added) => added.transaction.id(),
+            Self::Parked { transaction, .. } => transaction.id(),
         }
     }
 }

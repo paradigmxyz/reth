@@ -1,7 +1,7 @@
 use futures::Stream;
 use futures_util::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
 };
@@ -44,7 +44,7 @@ impl TaskDownloader {
     /// ```
     /// use reth_consensus::Consensus;
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
-    /// use reth_interfaces::p2p::bodies::client::BodiesClient;
+    /// use reth_network_p2p::bodies::client::BodiesClient;
     /// use reth_provider::HeaderProvider;
     /// use std::sync::Arc;
     ///
@@ -171,7 +171,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::p2p::error::DownloadError;
+    use reth_network_p2p::error::DownloadError;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 

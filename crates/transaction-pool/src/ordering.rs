@@ -15,7 +15,7 @@ pub enum Priority<T: Ord + Clone> {
 
 impl<T: Ord + Clone> From<Option<T>> for Priority<T> {
     fn from(value: Option<T>) -> Self {
-        value.map_or(Priority::None, Priority::Value)
+        value.map_or(Self::None, Priority::Value)
     }
 }
 

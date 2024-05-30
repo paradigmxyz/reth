@@ -47,6 +47,9 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
             body,
             ommers: Default::default(),
             withdrawals: block.withdrawals.map(Into::into),
+            // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it as
+            // empty.
+            requests: None,
         })
     }
 }
@@ -93,6 +96,8 @@ impl TryFrom<alloy_rpc_types::Header> for Header {
             timestamp: header.timestamp,
             transactions_root: header.transactions_root,
             withdrawals_root: header.withdrawals_root,
+            // TODO: requests_root: header.requests_root,
+            requests_root: None,
         })
     }
 }
@@ -117,7 +122,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                             .into(),
                     ))
                 }
-                Ok(Transaction::Legacy(TxLegacy {
+                Ok(Self::Legacy(TxLegacy {
                     chain_id: tx.chain_id,
                     nonce: tx.nonce,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
@@ -132,7 +137,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             }
             Some(TxType::Eip2930) => {
                 // eip2930
-                Ok(Transaction::Eip2930(TxEip2930 {
+                Ok(Self::Eip2930(TxEip2930 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
                     gas_limit: tx
@@ -148,7 +153,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             }
             Some(TxType::Eip1559) => {
                 // EIP-1559
-                Ok(Transaction::Eip1559(TxEip1559 {
+                Ok(Self::Eip1559(TxEip1559 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
                     max_priority_fee_per_gas: tx
@@ -169,7 +174,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             }
             Some(TxType::Eip4844) => {
                 // EIP-4844
-                Ok(Transaction::Eip4844(TxEip4844 {
+                Ok(Self::Eip4844(TxEip4844 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
                     max_priority_fee_per_gas: tx
@@ -210,7 +215,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for TransactionSigned {
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
         let transaction: Transaction = tx.try_into()?;
 
-        Ok(TransactionSigned::from_transaction_and_signature(
+        Ok(Self::from_transaction_and_signature(
             transaction.clone(),
             Signature {
                 r: signature.r,

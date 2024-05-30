@@ -43,7 +43,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-beacon-consensus.workspace = true
-reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
