@@ -1,5 +1,6 @@
 use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
 use async_trait::async_trait;
+use http::Extensions;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_engine_primitives::{
@@ -562,7 +563,11 @@ where
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v1(
+        &self,
+        _extensions: &Extensions,
+        payload: ExecutionPayloadV1,
+    ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         let start = Instant::now();
         let res = Self::new_payload_v1(self, payload).await;
@@ -573,7 +578,11 @@ where
 
     /// Handler for `engine_newPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
-    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v2(
+        &self,
+        _extensions: &Extensions,
+        payload: ExecutionPayloadInputV2,
+    ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         let start = Instant::now();
         let res = Self::new_payload_v2(self, payload).await;
@@ -586,6 +595,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     async fn new_payload_v3(
         &self,
+        _extensions: &Extensions,
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
@@ -601,6 +611,7 @@ where
 
     async fn new_payload_v4(
         &self,
+        _extensions: &Extensions,
         payload: ExecutionPayloadV4,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
@@ -620,6 +631,7 @@ where
     /// Caution: This should not accept the `withdrawals` field
     async fn fork_choice_updated_v1(
         &self,
+        _extensions: &Extensions,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
@@ -635,6 +647,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     async fn fork_choice_updated_v2(
         &self,
+        _extensions: &Extensions,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
@@ -651,6 +664,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     async fn fork_choice_updated_v3(
         &self,
+        _extensions: &Extensions,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
@@ -675,6 +689,7 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v1(
         &self,
+        _extensions: &Extensions,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
@@ -695,6 +710,7 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v2(
         &self,
+        _extensions: &Extensions,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
@@ -715,6 +731,7 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v3(
         &self,
+        _extensions: &Extensions,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
@@ -735,6 +752,7 @@ where
     /// > Provider software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v4(
         &self,
+        _extensions: &Extensions,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
@@ -748,6 +766,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
         &self,
+        _extensions: &Extensions,
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
@@ -775,6 +794,7 @@ where
     /// Note: If a block is pre shanghai, `withdrawals` field will be `null`.
     async fn get_payload_bodies_by_range_v1(
         &self,
+        _extensions: &Extensions,
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
@@ -789,6 +809,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangeTransitionConfigurationV1>
     async fn exchange_transition_configuration(
         &self,
+        _extensions: &Extensions,
         config: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
@@ -797,11 +818,13 @@ where
         self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
+
     /// Handler for `engine_getClientVersionV1`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md>
     async fn get_client_version_v1(
         &self,
+        _extensions: &Extensions,
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
         trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
@@ -812,7 +835,11 @@ where
 
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
-    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
+    async fn exchange_capabilities(
+        &self,
+        _extensions: &Extensions,
+        _capabilities: Vec<String>,
+    ) -> RpcResult<Vec<String>> {
         Ok(CAPABILITIES.into_iter().chain(V4_CAPABILITIES.into_iter()).map(str::to_owned).collect())
     }
 }

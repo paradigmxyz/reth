@@ -33,11 +33,12 @@ metrics.workspace = true
 
 # misc
 async-trait.workspace = true
-thiserror.workspace = true
-jsonrpsee-types.workspace = true
+http.workspace = true
 jsonrpsee-core.workspace = true
-tracing.workspace = true
+jsonrpsee-types.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-ethereum-engine-primitives.workspace = true

@@ -402,6 +402,7 @@ igd-next = "0.14.3"
 jsonrpsee = "0.22"
 jsonrpsee-core = "0.22"
 jsonrpsee-types = "0.22"
+jsonrpsee-http-client = "0.22"
 
 # http
 http = "1.0"
@@ -442,3 +443,13 @@ revm = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
 revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
 revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
 revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
+
+jsonrpsee = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-client-transport = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-core = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-http-client = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-proc-macros = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-server = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-types = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-wasm-client = { git = "https://github.com/paritytech/jsonrpsee" }
+jsonrpsee-ws-client = { git = "https://github.com/paritytech/jsonrpsee" }
