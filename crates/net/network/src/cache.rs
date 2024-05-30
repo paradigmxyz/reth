@@ -117,7 +117,7 @@ where
         debug_struct.field("limit", &self.limit);
 
         debug_struct.field(
-            "res_fn_iter",
+            "ret %iter",
             &format_args!("Iter: {{{} }}", self.iter().map(|k| format!(" {k:?}")).format(",")),
         );
 
@@ -146,7 +146,7 @@ where
         debug_struct.field("limiter", self.limiter());
 
         debug_struct.field(
-            "res_fn_iter",
+            "ret %iter",
             &format_args!(
                 "Iter: {{{} }}",
                 self.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")
@@ -240,7 +240,7 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, res_fn_iter: Iter: { 2: Value(22), 1: Value(11) } }", format!("{cache:?}"))
+        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, ret %iter: Iter: { 2: Value(22), 1: Value(11) } }", format!("{cache:?}"))
     }
 
     #[test]
@@ -253,7 +253,7 @@ mod test {
         cache.insert(key_2);
 
         assert_eq!(
-            "LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }",
+            "LruCache { limit: 2, ret %iter: Iter: { Key(2), Key(1) } }",
             format!("{cache:?}")
         )
     }
@@ -270,7 +270,7 @@ mod test {
         _ = cache.get(&key_1);
 
         assert_eq!(
-            "LruCache { limit: 2, res_fn_iter: Iter: { Key(1), Key(2) } }",
+            "LruCache { limit: 2, ret %iter: Iter: { Key(1), Key(2) } }",
             format!("{cache:?}")
         )
     }
@@ -319,7 +319,7 @@ mod test {
         _ = cache.peek(&key_1);
 
         assert_eq!(
-            "LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }",
+            "LruCache { limit: 2, ret %iter: Iter: { Key(2), Key(1) } }",
             format!("{cache:?}")
         )
     }
