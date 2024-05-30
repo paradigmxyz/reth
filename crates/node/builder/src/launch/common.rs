@@ -333,11 +333,11 @@ where
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
     pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
-        let factory = ProviderFactory::new(
+        let factory = ProviderFactory::read_write(
             self.right().clone(),
             self.chain_spec(),
             StaticFileProvider::read_write(self.data_dir().static_files())?,
-        )
+        )?
         .with_static_files_metrics();
 
         let has_receipt_pruning =

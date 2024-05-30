@@ -17,6 +17,7 @@ use reth_db::{
     table::Table,
     tables,
     transaction::DbTx,
+    StorageAccess,
 };
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
@@ -1021,6 +1022,16 @@ impl StaticFileWriter for StaticFileProvider {
         }
 
         Ok(())
+    }
+}
+
+impl StorageAccess for StaticFileProvider {
+    fn is_read_only(&self) -> bool {
+        self.access.is_read_only()
+    }
+
+    fn path(&self) -> &Path {
+        self.path()
     }
 }
 

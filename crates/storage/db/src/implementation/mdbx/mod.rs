@@ -9,7 +9,7 @@ use crate::{
     tables::{self, TableType, Tables},
     transaction::{DbTx, DbTxMut},
     utils::default_page_size,
-    DatabaseError,
+    DatabaseError, StorageAccess,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
@@ -21,7 +21,7 @@ use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
     ops::Deref,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -134,6 +134,8 @@ pub struct DatabaseEnv {
     inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Database directory
+    path: PathBuf,
 }
 
 impl Database for DatabaseEnv {
@@ -154,6 +156,16 @@ impl Database for DatabaseEnv {
             self.metrics.as_ref().cloned(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
+    }
+}
+
+impl StorageAccess for DatabaseEnv {
+    fn is_read_only(&self) -> bool {
+        !self.is_read_write()
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }
 
@@ -382,6 +394,7 @@ impl DatabaseEnv {
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
+            path: path.to_path_buf(),
         };
 
         Ok(env)

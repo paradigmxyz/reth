@@ -131,6 +131,9 @@ pub enum ProviderError {
     /// Consistent view error.
     #[error("failed to initialize consistent view: {0}")]
     ConsistentView(Box<ConsistentViewError>),
+    /// Storage access error.
+    #[error("failed to initialize storage provider")]
+    InvalidAccess,
 }
 
 impl From<reth_fs_util::FsPathError> for ProviderError {

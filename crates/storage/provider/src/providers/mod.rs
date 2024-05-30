@@ -35,6 +35,9 @@ use std::{
 };
 use tracing::trace;
 
+mod storage;
+use storage::*;
+
 mod database;
 pub use database::*;
 
