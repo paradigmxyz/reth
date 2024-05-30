@@ -7068,7 +7068,6 @@ dependencies = [
 name = "reth-execution-errors"
 version = "0.2.0-beta.7"
 dependencies = [
- "alloy-sol-types",
  "reth-consensus",
  "reth-primitives",
  "reth-storage-errors",

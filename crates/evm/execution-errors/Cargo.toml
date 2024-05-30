@@ -16,7 +16,4 @@ reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 
-# alloy
-alloy-sol-types.workspace = true
-
 thiserror.workspace = true

@@ -27,25 +27,25 @@ pub fn parse_deposits_from_receipts<'a, I>(
 where
     I: IntoIterator<Item = &'a Receipt>,
 {
+    let deposit_contract_address = chain_spec
+        .deposit_contract
+        .as_ref()
+        .map_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS, |contract| contract.address);
     receipts
         .into_iter()
         .flat_map(|receipt| receipt.logs.iter())
         // No need to filter for topic because there's only one event and that's the Deposit event
         // in the deposit contract.
-        .filter(|log| {
-            log.address ==
-                chain_spec
-                    .deposit_contract
-                    .as_ref()
-                    .map_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS, |contract| contract.address)
-        })
+        .filter(|log| log.address == deposit_contract_address)
         .map(|log| {
             let decoded_log = DepositEvent::decode_log(log, false)?;
             let deposit = parse_deposit_from_log(&decoded_log);
             Ok(Request::DepositRequest(deposit))
         })
         .collect::<Result<Vec<_>, _>>()
-        .map_err(BlockValidationError::DepositRequestDecode)
+        .map_err(|err: alloy_sol_types::Error| {
+            BlockValidationError::DepositRequestDecode(err.to_string())
+        })
 }
 
 fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
@@ -85,9 +85,8 @@ fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{TxType, MAINNET};
-
     use super::*;
+    use reth_primitives::{TxType, MAINNET};
 
     #[test]
     fn test_parse_deposit_from_log() {

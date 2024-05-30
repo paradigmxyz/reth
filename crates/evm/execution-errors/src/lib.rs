@@ -18,7 +18,7 @@ pub mod trie;
 pub use trie::{StateRootError, StorageRootError};
 
 /// Transaction validation errors
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
@@ -86,8 +86,8 @@ pub enum BlockValidationError {
     /// Error when decoding deposit requests from receipts [EIP-6110]
     ///
     /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
-    #[error(transparent)]
-    DepositRequestDecode(#[from] alloy_sol_types::Error),
+    #[error("failed to decode deposit requests from receipts: {0}")]
+    DepositRequestDecode(String),
 }
 
 /// BlockExecutor Errors

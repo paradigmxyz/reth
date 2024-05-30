@@ -1053,7 +1053,7 @@ impl From<Genesis> for ChainSpec {
 
         hardforks.extend(time_hardforks);
 
-        // NOTE: we prune receipts in full nodes, but not the deposit contract receipts. We do not
+        // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
         // genesis json.
