@@ -896,14 +896,13 @@ where
 ///
 /// This uses [apply_withdrawal_requests_contract_call] to ultimately calculate the
 /// [requests](Request).
-pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit, Attributes>(
+pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
 ) -> Result<Vec<Request>, PayloadBuilderError>
 where
     DB::Error: std::fmt::Display,
-    Attributes: PayloadBuilderAttributes,
 {
     // apply post-block EIP-7002 contract call
     let mut evm_post_block = Evm::builder()
