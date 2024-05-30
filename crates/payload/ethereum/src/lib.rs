@@ -180,10 +180,8 @@ where
                 // transactions in an empty payload.
                 let withdrawal_requests = post_block_withdrawal_requests_contract_call(
                     &mut db,
-                    &chain_spec,
                     &initialized_cfg,
                     &initialized_block_env,
-                    &attributes,
                 )?;
 
                 let requests = withdrawal_requests;
@@ -401,10 +399,8 @@ where
         if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
             let withdrawal_requests = post_block_withdrawal_requests_contract_call(
                 &mut db,
-                &chain_spec,
                 &initialized_cfg,
                 &initialized_block_env,
-                &attributes,
             )?;
 
             // TODO: add deposit requests

@@ -174,8 +174,6 @@ pub fn insert_post_block_withdrawals_balance_increments(
 /// returned. Otherwise, the withdrawal requests are returned.
 #[inline]
 pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommit>(
-    chain_spec: &ChainSpec,
-    block_timestamp: u64,
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<Vec<Request>, BlockExecutionError>
 where

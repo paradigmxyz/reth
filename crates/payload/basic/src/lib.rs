@@ -898,10 +898,8 @@ where
 /// [requests](Request).
 pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit, Attributes>(
     db: &mut DB,
-    chain_spec: &ChainSpec,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
-    attributes: &Attributes,
 ) -> Result<Vec<Request>, PayloadBuilderError>
 where
     DB::Error: std::fmt::Display,
@@ -918,7 +916,7 @@ where
         .build();
 
     // initialize a block from the env, because the post block call needs the block itself
-    apply_withdrawal_requests_contract_call(chain_spec, attributes.timestamp(), &mut evm_post_block)
+    apply_withdrawal_requests_contract_call(&mut evm_post_block)
         .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
