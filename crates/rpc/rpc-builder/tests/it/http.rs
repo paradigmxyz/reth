@@ -22,8 +22,8 @@ use reth_rpc_api::{
 };
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{
-    trace::filter::TraceFilter, Filter, Index, Log, PendingTransactionFilterKind, RichBlock,
-    SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
+    trace::filter::TraceFilter, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind,
+    RichBlock, SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
@@ -167,7 +167,7 @@ where
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
-    EthApiClient::fee_history(client, 0, block_number, None).await.unwrap();
+    EthApiClient::fee_history(client, U64::from(0), block_number, None).await.unwrap();
     EthApiClient::balance(client, address, None).await.unwrap();
     EthApiClient::transaction_count(client, address, None).await.unwrap();
     EthApiClient::storage_at(client, address, U256::default().into(), None).await.unwrap();
@@ -552,7 +552,6 @@ async fn test_eth_logs_args() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_by_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -582,7 +581,6 @@ async fn test_eth_get_block_by_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_by_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -616,7 +614,6 @@ async fn test_eth_get_block_by_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_code_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -675,7 +672,6 @@ async fn test_eth_get_code_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_block_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -697,7 +693,6 @@ async fn test_eth_block_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_chain_id_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -719,7 +714,6 @@ async fn test_eth_chain_id_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_syncing_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -741,7 +735,6 @@ async fn test_eth_syncing_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_protocol_version_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -763,7 +756,6 @@ async fn test_eth_protocol_version_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_coinbase_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -784,7 +776,6 @@ async fn test_eth_coinbase_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_accounts_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -806,7 +797,6 @@ async fn test_eth_accounts_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -844,7 +834,6 @@ async fn test_eth_get_block_transaction_count_by_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -886,7 +875,6 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -919,7 +907,6 @@ async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -953,7 +940,6 @@ async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_receipts_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -995,7 +981,6 @@ async fn test_eth_get_block_receipts_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1041,7 +1026,6 @@ async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1083,7 +1067,6 @@ async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_by_hash_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1121,7 +1104,6 @@ async fn test_eth_get_transaction_by_hash_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1167,7 +1149,6 @@ async fn test_eth_get_transaction_by_block_hash_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1209,7 +1190,6 @@ async fn test_eth_get_transaction_by_block_number_and_index_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_receipt_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1251,7 +1231,6 @@ async fn test_eth_get_transaction_receipt_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_balance_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1302,7 +1281,6 @@ async fn test_eth_get_balance_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_storage_at_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1369,7 +1347,6 @@ async fn test_eth_get_storage_at_rpc_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_transaction_count_rpc_call() {
-    // Initialize test tracing for logging
     reth_tracing::init_test_tracing();
 
     // Launch HTTP server with the specified RPC module
@@ -1427,20 +1404,32 @@ async fn test_eth_get_transaction_count_rpc_call() {
     .await;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[test]
+fn test_rpc_builder_basic() {
+    let rpc_string = RawRpcParamsBuilder::default()
+        .method("eth_getBalance")
+        .add_param("0xaa00000000000000000000000000000000000000")
+        .add_param("0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2")
+        .set_id(1)
+        .build();
 
-    #[test]
-    fn test_rpc_builder_basic() {
-        let rpc_string = RawRpcParamsBuilder::default()
-            .method("eth_getBalance")
-            .add_param("0xaa00000000000000000000000000000000000000")
-            .add_param("0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2")
-            .set_id(1)
-            .build();
+    let expected = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
+    assert_eq!(rpc_string, expected, "RPC string did not match expected format.");
+}
 
-        let expected = r#"{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xaa00000000000000000000000000000000000000","0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2"]}"#;
-        assert_eq!(rpc_string, expected, "RPC string did not match expected format.");
-    }
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_fee_history_raw() {
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting block by number with proper fields
+    test_rpc_call_ok::<Option<FeeHistory>>(
+        &client,
+        "eth_feeHistory",
+        rpc_params!["0x0", "latest", [0]],
+    )
+    .await;
 }

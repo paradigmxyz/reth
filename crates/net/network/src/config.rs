@@ -206,6 +206,14 @@ impl NetworkConfigBuilder {
         }
     }
 
+    /// Apply a function to the builder.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
         pk2id(&self.secret_key.public_key(SECP256K1))
@@ -268,6 +276,7 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Configures the transactions manager with the given config.
     pub const fn transactions_manager_config(mut self, config: TransactionsManagerConfig) -> Self {
         self.transactions_manager_config = config;
         self
