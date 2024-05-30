@@ -29,14 +29,15 @@ pub struct DebugArgs {
     pub max_block: Option<u64>,
 
     /// Runs a fake consensus client that advances the chain using recent block hashes
-    /// on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment
+    /// on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment variable.
+    /// If a string provided to this argument, it will be used as a custom Etherscan API url.
     #[arg(
         long = "debug.etherscan",
         help_heading = "Debug",
         conflicts_with = "tip",
         conflicts_with = "rpc_consensus_http"
     )]
-    pub etherscan: bool,
+    pub etherscan: Option<Option<String>>,
 
     /// Runs a fake consensus client using blocks from an RPC endpoint. HTTP endpoint for getting
     /// past blocks.

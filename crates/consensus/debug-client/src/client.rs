@@ -9,8 +9,8 @@ use reth_rpc_builder::auth::AuthServerHandle;
 use reth_rpc_types::ExecutionPayloadV1;
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
-use std::future::Future;
-use tokio::sync::mpsc;
+use std::{future::Future, sync::Arc};
+use tokio::sync::{mpsc, mpsc::Sender};
 
 /// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
 /// by number to fetch past finalized and safe blocks.
@@ -48,6 +48,19 @@ pub trait BlockProvider: Send + Sync + 'static {
             let block = self.get_block(previous_block_number).await?;
             block.header.hash.ok_or_else(|| eyre::eyre!("previous block does not have hash"))
         }
+    }
+}
+
+impl<P> BlockProvider for Arc<P>
+where
+    P: BlockProvider,
+{
+    fn subscribe_blocks(&self, tx: Sender<RichBlock>) -> impl Future<Output = ()> + Send {
+        self.as_ref().subscribe_blocks(tx)
+    }
+
+    fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<RichBlock>> + Send {
+        self.as_ref().get_block(block_number)
     }
 }
 

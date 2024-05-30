@@ -443,17 +443,24 @@ where
             let _ = tx.send(res);
         });
 
-        if ctx.node_config().debug.etherscan {
+        if let Some(custom_etherscan_url) = &ctx.node_config().debug.etherscan {
             let chain = ctx.node_config().chain.chain;
+            let etherscan_url = match custom_etherscan_url {
+                Some(url) => url.to_owned(),
+                None => {
+                    // If URL isn't provided, use default Etherscan URL for the chain
+                    chain
+                        .etherscan_urls()
+                        .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain"))?
+                        .0
+                        .to_owned()
+                }
+            };
             let block_provider = EtherscanBlockProvider::new(
-                chain
-                    .etherscan_urls()
-                    .expect("etherscan urls not found for rpc consensus client")
-                    .0
-                    .to_owned(),
-                chain
-                    .etherscan_api_key()
-                    .expect("etherscan api key not found for rpc consensus client"),
+                etherscan_url,
+                chain.etherscan_api_key().ok_or_else(|| {
+                    eyre::eyre!("etherscan api key not found for rpc consensus client")
+                })?,
             );
             let rpc_consensus_client = DebugConsensusClient::new(
                 rpc_server_handles.auth.clone(),
