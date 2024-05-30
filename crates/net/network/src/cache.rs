@@ -188,6 +188,25 @@ mod test {
     #[derive(Debug, Hash, PartialEq, Eq, Display, Clone, Copy)]
     struct Key(i8);
 
+    #[derive(Debug, Eq, Constructor, Clone, Copy)]
+    struct CompoundKey {
+        // type unique for id
+        id: i8,
+        other: i8,
+    }
+
+    impl PartialEq for CompoundKey {
+        fn eq(&self, other: &Self) -> bool {
+            self.id == other.id
+        }
+    }
+
+    impl Hash for CompoundKey {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.id.hash(state)
+        }
+    }
+
     #[test]
     fn test_cache_should_insert_into_empty_set() {
         let mut cache = LruCache::new(5);
@@ -277,25 +296,6 @@ mod test {
 
     #[test]
     fn get_ty_custom_eq_impl() {
-        #[derive(Debug, Eq, Constructor, Clone, Copy)]
-        struct CompoundKey {
-            // type unique for id
-            id: i8,
-            other: i8,
-        }
-
-        impl PartialEq for CompoundKey {
-            fn eq(&self, other: &Self) -> bool {
-                self.id == other.id
-            }
-        }
-
-        impl Hash for CompoundKey {
-            fn hash<H: Hasher>(&self, state: &mut H) {
-                self.id.hash(state)
-            }
-        }
-
         let mut cache = LruCache::new(2);
         let key_1 = CompoundKey::new(1, 11);
         cache.insert(key_1);
@@ -326,25 +326,6 @@ mod test {
 
     #[test]
     fn peek_ty_custom_eq_impl() {
-        #[derive(Debug, Eq, Constructor, Clone, Copy)]
-        struct CompoundKey {
-            // type unique for id
-            id: i8,
-            other: i8,
-        }
-
-        impl PartialEq for CompoundKey {
-            fn eq(&self, other: &Self) -> bool {
-                self.id == other.id
-            }
-        }
-
-        impl Hash for CompoundKey {
-            fn hash<H: Hasher>(&self, state: &mut H) {
-                self.id.hash(state)
-            }
-        }
-
         let mut cache = LruCache::new(2);
         let key_1 = CompoundKey::new(1, 11);
         cache.insert(key_1);
