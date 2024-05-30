@@ -73,7 +73,6 @@ pub mod tables;
 mod utils;
 pub mod version;
 
-/// Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
 #[cfg(feature = "mdbx")]
 pub mod mdbx;
 
