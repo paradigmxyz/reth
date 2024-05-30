@@ -1,6 +1,5 @@
 use crate::Tables;
 use metrics::{Gauge, Histogram};
-use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::{FxHashMap, FxHasher};
 use std::{
@@ -18,7 +17,7 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 /// Requires a metric recorder to be registered before creating an instance of this struct.
 /// Otherwise, metric recording will no-op.
 #[derive(Debug)]
-pub struct DatabaseEnvMetrics {
+pub(crate) struct DatabaseEnvMetrics {
     /// Caches OperationMetrics handles for each table and operation tuple.
     operations: FxHashMap<(Tables, Operation), OperationMetrics>,
     /// Caches TransactionMetrics handles for counters grouped by only transaction mode.
@@ -124,13 +123,14 @@ impl DatabaseEnvMetrics {
     }
 
     /// Record metrics for closing a database transactions.
+    #[cfg(feature = "mdbx")]
     pub(crate) fn record_closed_transaction(
         &self,
         mode: TransactionMode,
         outcome: TransactionOutcome,
         open_duration: Duration,
         close_duration: Option<Duration>,
-        commit_latency: Option<CommitLatency>,
+        commit_latency: Option<reth_libmdbx::CommitLatency>,
     ) {
         self.transactions
             .get(&mode)
@@ -152,6 +152,7 @@ pub(crate) enum TransactionMode {
     /// Read-write transaction mode.
     ReadWrite,
 }
+
 impl TransactionMode {
     /// Returns the transaction mode as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
@@ -304,11 +305,12 @@ pub(crate) struct TransactionOutcomeMetrics {
 impl TransactionOutcomeMetrics {
     /// Record transaction closing with the duration it was open and the duration it took to close
     /// it.
+    #[cfg(feature = "mdbx")]
     pub(crate) fn record(
         &self,
         open_duration: Duration,
         close_duration: Option<Duration>,
-        commit_latency: Option<CommitLatency>,
+        commit_latency: Option<reth_libmdbx::CommitLatency>,
     ) {
         self.open_duration_seconds.record(open_duration);
 
