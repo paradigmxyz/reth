@@ -17,16 +17,16 @@ use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db_common::init::init_genesis;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
-use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_core::init::init_genesis;
+use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_primitives::{
     stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };

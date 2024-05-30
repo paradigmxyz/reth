@@ -51,6 +51,7 @@ impl_compression_for_compact!(
     StageCheckpoint,
     PruneCheckpoint,
     ClientVersion,
+    Requests,
     // Non-DB
     GenesisAccount
 );

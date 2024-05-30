@@ -7,11 +7,11 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     trie::AccountProof, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
     StorageValue, B256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{proof::Proof, updates::TrieUpdates, HashedPostState};
 use revm::db::BundleState;
 
@@ -26,7 +26,7 @@ pub struct LatestStateProviderRef<'b, TX: DbTx> {
 
 impl<'b, TX: DbTx> LatestStateProviderRef<'b, TX> {
     /// Create new state provider
-    pub fn new(tx: &'b TX, static_file_provider: StaticFileProvider) -> Self {
+    pub const fn new(tx: &'b TX, static_file_provider: StaticFileProvider) -> Self {
         Self { tx, static_file_provider }
     }
 }
@@ -130,7 +130,7 @@ pub struct LatestStateProvider<TX: DbTx> {
 
 impl<TX: DbTx> LatestStateProvider<TX> {
     /// Create new state provider
-    pub fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
+    pub const fn new(db: TX, static_file_provider: StaticFileProvider) -> Self {
         Self { db, static_file_provider }
     }
 
@@ -148,9 +148,9 @@ delegate_provider_impls!(LatestStateProvider<TX> where [TX: DbTx]);
 mod tests {
     use super::*;
 
-    fn assert_state_provider<T: StateProvider>() {}
+    const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    fn assert_latest_state_provider<T: DbTx>() {
+    const fn assert_latest_state_provider<T: DbTx>() {
         assert_state_provider::<LatestStateProvider<T>>();
     }
 }

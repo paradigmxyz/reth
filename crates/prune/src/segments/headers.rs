@@ -25,7 +25,7 @@ pub struct Headers {
 }
 
 impl Headers {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }
@@ -189,13 +189,13 @@ where
 mod tests {
     use assert_matches::assert_matches;
     use reth_db::{tables, transaction::DbTx};
-    use reth_interfaces::test_utils::{generators, generators::random_header_range};
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, B256, U256,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestStageDB;
+    use reth_testing_utils::{generators, generators::random_header_range};
     use tracing::trace;
 
     use crate::segments::{

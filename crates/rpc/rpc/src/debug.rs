@@ -519,7 +519,7 @@ where
         env: EnvWithHandlerCfg,
         db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         transaction_context: Option<TransactionContext>,
-    ) -> EthResult<(GethTrace, revm_primitives::State)> {
+    ) -> EthResult<(GethTrace, revm_primitives::EvmState)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
         if let Some(tracer) = tracer {
@@ -710,7 +710,7 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default()).await?)
+        Ok(Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceBlockByHash`
@@ -720,7 +720,7 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
+        Ok(Self::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceBlockByNumber`
@@ -730,7 +730,7 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
+        Ok(Self::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceTransaction`
@@ -740,7 +740,7 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
+        Ok(Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
     }
 
     /// Handler for `debug_traceCall`
@@ -751,8 +751,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
-            .await?)
+        Ok(Self::debug_trace_call(self, request, block_number, opts.unwrap_or_default()).await?)
     }
 
     async fn debug_trace_call_many(
@@ -762,7 +761,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(DebugApi::debug_trace_call_many(self, bundles, state_context, opts).await?)
+        Ok(Self::debug_trace_call_many(self, bundles, state_context, opts).await?)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {

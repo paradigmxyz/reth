@@ -73,19 +73,19 @@ impl NodeRecord {
 
     /// Creates a new record from a socket addr and peer id.
     #[allow(dead_code)]
-    pub fn new(addr: SocketAddr, id: PeerId) -> Self {
+    pub const fn new(addr: SocketAddr, id: PeerId) -> Self {
         Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
     }
 
     /// The TCP socket address of this node
     #[must_use]
-    pub fn tcp_addr(&self) -> SocketAddr {
+    pub const fn tcp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.tcp_port)
     }
 
     /// The UDP socket address of this node
     #[must_use]
-    pub fn udp_addr(&self) -> SocketAddr {
+    pub const fn udp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.udp_port)
     }
 }
@@ -189,7 +189,7 @@ impl TryFrom<&Enr<SecretKey>> for NodeRecord {
 
         let id = pk2id(&enr.public_key());
 
-        Ok(NodeRecord { address, tcp_port, udp_port, id }.into_ipv4_mapped())
+        Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }
 }
 

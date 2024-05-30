@@ -11,8 +11,8 @@ use crate::{
 use clap::Parser;
 use itertools::Itertools;
 use reth_db::{open_db, static_file::iter_static_files, tables, transaction::DbTxMut, DatabaseEnv};
+use reth_db_common::init::{insert_genesis_header, insert_genesis_history, insert_genesis_state};
 use reth_fs_util as fs;
-use reth_node_core::init::{insert_genesis_header, insert_genesis_history, insert_genesis_state};
 use reth_primitives::{
     stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
 };
@@ -110,6 +110,7 @@ impl Command {
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers>()?;
                 tx.clear::<tables::BlockWithdrawals>()?;
+                tx.clear::<tables::BlockRequests>()?;
                 tx.put::<tables::StageCheckpoints>(
                     StageId::Bodies.to_string(),
                     Default::default(),

@@ -10,11 +10,11 @@ use reth_db::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
     constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
     StaticFileSegment, StorageKey, StorageValue, B256,
 };
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::db::BundleState;
 use std::fmt::Debug;
@@ -62,7 +62,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
 
     /// Create new StateProvider for historical block number and lowest block numbers at which
     /// account & storage histories are available.
-    pub fn new_with_lowest_available_blocks(
+    pub const fn new_with_lowest_available_blocks(
         tx: &'b TX,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
@@ -339,7 +339,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
     }
 
     /// Set the lowest block number at which the account history is available.
-    pub fn with_lowest_available_account_history_block_number(
+    pub const fn with_lowest_available_account_history_block_number(
         mut self,
         block_number: BlockNumber,
     ) -> Self {
@@ -348,7 +348,7 @@ impl<TX: DbTx> HistoricalStateProvider<TX> {
     }
 
     /// Set the lowest block number at which the storage history is available.
-    pub fn with_lowest_available_storage_history_block_number(
+    pub const fn with_lowest_available_storage_history_block_number(
         mut self,
         block_number: BlockNumber,
     ) -> Self {
@@ -413,16 +413,16 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         BlockNumberList,
     };
-    use reth_interfaces::provider::ProviderError;
     use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
+    use reth_storage_errors::provider::ProviderError;
 
     const ADDRESS: Address = address!("0000000000000000000000000000000000000001");
     const HIGHER_ADDRESS: Address = address!("0000000000000000000000000000000000000005");
     const STORAGE: B256 = b256!("0000000000000000000000000000000000000000000000000000000000000001");
 
-    fn assert_state_provider<T: StateProvider>() {}
+    const fn assert_state_provider<T: StateProvider>() {}
     #[allow(dead_code)]
-    fn assert_historical_state_provider<T: DbTx>() {
+    const fn assert_historical_state_provider<T: DbTx>() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }
 

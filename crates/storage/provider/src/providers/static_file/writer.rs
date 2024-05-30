@@ -6,13 +6,13 @@ use super::{
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db::codecs::CompactU256;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
     BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Weak},
@@ -621,7 +621,7 @@ impl StaticFileProviderRW {
 
     #[cfg(any(test, feature = "test-utils"))]
     /// Helper function to access [`SegmentHeader`].
-    pub fn user_header(&self) -> &SegmentHeader {
+    pub const fn user_header(&self) -> &SegmentHeader {
         self.writer.user_header()
     }
 }

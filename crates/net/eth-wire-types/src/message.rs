@@ -114,7 +114,7 @@ impl ProtocolMessage {
                 EthMessage::Receipts(request_pair)
             }
         };
-        Ok(ProtocolMessage { message_type, message })
+        Ok(Self { message_type, message })
     }
 }
 
@@ -132,7 +132,7 @@ impl Encodable for ProtocolMessage {
 
 impl From<EthMessage> for ProtocolMessage {
     fn from(message: EthMessage) -> Self {
-        ProtocolMessage { message_type: message.message_id(), message }
+        Self { message_type: message.message_id(), message }
     }
 }
 
@@ -160,7 +160,7 @@ impl Encodable for ProtocolBroadcastMessage {
 
 impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
     fn from(message: EthBroadcastMessage) -> Self {
-        ProtocolBroadcastMessage { message_type: message.message_id(), message }
+        Self { message_type: message.message_id(), message }
     }
 }
 
@@ -221,24 +221,25 @@ pub enum EthMessage {
 
 impl EthMessage {
     /// Returns the message's ID.
-    pub fn message_id(&self) -> EthMessageID {
+    pub const fn message_id(&self) -> EthMessageID {
         match self {
-            EthMessage::Status(_) => EthMessageID::Status,
-            EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
-            EthMessage::NewBlock(_) => EthMessageID::NewBlock,
-            EthMessage::Transactions(_) => EthMessageID::Transactions,
-            EthMessage::NewPooledTransactionHashes66(_) |
-            EthMessage::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
-            EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
-            EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
-            EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
-            EthMessage::BlockBodies(_) => EthMessageID::BlockBodies,
-            EthMessage::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
-            EthMessage::PooledTransactions(_) => EthMessageID::PooledTransactions,
-            EthMessage::GetNodeData(_) => EthMessageID::GetNodeData,
-            EthMessage::NodeData(_) => EthMessageID::NodeData,
-            EthMessage::GetReceipts(_) => EthMessageID::GetReceipts,
-            EthMessage::Receipts(_) => EthMessageID::Receipts,
+            Self::Status(_) => EthMessageID::Status,
+            Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
+            Self::NewBlock(_) => EthMessageID::NewBlock,
+            Self::Transactions(_) => EthMessageID::Transactions,
+            Self::NewPooledTransactionHashes66(_) | Self::NewPooledTransactionHashes68(_) => {
+                EthMessageID::NewPooledTransactionHashes
+            }
+            Self::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
+            Self::BlockHeaders(_) => EthMessageID::BlockHeaders,
+            Self::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
+            Self::BlockBodies(_) => EthMessageID::BlockBodies,
+            Self::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
+            Self::PooledTransactions(_) => EthMessageID::PooledTransactions,
+            Self::GetNodeData(_) => EthMessageID::GetNodeData,
+            Self::NodeData(_) => EthMessageID::NodeData,
+            Self::GetReceipts(_) => EthMessageID::GetReceipts,
+            Self::Receipts(_) => EthMessageID::Receipts,
         }
     }
 }
@@ -246,42 +247,42 @@ impl EthMessage {
 impl Encodable for EthMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
-            EthMessage::Status(status) => status.encode(out),
-            EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
-            EthMessage::NewBlock(new_block) => new_block.encode(out),
-            EthMessage::Transactions(transactions) => transactions.encode(out),
-            EthMessage::NewPooledTransactionHashes66(hashes) => hashes.encode(out),
-            EthMessage::NewPooledTransactionHashes68(hashes) => hashes.encode(out),
-            EthMessage::GetBlockHeaders(request) => request.encode(out),
-            EthMessage::BlockHeaders(headers) => headers.encode(out),
-            EthMessage::GetBlockBodies(request) => request.encode(out),
-            EthMessage::BlockBodies(bodies) => bodies.encode(out),
-            EthMessage::GetPooledTransactions(request) => request.encode(out),
-            EthMessage::PooledTransactions(transactions) => transactions.encode(out),
-            EthMessage::GetNodeData(request) => request.encode(out),
-            EthMessage::NodeData(data) => data.encode(out),
-            EthMessage::GetReceipts(request) => request.encode(out),
-            EthMessage::Receipts(receipts) => receipts.encode(out),
+            Self::Status(status) => status.encode(out),
+            Self::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
+            Self::NewBlock(new_block) => new_block.encode(out),
+            Self::Transactions(transactions) => transactions.encode(out),
+            Self::NewPooledTransactionHashes66(hashes) => hashes.encode(out),
+            Self::NewPooledTransactionHashes68(hashes) => hashes.encode(out),
+            Self::GetBlockHeaders(request) => request.encode(out),
+            Self::BlockHeaders(headers) => headers.encode(out),
+            Self::GetBlockBodies(request) => request.encode(out),
+            Self::BlockBodies(bodies) => bodies.encode(out),
+            Self::GetPooledTransactions(request) => request.encode(out),
+            Self::PooledTransactions(transactions) => transactions.encode(out),
+            Self::GetNodeData(request) => request.encode(out),
+            Self::NodeData(data) => data.encode(out),
+            Self::GetReceipts(request) => request.encode(out),
+            Self::Receipts(receipts) => receipts.encode(out),
         }
     }
     fn length(&self) -> usize {
         match self {
-            EthMessage::Status(status) => status.length(),
-            EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
-            EthMessage::NewBlock(new_block) => new_block.length(),
-            EthMessage::Transactions(transactions) => transactions.length(),
-            EthMessage::NewPooledTransactionHashes66(hashes) => hashes.length(),
-            EthMessage::NewPooledTransactionHashes68(hashes) => hashes.length(),
-            EthMessage::GetBlockHeaders(request) => request.length(),
-            EthMessage::BlockHeaders(headers) => headers.length(),
-            EthMessage::GetBlockBodies(request) => request.length(),
-            EthMessage::BlockBodies(bodies) => bodies.length(),
-            EthMessage::GetPooledTransactions(request) => request.length(),
-            EthMessage::PooledTransactions(transactions) => transactions.length(),
-            EthMessage::GetNodeData(request) => request.length(),
-            EthMessage::NodeData(data) => data.length(),
-            EthMessage::GetReceipts(request) => request.length(),
-            EthMessage::Receipts(receipts) => receipts.length(),
+            Self::Status(status) => status.length(),
+            Self::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
+            Self::NewBlock(new_block) => new_block.length(),
+            Self::Transactions(transactions) => transactions.length(),
+            Self::NewPooledTransactionHashes66(hashes) => hashes.length(),
+            Self::NewPooledTransactionHashes68(hashes) => hashes.length(),
+            Self::GetBlockHeaders(request) => request.length(),
+            Self::BlockHeaders(headers) => headers.length(),
+            Self::GetBlockBodies(request) => request.length(),
+            Self::BlockBodies(bodies) => bodies.length(),
+            Self::GetPooledTransactions(request) => request.length(),
+            Self::PooledTransactions(transactions) => transactions.length(),
+            Self::GetNodeData(request) => request.length(),
+            Self::NodeData(data) => data.length(),
+            Self::GetReceipts(request) => request.length(),
+            Self::Receipts(receipts) => receipts.length(),
         }
     }
 }
@@ -305,10 +306,10 @@ pub enum EthBroadcastMessage {
 
 impl EthBroadcastMessage {
     /// Returns the message's ID.
-    pub fn message_id(&self) -> EthMessageID {
+    pub const fn message_id(&self) -> EthMessageID {
         match self {
-            EthBroadcastMessage::NewBlock(_) => EthMessageID::NewBlock,
-            EthBroadcastMessage::Transactions(_) => EthMessageID::Transactions,
+            Self::NewBlock(_) => EthMessageID::NewBlock,
+            Self::Transactions(_) => EthMessageID::Transactions,
         }
     }
 }
@@ -316,15 +317,15 @@ impl EthBroadcastMessage {
 impl Encodable for EthBroadcastMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
-            EthBroadcastMessage::NewBlock(new_block) => new_block.encode(out),
-            EthBroadcastMessage::Transactions(transactions) => transactions.encode(out),
+            Self::NewBlock(new_block) => new_block.encode(out),
+            Self::Transactions(transactions) => transactions.encode(out),
         }
     }
 
     fn length(&self) -> usize {
         match self {
-            EthBroadcastMessage::NewBlock(new_block) => new_block.length(),
-            EthBroadcastMessage::Transactions(transactions) => transactions.length(),
+            Self::NewBlock(new_block) => new_block.length(),
+            Self::Transactions(transactions) => transactions.length(),
         }
     }
 }
@@ -385,21 +386,21 @@ impl Encodable for EthMessageID {
 impl Decodable for EthMessageID {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let id = match buf.first().ok_or(alloy_rlp::Error::InputTooShort)? {
-            0x00 => EthMessageID::Status,
-            0x01 => EthMessageID::NewBlockHashes,
-            0x02 => EthMessageID::Transactions,
-            0x03 => EthMessageID::GetBlockHeaders,
-            0x04 => EthMessageID::BlockHeaders,
-            0x05 => EthMessageID::GetBlockBodies,
-            0x06 => EthMessageID::BlockBodies,
-            0x07 => EthMessageID::NewBlock,
-            0x08 => EthMessageID::NewPooledTransactionHashes,
-            0x09 => EthMessageID::GetPooledTransactions,
-            0x0a => EthMessageID::PooledTransactions,
-            0x0d => EthMessageID::GetNodeData,
-            0x0e => EthMessageID::NodeData,
-            0x0f => EthMessageID::GetReceipts,
-            0x10 => EthMessageID::Receipts,
+            0x00 => Self::Status,
+            0x01 => Self::NewBlockHashes,
+            0x02 => Self::Transactions,
+            0x03 => Self::GetBlockHeaders,
+            0x04 => Self::BlockHeaders,
+            0x05 => Self::GetBlockBodies,
+            0x06 => Self::BlockBodies,
+            0x07 => Self::NewBlock,
+            0x08 => Self::NewPooledTransactionHashes,
+            0x09 => Self::GetPooledTransactions,
+            0x0a => Self::PooledTransactions,
+            0x0d => Self::GetNodeData,
+            0x0e => Self::NodeData,
+            0x0f => Self::GetReceipts,
+            0x10 => Self::Receipts,
             _ => return Err(alloy_rlp::Error::Custom("Invalid message ID")),
         };
         buf.advance(1);
@@ -412,21 +413,21 @@ impl TryFrom<usize> for EthMessageID {
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         match value {
-            0x00 => Ok(EthMessageID::Status),
-            0x01 => Ok(EthMessageID::NewBlockHashes),
-            0x02 => Ok(EthMessageID::Transactions),
-            0x03 => Ok(EthMessageID::GetBlockHeaders),
-            0x04 => Ok(EthMessageID::BlockHeaders),
-            0x05 => Ok(EthMessageID::GetBlockBodies),
-            0x06 => Ok(EthMessageID::BlockBodies),
-            0x07 => Ok(EthMessageID::NewBlock),
-            0x08 => Ok(EthMessageID::NewPooledTransactionHashes),
-            0x09 => Ok(EthMessageID::GetPooledTransactions),
-            0x0a => Ok(EthMessageID::PooledTransactions),
-            0x0d => Ok(EthMessageID::GetNodeData),
-            0x0e => Ok(EthMessageID::NodeData),
-            0x0f => Ok(EthMessageID::GetReceipts),
-            0x10 => Ok(EthMessageID::Receipts),
+            0x00 => Ok(Self::Status),
+            0x01 => Ok(Self::NewBlockHashes),
+            0x02 => Ok(Self::Transactions),
+            0x03 => Ok(Self::GetBlockHeaders),
+            0x04 => Ok(Self::BlockHeaders),
+            0x05 => Ok(Self::GetBlockBodies),
+            0x06 => Ok(Self::BlockBodies),
+            0x07 => Ok(Self::NewBlock),
+            0x08 => Ok(Self::NewPooledTransactionHashes),
+            0x09 => Ok(Self::GetPooledTransactions),
+            0x0a => Ok(Self::PooledTransactions),
+            0x0d => Ok(Self::GetNodeData),
+            0x0e => Ok(Self::NodeData),
+            0x0f => Ok(Self::GetReceipts),
+            0x10 => Ok(Self::Receipts),
             _ => Err("Invalid message ID"),
         }
     }

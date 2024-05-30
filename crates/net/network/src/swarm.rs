@@ -63,7 +63,7 @@ pub(crate) struct Swarm<C> {
 
 impl<C> Swarm<C> {
     /// Configures a new swarm instance.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         incoming: ConnectionListener,
         sessions: SessionManager,
         state: NetworkState<C>,
@@ -77,7 +77,7 @@ impl<C> Swarm<C> {
     }
 
     /// Access to the state.
-    pub(crate) fn state(&self) -> &NetworkState<C> {
+    pub(crate) const fn state(&self) -> &NetworkState<C> {
         &self.state
     }
 
@@ -87,12 +87,12 @@ impl<C> Swarm<C> {
     }
 
     /// Access to the [`ConnectionListener`].
-    pub(crate) fn listener(&self) -> &ConnectionListener {
+    pub(crate) const fn listener(&self) -> &ConnectionListener {
         &self.incoming
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) fn sessions(&self) -> &SessionManager {
+    pub(crate) const fn sessions(&self) -> &SessionManager {
         &self.sessions
     }
 
@@ -275,7 +275,7 @@ where
 
     /// Checks if the node's network connection state is 'ShuttingDown'
     #[inline]
-    pub(crate) fn is_shutting_down(&self) -> bool {
+    pub(crate) const fn is_shutting_down(&self) -> bool {
         self.state().peers().connection_state().is_shutting_down()
     }
 
@@ -442,12 +442,12 @@ pub enum NetworkConnectionState {
 
 impl NetworkConnectionState {
     /// Returns true if the node is active.
-    pub(crate) fn is_active(&self) -> bool {
-        matches!(self, NetworkConnectionState::Active)
+    pub(crate) const fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
     }
 
     /// Returns true if the node is shutting down.
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        matches!(self, NetworkConnectionState::ShuttingDown)
+    pub(crate) const fn is_shutting_down(&self) -> bool {
+        matches!(self, Self::ShuttingDown)
     }
 }

@@ -8,8 +8,7 @@ use crate::{
     AllTransactionsEvents,
 };
 use futures_util::{ready, Stream};
-use reth_eth_wire::HandleMempoolData;
-use reth_network_types::PeerId;
+use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
@@ -28,6 +27,9 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::Receiver;
+
+/// The PeerId type.
+pub type PeerId = reth_primitives::B512;
 
 /// General purpose abstraction of a transaction-pool.
 ///
@@ -495,7 +497,7 @@ impl PropagateKind {
     /// Returns the peer the transaction was sent to
     pub const fn peer(&self) -> &PeerId {
         match self {
-            PropagateKind::Full(peer) | PropagateKind::Hash(peer) => peer,
+            Self::Full(peer) | Self::Hash(peer) => peer,
         }
     }
 }
@@ -559,16 +561,16 @@ pub enum TransactionOrigin {
 impl TransactionOrigin {
     /// Whether the transaction originates from a local source.
     pub const fn is_local(&self) -> bool {
-        matches!(self, TransactionOrigin::Local)
+        matches!(self, Self::Local)
     }
 
     /// Whether the transaction originates from an external source.
     pub const fn is_external(&self) -> bool {
-        matches!(self, TransactionOrigin::External)
+        matches!(self, Self::External)
     }
     /// Whether the transaction originates from a private source.
     pub const fn is_private(&self) -> bool {
-        matches!(self, TransactionOrigin::Private)
+        matches!(self, Self::Private)
     }
 }
 
@@ -907,7 +909,7 @@ impl EthBlobTransactionSidecar {
     /// Returns the blob sidecar if it is present
     pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecar> {
         match self {
-            EthBlobTransactionSidecar::Present(sidecar) => Some(sidecar),
+            Self::Present(sidecar) => Some(sidecar),
             _ => None,
         }
     }
@@ -967,13 +969,13 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
                 // include the blob sidecar
                 let (tx, blob) = tx.into_parts();
                 let tx = TransactionSignedEcRecovered::from_signed_transaction(tx, signer);
-                let mut pooled = EthPooledTransaction::new(tx, encoded_length);
+                let mut pooled = Self::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
                 pooled
             }
             tx => {
                 // no blob sidecar
-                EthPooledTransaction::new(tx.into_ecrecovered_transaction(signer), encoded_length)
+                Self::new(tx.into_ecrecovered_transaction(signer), encoded_length)
             }
         }
     }
@@ -1144,14 +1146,14 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
         };
 
         let encoded_length = tx.length_without_header();
-        let transaction = EthPooledTransaction::new(tx, encoded_length);
+        let transaction = Self::new(tx, encoded_length);
         Ok(transaction)
     }
 }
 
 impl FromRecoveredPooledTransaction for EthPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        EthPooledTransaction::from(tx)
+        Self::from(tx)
     }
 }
 
@@ -1229,8 +1231,8 @@ impl GetPooledTransactionLimit {
     #[inline]
     pub const fn exceeds(&self, size: usize) -> bool {
         match self {
-            GetPooledTransactionLimit::None => false,
-            GetPooledTransactionLimit::ResponseSizeSoftLimit(limit) => size > *limit,
+            Self::None => false,
+            Self::ResponseSizeSoftLimit(limit) => size > *limit,
         }
     }
 }

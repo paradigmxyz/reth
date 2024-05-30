@@ -140,7 +140,7 @@ impl LayerInfo {
     ///  * `default_directive` - Directive for filtering log messages.
     ///  * `filters` - Additional filtering parameters as a string.
     ///  * `color` - Optional color configuration for the log messages.
-    pub fn new(
+    pub const fn new(
         format: LogFormat,
         default_directive: String,
         filters: String,

@@ -3,7 +3,6 @@ use reth_db::{
     cursor::DbCursorRO, database::Database, static_file::create_static_file_T1, tables,
     transaction::DbTx,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     static_file::{SegmentConfig, SegmentHeader},
     BlockNumber, StaticFileSegment, TxNumber,
@@ -12,6 +11,7 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DatabaseProviderRO, TransactionsProviderExt,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::RangeInclusive, path::Path};
 
 /// Static File segment responsible for [StaticFileSegment::Receipts] part of data.

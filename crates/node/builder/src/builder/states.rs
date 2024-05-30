@@ -63,7 +63,7 @@ pub(crate) struct NodeTypesAdapter<T: FullNodeTypes> {
 
 impl<T: FullNodeTypes> NodeTypesAdapter<T> {
     /// Create a new adapter from the given node types.
-    pub(crate) fn new(database: T::DB) -> Self {
+    pub(crate) const fn new(database: T::DB) -> Self {
         Self { database }
     }
 }
@@ -223,7 +223,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     /// Check that the builder can be launched
     ///
     /// This is useful when writing tests to ensure that the builder is configured correctly.
-    pub fn check_launch(self) -> Self {
+    pub const fn check_launch(self) -> Self {
         self
     }
 }

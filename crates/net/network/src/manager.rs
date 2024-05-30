@@ -53,7 +53,7 @@ use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
-    pin::{pin, Pin},
+    pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -137,7 +137,7 @@ impl<C> NetworkManager<C> {
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
     ///
     /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
-    pub fn handle(&self) -> &NetworkHandle {
+    pub const fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
 
@@ -148,7 +148,7 @@ impl<C> NetworkManager<C> {
     }
 
     /// Returns the secret key used for authenticating sessions.
-    pub fn secret_key(&self) -> SecretKey {
+    pub const fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
     }
 
@@ -313,12 +313,12 @@ where
     }
 
     /// Create a [`NetworkBuilder`] to configure all components of the network
-    pub fn into_builder(self) -> NetworkBuilder<C, (), ()> {
+    pub const fn into_builder(self) -> NetworkBuilder<C, (), ()> {
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
     }
 
@@ -895,25 +895,26 @@ where
 {
     /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
     ///
-    /// This also run the given function `shutdown_hook` afterwards.
-    pub async fn run_until_graceful_shutdown(
-        self,
+    /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
+    pub async fn run_until_graceful_shutdown<F, R>(
+        mut self,
         shutdown: GracefulShutdown,
-        shutdown_hook: impl FnOnce(&mut Self),
-    ) {
-        let network = self;
-        let mut network = pin!(network);
-
+        shutdown_hook: F,
+    ) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
         let mut graceful_guard = None;
         tokio::select! {
-            _ = &mut network => {},
+            _ = &mut self => {},
             guard = shutdown => {
                 graceful_guard = Some(guard);
             },
         }
 
-        shutdown_hook(&mut network);
+        let res = shutdown_hook(self);
         drop(graceful_guard);
+        res
     }
 }
 

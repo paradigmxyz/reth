@@ -75,24 +75,24 @@ impl BlockNumberAddress {
     }
 
     /// Return the block number
-    pub fn block_number(&self) -> BlockNumber {
+    pub const fn block_number(&self) -> BlockNumber {
         self.0 .0
     }
 
     /// Return the address
-    pub fn address(&self) -> Address {
+    pub const fn address(&self) -> Address {
         self.0 .1
     }
 
     /// Consumes `Self` and returns [`BlockNumber`], [`Address`]
-    pub fn take(self) -> (BlockNumber, Address) {
+    pub const fn take(self) -> (BlockNumber, Address) {
         (self.0 .0, self.0 .1)
     }
 }
 
 impl From<(BlockNumber, Address)> for BlockNumberAddress {
     fn from(tpl: (u64, Address)) -> Self {
-        BlockNumberAddress(tpl)
+        Self(tpl)
     }
 }
 
@@ -117,7 +117,7 @@ impl Decode for BlockNumberAddress {
         let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| DatabaseError::Decode)?);
         let hash = Address::from_slice(&value[8..]);
 
-        Ok(BlockNumberAddress((num, hash)))
+        Ok(Self((num, hash)))
     }
 }
 
@@ -150,7 +150,7 @@ impl Decode for AddressStorageKey {
         let address = Address::from_slice(&value[..20]);
         let storage_key = StorageKey::from_slice(&value[20..]);
 
-        Ok(AddressStorageKey((address, storage_key)))
+        Ok(Self((address, storage_key)))
     }
 }
 

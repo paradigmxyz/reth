@@ -64,7 +64,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     }
 
     /// Returns the [SharedCapabilities] of the underlying raw p2p stream
-    pub fn shared_capabilities(&self) -> &SharedCapabilities {
+    pub const fn shared_capabilities(&self) -> &SharedCapabilities {
         self.inner.shared_capabilities()
     }
 
@@ -234,7 +234,7 @@ struct MultiplexInner<St> {
 }
 
 impl<St> MultiplexInner<St> {
-    fn shared_capabilities(&self) -> &SharedCapabilities {
+    const fn shared_capabilities(&self) -> &SharedCapabilities {
         self.conn.shared_capabilities()
     }
 
@@ -417,7 +417,7 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
     /// Returns the primary protocol.
     #[inline]
-    pub fn primary(&self) -> &Primary {
+    pub const fn primary(&self) -> &Primary {
         &self.primary.st
     }
 
@@ -429,7 +429,7 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
     /// Returns the underlying [P2PStream].
     #[inline]
-    pub fn inner(&self) -> &P2PStream<St> {
+    pub const fn inner(&self) -> &P2PStream<St> {
         &self.inner.conn
     }
 

@@ -1,8 +1,8 @@
 use crate::{
     AccountReader, BlockHashReader, BundleStateDataProvider, StateProvider, StateRootProvider,
 };
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{trie::AccountProof, Account, Address, BlockNumber, Bytecode, B256};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
 
@@ -18,7 +18,7 @@ pub struct BundleStateProvider<SP: StateProvider, BSDP: BundleStateDataProvider>
 
 impl<SP: StateProvider, BSDP: BundleStateDataProvider> BundleStateProvider<SP, BSDP> {
     /// Create new bundle state provider
-    pub fn new(state_provider: SP, bundle_state_data_provider: BSDP) -> Self {
+    pub const fn new(state_provider: SP, bundle_state_data_provider: BSDP) -> Self {
         Self { state_provider, bundle_state_data_provider }
     }
 }

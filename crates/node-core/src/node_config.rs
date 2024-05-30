@@ -14,8 +14,8 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
+use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
@@ -24,6 +24,7 @@ use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, BlockNumReader, HeaderProvider,
     ProviderFactory, StageCheckpointReader,
 };
+use reth_storage_errors::provider::ProviderResult;
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
@@ -176,13 +177,13 @@ impl NodeConfig {
     }
 
     /// Set the metrics address for the node
-    pub fn with_metrics(mut self, metrics: SocketAddr) -> Self {
+    pub const fn with_metrics(mut self, metrics: SocketAddr) -> Self {
         self.metrics = Some(metrics);
         self
     }
 
     /// Set the instance for the node
-    pub fn with_instance(mut self, instance: u16) -> Self {
+    pub const fn with_instance(mut self, instance: u16) -> Self {
         self.instance = instance;
         self
     }
@@ -218,19 +219,19 @@ impl NodeConfig {
     }
 
     /// Set the database args for the node
-    pub fn with_db(mut self, db: DatabaseArgs) -> Self {
+    pub const fn with_db(mut self, db: DatabaseArgs) -> Self {
         self.db = db;
         self
     }
 
     /// Set the dev args for the node
-    pub fn with_dev(mut self, dev: DevArgs) -> Self {
+    pub const fn with_dev(mut self, dev: DevArgs) -> Self {
         self.dev = dev;
         self
     }
 
     /// Set the pruning args for the node
-    pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
+    pub const fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
         self
     }
@@ -366,7 +367,7 @@ impl NodeConfig {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    pub fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> RethResult<Head> {
+    pub fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> ProviderResult<Head> {
         let provider = factory.provider()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
@@ -401,7 +402,7 @@ impl NodeConfig {
         provider: Provider,
         client: Client,
         tip: B256,
-    ) -> RethResult<u64>
+    ) -> ProviderResult<u64>
     where
         Provider: HeaderProvider,
         Client: HeadersClient,
@@ -414,7 +415,7 @@ impl NodeConfig {
             return Ok(header.number)
         }
 
-        Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
+        Ok(self.fetch_tip_from_network(client, tip.into()).await.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -424,7 +425,7 @@ impl NodeConfig {
         &self,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> RethResult<SealedHeader>
+    ) -> SealedHeader
     where
         Client: HeadersClient,
     {
@@ -434,7 +435,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return tip_header
                 }
                 Err(error) => {
                     fetch_failures += 1;
