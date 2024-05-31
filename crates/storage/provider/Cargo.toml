@@ -64,6 +64,7 @@ reth-testing-utils.workspace = true
 
 alloy-rlp.workspace = true
 parking_lot.workspace = true
+tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
 
