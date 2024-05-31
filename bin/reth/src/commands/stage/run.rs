@@ -147,14 +147,14 @@ impl Command {
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
-        let factory = create_provider_factory(
+        let provider_factory = create_provider_factory(
             &config,
             self.chain.clone(),
             db.clone(),
             StaticFileProvider::read_write(data_dir.static_files())?,
         )?;
 
-        let mut provider_rw = factory.provider_rw()?;
+        let mut provider_rw = provider_factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -162,7 +162,7 @@ impl Command {
                 listen_addr,
                 prometheus_exporter::install_recorder()?,
                 Arc::clone(&db),
-                factory.static_file_provider(),
+                provider_factory.static_file_provider(),
                 metrics_process::Collector::default(),
                 ctx.task_executor,
             )
@@ -199,13 +199,6 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers();
 
-                    let provider_factory = Arc::new(create_provider_factory(
-                        &config,
-                        self.chain.clone(),
-                        db.clone(),
-                        StaticFileProvider::read_write(data_dir.static_files())?,
-                    )?);
-
                     let network = self
                         .network
                         .network_config(
@@ -230,7 +223,7 @@ impl Command {
                                 config.stages.bodies.downloader_min_concurrent_requests..=
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
-                            .build(fetch_client, consensus.clone(), provider_factory),
+                            .build(fetch_client, consensus.clone(), provider_factory.clone()),
                     );
                     (Box::new(stage), None)
                 }
@@ -327,7 +320,7 @@ impl Command {
 
                 if self.commit {
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw()?;
+                    provider_rw = provider_factory.provider_rw()?;
                 }
             }
         }
@@ -350,7 +343,7 @@ impl Command {
             }
             if self.commit {
                 provider_rw.commit()?;
-                provider_rw = factory.provider_rw()?;
+                provider_rw = provider_factory.provider_rw()?;
             }
 
             if done {
