@@ -107,15 +107,15 @@ pub enum ForkchoiceStatus {
 
 impl ForkchoiceStatus {
     pub(crate) fn is_valid(&self) -> bool {
-        matches!(self, ForkchoiceStatus::Valid)
+        matches!(self, Self::Valid)
     }
 
     pub(crate) fn is_invalid(&self) -> bool {
-        matches!(self, ForkchoiceStatus::Invalid)
+        matches!(self, Self::Invalid)
     }
 
     pub(crate) fn is_syncing(&self) -> bool {
-        matches!(self, ForkchoiceStatus::Syncing)
+        matches!(self, Self::Syncing)
     }
 
     /// Converts the general purpose [PayloadStatusEnum] into a [ForkchoiceStatus].
@@ -123,17 +123,17 @@ impl ForkchoiceStatus {
         match status {
             PayloadStatusEnum::Valid | PayloadStatusEnum::Accepted => {
                 // `Accepted` is only returned on `newPayload`. It would be a valid state here.
-                ForkchoiceStatus::Valid
+                Self::Valid
             }
-            PayloadStatusEnum::Invalid { .. } => ForkchoiceStatus::Invalid,
-            PayloadStatusEnum::Syncing => ForkchoiceStatus::Syncing,
+            PayloadStatusEnum::Invalid { .. } => Self::Invalid,
+            PayloadStatusEnum::Syncing => Self::Syncing,
         }
     }
 }
 
 impl From<PayloadStatusEnum> for ForkchoiceStatus {
     fn from(status: PayloadStatusEnum) -> Self {
-        ForkchoiceStatus::from_payload_status(&status)
+        Self::from_payload_status(&status)
     }
 }
 
@@ -149,11 +149,11 @@ impl ForkchoiceStateHash {
     /// Tries to find a matching hash in the given [ForkchoiceState].
     pub(crate) fn find(state: &ForkchoiceState, hash: B256) -> Option<Self> {
         if state.head_block_hash == hash {
-            Some(ForkchoiceStateHash::Head(hash))
+            Some(Self::Head(hash))
         } else if state.safe_block_hash == hash {
-            Some(ForkchoiceStateHash::Safe(hash))
+            Some(Self::Safe(hash))
         } else if state.finalized_block_hash == hash {
-            Some(ForkchoiceStateHash::Finalized(hash))
+            Some(Self::Finalized(hash))
         } else {
             None
         }
@@ -161,16 +161,14 @@ impl ForkchoiceStateHash {
 
     /// Returns true if this is the head hash of the [ForkchoiceState]
     pub(crate) fn is_head(&self) -> bool {
-        matches!(self, ForkchoiceStateHash::Head(_))
+        matches!(self, Self::Head(_))
     }
 }
 
 impl AsRef<B256> for ForkchoiceStateHash {
     fn as_ref(&self) -> &B256 {
         match self {
-            ForkchoiceStateHash::Head(h) |
-            ForkchoiceStateHash::Safe(h) |
-            ForkchoiceStateHash::Finalized(h) => h,
+            Self::Head(h) | Self::Safe(h) | Self::Finalized(h) => h,
         }
     }
 }

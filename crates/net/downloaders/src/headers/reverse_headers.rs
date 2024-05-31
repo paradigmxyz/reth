@@ -7,7 +7,7 @@ use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
 use reth_config::config::HeadersConfig;
 use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
         client::{HeadersClient, HeadersRequest},
@@ -1090,7 +1090,7 @@ impl ReverseHeadersDownloaderBuilder {
     /// Creates a new [ReverseHeadersDownloaderBuilder] with configurations based on the provided
     /// [HeadersConfig].
     pub fn new(config: HeadersConfig) -> Self {
-        ReverseHeadersDownloaderBuilder::default()
+        Self::default()
             .request_limit(config.downloader_request_limit)
             .min_concurrent_requests(config.downloader_min_concurrent_requests)
             .max_concurrent_requests(config.downloader_max_concurrent_requests)
@@ -1220,11 +1220,10 @@ fn calc_next_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::headers::test_utils::child_header;
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::TestHeadersClient;
+    use reth_network_p2p::test_utils::TestHeadersClient;
 
     /// Tests that `replace_number` works the same way as Option::replace
     #[test]

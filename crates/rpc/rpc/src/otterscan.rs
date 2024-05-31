@@ -14,7 +14,7 @@ use reth_rpc_types::{
     BlockTransactions, Transaction,
 };
 
-use crate::{eth::EthTransactions, result::internal_rpc_err};
+use crate::{eth::api::EthTransactions, result::internal_rpc_err};
 
 const API_LEVEL: u64 = 8;
 

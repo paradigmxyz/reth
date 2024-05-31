@@ -7,6 +7,21 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use std::sync::Arc;
+
+use reth_rpc::eth::api::EthApiInner;
+
+pub mod block;
 pub mod error;
 pub mod receipt;
 pub mod transaction;
+
+/// `Eth` API implementation for OP networks.
+///
+/// This type provides OP specific extension of default functionality for handling `eth_` related
+/// requests. See [`EthApi`](reth_rpc::EthApi) for the default L1 implementation.
+#[allow(missing_debug_implementations)]
+pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
+    /// All nested fields bundled together.
+    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+}

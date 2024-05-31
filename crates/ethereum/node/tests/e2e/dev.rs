@@ -1,6 +1,6 @@
 use crate::utils::EthNode;
 use futures::StreamExt;
-use reth::rpc::eth::EthTransactions;
+use reth::rpc::eth::api::EthTransactions;
 use reth_e2e_test_utils::setup;
 use reth_primitives::{b256, hex, ChainSpec, Genesis};
 use reth_provider::CanonStateSubscriptions;

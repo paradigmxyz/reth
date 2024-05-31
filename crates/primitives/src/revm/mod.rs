@@ -1,3 +1,5 @@
+//! Helpers for working with revm.
+
 /// The `compat` module contains utility functions that perform conversions between reth and revm,
 /// compare analogous types from the two implementations, and calculate intrinsic gas usage.
 ///

@@ -27,22 +27,22 @@ pub enum InclusionFilters {
 impl InclusionFilter for InclusionFilters {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         match self {
-            InclusionFilters::Cuckoo(c) => c.add(element),
-            InclusionFilters::Unused => todo!(),
+            Self::Cuckoo(c) => c.add(element),
+            Self::Unused => todo!(),
         }
     }
 
     fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
         match self {
-            InclusionFilters::Cuckoo(c) => c.contains(element),
-            InclusionFilters::Unused => todo!(),
+            Self::Cuckoo(c) => c.contains(element),
+            Self::Unused => todo!(),
         }
     }
 
     fn size(&self) -> usize {
         match self {
-            InclusionFilters::Cuckoo(c) => c.size(),
-            InclusionFilters::Unused => 0,
+            Self::Cuckoo(c) => c.size(),
+            Self::Unused => 0,
         }
     }
 }

@@ -24,6 +24,9 @@ reth-primitives = { workspace = true, features = ["optimism"] }
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 
+# async
+futures.workspace = true
+
 # rpc
 jsonrpsee.workspace = true
 

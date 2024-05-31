@@ -355,7 +355,12 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests: vec![],
+            gas_used,
+        })
     }
 }
 
@@ -420,6 +425,7 @@ where
         BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
+            self.batch_record.take_requests(),
             self.batch_record.first_block().unwrap_or_default(),
         )
     }
@@ -535,6 +541,7 @@ mod tests {
                             body: vec![tx, tx_deposit],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![addr, addr],
                     },
@@ -616,6 +623,7 @@ mod tests {
                             body: vec![tx, tx_deposit],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![addr, addr],
                     },

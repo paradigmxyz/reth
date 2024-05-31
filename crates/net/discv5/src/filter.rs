@@ -20,7 +20,7 @@ pub enum FilterOutcome {
 impl FilterOutcome {
     /// Returns `true` for [`FilterOutcome::Ok`].
     pub fn is_ok(&self) -> bool {
-        matches!(self, FilterOutcome::Ok)
+        matches!(self, Self::Ok)
     }
 }
 
@@ -58,7 +58,7 @@ impl MustNotIncludeKeys {
             _ = keys.insert(MustIncludeKey::new(key));
         }
 
-        MustNotIncludeKeys { keys }
+        Self { keys }
     }
 }
 

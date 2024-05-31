@@ -11,10 +11,9 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
-
 use async_trait::async_trait;
+use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
-use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -42,13 +41,17 @@ pub(crate) mod fee_history;
 
 mod fees;
 mod pending_block;
+pub mod receipt;
 mod server;
 mod sign;
 mod state;
+pub mod traits;
 pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
-pub use transactions::{EthTransactions, TransactionSource};
+pub use receipt::ReceiptBuilder;
+pub use traits::{BuildReceipt, EthBlocks, EthTransactions, StateCacheDB};
+pub use transactions::TransactionSource;
 
 /// `Eth` API trait.
 ///
@@ -74,22 +77,6 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
     fn sync_status(&self) -> RethResult<SyncStatus>;
 }
 
-// move to crates/optimism/rpc
-pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
-    /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-}
-
-pub struct EthereumApi<Provider, Pool, Network, EvmConfig> {
-    /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-}
-
-pub struct L2EthApi<Provider, Pool, Network, EvmConfig> {
-    /// reuse eth server
-    inner: Arc<EthereumApi<Provider, Pool, Network, EvmConfig>>,
-}
-
 /// `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -98,10 +85,9 @@ pub struct L2EthApi<Provider, Pool, Network, EvmConfig> {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-pub struct EthApi<Provider, Pool, Network, EvmConfig, N: NetworkEthApi> {
+pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-    network: N,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -281,9 +267,9 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
 where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Pool: TransactionPool + Clone + 'static,
-    Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + Clone + 'static,
+    Pool: TransactionPool + 'static,
+    Network: NetworkInfo + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
     ///
@@ -406,7 +392,7 @@ where
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
     async fn protocol_version(&self) -> RethResult<U64> {
-        let status = self.network().network_status().await?;
+        let status = self.network().network_status().await.map_err(RethError::other)?;
         Ok(U64::from(status.protocol_version))
     }
 
@@ -508,4 +494,18 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
     raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
+    /// Returns a handle to data on disk.
+    #[inline]
+    pub fn provider(&self) -> &Provider {
+        &self.provider
+    }
+
+    /// Returns a handle to data in memory.
+    #[inline]
+    pub fn cache(&self) -> &EthStateCache {
+        &self.eth_cache
+    }
 }

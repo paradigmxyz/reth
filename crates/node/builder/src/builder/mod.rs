@@ -164,7 +164,7 @@ impl<DB> NodeBuilder<DB> {
         self,
         task_executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> WithLaunchContext<NodeBuilder<DB>> {
+    ) -> WithLaunchContext<Self> {
         WithLaunchContext { builder: self, task_executor, data_dir }
     }
 
@@ -544,7 +544,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             "p2p network task",
             |shutdown| {
                 network.run_until_graceful_shutdown(shutdown, |network| {
-                    write_peers_to_file(network, known_peers_file)
+                    write_peers_to_file(&network, known_peers_file)
                 })
             },
         );

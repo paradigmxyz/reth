@@ -16,7 +16,7 @@ pub(crate) mod utils;
 
 pub use api::{
     fee_history::{fee_history_cache_new_blocks_task, FeeHistoryCache, FeeHistoryCacheConfig},
-    EthApi, EthApiSpec, EthTransactions, TransactionSource, RPC_DEFAULT_GAS_CAP,
+    EthApi, EthApiSpec, TransactionSource, RPC_DEFAULT_GAS_CAP,
 };
 
 pub use bundle::EthBundle;

@@ -157,7 +157,7 @@ impl FromIterator<Vec<Option<Receipt>>> for Receipts {
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
-        ReceiptWithBloom { receipt, bloom }
+        Self { receipt, bloom }
     }
 }
 
@@ -245,7 +245,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
         arbitrary_receipt().boxed()
     }
 
-    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]

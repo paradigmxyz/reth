@@ -22,7 +22,7 @@ Output from running the command to export state, can also be downloaded from <ht
 
 Imports a `.rlp` file of blocks.
 
-Note! Requires running in debug mode (TODO: <https://github.com/paradigmxyz/reth/issues/7650>).
+Import of >100 million OVM blocks, from genesis to Bedrock, completes in 6 hours.
 
 ```bash
 ./op-reth import-op <exported-blocks>
@@ -36,14 +36,18 @@ corresponding transactions must already be imported (see [step 1](#1-import-bloc
 Imports a `.rlp` file of receipts, that has been exported with command specified in
 <https://github.com/testinprod-io/op-geth/pull/1> (command for exporting receipts uses custom RLP-encoding). 
 
+Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 minutes.
+
 ```bash
-./op-reth import-receipts --chain optimism <exported-receipts>
+./op-reth import-receipts-op <exported-receipts>
 ```
 
 ### 3. Import State
 
 Imports a `.jsonl` state dump. The block at which the state dump is made, must be the latest block in
-reth's database.
+reth's database. This should be block 105 235 063, the first Bedrock block (see [step 1](#1-import-blocks)).
+
+Import of >4 million OP mainnet accounts at Bedrock, completes in 10 minutes.
 
 ```bash
 ./op-reth init-state --chain optimism <state-dump>

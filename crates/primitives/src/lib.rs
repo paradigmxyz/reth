@@ -35,16 +35,15 @@ mod header;
 mod integer_list;
 mod log;
 mod net;
-pub mod op_mainnet;
 pub mod proofs;
 mod prune;
 mod receipt;
+mod request;
 /// Helpers for working with revm
 pub mod revm;
 pub mod stage;
 pub use reth_static_file_types as static_file;
 mod storage;
-/// Helpers for working with transactions
 pub mod transaction;
 pub mod trie;
 mod withdrawal;
@@ -85,6 +84,7 @@ pub use prune::{
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
+pub use request::Requests;
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -109,6 +109,7 @@ pub use withdrawal::{Withdrawal, Withdrawals};
 
 // Re-exports
 pub use self::ruint::UintTryTo;
+pub use alloy_consensus::Request;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},

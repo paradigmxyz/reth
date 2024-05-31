@@ -216,7 +216,7 @@ impl InvalidPoolTransactionError {
     #[inline]
     fn is_bad_transaction(&self) -> bool {
         match self {
-            InvalidPoolTransactionError::Consensus(err) => {
+            Self::Consensus(err) => {
                 // transaction considered invalid by the consensus rules
                 // We do not consider the following errors to be erroneous transactions, since they
                 // depend on dynamic environmental conditions and should not be assumed to have been
@@ -250,17 +250,17 @@ impl InvalidPoolTransactionError {
                     InvalidTransactionError::SignerAccountHasBytecode => true,
                 }
             }
-            InvalidPoolTransactionError::ExceedsGasLimit(_, _) => true,
-            InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => true,
-            InvalidPoolTransactionError::OversizedData(_, _) => true,
-            InvalidPoolTransactionError::Underpriced => {
+            Self::ExceedsGasLimit(_, _) => true,
+            Self::ExceedsMaxInitCodeSize(_, _) => true,
+            Self::OversizedData(_, _) => true,
+            Self::Underpriced => {
                 // local setting
                 false
             }
-            InvalidPoolTransactionError::IntrinsicGasTooLow => true,
-            InvalidPoolTransactionError::Overdraft => false,
-            InvalidPoolTransactionError::Other(err) => err.is_bad_transaction(),
-            InvalidPoolTransactionError::Eip4844(eip4844_err) => {
+            Self::IntrinsicGasTooLow => true,
+            Self::Overdraft => false,
+            Self::Other(err) => err.is_bad_transaction(),
+            Self::Eip4844(eip4844_err) => {
                 match eip4844_err {
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar => {
                         // this is only reachable when blob transactions are reinjected and we're
@@ -291,12 +291,7 @@ impl InvalidPoolTransactionError {
 
     /// Returns `true` if an import failed due to nonce gap.
     pub const fn is_nonce_gap(&self) -> bool {
-        matches!(
-            self,
-            InvalidPoolTransactionError::Consensus(InvalidTransactionError::NonceNotConsistent)
-        ) || matches!(
-            self,
-            InvalidPoolTransactionError::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap)
-        )
+        matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent)) ||
+            matches!(self, Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap))
     }
 }
