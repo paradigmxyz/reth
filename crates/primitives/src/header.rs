@@ -305,6 +305,7 @@ impl Header {
         mem::size_of::<Option<u64>>() + // blob gas used
         mem::size_of::<Option<u64>>() + // excess blob gas
         mem::size_of::<Option<B256>>() + // parent beacon block root
+        mem::size_of::<Option<B256>>() + // requests root
         self.extra_data.len() // extra data
     }
 

@@ -270,6 +270,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
         }
     }
 }
+
 impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
     fn from(value: OptimismBuiltPayload) -> Self {
         let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;

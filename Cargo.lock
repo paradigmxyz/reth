@@ -6838,12 +6838,15 @@ name = "reth-evm-ethereum"
 version = "0.2.0-beta.7"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=7320d4c)",
+ "alloy-rlp",
  "alloy-sol-types",
  "reth-ethereum-consensus",
  "reth-evm",
  "reth-primitives",
  "reth-revm",
  "reth-testing-utils",
+ "revm-interpreter",
+ "revm-precompile",
  "revm-primitives",
  "secp256k1 0.28.2",
  "serde_json",

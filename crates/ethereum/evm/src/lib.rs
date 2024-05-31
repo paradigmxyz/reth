@@ -5,9 +5,11 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![allow(unused_crate_dependencies)]
+#![allow(unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use instructions::{context::InstructionsContext, eip3074, BoxedInstructionWithOpCode};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
@@ -15,6 +17,9 @@ use reth_primitives::{
     Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{Database, EvmBuilder};
+use revm_interpreter::{opcode::InstructionTables, Host};
+use revm_primitives::SpecId;
+use std::sync::Arc;
 
 pub mod execute;
 
@@ -23,6 +28,8 @@ pub mod dao_fork;
 
 /// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
 pub mod eip6110;
+
+mod instructions;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -58,6 +65,22 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
+/// Inserts the given boxed instructions with opcodes in the instructions table.
+fn insert_boxed_instructions<'a, I, H>(
+    table: &mut InstructionTables<'a, H>,
+    boxed_instructions_with_opcodes: I,
+) where
+    I: Iterator<Item = BoxedInstructionWithOpCode<'a, H>>,
+    H: Host + 'a,
+{
+    for boxed_instruction_with_opcode in boxed_instructions_with_opcodes {
+        table.insert_boxed(
+            boxed_instruction_with_opcode.opcode,
+            boxed_instruction_with_opcode.boxed_instruction,
+        );
+    }
+}
+
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();
 
@@ -65,7 +88,29 @@ impl ConfigureEvm for EthEvmConfig {
         &self,
         db: DB,
     ) -> reth_revm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
-        EvmBuilder::default().with_db(db).build()
+        let instructions_context = InstructionsContext::default();
+        EvmBuilder::default()
+            .with_db(db)
+            .append_handler_register_box(Box::new(move |h| {
+                if h.cfg.spec_id >= SpecId::PRAGUE {
+                    insert_boxed_instructions(
+                        &mut h.instruction_table,
+                        eip3074::boxed_instructions(instructions_context.clone()),
+                    );
+
+                    instructions_context.clear();
+
+                    let post_execution_context = instructions_context.clone();
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    {
+                        h.post_execution.end = Arc::new(move |_, outcome: _| {
+                            post_execution_context.clear();
+                            outcome
+                        });
+                    }
+                }
+            }))
+            .build()
     }
 }
 
