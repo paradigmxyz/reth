@@ -41,7 +41,7 @@ pub struct RetryStrategy {
 
 impl RetryStrategy {
     /// Create a new retry strategy.
-    pub fn new(interval: Duration, attempts: usize) -> Self {
+    pub const fn new(interval: Duration, attempts: usize) -> Self {
         Self { interval, attempts }
     }
 }
@@ -55,7 +55,7 @@ impl DNSNodeRecord {
     }
 
     /// Creates a new record from a socket addr and peer id.
-    pub fn new(host: Host, port: u16, id: PeerId) -> Self {
+    pub const fn new(host: Host, port: u16, id: PeerId) -> Self {
         Self { host, tcp_port: port, udp_port: port, id }
     }
 
