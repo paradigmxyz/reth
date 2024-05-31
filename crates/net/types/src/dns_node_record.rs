@@ -82,15 +82,18 @@ impl DNSNodeRecord {
             Host::Domain(domain) => domain,
         };
 
-        // Use provided retry strategy or use strategy which does not retry
-        let strategy = match retry_strategy {
-            Some(rs) => rs,
-            None => RetryStrategy::new(Duration::from_millis(0), 0),
-        };
         // Execute the lookup
         let lookup = || async { Self::lookup_host(&domain).await };
-        let retry = FixedInterval::new(strategy.interval).take(strategy.attempts);
-        let ip = Retry::spawn(retry, lookup).await?;
+
+        // Use provided retry strategy or use strategy which does not retry
+        let ip = match retry_strategy {
+            Some(strategy) => {
+                let retry = FixedInterval::new(strategy.interval).take(strategy.attempts);
+                Retry::spawn(retry, lookup).await?
+            }
+            None => lookup().await?,
+        };
+
         Ok(NodeRecord {
             address: ip,
             id: self.id,
