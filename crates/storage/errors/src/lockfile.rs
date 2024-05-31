@@ -11,6 +11,7 @@ pub enum StorageLockError {
     Other(String),
 }
 
+/// TODO: turn into variant once ProviderError
 impl From<std::io::Error> for StorageLockError {
     fn from(source: std::io::Error) -> Self {
         Self::Other(source.to_string())
