@@ -310,7 +310,7 @@ revm = { version = "9.0.0", features = [
 revm-primitives = { version = "4.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "dc2bdbc" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "0f43cf5" }
 
 # eth
 alloy-chains = "0.1.15"
