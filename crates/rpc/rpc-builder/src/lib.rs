@@ -577,7 +577,7 @@ impl RpcModuleConfig {
     }
 
     /// Get a reference to the eth namespace config
-    pub fn eth(&self) -> &EthConfig {
+    pub const fn eth(&self) -> &EthConfig {
         &self.eth
     }
 
@@ -609,7 +609,7 @@ impl RpcModuleConfigBuilder {
     }
 
     /// Get a reference to the eth namespace config, if any
-    pub fn get_eth(&self) -> &Option<EthConfig> {
+    pub const fn get_eth(&self) -> &Option<EthConfig> {
         &self.eth
     }
 
