@@ -4,12 +4,12 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db::database::Database;
-use reth_interfaces::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     ProviderFactory,
 };
+use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
     ops::{Deref, RangeInclusive},
@@ -19,7 +19,7 @@ use std::{
 use tracing::{debug, trace};
 
 /// Result of [StaticFileProducerInner::run] execution.
-pub type StaticFileProducerResult = RethResult<StaticFileTargets>;
+pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
 /// The [StaticFileProducer] instance itself with the result of [StaticFileProducerInner::run]
 pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
@@ -76,7 +76,7 @@ pub struct StaticFileTargets {
 
 impl StaticFileTargets {
     /// Returns `true` if any of the targets are [Some].
-    pub fn any(&self) -> bool {
+    pub const fn any(&self) -> bool {
         self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
     }
 
@@ -154,7 +154,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             segments.push((Box::new(segments::Receipts), block_range));
         }
 
-        segments.par_iter().try_for_each(|(segment, block_range)| -> RethResult<()> {
+        segments.par_iter().try_for_each(|(segment, block_range)| -> ProviderResult<()> {
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, "StaticFileProducer segment");
             let start = Instant::now();
 
@@ -189,7 +189,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     pub fn get_static_file_targets(
         &self,
         finalized_block_numbers: HighestStaticFiles,
-    ) -> RethResult<StaticFileTargets> {
+    ) -> ProviderResult<StaticFileTargets> {
         let highest_static_files = self.static_file_provider.get_highest_static_files();
 
         let targets = StaticFileTargets {
@@ -246,22 +246,18 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{database::Database, test_utils::TempDatabase, transaction::DbTx, DatabaseEnv};
-    use reth_interfaces::{
-        provider::ProviderError,
-        test_utils::{
-            generators,
-            generators::{random_block_range, random_receipt},
-        },
-        RethError,
-    };
     use reth_primitives::{
         static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
     };
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
-        ProviderFactory, StaticFileProviderFactory,
+        ProviderError, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block_range, random_receipt},
+    };
     use std::{
         sync::{mpsc::channel, Arc},
         time::Duration,
@@ -373,7 +369,7 @@ mod tests {
         );
         assert_matches!(
             static_file_producer.run(targets),
-            Err(RethError::Provider(ProviderError::BlockBodyIndicesNotFound(4)))
+            Err(ProviderError::BlockBodyIndicesNotFound(4))
         );
         assert_eq!(
             static_file_provider.get_highest_static_files(),

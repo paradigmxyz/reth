@@ -144,16 +144,16 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
 impl NippyJar<()> {
     /// Creates a new [`NippyJar`] without an user-defined header data.
     pub fn new_without_header(columns: usize, path: &Path) -> Self {
-        NippyJar::<()>::new(columns, path, ())
+        Self::new(columns, path, ())
     }
 
     /// Loads the file configuration and returns [`Self`] on a jar without user-defined header data.
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
-        NippyJar::<()>::load(path)
+        Self::load(path)
     }
 
     /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
-    pub fn uses_filters(&self) -> bool {
+    pub const fn uses_filters(&self) -> bool {
         self.filter.is_some() && self.phf.is_some()
     }
 }
@@ -161,7 +161,7 @@ impl NippyJar<()> {
 impl<H: NippyJarHeader> NippyJar<H> {
     /// Creates a new [`NippyJar`] with a user-defined header data.
     pub fn new(columns: usize, path: &Path, user_header: H) -> Self {
-        NippyJar {
+        Self {
             version: NIPPY_JAR_VERSION,
             user_header,
             columns,
@@ -207,17 +207,17 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the user header.
-    pub fn user_header(&self) -> &H {
+    pub const fn user_header(&self) -> &H {
         &self.user_header
     }
 
     /// Gets total columns in jar.
-    pub fn columns(&self) -> usize {
+    pub const fn columns(&self) -> usize {
         self.columns
     }
 
     /// Gets total rows in jar.
-    pub fn rows(&self) -> usize {
+    pub const fn rows(&self) -> usize {
         self.rows
     }
 
@@ -232,7 +232,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the compressor.
-    pub fn compressor(&self) -> Option<&Compressors> {
+    pub const fn compressor(&self) -> Option<&Compressors> {
         self.compressor.as_ref()
     }
 
@@ -476,7 +476,7 @@ pub struct DataReader {
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
     /// Number of bytes that represent one offset.
-    offset_size: u64,
+    offset_size: u8,
 }
 
 impl DataReader {
@@ -491,7 +491,7 @@ impl DataReader {
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
         // First byte is the size of one offset in bytes
-        let offset_size = offset_mmap[0] as u64;
+        let offset_size = offset_mmap[0];
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
@@ -525,7 +525,8 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size) as usize)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+            as usize)
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
@@ -542,7 +543,7 @@ impl DataReader {
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u64 {
+    pub const fn offset_size(&self) -> u8 {
         self.offset_size
     }
 

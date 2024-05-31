@@ -8,7 +8,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
@@ -105,13 +105,13 @@ impl<C> NetworkConfig<C> {
     }
 
     /// Sets the address for the incoming RLPx connection listener.
-    pub fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
+    pub const fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
         self
     }
 
     /// Returns the address for the incoming RLPx connection listener.
-    pub fn listener_addr(&self) -> &SocketAddr {
+    pub const fn listener_addr(&self) -> &SocketAddr {
         &self.listener_addr
     }
 }
@@ -206,6 +206,14 @@ impl NetworkConfigBuilder {
         }
     }
 
+    /// Apply a function to the builder.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
+    }
+
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
         pk2id(&self.secret_key.public_key(SECP256K1))
@@ -218,7 +226,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the [`NetworkMode`].
-    pub fn network_mode(mut self, network_mode: NetworkMode) -> Self {
+    pub const fn network_mode(mut self, network_mode: NetworkMode) -> Self {
         self.network_mode = network_mode;
         self
     }
@@ -228,7 +236,7 @@ impl NetworkConfigBuilder {
     /// This is used to construct the appropriate [`ForkFilter`] and [`Status`] message.
     ///
     /// If not set, this defaults to the genesis specified by the current chain specification.
-    pub fn set_head(mut self, head: Head) -> Self {
+    pub const fn set_head(mut self, head: Head) -> Self {
         self.head = Some(head);
         self
     }
@@ -263,12 +271,13 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets a custom config for how sessions are handled.
-    pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
+    pub const fn sessions_config(mut self, config: SessionsConfig) -> Self {
         self.sessions_config = Some(config);
         self
     }
 
-    pub fn transactions_manager_config(mut self, config: TransactionsManagerConfig) -> Self {
+    /// Configures the transactions manager with the given config.
+    pub const fn transactions_manager_config(mut self, config: TransactionsManagerConfig) -> Self {
         self.transactions_manager_config = config;
         self
     }
@@ -280,14 +289,14 @@ impl NetworkConfigBuilder {
     ///
     /// By default, both are on the same port:
     /// [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
-    pub fn set_addrs(self, addr: SocketAddr) -> Self {
+    pub const fn set_addrs(self, addr: SocketAddr) -> Self {
         self.listener_addr(addr).discovery_addr(addr)
     }
 
     /// Sets the socket address the network will listen on.
     ///
     /// By default, this is [DEFAULT_DISCOVERY_ADDRESS]
-    pub fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
+    pub const fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = Some(listener_addr);
         self
     }
@@ -301,7 +310,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the socket address the discovery network will listen on
-    pub fn discovery_addr(mut self, discovery_addr: SocketAddr) -> Self {
+    pub const fn discovery_addr(mut self, discovery_addr: SocketAddr) -> Self {
         self.discovery_addr = Some(discovery_addr);
         self
     }
@@ -311,6 +320,19 @@ impl NetworkConfigBuilder {
     /// By default, this is [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn discovery_port(mut self, port: u16) -> Self {
         self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
+        self
+    }
+
+    /// Sets the external ip resolver to use for discovery v4.
+    ///
+    /// If no [Discv4ConfigBuilder] is set via [Self::discovery], this will create a new one.
+    ///
+    /// This is a convenience function for setting the external ip resolver on the default
+    /// [Discv4Config] config.
+    pub fn external_ip_resolver(mut self, resolver: NatResolver) -> Self {
+        self.discovery_v4_builder
+            .get_or_insert_with(Discv4Config::builder)
+            .external_ip_resolver(Some(resolver));
         self
     }
 
@@ -429,7 +451,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets whether tx gossip is disabled.
-    pub fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
+    pub const fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
         self.tx_gossip_disabled = disable_tx_gossip;
         self
     }
@@ -552,8 +574,8 @@ pub enum NetworkMode {
 
 impl NetworkMode {
     /// Returns true if network has entered proof-of-stake
-    pub fn is_stake(&self) -> bool {
-        matches!(self, NetworkMode::Stake)
+    pub const fn is_stake(&self) -> bool {
+        matches!(self, Self::Stake)
     }
 }
 

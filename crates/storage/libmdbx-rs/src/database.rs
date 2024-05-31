@@ -36,20 +36,20 @@ impl Database {
         Ok(Self::new_from_ptr(dbi, txn.env().clone()))
     }
 
-    pub(crate) fn new_from_ptr(dbi: ffi::MDBX_dbi, env: Environment) -> Self {
+    pub(crate) const fn new_from_ptr(dbi: ffi::MDBX_dbi, env: Environment) -> Self {
         Self { dbi, _env: Some(env) }
     }
 
     /// Opens the freelist database with DBI `0`.
-    pub fn freelist_db() -> Self {
-        Database { dbi: 0, _env: None }
+    pub const fn freelist_db() -> Self {
+        Self { dbi: 0, _env: None }
     }
 
     /// Returns the underlying MDBX database handle.
     ///
     /// The caller **must** ensure that the handle is not used after the lifetime of the
     /// environment, or after the database has been closed.
-    pub fn dbi(&self) -> ffi::MDBX_dbi {
+    pub const fn dbi(&self) -> ffi::MDBX_dbi {
         self.dbi
     }
 }

@@ -237,7 +237,7 @@ impl Discv5 {
                 None
             }
             discv5::Event::SessionEstablished(enr, remote_socket) => {
-                // this branch is semantically similar to branches of 
+                // this branch is semantically similar to branches of
                 // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
                 // `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
@@ -253,11 +253,11 @@ impl Discv5 {
                 socket,
                 node_id: _,
             } => {
-                // this branch is semantically similar to branches of 
+                // this branch is semantically similar to branches of
                 // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
                 // `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
-                // peer has been discovered as part of query, or, by an outgoing session (but peer 
+                // peer has been discovered as part of query, or, by an outgoing session (but peer
                 // is behind NAT and responds from a different socket)
 
                 // NOTE: `discv5::Discv5` won't initiate a session with any peer with an
@@ -390,12 +390,12 @@ impl Discv5 {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /// Returns the RLPx [`IpMode`] of the local node.
-    pub fn ip_mode(&self) -> IpMode {
+    pub const fn ip_mode(&self) -> IpMode {
         self.rlpx_ip_mode
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
-    pub fn fork_key(&self) -> Option<&[u8]> {
+    pub const fn fork_key(&self) -> Option<&[u8]> {
         self.fork_key
     }
 }
@@ -798,27 +798,27 @@ mod test {
         }
 
         impl<T> PartialEq for Key<T> {
-            fn eq(&self, other: &Key<T>) -> bool {
+            fn eq(&self, other: &Self) -> bool {
                 self.hash == other.hash
             }
         }
 
         impl<T> Eq for Key<T> {}
 
-        impl<TPeerId> AsRef<Key<TPeerId>> for Key<TPeerId> {
-            fn as_ref(&self) -> &Key<TPeerId> {
+        impl<TPeerId> AsRef<Self> for Key<TPeerId> {
+            fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl<T> Key<T> {
             /// Construct a new `Key` by providing the raw 32 byte hash.
-            pub fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Key<T> {
-                Key { preimage, hash }
+            pub const fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Self {
+                Self { preimage, hash }
             }
 
             /// Borrows the preimage of the key.
-            pub fn preimage(&self) -> &T {
+            pub const fn preimage(&self) -> &T {
                 &self.preimage
             }
 
@@ -846,7 +846,7 @@ mod test {
 
         impl From<NodeId> for Key<NodeId> {
             fn from(node_id: NodeId) -> Self {
-                Key { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
+                Self { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
             }
         }
 

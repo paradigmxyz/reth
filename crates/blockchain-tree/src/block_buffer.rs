@@ -47,7 +47,7 @@ impl BlockBuffer {
     }
 
     /// Return reference to buffered blocks
-    pub fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders> {
+    pub const fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders> {
         &self.blocks
     }
 
@@ -182,11 +182,11 @@ impl BlockBuffer {
 #[cfg(test)]
 mod tests {
     use crate::BlockBuffer;
-    use reth_interfaces::test_utils::{
+    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
+    use reth_testing_utils::{
         generators,
         generators::{random_block, Rng},
     };
-    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
     use std::collections::HashMap;
 
     /// Create random block with specified number and parent hash.

@@ -24,20 +24,20 @@ pub enum TransactionSignedVariant {
 
 impl TransactionSignedVariant {
     /// Returns the raw transaction object
-    pub fn as_raw(&self) -> &Transaction {
+    pub const fn as_raw(&self) -> &Transaction {
         match self {
-            TransactionSignedVariant::SignedNoHash(tx) => &tx.transaction,
-            TransactionSignedVariant::Signed(tx) => &tx.transaction,
-            TransactionSignedVariant::SignedEcRecovered(tx) => &tx.signed_transaction.transaction,
+            Self::SignedNoHash(tx) => &tx.transaction,
+            Self::Signed(tx) => &tx.transaction,
+            Self::SignedEcRecovered(tx) => &tx.signed_transaction.transaction,
         }
     }
 
     /// Returns the hash of the transaction
     pub fn hash(&self) -> B256 {
         match self {
-            TransactionSignedVariant::SignedNoHash(tx) => tx.hash(),
-            TransactionSignedVariant::Signed(tx) => tx.hash,
-            TransactionSignedVariant::SignedEcRecovered(tx) => tx.hash,
+            Self::SignedNoHash(tx) => tx.hash(),
+            Self::Signed(tx) => tx.hash,
+            Self::SignedEcRecovered(tx) => tx.hash,
         }
     }
 
@@ -46,60 +46,60 @@ impl TransactionSignedVariant {
     /// If the transaction is of not of [TransactionSignedEcRecovered] it will be recovered.
     pub fn signer(&self) -> Option<Address> {
         match self {
-            TransactionSignedVariant::SignedNoHash(tx) => tx.recover_signer(),
-            TransactionSignedVariant::Signed(tx) => tx.recover_signer(),
-            TransactionSignedVariant::SignedEcRecovered(tx) => Some(tx.signer),
+            Self::SignedNoHash(tx) => tx.recover_signer(),
+            Self::Signed(tx) => tx.recover_signer(),
+            Self::SignedEcRecovered(tx) => Some(tx.signer),
         }
     }
 
     /// Returns [TransactionSigned] type
     /// else None
-    pub fn as_signed(&self) -> Option<&TransactionSigned> {
+    pub const fn as_signed(&self) -> Option<&TransactionSigned> {
         match self {
-            TransactionSignedVariant::Signed(tx) => Some(tx),
+            Self::Signed(tx) => Some(tx),
             _ => None,
         }
     }
 
     /// Returns `TransactionSignedEcRecovered` type
     /// else None
-    pub fn as_signed_ec_recovered(&self) -> Option<&TransactionSignedEcRecovered> {
+    pub const fn as_signed_ec_recovered(&self) -> Option<&TransactionSignedEcRecovered> {
         match self {
-            TransactionSignedVariant::SignedEcRecovered(tx) => Some(tx),
+            Self::SignedEcRecovered(tx) => Some(tx),
             _ => None,
         }
     }
 
     /// Returns true if the transaction is of [TransactionSigned] variant
-    pub fn is_signed(&self) -> bool {
-        matches!(self, TransactionSignedVariant::Signed(_))
+    pub const fn is_signed(&self) -> bool {
+        matches!(self, Self::Signed(_))
     }
 
     /// Returns true if the transaction is of [TransactionSignedNoHash] variant
-    pub fn is_signed_no_hash(&self) -> bool {
-        matches!(self, TransactionSignedVariant::SignedNoHash(_))
+    pub const fn is_signed_no_hash(&self) -> bool {
+        matches!(self, Self::SignedNoHash(_))
     }
 
     /// Returns true if the transaction is of [TransactionSignedEcRecovered] variant
-    pub fn is_signed_ec_recovered(&self) -> bool {
-        matches!(self, TransactionSignedVariant::SignedEcRecovered(_))
+    pub const fn is_signed_ec_recovered(&self) -> bool {
+        matches!(self, Self::SignedEcRecovered(_))
     }
 
     /// Consumes the [TransactionSignedVariant] and returns the consumed [Transaction]
     pub fn into_raw(self) -> Transaction {
         match self {
-            TransactionSignedVariant::SignedNoHash(tx) => tx.transaction,
-            TransactionSignedVariant::Signed(tx) => tx.transaction,
-            TransactionSignedVariant::SignedEcRecovered(tx) => tx.signed_transaction.transaction,
+            Self::SignedNoHash(tx) => tx.transaction,
+            Self::Signed(tx) => tx.transaction,
+            Self::SignedEcRecovered(tx) => tx.signed_transaction.transaction,
         }
     }
 
     /// Consumes the [TransactionSignedVariant] and returns the consumed [TransactionSigned]
     pub fn into_signed(self) -> TransactionSigned {
         match self {
-            TransactionSignedVariant::SignedNoHash(tx) => tx.with_hash(),
-            TransactionSignedVariant::Signed(tx) => tx,
-            TransactionSignedVariant::SignedEcRecovered(tx) => tx.signed_transaction,
+            Self::SignedNoHash(tx) => tx.with_hash(),
+            Self::Signed(tx) => tx,
+            Self::SignedEcRecovered(tx) => tx.signed_transaction,
         }
     }
 
@@ -123,28 +123,28 @@ impl TransactionSignedVariant {
         self,
     ) -> Result<TransactionSignedEcRecovered, TransactionSigned> {
         match self {
-            TransactionSignedVariant::SignedEcRecovered(tx) => Ok(tx),
-            TransactionSignedVariant::Signed(tx) => tx.try_into_ecrecovered(),
-            TransactionSignedVariant::SignedNoHash(tx) => tx.with_hash().try_into_ecrecovered(),
+            Self::SignedEcRecovered(tx) => Ok(tx),
+            Self::Signed(tx) => tx.try_into_ecrecovered(),
+            Self::SignedNoHash(tx) => tx.with_hash().try_into_ecrecovered(),
         }
     }
 }
 
 impl From<TransactionSignedNoHash> for TransactionSignedVariant {
     fn from(tx: TransactionSignedNoHash) -> Self {
-        TransactionSignedVariant::SignedNoHash(tx)
+        Self::SignedNoHash(tx)
     }
 }
 
 impl From<TransactionSigned> for TransactionSignedVariant {
     fn from(tx: TransactionSigned) -> Self {
-        TransactionSignedVariant::Signed(tx)
+        Self::Signed(tx)
     }
 }
 
 impl From<TransactionSignedEcRecovered> for TransactionSignedVariant {
     fn from(tx: TransactionSignedEcRecovered) -> Self {
-        TransactionSignedVariant::SignedEcRecovered(tx)
+        Self::SignedEcRecovered(tx)
     }
 }
 

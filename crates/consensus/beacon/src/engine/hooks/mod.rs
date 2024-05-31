@@ -1,4 +1,4 @@
-use reth_interfaces::{RethError, RethResult};
+use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use std::{
     fmt,
@@ -83,12 +83,12 @@ pub enum EngineHookEvent {
 
 impl EngineHookEvent {
     /// Returns `true` if the event is [`EngineHookEvent::Started`].
-    pub fn is_started(&self) -> bool {
+    pub const fn is_started(&self) -> bool {
         matches!(self, Self::Started)
     }
 
     /// Returns `true` if the event is [`EngineHookEvent::Finished`].
-    pub fn is_finished(&self) -> bool {
+    pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished(_))
     }
 }
@@ -118,12 +118,12 @@ pub enum EngineHookDBAccessLevel {
 
 impl EngineHookDBAccessLevel {
     /// Returns `true` if the hook needs read-only access to the database.
-    pub fn is_read_only(&self) -> bool {
+    pub const fn is_read_only(&self) -> bool {
         matches!(self, Self::ReadOnly)
     }
 
     /// Returns `true` if the hook needs read-write access to the database.
-    pub fn is_read_write(&self) -> bool {
+    pub const fn is_read_write(&self) -> bool {
         matches!(self, Self::ReadWrite)
     }
 }

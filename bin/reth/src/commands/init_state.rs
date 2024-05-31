@@ -10,7 +10,7 @@ use crate::{
 use clap::Parser;
 use reth_config::config::EtlConfig;
 use reth_db::{database::Database, init_db};
-use reth_node_core::init::init_from_state_dump;
+use reth_db_common::init::init_from_state_dump;
 use reth_primitives::{ChainSpec, B256};
 use reth_provider::ProviderFactory;
 

@@ -16,7 +16,7 @@ pub struct ReceiptsByLogs {
 }
 
 impl ReceiptsByLogs {
-    pub fn new(config: ReceiptsLogPruneConfig) -> Self {
+    pub const fn new(config: ReceiptsLogPruneConfig) -> Self {
         Self { config }
     }
 }
@@ -217,13 +217,13 @@ mod tests {
     use crate::segments::{receipts_by_logs::ReceiptsByLogs, PruneInput, Segment};
     use assert_matches::assert_matches;
     use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block_range, random_eoa_account, random_log, random_receipt},
-    };
     use reth_primitives::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block_range, random_eoa_account, random_log, random_receipt},
+    };
     use std::collections::BTreeMap;
 
     #[test]

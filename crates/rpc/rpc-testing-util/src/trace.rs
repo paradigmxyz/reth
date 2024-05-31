@@ -438,8 +438,8 @@ where
     ///
     /// * `client1` - The first RPC client.
     /// * `client2` - The second RPC client.
-    pub fn new(client1: C1, client2: C2) -> Self {
-        RpcComparer { client1, client2 }
+    pub const fn new(client1: C1, client2: C2) -> Self {
+        Self { client1, client2 }
     }
 
     /// Compares the `trace_block` responses from the two RPC clients.
@@ -519,7 +519,7 @@ mod tests {
     use reth_primitives::BlockNumberOrTag;
     use reth_rpc_types::trace::filter::TraceFilterMode;
 
-    fn assert_is_stream<St: Stream>(_: &St) {}
+    const fn assert_is_stream<St: Stream>(_: &St) {}
 
     #[tokio::test]
     async fn can_create_block_stream() {

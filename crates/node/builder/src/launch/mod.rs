@@ -25,11 +25,13 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     engine::EngineMessageStreamExt,
     exit::NodeExitFuture,
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
 use reth_rpc_engine_api::EngineApi;
+use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -64,7 +66,7 @@ pub struct DefaultNodeLauncher {
 
 impl DefaultNodeLauncher {
     /// Create a new instance of the default node launcher.
-    pub fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }
@@ -407,12 +409,19 @@ where
             ),
         );
 
+        let client = ClientVersionV1 {
+            code: CLIENT_CODE,
+            name: NAME_CLIENT.to_string(),
+            version: CARGO_PKG_VERSION.to_string(),
+            commit: VERGEN_GIT_SHA.to_string(),
+        };
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
             ctx.chain_spec(),
             beacon_engine_handle,
             node_adapter.components.payload_builder().clone().into(),
             Box::new(ctx.task_executor().clone()),
+            client,
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 

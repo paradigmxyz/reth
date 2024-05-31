@@ -1,7 +1,7 @@
 use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
 use futures::{future::Either, FutureExt};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
@@ -33,7 +33,7 @@ pub struct OnForkChoiceUpdated {
 
 impl OnForkChoiceUpdated {
     /// Returns the determined status of the received ForkchoiceState.
-    pub fn forkchoice_status(&self) -> ForkchoiceStatus {
+    pub const fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status
     }
 

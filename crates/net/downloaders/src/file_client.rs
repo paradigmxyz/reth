@@ -1,7 +1,7 @@
 use super::file_codec::BlockFileCodec;
 use futures::Future;
 use itertools::Either;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
@@ -74,7 +74,7 @@ impl FileClient {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
-        FileClient::from_file(file).await
+        Self::from_file(file).await
     }
 
     /// Initialize the [`FileClient`] with a file directly.
@@ -234,6 +234,7 @@ impl FromReader for FileClient {
                         transactions: block.body,
                         ommers: block.ommers,
                         withdrawals: block.withdrawals,
+                        requests: block.requests,
                     },
                 );
 
@@ -361,7 +362,7 @@ pub struct ChunkedFileReader {
 
 impl ChunkedFileReader {
     /// Returns the remaining file length.
-    pub fn file_len(&self) -> u64 {
+    pub const fn file_len(&self) -> u64 {
         self.file_byte_len
     }
 
@@ -482,12 +483,12 @@ mod tests {
     use futures_util::stream::StreamExt;
     use rand::Rng;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::p2p::{
+    use reth_network_p2p::{
         bodies::downloader::BodyDownloader,
         headers::downloader::{HeaderDownloader, SyncTarget},
     };
     use reth_provider::test_utils::create_test_provider_factory;
-    use std::{mem, sync::Arc};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
@@ -601,23 +602,11 @@ mod tests {
     async fn test_chunk_download_headers_from_file() {
         reth_tracing::init_test_tracing();
 
-        // rig
-
-        const MAX_BYTE_SIZE_HEADER: usize = 720;
-
         // Generate some random blocks
-        let (file, headers, bodies) = generate_bodies_file(0..=14).await;
-        // now try to read them back in chunks.
-        for header in &headers {
-            assert_eq!(720, mem::size_of_val(header))
-        }
+        let (file, headers, _) = generate_bodies_file(0..=14).await;
 
         // calculate min for chunk byte length range
-        let mut bodies_sizes = bodies.values().map(|body| body.size()).collect::<Vec<_>>();
-        bodies_sizes.sort();
-        let max_block_size = MAX_BYTE_SIZE_HEADER + bodies_sizes.last().unwrap();
-        let chunk_byte_len = rand::thread_rng().gen_range(max_block_size..=max_block_size + 10_000);
-
+        let chunk_byte_len = rand::thread_rng().gen_range(1..=10_000);
         trace!(target: "downloaders::file::test", chunk_byte_len);
 
         // init reader
@@ -628,7 +617,6 @@ mod tests {
         let mut local_header = headers.first().unwrap().clone();
 
         // test
-
         while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
             let sync_target = client.tip_header().unwrap();
             let sync_target_hash = sync_target.hash();

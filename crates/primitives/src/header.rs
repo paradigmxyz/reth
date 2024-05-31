@@ -50,7 +50,8 @@ pub struct Header {
     /// of each transaction in the transactions list portion of the block; formally He.
     pub receipts_root: B256,
     /// The Keccak 256-bit hash of the withdrawals list portion of this block.
-    /// <https://eips.ethereum.org/EIPS/eip-4895>
+    ///
+    /// See [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895).
     pub withdrawals_root: Option<B256>,
     /// The Bloom filter composed from indexable information (logger address and log topics)
     /// contained in each log entry from the receipt of each transaction in the transactions list;
@@ -98,6 +99,11 @@ pub struct Header {
     ///
     /// The beacon roots contract handles root storage, enhancing Ethereum's functionalities.
     pub parent_beacon_block_root: Option<B256>,
+    /// The Keccak 256-bit hash of the root node of the trie structure populated with each
+    /// [EIP-7685] request in the block body.
+    ///
+    /// [EIP-7685]: https://eips.ethereum.org/EIPS/eip-7685
+    pub requests_root: Option<B256>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
     pub extra_data: Bytes,
@@ -105,7 +111,7 @@ pub struct Header {
 
 impl Default for Header {
     fn default() -> Self {
-        Header {
+        Self {
             parent_hash: Default::default(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Default::default(),
@@ -126,6 +132,7 @@ impl Default for Header {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None,
         }
     }
 }
@@ -185,7 +192,7 @@ impl Header {
     /// Checks if the block's timestamp is in the past compared to the parent block's timestamp.
     ///
     /// Note: This check is relevant only pre-merge.
-    pub fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
+    pub const fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
         self.timestamp <= parent_timestamp
     }
 
@@ -194,12 +201,12 @@ impl Header {
     /// Clock can drift but this can be consensus issue.
     ///
     /// Note: This check is relevant only pre-merge.
-    pub fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
+    pub const fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
         self.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS
     }
 
     /// Returns the parent block's number and hash
-    pub fn parent_num_hash(&self) -> BlockNumHash {
+    pub const fn parent_num_hash(&self) -> BlockNumHash {
         BlockNumHash { number: self.number.saturating_sub(1), hash: self.parent_hash }
     }
 
@@ -265,7 +272,7 @@ impl Header {
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
     #[inline]
-    pub fn seal(self, hash: B256) -> SealedHeader {
+    pub const fn seal(self, hash: B256) -> SealedHeader {
         SealedHeader { header: self, hash }
     }
 
@@ -343,6 +350,10 @@ impl Header {
             length += parent_beacon_block_root.length();
         }
 
+        if let Some(requests_root) = self.requests_root {
+            length += requests_root.length();
+        }
+
         length
     }
 }
@@ -396,15 +407,22 @@ impl Encodable for Header {
             U256::from(*excess_blob_gas).encode(out);
         }
 
-        // Encode parent beacon block root. If new fields are added, the above pattern will need to
+        // Encode parent beacon block root.
+        if let Some(ref parent_beacon_block_root) = self.parent_beacon_block_root {
+            parent_beacon_block_root.encode(out);
+        }
+
+        // Encode EIP-7685 requests root
+        //
+        // If new fields are added, the above pattern will need to
         // be repeated and placeholders added. Otherwise, it's impossible to tell _which_
         // fields are missing. This is mainly relevant for contrived cases where a header is
         // created at random, for example:
         //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
         //    post-London, so this is technically not valid. However, a tool like proptest would
         //    generate a block like this.
-        if let Some(ref parent_beacon_block_root) = self.parent_beacon_block_root {
-            parent_beacon_block_root.encode(out);
+        if let Some(ref requests_root) = self.requests_root {
+            requests_root.encode(out);
         }
     }
 
@@ -444,6 +462,7 @@ impl Decodable for Header {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None,
         };
         if started_len - buf.len() < rlp_head.payload_length {
             this.base_fee_per_gas = Some(u64::decode(buf)?);
@@ -463,7 +482,14 @@ impl Decodable for Header {
             this.excess_blob_gas = Some(u64::decode(buf)?);
         }
 
-        // Decode parent beacon block root. If new fields are added, the above pattern will need to
+        // Decode parent beacon block root.
+        if started_len - buf.len() < rlp_head.payload_length {
+            this.parent_beacon_block_root = Some(B256::decode(buf)?);
+        }
+
+        // Decode requests root.
+        //
+        // If new fields are added, the above pattern will need to
         // be repeated and placeholders decoded. Otherwise, it's impossible to tell _which_
         // fields are missing. This is mainly relevant for contrived cases where a header is
         // created at random, for example:
@@ -471,7 +497,7 @@ impl Decodable for Header {
         //    post-London, so this is technically not valid. However, a tool like proptest would
         //    generate a block like this.
         if started_len - buf.len() < rlp_head.payload_length {
-            this.parent_beacon_block_root = Some(B256::decode(buf)?);
+            this.requests_root = Some(B256::decode(buf)?);
         }
 
         let consumed = started_len - buf.len();
@@ -592,7 +618,7 @@ impl SealedHeader {
 
     /// Returns the sealed Header fields.
     #[inline]
-    pub fn header(&self) -> &Header {
+    pub const fn header(&self) -> &Header {
         &self.header
     }
 
@@ -648,7 +674,7 @@ impl SealedHeader {
     #[inline(always)]
     fn validate_gas_limit(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
@@ -713,7 +739,7 @@ impl SealedHeader {
     /// of certain features (e.g., Optimism feature) or the activation of specific hardforks.
     pub fn validate_against_parent(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Parent number is consistent.
@@ -800,7 +826,7 @@ impl SealedHeader {
     /// parent header fields.
     pub fn validate_4844_header_against_parent(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
     ) -> Result<(), HeaderValidationError> {
         // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
         //
@@ -859,7 +885,7 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
         // map valid header strategy by sealing
         valid_header_strategy().prop_map(|header| header.seal_slow()).boxed()
     }
-    type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -944,13 +970,13 @@ pub enum HeadersDirection {
 
 impl HeadersDirection {
     /// Returns true for rising block numbers
-    pub fn is_rising(&self) -> bool {
-        matches!(self, HeadersDirection::Rising)
+    pub const fn is_rising(&self) -> bool {
+        matches!(self, Self::Rising)
     }
 
     /// Returns true for falling block numbers
-    pub fn is_falling(&self) -> bool {
-        matches!(self, HeadersDirection::Falling)
+    pub const fn is_falling(&self) -> bool {
+        matches!(self, Self::Falling)
     }
 
     /// Converts the bool into a direction.
@@ -959,11 +985,11 @@ impl HeadersDirection {
     ///
     /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
     /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
-    pub fn new(reverse: bool) -> Self {
+    pub const fn new(reverse: bool) -> Self {
         if reverse {
-            HeadersDirection::Falling
+            Self::Falling
         } else {
-            HeadersDirection::Rising
+            Self::Rising
         }
     }
 }
@@ -1059,6 +1085,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }
@@ -1183,6 +1210,7 @@ mod tests {
             blob_gas_used: Some(0x020000),
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
+            requests_root: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();
@@ -1228,6 +1256,7 @@ mod tests {
             parent_beacon_block_root: None,
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0x1600000),
+            requests_root: None,
         };
 
         let header = Header::decode(&mut data.as_slice()).unwrap();

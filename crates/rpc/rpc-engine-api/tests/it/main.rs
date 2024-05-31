@@ -1,3 +1,3 @@
 mod payload;
 
-fn main() {}
+const fn main() {}

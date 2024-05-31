@@ -12,20 +12,20 @@ use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_interfaces::RethResult;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
 };
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, Bytes, ChainSpec, Request, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
 use reth_revm::state_change::{
-    apply_beacon_root_contract_call, post_block_withdrawals_balance_increments,
+    apply_beacon_root_contract_call, apply_withdrawal_requests_contract_call,
+    post_block_withdrawals_balance_increments,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -121,7 +121,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     }
 
     /// Returns a reference to the tasks type
-    pub fn tasks(&self) -> &Tasks {
+    pub const fn tasks(&self) -> &Tasks {
         &self.executor
     }
 
@@ -265,13 +265,13 @@ pub struct BasicPayloadJobGeneratorConfig {
 
 impl BasicPayloadJobGeneratorConfig {
     /// Sets the interval at which the job should build a new payload after the last.
-    pub fn interval(mut self, interval: Duration) -> Self {
+    pub const fn interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
     }
 
     /// Sets the deadline when this job should resolve.
-    pub fn deadline(mut self, deadline: Duration) -> Self {
+    pub const fn deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
         self
     }
@@ -800,7 +800,7 @@ pub struct WithdrawalsOutcome {
 
 impl WithdrawalsOutcome {
     /// No withdrawals pre shanghai
-    pub fn pre_shanghai() -> Self {
+    pub const fn pre_shanghai() -> Self {
         Self { withdrawals: None, withdrawals_root: None }
     }
 
@@ -823,7 +823,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Withdrawals,
-) -> RethResult<WithdrawalsOutcome> {
+) -> Result<WithdrawalsOutcome, DB::Error> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }
@@ -887,6 +887,36 @@ where
         &mut evm_pre_block,
     )
     .map_err(|err| PayloadBuilderError::Internal(err.into()))
+}
+
+/// Apply the [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) post block contract call.
+///
+/// This constructs a new [Evm] with the given DB, and environment
+/// ([CfgEnvWithHandlerCfg] and [BlockEnv]) to execute the post block contract call.
+///
+/// This uses [apply_withdrawal_requests_contract_call] to ultimately calculate the
+/// [requests](Request).
+pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit>(
+    db: &mut DB,
+    initialized_cfg: &CfgEnvWithHandlerCfg,
+    initialized_block_env: &BlockEnv,
+) -> Result<Vec<Request>, PayloadBuilderError>
+where
+    DB::Error: std::fmt::Display,
+{
+    // apply post-block EIP-7002 contract call
+    let mut evm_post_block = Evm::builder()
+        .with_db(db)
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            Default::default(),
+        ))
+        .build();
+
+    // initialize a block from the env, because the post block call needs the block itself
+    apply_withdrawal_requests_contract_call(&mut evm_post_block)
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
 /// Checks if the new payload is better than the current best.

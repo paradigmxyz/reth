@@ -55,11 +55,11 @@ impl<T> UnboundedMeteredSender<T> {
     pub fn send(&self, message: T) -> Result<(), SendError<T>> {
         match self.sender.send(message) {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => {
-                self.metrics.send_errors.increment(1);
+                self.metrics.send_errors_total.increment(1);
                 Err(error)
             }
         }
@@ -94,7 +94,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     pub async fn recv(&mut self) -> Option<T> {
         let msg = self.receiver.recv().await;
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         msg
     }
@@ -102,7 +102,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     /// Tries to receive the next value for this receiver.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         let msg = self.receiver.try_recv()?;
-        self.metrics.messages_received.increment(1);
+        self.metrics.messages_received_total.increment(1);
         Ok(msg)
     }
 
@@ -115,7 +115,7 @@ impl<T> UnboundedMeteredReceiver<T> {
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         let msg = ready!(self.receiver.poll_recv(cx));
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         Poll::Ready(msg)
     }
@@ -152,7 +152,7 @@ impl<T> MeteredSender<T> {
     }
 
     /// Returns the underlying [Sender](mpsc::Sender).
-    pub fn inner(&self) -> &mpsc::Sender<T> {
+    pub const fn inner(&self) -> &mpsc::Sender<T> {
         &self.sender
     }
 
@@ -161,11 +161,11 @@ impl<T> MeteredSender<T> {
     pub fn try_send(&self, message: T) -> Result<(), TrySendError<T>> {
         match self.sender.try_send(message) {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => {
-                self.metrics.send_errors.increment(1);
+                self.metrics.send_errors_total.increment(1);
                 Err(error)
             }
         }
@@ -176,11 +176,11 @@ impl<T> MeteredSender<T> {
     pub async fn send(&self, value: T) -> Result<(), SendError<T>> {
         match self.sender.send(value).await {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => {
-                self.metrics.send_errors.increment(1);
+                self.metrics.send_errors_total.increment(1);
                 Err(error)
             }
         }
@@ -214,7 +214,7 @@ impl<T> MeteredReceiver<T> {
     pub async fn recv(&mut self) -> Option<T> {
         let msg = self.receiver.recv().await;
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         msg
     }
@@ -222,7 +222,7 @@ impl<T> MeteredReceiver<T> {
     /// Tries to receive the next value for this receiver.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         let msg = self.receiver.try_recv()?;
-        self.metrics.messages_received.increment(1);
+        self.metrics.messages_received_total.increment(1);
         Ok(msg)
     }
 
@@ -235,7 +235,7 @@ impl<T> MeteredReceiver<T> {
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         let msg = ready!(self.receiver.poll_recv(cx));
         if msg.is_some() {
-            self.metrics.messages_received.increment(1);
+            self.metrics.messages_received_total.increment(1);
         }
         Poll::Ready(msg)
     }
@@ -254,9 +254,9 @@ impl<T> Stream for MeteredReceiver<T> {
 #[metrics(dynamic = true)]
 struct MeteredSenderMetrics {
     /// Number of messages sent
-    messages_sent: Counter,
+    messages_sent_total: Counter,
     /// Number of failed message deliveries
-    send_errors: Counter,
+    send_errors_total: Counter,
 }
 
 /// Throughput metrics for [MeteredReceiver]
@@ -264,7 +264,7 @@ struct MeteredSenderMetrics {
 #[metrics(dynamic = true)]
 struct MeteredReceiverMetrics {
     /// Number of messages received
-    messages_received: Counter,
+    messages_received_total: Counter,
 }
 
 /// A wrapper type around [PollSender] that updates metrics on send.
@@ -283,7 +283,7 @@ impl<T: Send + 'static> MeteredPollSender<T> {
     }
 
     /// Returns the underlying [PollSender].
-    pub fn inner(&self) -> &PollSender<T> {
+    pub const fn inner(&self) -> &PollSender<T> {
         &self.sender
     }
 
@@ -294,7 +294,7 @@ impl<T: Send + 'static> MeteredPollSender<T> {
             Poll::Ready(Ok(permit)) => Poll::Ready(Ok(permit)),
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
             Poll::Pending => {
-                self.metrics.back_pressure.increment(1);
+                self.metrics.back_pressure_total.increment(1);
                 Poll::Pending
             }
         }
@@ -305,7 +305,7 @@ impl<T: Send + 'static> MeteredPollSender<T> {
     pub fn send_item(&mut self, item: T) -> Result<(), PollSendError<T>> {
         match self.sender.send_item(item) {
             Ok(()) => {
-                self.metrics.messages_sent.increment(1);
+                self.metrics.messages_sent_total.increment(1);
                 Ok(())
             }
             Err(error) => Err(error),
@@ -324,7 +324,7 @@ impl<T> Clone for MeteredPollSender<T> {
 #[metrics(dynamic = true)]
 struct MeteredPollSenderMetrics {
     /// Number of messages sent
-    messages_sent: Counter,
+    messages_sent_total: Counter,
     /// Number of delayed message deliveries caused by a full channel
-    back_pressure: Counter,
+    back_pressure_total: Counter,
 }

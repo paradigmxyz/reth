@@ -66,7 +66,7 @@ impl DevSigner {
             let address = reth_primitives::public_key_to_address(pk);
             let addresses = vec![address];
             let accounts = HashMap::from([(address, sk)]);
-            signers.push(Box::new(DevSigner { addresses, accounts }) as Box<dyn EthSigner>);
+            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner>);
         }
         signers
     }

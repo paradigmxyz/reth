@@ -2,13 +2,13 @@ use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullBundleStateDataProvider,
-    HeaderProvider, ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
     BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
@@ -16,6 +16,7 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::updates::TrieUpdates;
 use revm::{
     db::BundleState,
@@ -41,8 +42,8 @@ pub struct MockEthProvider {
 }
 
 impl Default for MockEthProvider {
-    fn default() -> MockEthProvider {
-        MockEthProvider {
+    fn default() -> Self {
+        Self {
             blocks: Default::default(),
             headers: Default::default(),
             accounts: Default::default(),
@@ -675,6 +676,16 @@ impl WithdrawalsProvider for MockEthProvider {
         Ok(None)
     }
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        Ok(None)
+    }
+}
+
+impl RequestsProvider for MockEthProvider {
+    fn requests_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
         Ok(None)
     }
 }

@@ -34,7 +34,7 @@ Options:
           Disables stages that require state.
 
       --chunk-len <CHUNK_LEN>
-          Chunk byte length.
+          Chunk byte length to read from file.
 
       --instance <INSTANCE>
           Add a new instance of a node.
