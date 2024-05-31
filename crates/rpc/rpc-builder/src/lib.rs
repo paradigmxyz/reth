@@ -576,6 +576,11 @@ impl RpcModuleConfig {
         Self { eth }
     }
 
+    /// Get a reference to the eth namespace config
+    pub fn eth(&self) -> &EthConfig {
+        &self.eth
+    }
+
     /// Get a mutable reference to the eth namespace config
     pub fn eth_mut(&mut self) -> &mut EthConfig {
         &mut self.eth
@@ -603,9 +608,19 @@ impl RpcModuleConfigBuilder {
         RpcModuleConfig { eth: eth.unwrap_or_default() }
     }
 
-    /// Get a mutable reference to the eth namespace config.
+    /// Get a reference to the eth namespace config, if any
+    pub fn get_eth(&self) -> &Option<EthConfig> {
+        &self.eth
+    }
+
+    /// Get a mutable reference to the eth namespace config, if any
     pub fn eth_mut(&mut self) -> &mut Option<EthConfig> {
         &mut self.eth
+    }
+
+    /// Get the eth namespace config, creating a default if none is set
+    pub fn eth_mut_or_default(&mut self) -> &mut EthConfig {
+        self.eth.get_or_insert_with(EthConfig::default)
     }
 }
 
