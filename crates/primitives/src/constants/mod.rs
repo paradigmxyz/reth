@@ -25,7 +25,8 @@ pub const EPOCH_SLOTS: u64 = 32;
 ///
 /// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a
 /// block.
-pub const SLOT_DURATION: Duration = Duration::from_secs(12);
+/// WVM changes it to 0.2s
+pub const SLOT_DURATION: Duration = Duration::from_millis(200);
 
 /// An EPOCH is a series of 32 slots (~6.4min).
 pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * EPOCH_SLOTS);
@@ -36,7 +37,8 @@ pub const BEACON_NONCE: u64 = 0u64;
 /// The default Ethereum block gas limit.
 // TODO: This should be a chain spec parameter.
 /// See <https://github.com/paradigmxyz/reth/issues/3233>.
-pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
+/// WVM changes it by x10
+pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 300_000_000;
 
 /// The minimum tx fee below which the txpool will reject the transaction.
 ///
