@@ -1844,10 +1844,9 @@ where
                 // process it first.
                 if this.hooks.active_db_write_hook().is_none() {
                     if let Some((state, attrs, tx)) = this.pending_forkchoice_update.take() {
-                        let previous_action = this.blockchain_tree_action.replace(
+                        this.set_blockchain_tree_action(
                             BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx },
                         );
-                        debug_assert!(previous_action.is_none(), "Pre-existing action found");
                         continue
                     }
                 }
