@@ -21,7 +21,6 @@ reth-ethereum-consensus.workspace = true
 revm-primitives.workspace = true
 
 # Alloy
-alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 
