@@ -39,8 +39,13 @@ impl StorageLock {
 impl Drop for StorageLock {
     fn drop(&mut self) {
         if Arc::strong_count(&self.0) == 1 {
-            if let Err(e) = std::fs::remove_file(&self.0.file_path) {
-                eprintln!("Failed to delete lock file: {}", e);
+            if self.0.file_path.exists() {
+                // TODO: should only happen during tests that the file does not exist: tempdir is
+                // getting dropped first. However, tempdir shouldn't be dropped
+                // before any of the storage providers.
+                if let Err(e) = std::fs::remove_file(&self.0.file_path) {
+                    eprintln!("Failed to delete lock file: {}", e);
+                }
             }
         }
     }
