@@ -2,6 +2,7 @@
 
 use std::{
     fmt::{self, Write},
+    io::Error,
     net::IpAddr,
     num::ParseIntError,
     str::FromStr,
@@ -10,6 +11,8 @@ use std::{
 use crate::{NodeRecord, PeerId};
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::time::Duration;
+use tokio_retry::{strategy::FixedInterval, Retry};
 use url::Host;
 
 /// Represents a ENR in discovery.
@@ -27,6 +30,22 @@ pub struct DNSNodeRecord {
     pub id: PeerId,
 }
 
+/// Retry strategy for DNS lookups.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetryStrategy {
+    /// The amount of time between attempts.
+    pub interval: Duration,
+    /// The number of attempts to make before failing.
+    pub attempts: usize,
+}
+
+impl RetryStrategy {
+    /// Create a new retry strategy.
+    pub fn new(interval: Duration, attempts: usize) -> Self {
+        Self { interval, attempts }
+    }
+}
+
 impl DNSNodeRecord {
     /// Derive the [`NodeRecord`] from the secret key and addr
     pub fn from_secret_key(host: Host, port: u16, sk: &SecretKey) -> Self {
@@ -38,6 +57,54 @@ impl DNSNodeRecord {
     /// Creates a new record from a socket addr and peer id.
     pub fn new(host: Host, port: u16, id: PeerId) -> Self {
         Self { host, tcp_port: port, udp_port: port, id }
+    }
+
+    /// Resolves the host in a [DNSNodeRecord] to an IP address, returning a [NodeRecord].
+    pub async fn resolve(
+        &self,
+        retry_strategy: Option<RetryStrategy>,
+    ) -> Result<NodeRecord, Error> {
+        let domain = match self.host.to_owned() {
+            Host::Ipv4(ip) => {
+                let id = self.id;
+                let tcp_port = self.tcp_port;
+                let udp_port = self.udp_port;
+
+                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port })
+            }
+            Host::Ipv6(ip) => {
+                let id = self.id;
+                let tcp_port = self.tcp_port;
+                let udp_port = self.udp_port;
+
+                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port })
+            }
+            Host::Domain(domain) => domain,
+        };
+
+        // Use provided retry strategy or use strategy which does not retry
+        let strategy = match retry_strategy {
+            Some(rs) => rs,
+            None => RetryStrategy::new(Duration::from_millis(0), 0),
+        };
+        // Execute the lookup
+        let lookup = || async { Self::lookup_host(&domain).await };
+        let retry = FixedInterval::new(strategy.interval).take(strategy.attempts);
+        let ip = Retry::spawn(retry, lookup).await?;
+        Ok(NodeRecord {
+            address: ip,
+            id: self.id,
+            tcp_port: self.tcp_port,
+            udp_port: self.udp_port,
+        })
+    }
+
+    async fn lookup_host(domain: &str) -> Result<std::net::IpAddr, Error> {
+        let mut ips = tokio::net::lookup_host(format!("{domain}:0")).await?;
+        let ip = ips
+            .next()
+            .ok_or_else(|| Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
+        Ok(ip.ip())
     }
 }
 
@@ -232,6 +299,46 @@ mod tests {
         for (url, expected) in cases {
             let node: DNSNodeRecord = serde_json::from_str(url).expect("couldn't deserialize");
             assert_eq!(node, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_dns_node_record() {
+        use super::*;
+
+        // Set up tests
+        let tests = vec![
+            (
+                "localhost",
+                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 0 }),
+            ),
+            (
+                "localhost",
+                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 3 }),
+            ),
+            ("localhost", None),
+            (
+                "localhost",
+                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 0 }),
+            ),
+        ];
+
+        // Run tests
+        for (domain, retry_strategy) in tests {
+            // Construct record
+            let rec =
+                DNSNodeRecord::new(url::Host::Domain(domain.to_owned()), 30300, PeerId::random());
+
+            // Resolve domain and validate
+            let rec = rec.resolve(retry_strategy).await.unwrap();
+            match rec.address {
+                std::net::IpAddr::V4(addr) => {
+                    assert_eq!(addr, std::net::Ipv4Addr::new(127, 0, 0, 1))
+                }
+                std::net::IpAddr::V6(addr) => {
+                    assert_eq!(addr, std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+                }
+            }
         }
     }
 }

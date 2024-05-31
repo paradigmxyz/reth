@@ -42,9 +42,7 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_net_common::{
-    bandwidth_meter::BandwidthMeter, dns_node_record_resolve::resolve_dns_node_record,
-};
+use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
 use reth_network_types::PeerId;
 use reth_primitives::{ForkId, NodeRecord};
@@ -211,7 +209,7 @@ where
         // resolve boot nodes
         let mut resolved_boot_nodes = vec![];
         for record in boot_nodes.iter() {
-            let resolved = resolve_dns_node_record(record.clone()).await?;
+            let resolved = record.resolve(None).await?;
             resolved_boot_nodes.push(resolved);
         }
 

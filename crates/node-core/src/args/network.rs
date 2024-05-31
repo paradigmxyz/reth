@@ -17,7 +17,8 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, DNSNodeRecord};
+use reth_network_types::DNSNodeRecord;
+use reth_primitives::{mainnet_nodes, ChainSpec};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -50,6 +51,14 @@ pub struct NetworkArgs {
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
     pub bootnodes: Option<Vec<DNSNodeRecord>>,
+
+    /// Amount of milliseconds to wait before retrying DNS resolution requests peering.
+    #[arg(long, default_value_t = 1000)]
+    pub retry_millis: u64,
+
+    /// Amount of DNS resolution requests retries to perform when peering.
+    #[arg(long, default_value_t = 0)]
+    pub retry_attempts: usize,
 
     /// The path to the known peers file. Connected peers are dumped to this file on nodes
     /// shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
@@ -125,7 +134,7 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec
+        let chain_bootnodes: Vec<DNSNodeRecord> = chain_spec
             .bootnodes()
             .unwrap_or_else(mainnet_nodes)
             .into_iter()
@@ -158,7 +167,7 @@ impl NetworkArgs {
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
-            .boot_nodes(boot_nodes.clone())
+            .boot_nodes(chain_bootnodes.clone())
             .chain_spec(chain_spec.clone())
             .transactions_manager_config(transactions_manager_config)
             // Configure node identity
@@ -191,7 +200,7 @@ impl NetworkArgs {
                 } = self.discovery;
 
                 builder
-                    .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                    .add_unsigned_boot_nodes(chain_bootnodes.into_iter())
                     .lookup_interval(discv5_lookup_interval)
                     .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
                     .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
@@ -226,6 +235,8 @@ impl Default for NetworkArgs {
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
+            retry_attempts: 0,
+            retry_millis: 1000,
             peers_file: None,
             identity: P2P_CLIENT_VERSION.to_string(),
             p2p_secret_key: None,
@@ -416,6 +427,43 @@ mod tests {
             "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303".parse().unwrap()
             ]
         );
+    }
+
+    #[test]
+    fn parse_retry_strategy_args() {
+        use reth_network_types::RetryStrategy;
+        let tests = vec![
+            (
+                "1",
+                "0",
+                Some(RetryStrategy { interval: core::time::Duration::from_millis(1), attempts: 0 }),
+            ),
+            (
+                "1000",
+                "10",
+                Some(RetryStrategy {
+                    interval: core::time::Duration::from_millis(1000),
+                    attempts: 10,
+                }),
+            ),
+        ];
+
+        for (interval, attempts, expected) in tests {
+            let args = CommandParser::<NetworkArgs>::parse_from([
+                "reth",
+                "--retry-millis",
+                interval,
+                "--retry-attempts",
+                attempts,
+            ])
+            .args;
+
+            let found = Some(RetryStrategy::new(
+                core::time::Duration::from_millis(args.retry_millis),
+                args.retry_attempts,
+            ));
+            assert_eq!(found, expected);
+        }
     }
 
     #[cfg(not(feature = "optimism"))]
