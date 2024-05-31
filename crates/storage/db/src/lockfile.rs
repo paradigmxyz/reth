@@ -26,7 +26,7 @@ impl StorageLock {
         let lock = match parse_lock_file_pid(&path)? {
             Some(pid) => {
                 if System::new_all().process(pid.into()).is_some() {
-                    return Err(StorageLockError::Taken)
+                    return Err(StorageLockError::Taken(pid))
                 } else {
                     // If PID is no longer active, take hold of the lock.
                     StorageLockInner::new(path)
