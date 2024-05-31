@@ -57,7 +57,7 @@ impl StorageLockInner {
     /// Creates lock file and writes this process PID into it.
     fn new(file_path: impl AsRef<Path>) -> Result<Self, StorageLockError> {
         let path = file_path.as_ref().to_path_buf();
-        let mut file = OpenOptions::new().create(true).write(true).open(&path)?;
+        let mut file = OpenOptions::new().create(true).truncate(true).write(true).open(&path)?;
         write!(file, "{}", process::id() as usize)?;
         Ok(Self { path })
     }

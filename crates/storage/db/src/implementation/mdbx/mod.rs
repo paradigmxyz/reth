@@ -255,13 +255,14 @@ impl DatabaseEnv {
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
     ) -> Result<Self, DatabaseError> {
-        let mut lock_file = None;
-        if kind.is_rw() {
-            lock_file = Some(
+        let lock_file = if kind.is_rw() {
+            Some(
                 StorageLock::try_acquire(path)
                     .map_err(|err| DatabaseError::Other(err.to_string()))?,
-            );
-        }
+            )
+        } else {
+            None
+        };
 
         let mut inner_env = Environment::builder();
 
