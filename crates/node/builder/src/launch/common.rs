@@ -273,7 +273,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
     /// Returns the configured [PruneConfig]
     pub fn prune_config(&self) -> Option<PruneConfig> {
-        self.node_config().prune_config().or_else(|| self.toml_config().prune.clone())
+        self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
     }
 
     /// Returns the configured [PruneModes]
