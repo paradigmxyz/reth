@@ -15,11 +15,16 @@ use std::time::Duration;
 use tokio_retry::{strategy::FixedInterval, Retry};
 use url::Host;
 
-/// Represents a ENR in discovery.
+/// Represents the node record of a trusted peer. The only difference between this and a
+/// [NodeRecord] is that this does not contain the IP address of the peer, but rather a domain
+/// __or__ IP address.
 ///
-/// Note: this is only an excerpt of the [`NodeRecord`] data structure.
+/// This is useful when specifying nodes which are in internal infrastructure and may only be
+/// discoverable reliably using DNS.
+///
+/// This should NOT be used for any use case other than in trusted peer lists.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, SerializeDisplay, DeserializeFromStr)]
-pub struct DNSNodeRecord {
+pub struct TrustedPeer {
     /// The host of a node.
     pub host: Host,
     /// TCP port of the port that accepts connections.
@@ -46,7 +51,7 @@ impl RetryStrategy {
     }
 }
 
-impl DNSNodeRecord {
+impl TrustedPeer {
     /// Derive the [`NodeRecord`] from the secret key and addr
     pub fn from_secret_key(host: Host, port: u16, sk: &SecretKey) -> Self {
         let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, sk);
@@ -111,7 +116,7 @@ impl DNSNodeRecord {
     }
 }
 
-impl fmt::Display for DNSNodeRecord {
+impl fmt::Display for TrustedPeer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("enode://")?;
         alloy_primitives::hex::encode(self.id.as_slice()).fmt(f)?;
@@ -142,7 +147,7 @@ pub enum NodeRecordParseError {
     Discport(ParseIntError),
 }
 
-impl FromStr for DNSNodeRecord {
+impl FromStr for TrustedPeer {
     type Err = NodeRecordParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -181,7 +186,7 @@ impl FromStr for DNSNodeRecord {
     }
 }
 
-impl From<NodeRecord> for DNSNodeRecord {
+impl From<NodeRecord> for TrustedPeer {
     fn from(record: NodeRecord) -> Self {
         let host = match record.address {
             IpAddr::V4(ip) => Host::Ipv4(ip),
@@ -200,8 +205,8 @@ mod tests {
     #[test]
     fn test_url_parse() {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
-        let node: DNSNodeRecord = url.parse().unwrap();
-        assert_eq!(node, DNSNodeRecord {
+        let node: TrustedPeer = url.parse().unwrap();
+        assert_eq!(node, TrustedPeer {
             host: Host::Ipv4([10,3,58,6].into()),
             tcp_port: 30303,
             udp_port: 30301,
@@ -212,14 +217,14 @@ mod tests {
     #[test]
     fn test_node_display() {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303";
-        let node: DNSNodeRecord = url.parse().unwrap();
+        let node: TrustedPeer = url.parse().unwrap();
         assert_eq!(url, &format!("{node}"));
     }
 
     #[test]
     fn test_node_display_discport() {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
-        let node: DNSNodeRecord = url.parse().unwrap();
+        let node: TrustedPeer = url.parse().unwrap();
         assert_eq!(url, &format!("{node}"));
     }
 
@@ -228,7 +233,7 @@ mod tests {
         let cases = vec![
             // IPv4
             (
-                DNSNodeRecord {
+                TrustedPeer {
                     host: Host::Ipv4([10, 3, 58, 6].into()),
                     tcp_port: 30303u16,
                     udp_port: 30301u16,
@@ -238,7 +243,7 @@ mod tests {
             ),
             // IPv6
             (
-                DNSNodeRecord {
+                TrustedPeer {
                     host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
                     tcp_port: 52150u16,
                     udp_port: 52151u16,
@@ -248,7 +253,7 @@ mod tests {
             ),
             // URL
             (
-                DNSNodeRecord {
+                TrustedPeer {
                     host: Host::Domain("my-domain".to_string()),
                     tcp_port: 52150u16,
                     udp_port: 52151u16,
@@ -259,7 +264,7 @@ mod tests {
         ];
 
         for (node, expected) in cases {
-            let ser = serde_json::to_string::<DNSNodeRecord>(&node).expect("couldn't serialize");
+            let ser = serde_json::to_string::<TrustedPeer>(&node).expect("couldn't serialize");
             assert_eq!(ser, expected);
         }
     }
@@ -270,7 +275,7 @@ mod tests {
             // IPv4
             (
                 "\"enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301\"",
-                DNSNodeRecord {
+                TrustedPeer {
                     host: Host::Ipv4([10, 3, 58, 6].into()),
                     tcp_port: 30303u16,
                     udp_port: 30301u16,
@@ -280,7 +285,7 @@ mod tests {
             // IPv6
             (
                 "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@[2001:db8:3c4d:15::abcd:ef12]:52150?discport=52151\"",
-                DNSNodeRecord {
+                TrustedPeer {
                     host: Host::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0x3c4d, 0x15, 0x0, 0x0, 0xabcd, 0xef12)),
                     tcp_port: 52150u16,
                     udp_port: 52151u16,
@@ -290,7 +295,7 @@ mod tests {
             // URL
             (
                 "\"enode://1dd9d65c4552b5eb43d5ad55a2ee3f56c6cbc1c64a5c8d659f51fcd51bace24351232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439@my-domain:52150?discport=52151\"",
-                DNSNodeRecord {
+                TrustedPeer {
                     host: Host::Domain("my-domain".to_string()),
                     tcp_port: 52150u16,
                     udp_port: 52151u16,
@@ -300,14 +305,14 @@ mod tests {
         ];
 
         for (url, expected) in cases {
-            let node: DNSNodeRecord = serde_json::from_str(url).expect("couldn't deserialize");
+            let node: TrustedPeer = serde_json::from_str(url).expect("couldn't deserialize");
             assert_eq!(node, expected);
         }
     }
 
     #[tokio::test]
     async fn test_resolve_dns_node_record() {
-        use super::*;
+        use trusted_peer::*;
 
         // Set up tests
         let tests = vec![
@@ -330,7 +335,7 @@ mod tests {
         for (domain, retry_strategy) in tests {
             // Construct record
             let rec =
-                DNSNodeRecord::new(url::Host::Domain(domain.to_owned()), 30300, PeerId::random());
+                TrustedPeer::new(url::Host::Domain(domain.to_owned()), 30300, PeerId::random());
 
             // Resolve domain and validate
             let rec = rec.resolve(retry_strategy).await.unwrap();

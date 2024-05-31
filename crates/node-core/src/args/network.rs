@@ -17,7 +17,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, DNSNodeRecord};
+use reth_primitives::{mainnet_nodes, ChainSpec, TrustedPeer};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -39,7 +39,7 @@ pub struct NetworkArgs {
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
     #[arg(long, value_delimiter = ',')]
-    pub trusted_peers: Vec<DNSNodeRecord>,
+    pub trusted_peers: Vec<TrustedPeer>,
 
     /// Connect to or accept from trusted peers only
     #[arg(long)]
@@ -49,7 +49,7 @@ pub struct NetworkArgs {
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
-    pub bootnodes: Option<Vec<DNSNodeRecord>>,
+    pub bootnodes: Option<Vec<TrustedPeer>>,
 
     /// Amount of milliseconds to wait before retrying DNS resolution requests peering.
     #[arg(long, default_value_t = 1000)]
@@ -133,11 +133,11 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes: Vec<DNSNodeRecord> = chain_spec
+        let chain_bootnodes: Vec<TrustedPeer> = chain_spec
             .bootnodes()
             .unwrap_or_else(mainnet_nodes)
             .into_iter()
-            .map(DNSNodeRecord::from)
+            .map(TrustedPeer::from)
             .collect();
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 

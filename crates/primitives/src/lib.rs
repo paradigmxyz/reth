@@ -72,8 +72,8 @@ pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{
-    goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, DNSNodeRecord,
-    NodeRecord, NodeRecordParseError, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
+    goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
+    NodeRecordParseError, TrustedPeer, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,
 };
 pub use prune::{

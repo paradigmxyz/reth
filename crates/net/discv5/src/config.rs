@@ -9,7 +9,7 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, DNSNodeRecord, EnrForkIdEntry, ForkId};
+use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, TrustedPeer};
 use tracing::warn;
 use url::Host;
 
@@ -130,7 +130,7 @@ impl ConfigBuilder {
     }
 
     /// Adds boot nodes in the form a list of [`DNSNodeRecord`]s, parsed enodes.
-    pub fn add_unsigned_boot_nodes<T: Into<DNSNodeRecord>>(
+    pub fn add_unsigned_boot_nodes<T: Into<TrustedPeer>>(
         mut self,
         enodes: impl Iterator<Item = T>,
     ) -> Self {
@@ -431,8 +431,8 @@ pub enum BootNode {
 impl BootNode {
     /// Parses a [`DNSNodeRecord`] and serializes according to CL format. Note: [`discv5`] is
     /// originally a CL library hence needs this format to add the node.
-    pub fn from_unsigned(node_record: DNSNodeRecord) -> Result<Self, secp256k1::Error> {
-        let DNSNodeRecord { host, udp_port, id, .. } = node_record;
+    pub fn from_unsigned(node_record: TrustedPeer) -> Result<Self, secp256k1::Error> {
+        let TrustedPeer { host, udp_port, id, .. } = node_record;
         let mut multi_address = Multiaddr::empty();
         match host {
             Host::Ipv4(ip) => multi_address.push(Protocol::Ip4(ip)),
