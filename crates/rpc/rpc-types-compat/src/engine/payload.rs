@@ -648,8 +648,10 @@ mod tests {
     }"#;
 
         let payload = serde_json::from_str::<ExecutionPayloadV4>(s).unwrap();
-        let block = try_payload_v4_to_block(payload).unwrap().seal_slow();
-        let hash = block.hash();
+        let mut block = try_payload_v4_to_block(payload).unwrap();
+        block.header.parent_beacon_block_root =
+            Some(b256!("d9851db05fa63593f75e2b12c4bba9f47740613ca57da3b523a381b8c27f3297"));
+        let hash = block.seal_slow().hash();
         assert_eq!(hash, b256!("86eeb2a4b656499f313b601e1dcaedfeacccab27131b6d4ea99bc69a57607f7d"))
     }
 }
