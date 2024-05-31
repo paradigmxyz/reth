@@ -7,7 +7,7 @@ use itertools::Itertools;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
 use std::{fmt, hash::Hash};
 
-/// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
+/// A minimal LRU cache based on a [`LruMap`](schnellru::LruMap) with limited capacity.
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
@@ -26,7 +26,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
 
     /// Insert an element into the set.
     ///
-    /// If the element is new (did not exist before [`LruCache::insert()`]) was called, then the
+    /// If the element is new (did not exist before [`insert`](Self::insert)) was called, then the
     /// given length will be enforced and the oldest element will be removed if the limit was
     /// exceeded.
     ///
@@ -37,8 +37,8 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
         new_entry
     }
 
-    /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
-    /// if one was evicted.
+    /// Same as [`insert`](Self::insert) but returns a tuple, where the second index is the evicted
+    /// value, if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         let new = self.inner.peek(&entry).is_none();
         let evicted =
@@ -51,12 +51,17 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     /// Gets the given element, if exists, and promotes to lru.
     pub fn get(&mut self, entry: &T) -> Option<&T> {
         let _ = self.inner.get(entry)?;
-        self.inner.iter().next().map(|(key, ())| key)
+        self.iter().next()
     }
 
-    /// Gets the given element, if exists, without promoting to lru.
-    pub fn peek(&self, entry: &T) -> Option<&T> {
-        self.inner.iter().find_map(|(key, ())| (key == entry).then_some(key))
+    /// Iterates through entries and returns a reference to the given entry, if exists, without
+    /// promoting to lru.
+    ///
+    /// NOTE: Use this for type that have custom impl of [`PartialEq`] and [`Eq`], that aren't
+    /// unique by all fields. If `PartialEq` and `Eq` are derived for a type, it's more efficient to
+    /// call [`contains`](Self::contains).
+    pub fn find(&self, entry: &T) -> Option<&T> {
+        self.iter().find(|key| *key == entry)
     }
 
     /// Remove the least recently used entry and return it.
@@ -179,9 +184,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::hash::Hasher;
-    use derive_more::{Constructor, Display};
     use super::*;
+    use derive_more::{Constructor, Display};
+    use std::hash::Hasher;
 
     #[derive(Debug, Hash, PartialEq, Eq, Display, Clone, Copy)]
     struct Key(i8);
@@ -314,7 +319,7 @@ mod test {
         cache.insert(key_2);
 
         // doesn't promote key 1 to lru
-        _ = cache.peek(&key_1);
+        _ = cache.find(&key_1);
 
         assert_eq!(
             "LruCache { limit: 2, ret %iter: Iter: { Key(2), Key(1) } }",
@@ -330,7 +335,7 @@ mod test {
         let key_2 = CompoundKey::new(2, 22);
         cache.insert(key_2);
 
-        let key = cache.peek(&key_1);
+        let key = cache.find(&key_1);
 
         assert_eq!(key_1.other, key.unwrap().other)
     }
