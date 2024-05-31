@@ -200,11 +200,11 @@ where
         }
 
         (rx.await).unwrap_or_else(|_| {
-                TransactionValidationOutcome::Error(
-                    hash,
-                    Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-                )
-            })
+            TransactionValidationOutcome::Error(
+                hash,
+                Box::new(TransactionValidatorError::ValidationServiceUnreachable),
+            )
+        })
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
