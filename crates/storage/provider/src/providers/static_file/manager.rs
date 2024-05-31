@@ -3,9 +3,10 @@ use super::{
     StaticFileProviderRWRefMut, BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
-    HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
-    TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
+    providers::lockfile::StorageLock, to_range, BlockHashReader, BlockNumReader, BlockReader,
+    BlockSource, DatabaseProvider, HeaderProvider, ReceiptProvider, RequestsProvider,
+    StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
@@ -17,7 +18,6 @@ use reth_db::{
     table::Table,
     tables,
     transaction::DbTx,
-    StorageAccess,
 };
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
@@ -58,6 +58,11 @@ impl StaticFileAccess {
     /// Returns `true` if read-only access.
     pub const fn is_read_only(&self) -> bool {
         matches!(self, Self::RO)
+    }
+
+    /// Returns `true` if read-write access.
+    pub const fn is_read_write(&self) -> bool {
+        matches!(self, Self::RW)
     }
 }
 
@@ -112,11 +117,18 @@ pub struct StaticFileProviderInner {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
+    /// Write lock for when access is [StaticFileAccess::RW].
+    lock_file: Option<StorageLock>,
 }
 
 impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
+        let mut lock_file = None;
+        if access.is_read_write() {
+            lock_file = Some(StorageLock::try_acquire(path.as_ref())?);
+        }
+
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -126,6 +138,7 @@ impl StaticFileProviderInner {
             load_filters: false,
             metrics: None,
             access,
+            lock_file,
         };
 
         Ok(provider)
@@ -1022,16 +1035,6 @@ impl StaticFileWriter for StaticFileProvider {
         }
 
         Ok(())
-    }
-}
-
-impl StorageAccess for StaticFileProvider {
-    fn is_read_only(&self) -> bool {
-        self.access.is_read_only()
-    }
-
-    fn path(&self) -> &Path {
-        self.path()
     }
 }
 
