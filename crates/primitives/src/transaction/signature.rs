@@ -77,7 +77,7 @@ impl Signature {
 
     /// Output the `v` of the signature depends on chain_id
     #[inline]
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn, clippy::option_if_let_else)]
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
         if let Some(chain_id) = chain_id {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
