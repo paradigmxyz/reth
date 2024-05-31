@@ -57,8 +57,15 @@ impl StorageLockInner {
     /// Creates lock file and writes this process PID into it.
     fn new(file_path: impl AsRef<Path>) -> Result<Self, StorageLockError> {
         let path = file_path.as_ref().to_path_buf();
+
+        // Create the directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
         let mut file = OpenOptions::new().create(true).truncate(true).write(true).open(&path)?;
         write!(file, "{}", process::id() as usize)?;
+
         Ok(Self { path })
     }
 }
