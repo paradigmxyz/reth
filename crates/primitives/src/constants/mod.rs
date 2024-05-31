@@ -1,10 +1,6 @@
 //! Ethereum protocol-related constants
 
-use crate::{
-    chain::DepositContract,
-    revm_primitives::{address, b256},
-    B256, U256,
-};
+use crate::{revm_primitives::b256, B256, U256};
 use std::time::Duration;
 
 #[cfg(feature = "optimism")]
@@ -29,8 +25,7 @@ pub const EPOCH_SLOTS: u64 = 32;
 ///
 /// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a
 /// block.
-/// WVM changes it to 0.2s
-pub const SLOT_DURATION: Duration = Duration::from_millis(200);
+pub const SLOT_DURATION: Duration = Duration::from_secs(12);
 
 /// An EPOCH is a series of 32 slots (~6.4min).
 pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * EPOCH_SLOTS);
@@ -41,8 +36,7 @@ pub const BEACON_NONCE: u64 = 0u64;
 /// The default Ethereum block gas limit.
 // TODO: This should be a chain spec parameter.
 /// See <https://github.com/paradigmxyz/reth/issues/3233>.
-/// WVM changes it by x10
-pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 300_000_000;
+pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
 /// The minimum tx fee below which the txpool will reject the transaction.
 ///
@@ -69,13 +63,6 @@ pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
-
-/// Deposit contract address
-pub const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::new(
-    address!("00000000219ab540356cbb839cbe05303d7705fa"),
-    11052984,
-    b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
-);
 
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
