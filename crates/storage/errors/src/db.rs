@@ -37,6 +37,9 @@ pub enum DatabaseError {
     /// Failed to use the specified log level, as it's not available.
     #[error("log level {0:?} is not available")]
     LogLevelUnavailable(LogLevel),
+    /// Other unspecified error.
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Common error struct to propagate implementation-specific error information.

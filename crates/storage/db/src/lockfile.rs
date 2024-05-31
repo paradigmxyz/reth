@@ -10,10 +10,11 @@ use std::{
 };
 use sysinfo::System;
 
-/// A lock for a storage directory to ensure exclusive read-write access.
+/// A file lock for a storage directory to ensure exclusive read-write access.
 ///
-/// This lock stores the PID of the process holding it and is released on a graceful shutdown.
-/// On resuming from a crash, the stored PID helps verify that no other process holds the lock.
+/// This lock stores the PID of the process holding it and is released (deleted) on a graceful
+/// shutdown. On resuming from a crash, the stored PID helps verify that no other process holds the
+/// lock.
 #[derive(Debug, Clone)]
 pub struct StorageLock(Arc<StorageLockInner>);
 
