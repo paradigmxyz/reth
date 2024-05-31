@@ -2,16 +2,24 @@
 
 use boyer_moore_magiclen::BMByte;
 use eyre::Result;
+use reth_beacon_consensus::EthBeaconConsensus;
+use reth_config::Config;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     table::{Decode, Decompress, DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
-    DatabaseError, RawTable, TableRawRow,
+    DatabaseEnv, DatabaseError, RawTable, TableRawRow,
 };
+use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_fs_util as fs;
-use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_primitives::{stage::PipelineTarget, ChainSpec};
+use reth_provider::{
+    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+};
+use reth_stages::{sets::DefaultStages, Pipeline};
+use reth_static_file::StaticFileProducer;
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 
@@ -191,4 +199,71 @@ impl ListFilter {
         self.skip = skip;
         self.len = len;
     }
+}
+
+/// Returns a [ProviderFactory] after executing consistency checks.
+///
+/// If it's a read-write environment and an issue is found, it will attempt to heal (including a
+/// pipeline unwind). Otherwise it will thrown an error.
+pub fn create_provider_factory(
+    config: &Config,
+    chain_spec: Arc<ChainSpec>,
+    db: Arc<DatabaseEnv>,
+    static_file_provider: StaticFileProvider,
+) -> eyre::Result<ProviderFactory<Arc<DatabaseEnv>>> {
+    if db.is_read_only() != static_file_provider.is_read_only() {
+        return Err(eyre::eyre!("Storage types should be open with same access rights."));
+    }
+
+    let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+    let factory = ProviderFactory::new(db, chain_spec.clone(), static_file_provider);
+
+    info!(target: "reth::cli", "Verifying storage consistency.");
+
+    // Check for consistency between database and static files.
+    if let Some(unwind_target) = factory
+        .static_file_provider()
+        .check_consistency(&factory.provider()?, has_receipt_pruning)?
+    {
+        if factory.db_ref().is_read_only() {
+            return Err(eyre::eyre!("Inconsistent storage. Restart node to heal: {unwind_target}"));
+        }
+
+        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+
+        // Highly unlikely to happen, and given its destructive nature, it's better to panic
+        // instead.
+        if PipelineTarget::Unwind(0) == unwind_target {
+            panic!("A static file <> database inconsistency was found that would trigger an unwind to block 0.")
+        }
+
+        info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+
+        // Builds and executes an unwind-only pipeline
+        let mut pipeline = Pipeline::builder()
+            .add_stages(DefaultStages::new(
+                factory.clone(),
+                HeaderSyncMode::Continuous,
+                Arc::new(EthBeaconConsensus::new(chain_spec)),
+                NoopHeaderDownloader::default(),
+                NoopBodiesDownloader::default(),
+                NoopBlockExecutorProvider::default(),
+                config.stages.clone(),
+                prune_modes.clone(),
+            ))
+            .build(
+                factory.clone(),
+                StaticFileProducer::new(
+                    factory.clone(),
+                    factory.static_file_provider(),
+                    prune_modes,
+                ),
+            );
+
+        // Move all applicable data from database to static files.
+        pipeline.move_to_static_files()?;
+        pipeline.unwind(unwind_target.unwind_target().expect("should exist"), None)?;
+    }
+
+    Ok(factory)
 }

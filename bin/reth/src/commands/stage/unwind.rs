@@ -30,6 +30,7 @@ use crate::{
     },
     dirs::{DataDirPath, MaybePlatformPath},
     macros::block_executor,
+    utils::create_provider_factory,
 };
 
 /// `reth stage unwind` command
@@ -81,11 +82,12 @@ impl Command {
         let config: Config = confy::load_path(config_path).unwrap_or_default();
 
         let db = Arc::new(open_db(db_path.as_ref(), self.db.database_args())?);
-        let provider_factory = ProviderFactory::new(
-            db,
+        let provider_factory = create_provider_factory(
+            &config,
             self.chain.clone(),
+            db,
             StaticFileProvider::read_write(data_dir.static_files())?,
-        );
+        )?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {
