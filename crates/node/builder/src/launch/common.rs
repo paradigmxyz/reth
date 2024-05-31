@@ -11,6 +11,7 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_net_common::dns_node_record_resolve::resolve_dns_node_record;
+use reth_network_types::RetryStrategy;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -87,7 +88,12 @@ impl LaunchContext {
 
             // resolve trusted peers if they use a domain instead of dns
             for peer in &config.network.trusted_peers {
-                let resolved = resolve_dns_node_record(peer.clone())
+                let retry_strategy = RetryStrategy::new(
+                    std::time::Duration::from_millis(config.network.retry_millis),
+                    config.network.retry_attempts,
+                );
+                let resolved = peer
+                    .resolve(Some(retry_strategy))
                     .await
                     .wrap_err_with(|| format!("Could not resolve trusted peer {peer}"))?;
                 toml_config.peers.trusted_nodes.insert(resolved);

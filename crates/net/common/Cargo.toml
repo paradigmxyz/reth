@@ -13,9 +13,8 @@ workspace = true
 
 [dependencies]
 # ethereum
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["rand"] }
 
 # async
 pin-project.workspace = true
-url.workspace = true
 tokio = { workspace = true, features = ["full"] }
