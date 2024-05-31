@@ -4,7 +4,7 @@ use thiserror::Error;
 /// Storage lock error.
 pub enum StorageLockError {
     /// Write lock taken
-    #[error("write lock already taken")]
+    #[error("storage directory is currently in use as read-write by another process")]
     Taken,
     /// Indicates other unspecified errors.
     #[error("{0}")]
