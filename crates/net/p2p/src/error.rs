@@ -104,25 +104,25 @@ pub enum RequestError {
 
 impl RequestError {
     /// Indicates whether this error is retryable or fatal.
-    pub fn is_retryable(&self) -> bool {
-        matches!(self, RequestError::Timeout | RequestError::ConnectionDropped)
+    pub const fn is_retryable(&self) -> bool {
+        matches!(self, Self::Timeout | Self::ConnectionDropped)
     }
 
     /// Whether the error happened because the channel was closed.
-    pub fn is_channel_closed(&self) -> bool {
-        matches!(self, RequestError::ChannelClosed)
+    pub const fn is_channel_closed(&self) -> bool {
+        matches!(self, Self::ChannelClosed)
     }
 }
 
 impl<T> From<mpsc::error::SendError<T>> for RequestError {
     fn from(_: mpsc::error::SendError<T>) -> Self {
-        RequestError::ChannelClosed
+        Self::ChannelClosed
     }
 }
 
 impl From<oneshot::error::RecvError> for RequestError {
     fn from(_: oneshot::error::RecvError) -> Self {
-        RequestError::ChannelClosed
+        Self::ChannelClosed
     }
 }
 

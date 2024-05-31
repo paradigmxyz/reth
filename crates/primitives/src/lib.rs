@@ -35,7 +35,6 @@ mod header;
 mod integer_list;
 mod log;
 mod net;
-pub mod op_mainnet;
 pub mod proofs;
 mod prune;
 mod receipt;
@@ -85,6 +84,7 @@ pub use prune::{
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
+pub use request::Requests;
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -105,7 +105,6 @@ pub use transaction::{
     LEGACY_TX_TYPE_ID,
 };
 
-pub use request::Requests;
 pub use withdrawal::{Withdrawal, Withdrawals};
 
 // Re-exports

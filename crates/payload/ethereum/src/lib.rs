@@ -14,9 +14,9 @@ use reth_basic_payload_builder::{
     pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
 };
+use reth_errors::RethError;
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
-use reth_interfaces::RethError;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
@@ -129,10 +129,11 @@ where
 
         // apply eip-2935 blockhashes update
         apply_blockhashes_update(
+            &mut db,
             &chain_spec,
             initialized_block_env.timestamp.to::<u64>(),
             block_number,
-            &mut db,
+            parent_block.hash(),
         ).map_err(|err| {
             warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
             PayloadBuilderError::Internal(err.into())
@@ -152,26 +153,6 @@ where
             );
             err
         })?;
-
-        // Calculate the requests and the requests root.
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                // We do not calculate the EIP-6110 deposit requests because there are no
-                // transactions in an empty payload.
-                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
-                    &mut db,
-                    &chain_spec,
-                    &initialized_cfg,
-                    &initialized_block_env,
-                    &attributes,
-                )?;
-
-                let requests = withdrawal_requests;
-                let requests_root = calculate_requests_root(&requests);
-                (Some(requests.into()), Some(requests_root))
-            } else {
-                (None, None)
-            };
 
         // merge all transitions into bundle state, this would apply the withdrawal balance
         // changes and 4788 contract call
@@ -204,6 +185,24 @@ where
 
             blob_gas_used = Some(0);
         }
+
+        // Calculate the requests and the requests root.
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                // We do not calculate the EIP-6110 deposit requests because there are no
+                // transactions in an empty payload.
+                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )?;
+
+                let requests = withdrawal_requests;
+                let requests_root = calculate_requests_root(&requests);
+                (Some(requests.into()), Some(requests_root))
+            } else {
+                (None, None)
+            };
 
         let header = Header {
             parent_hash: parent_block.hash(),
@@ -296,10 +295,11 @@ where
 
     // apply eip-2935 blockhashes update
     apply_blockhashes_update(
+        &mut db,
         &chain_spec,
         initialized_block_env.timestamp.to::<u64>(),
         block_number,
-        &mut db,
+        parent_block.hash(),
     )
     .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
@@ -423,13 +423,10 @@ where
     {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
-
         let withdrawal_requests = post_block_withdrawal_requests_contract_call(
             &mut db,
-            &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
-            &attributes,
         )?;
 
         let requests = [deposit_requests, withdrawal_requests].concat();

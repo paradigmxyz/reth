@@ -49,7 +49,7 @@ impl TreeState {
 
     /// Expose internal indices of the BlockchainTree.
     #[inline]
-    pub(crate) fn block_indices(&self) -> &BlockIndices {
+    pub(crate) const fn block_indices(&self) -> &BlockIndices {
         &self.block_indices
     }
 
@@ -124,6 +124,6 @@ impl From<BlockchainId> for u64 {
 #[cfg(test)]
 impl From<u64> for BlockchainId {
     fn from(value: u64) -> Self {
-        BlockchainId(value)
+        Self(value)
     }
 }

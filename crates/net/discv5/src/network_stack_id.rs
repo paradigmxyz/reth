@@ -21,7 +21,7 @@ impl NetworkStackId {
     pub const OPSTACK: &'static [u8] = b"opstack";
 
     /// Returns the [`NetworkStackId`] that matches the given [`ChainSpec`].
-    pub fn id(chain: &ChainSpec) -> Option<&'static [u8]> {
+    pub const fn id(chain: &ChainSpec) -> Option<&'static [u8]> {
         if chain.is_optimism() {
             return Some(Self::OPEL)
         } else if chain.is_eth() {

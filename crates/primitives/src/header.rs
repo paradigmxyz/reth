@@ -111,7 +111,7 @@ pub struct Header {
 
 impl Default for Header {
     fn default() -> Self {
-        Header {
+        Self {
             parent_hash: Default::default(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: Default::default(),
@@ -192,7 +192,7 @@ impl Header {
     /// Checks if the block's timestamp is in the past compared to the parent block's timestamp.
     ///
     /// Note: This check is relevant only pre-merge.
-    pub fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
+    pub const fn is_timestamp_in_past(&self, parent_timestamp: u64) -> bool {
         self.timestamp <= parent_timestamp
     }
 
@@ -201,12 +201,12 @@ impl Header {
     /// Clock can drift but this can be consensus issue.
     ///
     /// Note: This check is relevant only pre-merge.
-    pub fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
+    pub const fn exceeds_allowed_future_timestamp(&self, present_timestamp: u64) -> bool {
         self.timestamp > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS
     }
 
     /// Returns the parent block's number and hash
-    pub fn parent_num_hash(&self) -> BlockNumHash {
+    pub const fn parent_num_hash(&self) -> BlockNumHash {
         BlockNumHash { number: self.number.saturating_sub(1), hash: self.parent_hash }
     }
 
@@ -272,7 +272,7 @@ impl Header {
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
     #[inline]
-    pub fn seal(self, hash: B256) -> SealedHeader {
+    pub const fn seal(self, hash: B256) -> SealedHeader {
         SealedHeader { header: self, hash }
     }
 
@@ -618,7 +618,7 @@ impl SealedHeader {
 
     /// Returns the sealed Header fields.
     #[inline]
-    pub fn header(&self) -> &Header {
+    pub const fn header(&self) -> &Header {
         &self.header
     }
 
@@ -674,7 +674,7 @@ impl SealedHeader {
     #[inline(always)]
     fn validate_gas_limit(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
@@ -739,7 +739,7 @@ impl SealedHeader {
     /// of certain features (e.g., Optimism feature) or the activation of specific hardforks.
     pub fn validate_against_parent(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
         chain_spec: &ChainSpec,
     ) -> Result<(), HeaderValidationError> {
         // Parent number is consistent.
@@ -826,7 +826,7 @@ impl SealedHeader {
     /// parent header fields.
     pub fn validate_4844_header_against_parent(
         &self,
-        parent: &SealedHeader,
+        parent: &Self,
     ) -> Result<(), HeaderValidationError> {
         // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
         //
@@ -885,7 +885,7 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
         // map valid header strategy by sealing
         valid_header_strategy().prop_map(|header| header.seal_slow()).boxed()
     }
-    type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -970,13 +970,13 @@ pub enum HeadersDirection {
 
 impl HeadersDirection {
     /// Returns true for rising block numbers
-    pub fn is_rising(&self) -> bool {
-        matches!(self, HeadersDirection::Rising)
+    pub const fn is_rising(&self) -> bool {
+        matches!(self, Self::Rising)
     }
 
     /// Returns true for falling block numbers
-    pub fn is_falling(&self) -> bool {
-        matches!(self, HeadersDirection::Falling)
+    pub const fn is_falling(&self) -> bool {
+        matches!(self, Self::Falling)
     }
 
     /// Converts the bool into a direction.
@@ -985,11 +985,11 @@ impl HeadersDirection {
     ///
     /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
     /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
-    pub fn new(reverse: bool) -> Self {
+    pub const fn new(reverse: bool) -> Self {
         if reverse {
-            HeadersDirection::Falling
+            Self::Falling
         } else {
-            HeadersDirection::Rising
+            Self::Rising
         }
     }
 }

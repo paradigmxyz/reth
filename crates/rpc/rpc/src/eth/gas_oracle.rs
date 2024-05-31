@@ -61,7 +61,7 @@ pub struct GasPriceOracleConfig {
 
 impl Default for GasPriceOracleConfig {
     fn default() -> Self {
-        GasPriceOracleConfig {
+        Self {
             blocks: DEFAULT_GAS_PRICE_BLOCKS,
             percentile: DEFAULT_GAS_PRICE_PERCENTILE,
             max_header_history: MAX_HEADER_HISTORY,
@@ -119,7 +119,7 @@ where
     }
 
     /// Returns the configuration of the gas price oracle.
-    pub fn config(&self) -> &GasPriceOracleConfig {
+    pub const fn config(&self) -> &GasPriceOracleConfig {
         &self.oracle_config
     }
 

@@ -23,7 +23,7 @@ enum MetricField<'a> {
 }
 
 impl<'a> MetricField<'a> {
-    fn field(&self) -> &'a Field {
+    const fn field(&self) -> &'a Field {
         match self {
             MetricField::Included(Metric { field, .. }) | MetricField::Skipped(field) => field,
         }
@@ -220,7 +220,7 @@ impl MetricsAttr {
     fn separator(&self) -> String {
         match &self.separator {
             Some(sep) => sep.value(),
-            None => MetricsAttr::DEFAULT_SEPARATOR.to_owned(),
+            None => Self::DEFAULT_SEPARATOR.to_owned(),
         }
     }
 }

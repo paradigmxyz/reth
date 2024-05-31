@@ -358,8 +358,8 @@ where
         Ok(BlockExecutionOutput {
             state: self.state.take_bundle(),
             receipts,
+            requests: vec![],
             gas_used,
-            requests: Default::default(),
         })
     }
 }
@@ -378,7 +378,7 @@ pub struct OpBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
     /// Returns the receipts of the executed blocks.
-    pub fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts {
         self.batch_record.receipts()
     }
 

@@ -21,7 +21,7 @@ pub struct AccountHistory {
 }
 
 impl AccountHistory {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }
@@ -107,16 +107,16 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
-    };
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, B256,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block_range, random_changeset_range, random_eoa_accounts},
+    };
     use std::{collections::BTreeMap, ops::AddAssign};
 
     #[test]

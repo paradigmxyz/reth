@@ -60,7 +60,7 @@ pub struct BlockHashNumber {
 
 impl From<Vec<BlockHashNumber>> for NewBlockHashes {
     fn from(v: Vec<BlockHashNumber>) -> Self {
-        NewBlockHashes(v)
+        Self(v)
     }
 }
 
@@ -101,7 +101,7 @@ impl Transactions {
 
 impl From<Vec<TransactionSigned>> for Transactions {
     fn from(txs: Vec<TransactionSigned>) -> Self {
-        Transactions(txs)
+        Self(txs)
     }
 }
 
@@ -137,20 +137,20 @@ pub enum NewPooledTransactionHashes {
 
 impl NewPooledTransactionHashes {
     /// Returns the message [`EthVersion`].
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         match self {
-            NewPooledTransactionHashes::Eth66(_) => EthVersion::Eth66,
-            NewPooledTransactionHashes::Eth68(_) => EthVersion::Eth68,
+            Self::Eth66(_) => EthVersion::Eth66,
+            Self::Eth68(_) => EthVersion::Eth68,
         }
     }
 
     /// Returns `true` if the payload is valid for the given version
-    pub fn is_valid_for_version(&self, version: EthVersion) -> bool {
+    pub const fn is_valid_for_version(&self, version: EthVersion) -> bool {
         match self {
-            NewPooledTransactionHashes::Eth66(_) => {
+            Self::Eth66(_) => {
                 matches!(version, EthVersion::Eth67 | EthVersion::Eth66)
             }
-            NewPooledTransactionHashes::Eth68(_) => {
+            Self::Eth68(_) => {
                 matches!(version, EthVersion::Eth68)
             }
         }
@@ -159,40 +159,40 @@ impl NewPooledTransactionHashes {
     /// Returns an iterator over all transaction hashes.
     pub fn iter_hashes(&self) -> impl Iterator<Item = &B256> + '_ {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.0.iter(),
-            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.iter(),
+            Self::Eth66(msg) => msg.0.iter(),
+            Self::Eth68(msg) => msg.hashes.iter(),
         }
     }
 
     /// Returns an immutable reference to transaction hashes.
-    pub fn hashes(&self) -> &Vec<B256> {
+    pub const fn hashes(&self) -> &Vec<B256> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => &msg.0,
-            NewPooledTransactionHashes::Eth68(msg) => &msg.hashes,
+            Self::Eth66(msg) => &msg.0,
+            Self::Eth68(msg) => &msg.hashes,
         }
     }
 
     /// Returns a mutable reference to transaction hashes.
     pub fn hashes_mut(&mut self) -> &mut Vec<B256> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => &mut msg.0,
-            NewPooledTransactionHashes::Eth68(msg) => &mut msg.hashes,
+            Self::Eth66(msg) => &mut msg.0,
+            Self::Eth68(msg) => &mut msg.hashes,
         }
     }
 
     /// Consumes the type and returns all hashes
     pub fn into_hashes(self) -> Vec<B256> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.0,
-            NewPooledTransactionHashes::Eth68(msg) => msg.hashes,
+            Self::Eth66(msg) => msg.0,
+            Self::Eth68(msg) => msg.hashes,
         }
     }
 
     /// Returns an iterator over all transaction hashes.
     pub fn into_iter_hashes(self) -> impl Iterator<Item = B256> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.0.into_iter(),
-            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.into_iter(),
+            Self::Eth66(msg) => msg.0.into_iter(),
+            Self::Eth68(msg) => msg.hashes.into_iter(),
         }
     }
 
@@ -200,8 +200,8 @@ impl NewPooledTransactionHashes {
     /// the rest. If `len` is greater than the number of hashes, this has no effect.
     pub fn truncate(&mut self, len: usize) {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.0.truncate(len),
-            NewPooledTransactionHashes::Eth68(msg) => {
+            Self::Eth66(msg) => msg.0.truncate(len),
+            Self::Eth68(msg) => {
                 msg.types.truncate(len);
                 msg.sizes.truncate(len);
                 msg.hashes.truncate(len);
@@ -212,56 +212,56 @@ impl NewPooledTransactionHashes {
     /// Returns true if the message is empty
     pub fn is_empty(&self) -> bool {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.0.is_empty(),
-            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.is_empty(),
+            Self::Eth66(msg) => msg.0.is_empty(),
+            Self::Eth68(msg) => msg.hashes.is_empty(),
         }
     }
 
     /// Returns the number of hashes in the message
     pub fn len(&self) -> usize {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.0.len(),
-            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.len(),
+            Self::Eth66(msg) => msg.0.len(),
+            Self::Eth68(msg) => msg.hashes.len(),
         }
     }
 
     /// Returns an immutable reference to the inner type if this an eth68 announcement.
-    pub fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
+    pub const fn as_eth68(&self) -> Option<&NewPooledTransactionHashes68> {
         match self {
-            NewPooledTransactionHashes::Eth66(_) => None,
-            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
+            Self::Eth66(_) => None,
+            Self::Eth68(msg) => Some(msg),
         }
     }
 
     /// Returns a mutable reference to the inner type if this an eth68 announcement.
     pub fn as_eth68_mut(&mut self) -> Option<&mut NewPooledTransactionHashes68> {
         match self {
-            NewPooledTransactionHashes::Eth66(_) => None,
-            NewPooledTransactionHashes::Eth68(msg) => Some(msg),
+            Self::Eth66(_) => None,
+            Self::Eth68(msg) => Some(msg),
         }
     }
 
     /// Returns a mutable reference to the inner type if this an eth66 announcement.
     pub fn as_eth66_mut(&mut self) -> Option<&mut NewPooledTransactionHashes66> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => Some(msg),
-            NewPooledTransactionHashes::Eth68(_) => None,
+            Self::Eth66(msg) => Some(msg),
+            Self::Eth68(_) => None,
         }
     }
 
     /// Returns the inner type if this an eth68 announcement.
     pub fn take_eth68(&mut self) -> Option<NewPooledTransactionHashes68> {
         match self {
-            NewPooledTransactionHashes::Eth66(_) => None,
-            NewPooledTransactionHashes::Eth68(msg) => Some(mem::take(msg)),
+            Self::Eth66(_) => None,
+            Self::Eth68(msg) => Some(mem::take(msg)),
         }
     }
 
     /// Returns the inner type if this an eth66 announcement.
     pub fn take_eth66(&mut self) -> Option<NewPooledTransactionHashes66> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => Some(mem::take(msg)),
-            NewPooledTransactionHashes::Eth68(_) => None,
+            Self::Eth66(msg) => Some(mem::take(msg)),
+            Self::Eth68(_) => None,
         }
     }
 }
@@ -269,8 +269,8 @@ impl NewPooledTransactionHashes {
 impl From<NewPooledTransactionHashes> for EthMessage {
     fn from(value: NewPooledTransactionHashes) -> Self {
         match value {
-            NewPooledTransactionHashes::Eth66(msg) => EthMessage::NewPooledTransactionHashes66(msg),
-            NewPooledTransactionHashes::Eth68(msg) => EthMessage::NewPooledTransactionHashes68(msg),
+            NewPooledTransactionHashes::Eth66(msg) => Self::NewPooledTransactionHashes66(msg),
+            NewPooledTransactionHashes::Eth68(msg) => Self::NewPooledTransactionHashes68(msg),
         }
     }
 }
@@ -301,7 +301,7 @@ pub struct NewPooledTransactionHashes66(
 
 impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<B256>) -> Self {
-        NewPooledTransactionHashes66(v)
+        Self(v)
     }
 }
 
@@ -359,11 +359,7 @@ impl Arbitrary for NewPooledTransactionHashes68 {
 
                 (types_vec, sizes_vec, hashes_vec)
             })
-            .prop_map(|(types, sizes, hashes)| NewPooledTransactionHashes68 {
-                types,
-                sizes,
-                hashes,
-            })
+            .prop_map(|(types, sizes, hashes)| Self { types, sizes, hashes })
             .boxed()
     }
 
@@ -476,8 +472,8 @@ impl DedupPayload for NewPooledTransactionHashes {
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         match self {
-            NewPooledTransactionHashes::Eth66(msg) => msg.dedup(),
-            NewPooledTransactionHashes::Eth68(msg) => msg.dedup(),
+            Self::Eth66(msg) => msg.dedup(),
+            Self::Eth68(msg) => msg.dedup(),
         }
     }
 }
@@ -601,17 +597,17 @@ handle_mempool_data_map_impl!(PartiallyValidData<V>, <V>);
 
 impl<V> PartiallyValidData<V> {
     /// Wraps raw data.
-    pub fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
+    pub const fn from_raw_data(data: HashMap<TxHash, V>, version: Option<EthVersion>) -> Self {
         Self { data, version }
     }
 
     /// Wraps raw data with version [`EthVersion::Eth68`].
-    pub fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
+    pub const fn from_raw_data_eth68(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth68))
     }
 
     /// Wraps raw data with version [`EthVersion::Eth66`].
-    pub fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
+    pub const fn from_raw_data_eth66(data: HashMap<TxHash, V>) -> Self {
         Self::from_raw_data(data, Some(EthVersion::Eth66))
     }
 
@@ -629,7 +625,7 @@ impl<V> PartiallyValidData<V> {
 
     /// Returns the version of the message this data was received in if different versions of the
     /// message exists, either [`Eth66`](EthVersion::Eth66) or [`Eth68`](EthVersion::Eth68).
-    pub fn msg_version(&self) -> Option<EthVersion> {
+    pub const fn msg_version(&self) -> Option<EthVersion> {
         self.version
     }
 
@@ -733,7 +729,7 @@ impl RequestTxHashes {
 
 impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
-        RequestTxHashes::new(iter.into_iter().map(|(hash, _)| hash).collect::<HashSet<_>>())
+        Self::new(iter.into_iter().map(|(hash, _)| hash).collect::<HashSet<_>>())
     }
 }
 

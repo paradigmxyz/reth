@@ -16,9 +16,8 @@ use reth_downloaders::{
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_interfaces::{
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-    sync::NoopSyncStateUpdater,
+use reth_network_p2p::{
+    bodies::client::BodiesClient, headers::client::HeadersClient, sync::NoopSyncStateUpdater,
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
@@ -193,7 +192,7 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Sets the max block for the pipeline to run.
-    pub fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+    pub const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
         self.max_block = Some(max_block);
         self
     }
@@ -211,21 +210,24 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Uses a real consensus engine instead of a test consensus engine.
-    pub fn with_real_consensus(mut self) -> Self {
+    pub const fn with_real_consensus(mut self) -> Self {
         self.consensus = TestConsensusConfig::Real;
         self
     }
 
     /// Disables blockchain tree driven sync. This is the same as setting the pipeline run
     /// threshold to 0.
-    pub fn disable_blockchain_tree_sync(mut self) -> Self {
+    pub const fn disable_blockchain_tree_sync(mut self) -> Self {
         self.pipeline_run_threshold = Some(0);
         self
     }
 
     /// Sets the client to use for network operations.
     #[allow(dead_code)]
-    pub fn with_client<Client>(self, client: Client) -> NetworkedTestConsensusEngineBuilder<Client>
+    pub const fn with_client<Client>(
+        self,
+        client: Client,
+    ) -> NetworkedTestConsensusEngineBuilder<Client>
     where
         Client: HeadersClient + BodiesClient + 'static,
     {
@@ -275,7 +277,7 @@ where
 
     /// Sets the max block for the pipeline to run.
     #[allow(dead_code)]
-    pub fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+    pub const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
         self.base_config.max_block = Some(max_block);
         self
     }
@@ -297,7 +299,7 @@ where
     /// Disables blockchain tree driven sync. This is the same as setting the pipeline run
     /// threshold to 0.
     #[allow(dead_code)]
-    pub fn disable_blockchain_tree_sync(mut self) -> Self {
+    pub const fn disable_blockchain_tree_sync(mut self) -> Self {
         self.base_config.pipeline_run_threshold = Some(0);
         self
     }

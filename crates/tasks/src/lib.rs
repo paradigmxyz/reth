@@ -297,12 +297,12 @@ pub struct TaskExecutor {
 
 impl TaskExecutor {
     /// Returns the [Handle] to the tokio runtime.
-    pub fn handle(&self) -> &Handle {
+    pub const fn handle(&self) -> &Handle {
         &self.handle
     }
 
     /// Returns the receiver of the shutdown signal.
-    pub fn on_shutdown_signal(&self) -> &Shutdown {
+    pub const fn on_shutdown_signal(&self) -> &Shutdown {
         &self.on_shutdown
     }
 
@@ -328,12 +328,14 @@ impl TaskExecutor {
         let on_shutdown = self.on_shutdown.clone();
 
         // Clone only the specific counter that we need.
-        let finished_regular_tasks_metrics = self.metrics.finished_regular_tasks.clone();
+        let finished_regular_tasks_total_metrics =
+            self.metrics.finished_regular_tasks_total.clone();
         // Wrap the original future to increment the finished tasks counter upon completion
         let task = {
             async move {
                 // Create an instance of IncCounterOnDrop with the counter to increment
-                let _inc_counter_on_drop = IncCounterOnDrop::new(finished_regular_tasks_metrics);
+                let _inc_counter_on_drop =
+                    IncCounterOnDrop::new(finished_regular_tasks_total_metrics);
                 let fut = pin!(fut);
                 let _ = select(on_shutdown, fut).await;
             }
@@ -405,10 +407,11 @@ impl TaskExecutor {
             .in_current_span();
 
         // Clone only the specific counter that we need.
-        let finished_critical_tasks_metrics = self.metrics.finished_critical_tasks.clone();
+        let finished_critical_tasks_total_metrics =
+            self.metrics.finished_critical_tasks_total.clone();
         let task = async move {
             // Create an instance of IncCounterOnDrop with the counter to increment
-            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_metrics);
+            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_total_metrics);
             let task = pin!(task);
             let _ = select(on_shutdown, task).await;
         };
@@ -560,7 +563,7 @@ impl TaskSpawner for TaskExecutor {
 
     fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.metrics.inc_critical_tasks();
-        TaskExecutor::spawn_critical(self, name, fut)
+        Self::spawn_critical(self, name, fut)
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
@@ -572,7 +575,7 @@ impl TaskSpawner for TaskExecutor {
         name: &'static str,
         fut: BoxFuture<'static, ()>,
     ) -> JoinHandle<()> {
-        TaskExecutor::spawn_critical_blocking(self, name, fut)
+        Self::spawn_critical_blocking(self, name, fut)
     }
 }
 
@@ -610,7 +613,7 @@ impl TaskSpawnerExt for TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        TaskExecutor::spawn_critical_with_graceful_shutdown_signal(self, name, f)
+        Self::spawn_critical_with_graceful_shutdown_signal(self, name, f)
     }
 
     fn spawn_with_graceful_shutdown_signal<F>(
@@ -620,7 +623,7 @@ impl TaskSpawnerExt for TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        TaskExecutor::spawn_with_graceful_shutdown_signal(self, f)
+        Self::spawn_with_graceful_shutdown_signal(self, f)
     }
 }
 

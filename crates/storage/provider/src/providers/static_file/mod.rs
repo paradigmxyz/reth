@@ -42,7 +42,7 @@ impl LoadedJar {
         self.mmap_handle.clone()
     }
 
-    fn segment(&self) -> StaticFileSegment {
+    const fn segment(&self) -> StaticFileSegment {
         self.jar.user_header().segment()
     }
 }
@@ -65,8 +65,8 @@ mod tests {
         transaction::{DbTx, DbTxMut},
         CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers, RawTable,
     };
-    use reth_interfaces::test_utils::generators::{self, random_header_range};
     use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
+    use reth_testing_utils::generators::{self, random_header_range};
 
     #[test]
     fn test_snap() {

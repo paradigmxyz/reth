@@ -49,7 +49,7 @@ impl EngineMessageStore {
     /// Creates a new [EngineMessageStore] at the given path.
     ///
     /// The path is expected to be a directory, where individual message JSON files will be stored.
-    pub fn new(path: PathBuf) -> Self {
+    pub const fn new(path: PathBuf) -> Self {
         Self { path }
     }
 

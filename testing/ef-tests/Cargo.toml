@@ -20,12 +20,10 @@ reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
-reth-interfaces.workspace = true
-reth-revm.workspace = true
 reth-evm-ethereum.workspace = true
 
 alloy-rlp.workspace = true
-tokio.workspace = true
+
 walkdir = "2.3.3"
 serde.workspace = true
 serde_json.workspace = true

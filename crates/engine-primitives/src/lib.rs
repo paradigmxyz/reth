@@ -303,7 +303,10 @@ pub enum MessageValidationKind {
 impl MessageValidationKind {
     /// Returns an `EngineObjectValidationError` based on the given
     /// `VersionSpecificValidationError` and the current validation kind.
-    pub fn to_error(self, error: VersionSpecificValidationError) -> EngineObjectValidationError {
+    pub const fn to_error(
+        self,
+        error: VersionSpecificValidationError,
+    ) -> EngineObjectValidationError {
         match self {
             Self::Payload => EngineObjectValidationError::Payload(error),
             Self::PayloadAttributes => EngineObjectValidationError::PayloadAttributes(error),

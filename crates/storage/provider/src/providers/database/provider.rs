@@ -28,11 +28,7 @@ use reth_db::{
     BlockNumberList, DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{
-    p2p::headers::downloader::SyncTarget,
-    provider::{ProviderResult, RootMismatch},
-    RethResult,
-};
+use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
@@ -45,6 +41,7 @@ use reth_primitives::{
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
     Withdrawals, B256, U256,
 };
+use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
@@ -111,7 +108,7 @@ pub struct DatabaseProvider<TX> {
 
 impl<TX> DatabaseProvider<TX> {
     /// Returns a static file provider
-    pub fn static_file_provider(&self) -> &StaticFileProvider {
+    pub const fn static_file_provider(&self) -> &StaticFileProvider {
         &self.static_file_provider
     }
 }
@@ -314,7 +311,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     }
 
     /// Pass `DbTx` or `DbTxMut` immutable reference.
-    pub fn tx_ref(&self) -> &TX {
+    pub const fn tx_ref(&self) -> &TX {
         &self.tx
     }
 
@@ -1121,7 +1118,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
         &self,
         mode: HeaderSyncMode,
         highest_uninterrupted_block: BlockNumber,
-    ) -> RethResult<HeaderSyncGap> {
+    ) -> ProviderResult<HeaderSyncGap> {
         let static_file_provider = self.static_file_provider();
 
         // Make sure Headers static file is at the same height. If it's further, this
@@ -1145,7 +1142,7 @@ impl<TX: DbTx> HeaderSyncGapProvider for DatabaseProvider<TX> {
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()).into())
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
             }
             Ordering::Equal => {}
         }

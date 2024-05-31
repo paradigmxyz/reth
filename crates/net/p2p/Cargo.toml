@@ -28,21 +28,13 @@ auto_impl.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
-secp256k1 = { workspace = true, default-features = false, features = [
-    "alloc",
-    "recovery",
-    "rand",
-], optional = true }
 parking_lot = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-consensus = { workspace = true, features = ["test-utils"] }
 
 parking_lot.workspace = true
-rand.workspace = true
 tokio = { workspace = true, features = ["full"] }
-secp256k1 = { workspace = true, features = ["alloc", "recovery", "rand"] }
 
 [features]
-test-utils = ["reth-consensus/test-utils", "secp256k1", "rand", "parking_lot"]
+test-utils = ["reth-consensus/test-utils", "parking_lot"]

@@ -137,7 +137,7 @@ impl<C> NetworkManager<C> {
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
     ///
     /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
-    pub fn handle(&self) -> &NetworkHandle {
+    pub const fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
 
@@ -148,7 +148,7 @@ impl<C> NetworkManager<C> {
     }
 
     /// Returns the secret key used for authenticating sessions.
-    pub fn secret_key(&self) -> SecretKey {
+    pub const fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
     }
 
@@ -161,8 +161,8 @@ impl<C> NetworkManager<C> {
         // update metrics for whole poll function
         metrics.duration_poll_network_manager.set(start.elapsed().as_secs_f64());
         // update poll metrics for nested items
-        metrics.duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
-        metrics.duration_poll_swarm.set(acc_swarm.as_secs_f64());
+        metrics.acc_duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
+        metrics.acc_duration_poll_swarm.set(acc_swarm.as_secs_f64());
     }
 }
 
@@ -313,12 +313,12 @@ where
     }
 
     /// Create a [`NetworkBuilder`] to configure all components of the network
-    pub fn into_builder(self) -> NetworkBuilder<C, (), ()> {
+    pub const fn into_builder(self) -> NetworkBuilder<C, (), ()> {
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
     }
 

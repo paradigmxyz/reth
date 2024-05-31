@@ -84,32 +84,21 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
 }
 
 /// Converts [ExecutionPayloadV3] to [Block]
-///
-/// This requires the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) parent beacon block root
-pub fn try_payload_v3_to_block(
-    payload: ExecutionPayloadV3,
-    parent_beacon_block_root: B256,
-) -> Result<Block, PayloadError> {
+pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, PayloadError> {
     // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
     // used and excess blob gas
     let mut base_block = try_payload_v2_to_block(payload.payload_inner)?;
 
     base_block.header.blob_gas_used = Some(payload.blob_gas_used);
     base_block.header.excess_blob_gas = Some(payload.excess_blob_gas);
-    base_block.header.parent_beacon_block_root = Some(parent_beacon_block_root);
 
     Ok(base_block)
 }
 
 /// Converts [ExecutionPayloadV4] to [Block]
-///
-/// This requires the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) parent beacon block root
-pub fn try_payload_v4_to_block(
-    payload: ExecutionPayloadV4,
-    parent_beacon_block_root: B256,
-) -> Result<Block, PayloadError> {
+pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
     let ExecutionPayloadV4 { payload_inner, deposit_requests, withdrawal_requests } = payload;
-    let mut block = try_payload_v3_to_block(payload_inner, parent_beacon_block_root)?;
+    let mut block = try_payload_v3_to_block(payload_inner)?;
 
     // attach requests with asc type identifiers
     let requests = deposit_requests
@@ -128,7 +117,6 @@ pub fn try_payload_v4_to_block(
 /// Converts [SealedBlock] to [ExecutionPayload]
 pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) {
     if value.header.requests_root.is_some() {
-        // block with requests root: V4
         (ExecutionPayload::V4(block_to_payload_v4(value)), None)
     } else if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
@@ -296,18 +284,14 @@ pub fn try_into_block(
     value: ExecutionPayload,
     parent_beacon_block_root: Option<B256>,
 ) -> Result<Block, PayloadError> {
-    let base_payload = match value {
+    let mut base_payload = match value {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
         ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload)?,
-        ExecutionPayload::V3(payload) => try_payload_v3_to_block(
-            payload,
-            parent_beacon_block_root.ok_or_else(|| PayloadError::PostCancunWithoutCancunFields)?,
-        )?,
-        ExecutionPayload::V4(payload) => try_payload_v4_to_block(
-            payload,
-            parent_beacon_block_root.ok_or_else(|| PayloadError::PostCancunWithoutCancunFields)?,
-        )?,
+        ExecutionPayload::V3(payload) => try_payload_v3_to_block(payload)?,
+        ExecutionPayload::V4(payload) => try_payload_v4_to_block(payload)?,
     };
+
+    base_payload.header.parent_beacon_block_root = parent_beacon_block_root;
 
     Ok(base_payload)
 }
@@ -394,7 +378,7 @@ mod tests {
         block_to_payload_v3, try_into_block, try_payload_v3_to_block, try_payload_v4_to_block,
         validate_block_hash,
     };
-    use reth_primitives::{b256, hex, Bytes, B256, U256};
+    use reth_primitives::{b256, hex, Bytes, U256};
     use reth_rpc_types::{
         engine::{CancunPayloadFields, ExecutionPayloadV3, ExecutionPayloadV4},
         ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,
@@ -429,12 +413,13 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
+        let mut block = try_payload_v3_to_block(new_payload.clone()).unwrap();
+
         // this newPayload came with a parent beacon block root, we need to manually insert it
         // before hashing
         let parent_beacon_block_root =
             b256!("531cd53b8e68deef0ea65edfa3cda927a846c307b0907657af34bc3f313b5871");
-
-        let block = try_payload_v3_to_block(new_payload.clone(), parent_beacon_block_root).unwrap();
+        block.header.parent_beacon_block_root = Some(parent_beacon_block_root);
 
         let converted_payload = block_to_payload_v3(block.seal_slow());
 
@@ -471,7 +456,7 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let _block = try_payload_v3_to_block(new_payload, B256::random())
+        let _block = try_payload_v3_to_block(new_payload)
             .expect_err("execution payload conversion requires typed txs without a rlp header");
     }
 
@@ -662,11 +647,8 @@ mod tests {
       "withdrawals": []
     }"#;
 
-        let parent_beacon_block =
-            b256!("d9851db05fa63593f75e2b12c4bba9f47740613ca57da3b523a381b8c27f3297");
-
         let payload = serde_json::from_str::<ExecutionPayloadV4>(s).unwrap();
-        let block = try_payload_v4_to_block(payload, parent_beacon_block).unwrap().seal_slow();
+        let block = try_payload_v4_to_block(payload).unwrap().seal_slow();
         let hash = block.hash();
         assert_eq!(hash, b256!("86eeb2a4b656499f313b601e1dcaedfeacccab27131b6d4ea99bc69a57607f7d"))
     }

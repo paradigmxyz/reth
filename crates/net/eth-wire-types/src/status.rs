@@ -43,12 +43,12 @@ pub struct Status {
 }
 
 impl From<Genesis> for Status {
-    fn from(genesis: Genesis) -> Status {
+    fn from(genesis: Genesis) -> Self {
         let chain = genesis.config.chain_id;
         let total_difficulty = genesis.difficulty;
         let chainspec = ChainSpec::from(genesis);
 
-        Status {
+        Self {
             version: EthVersion::Eth68 as u8,
             chain: Chain::from_id(chain),
             total_difficulty,
@@ -135,7 +135,7 @@ impl Debug for Status {
 impl Default for Status {
     fn default() -> Self {
         let mainnet_genesis = MAINNET.genesis_hash();
-        Status {
+        Self {
             version: EthVersion::Eth68 as u8,
             chain: Chain::from_named(NamedChain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
@@ -184,42 +184,42 @@ pub struct StatusBuilder {
 
 impl StatusBuilder {
     /// Consumes the type and creates the actual [`Status`] message.
-    pub fn build(self) -> Status {
+    pub const fn build(self) -> Status {
         self.status
     }
 
     /// Sets the protocol version.
-    pub fn version(mut self, version: u8) -> Self {
+    pub const fn version(mut self, version: u8) -> Self {
         self.status.version = version;
         self
     }
 
     /// Sets the chain id.
-    pub fn chain(mut self, chain: Chain) -> Self {
+    pub const fn chain(mut self, chain: Chain) -> Self {
         self.status.chain = chain;
         self
     }
 
     /// Sets the total difficulty.
-    pub fn total_difficulty(mut self, total_difficulty: U256) -> Self {
+    pub const fn total_difficulty(mut self, total_difficulty: U256) -> Self {
         self.status.total_difficulty = total_difficulty;
         self
     }
 
     /// Sets the block hash.
-    pub fn blockhash(mut self, blockhash: B256) -> Self {
+    pub const fn blockhash(mut self, blockhash: B256) -> Self {
         self.status.blockhash = blockhash;
         self
     }
 
     /// Sets the genesis hash.
-    pub fn genesis(mut self, genesis: B256) -> Self {
+    pub const fn genesis(mut self, genesis: B256) -> Self {
         self.status.genesis = genesis;
         self
     }
 
     /// Sets the fork id.
-    pub fn forkid(mut self, forkid: ForkId) -> Self {
+    pub const fn forkid(mut self, forkid: ForkId) -> Self {
         self.status.forkid = forkid;
         self
     }

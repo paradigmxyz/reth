@@ -227,7 +227,7 @@ impl Testnet<NoopProvider, TestPool> {
 
     /// Creates a new [`Testnet`] with the given number of peers
     pub async fn try_create(num_peers: usize) -> Result<Self, NetworkError> {
-        let mut this = Testnet::default();
+        let mut this = Self::default();
 
         this.extend_peer_with_config((0..num_peers).map(|_| Default::default())).await?;
         Ok(this)
@@ -364,7 +364,7 @@ where
     }
 
     /// The address that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
     }
 
@@ -384,7 +384,7 @@ where
     }
 
     /// Returns the [`TestPool`] of this peer.
-    pub fn pool(&self) -> Option<&Pool> {
+    pub const fn pool(&self) -> Option<&Pool> {
         self.pool.as_ref()
     }
 
@@ -508,17 +508,17 @@ impl<Pool> PeerHandle<Pool> {
     }
 
     /// Returns the [`TransactionsHandle`] of this peer.
-    pub fn transactions(&self) -> Option<&TransactionsHandle> {
+    pub const fn transactions(&self) -> Option<&TransactionsHandle> {
         self.transactions.as_ref()
     }
 
     /// Returns the [`TestPool`] of this peer.
-    pub fn pool(&self) -> Option<&Pool> {
+    pub const fn pool(&self) -> Option<&Pool> {
         self.pool.as_ref()
     }
 
     /// Returns the [`NetworkHandle`] of this peer.
-    pub fn network(&self) -> &NetworkHandle {
+    pub const fn network(&self) -> &NetworkHandle {
         &self.network
     }
 }
@@ -531,7 +531,7 @@ where
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
-        let PeerConfig { config, client, secret_key } = self;
+        let Self { config, client, secret_key } = self;
         let network = NetworkManager::new(config).await?;
         let peer = Peer {
             network,
@@ -598,7 +598,7 @@ pub struct NetworkEventStream {
 
 impl NetworkEventStream {
     /// Create a new [`NetworkEventStream`] from the given network event receiver stream.
-    pub fn new(inner: EventStream<NetworkEvent>) -> Self {
+    pub const fn new(inner: EventStream<NetworkEvent>) -> Self {
         Self { inner }
     }
 

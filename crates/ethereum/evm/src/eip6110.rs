@@ -5,40 +5,6 @@ use reth_evm::execute::BlockValidationError;
 use reth_primitives::{ChainSpec, Receipt, Request};
 use revm_primitives::Log;
 
-/// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa) Deposits from receipts,
-/// and returns them as a `Request`.
-pub fn parse_deposits_from_receipts<'a, I>(
-    chain_spec: &ChainSpec,
-    receipts: I,
-) -> Result<Vec<Request>, BlockValidationError>
-where
-    I: IntoIterator<Item = &'a Receipt>,
-{
-    let res = receipts
-        .into_iter()
-        .flat_map(|receipt| receipt.logs.iter())
-        // No need to filter for topic because there's only one event and that's the Deposit event
-        // in the deposit contract.
-        .filter(|log| {
-            log.address ==
-                chain_spec
-                    .deposit_contract
-                    .as_ref()
-                    .map_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS, |contract| contract.address)
-        })
-        .map(|log| {
-            let decoded_log = DepositEvent::decode_log(log, false)?;
-            let deposit = parse_deposit_from_log(&decoded_log);
-            Ok(Request::DepositRequest(deposit))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        // todo: this is ugly, we should clean it up
-        .map_err(|err: alloy_sol_types::Error| {
-            BlockValidationError::DepositRequestDecode(err.to_string())
-        })?;
-    Ok(res)
-}
-
 sol! {
     #[allow(missing_docs)]
     event DepositEvent(
@@ -48,6 +14,37 @@ sol! {
         bytes signature,
         bytes index
     );
+}
+
+/// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa)
+/// (address is from the passed [ChainSpec]) deposits from receipts, and return them as a
+/// [vector](Vec) of (requests)[Request].
+pub fn parse_deposits_from_receipts<'a, I>(
+    chain_spec: &ChainSpec,
+    receipts: I,
+) -> Result<Vec<Request>, BlockValidationError>
+where
+    I: IntoIterator<Item = &'a Receipt>,
+{
+    let deposit_contract_address = chain_spec
+        .deposit_contract
+        .as_ref()
+        .map_or(MAINNET_DEPOSIT_CONTRACT_ADDRESS, |contract| contract.address);
+    receipts
+        .into_iter()
+        .flat_map(|receipt| receipt.logs.iter())
+        // No need to filter for topic because there's only one event and that's the Deposit event
+        // in the deposit contract.
+        .filter(|log| log.address == deposit_contract_address)
+        .map(|log| {
+            let decoded_log = DepositEvent::decode_log(log, false)?;
+            let deposit = parse_deposit_from_log(&decoded_log);
+            Ok(Request::DepositRequest(deposit))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err: alloy_sol_types::Error| {
+            BlockValidationError::DepositRequestDecode(err.to_string())
+        })
 }
 
 fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
@@ -87,15 +84,14 @@ fn parse_deposit_from_log(log: &Log<DepositEvent>) -> DepositRequest {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use reth_primitives::{TxType, MAINNET};
 
-    use super::*;
-
     #[test]
-    #[allow(clippy::needless_update)] // side-effect of optimism fields
     fn test_parse_deposit_from_log() {
         let receipts = vec![
             // https://etherscan.io/tx/0xa5239d4c542063d29022545835815b78b09f571f2bf1c8427f4765d6f5abbce9
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
             Receipt {
                 // these don't matter
                 tx_type: TxType::Legacy,
@@ -107,6 +103,7 @@ mod tests {
                 ..Default::default()
             },
             // https://etherscan.io/tx/0xd9734d4e3953bcaa939fd1c1d80950ee54aeecc02eef6ae8179f47f5b7103338
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
             Receipt {
                 // these don't matter
                 tx_type: TxType::Legacy,
@@ -118,6 +115,7 @@ mod tests {
                 ..Default::default()
             },
         ];
+
         let requests = parse_deposits_from_receipts(&MAINNET, &receipts).unwrap();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].as_deposit_request().unwrap().amount, 32e9 as u64);

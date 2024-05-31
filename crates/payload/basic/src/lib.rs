@@ -12,7 +12,6 @@ use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_interfaces::RethResult;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
@@ -122,7 +121,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     }
 
     /// Returns a reference to the tasks type
-    pub fn tasks(&self) -> &Tasks {
+    pub const fn tasks(&self) -> &Tasks {
         &self.executor
     }
 
@@ -266,13 +265,13 @@ pub struct BasicPayloadJobGeneratorConfig {
 
 impl BasicPayloadJobGeneratorConfig {
     /// Sets the interval at which the job should build a new payload after the last.
-    pub fn interval(mut self, interval: Duration) -> Self {
+    pub const fn interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
     }
 
     /// Sets the deadline when this job should resolve.
-    pub fn deadline(mut self, deadline: Duration) -> Self {
+    pub const fn deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
         self
     }
@@ -801,7 +800,7 @@ pub struct WithdrawalsOutcome {
 
 impl WithdrawalsOutcome {
     /// No withdrawals pre shanghai
-    pub fn pre_shanghai() -> Self {
+    pub const fn pre_shanghai() -> Self {
         Self { withdrawals: None, withdrawals_root: None }
     }
 
@@ -824,7 +823,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Withdrawals,
-) -> RethResult<WithdrawalsOutcome> {
+) -> Result<WithdrawalsOutcome, DB::Error> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }
@@ -897,16 +896,13 @@ where
 ///
 /// This uses [apply_withdrawal_requests_contract_call] to ultimately calculate the
 /// [requests](Request).
-pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit, Attributes>(
+pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
-    chain_spec: &ChainSpec,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
-    attributes: &Attributes,
 ) -> Result<Vec<Request>, PayloadBuilderError>
 where
     DB::Error: std::fmt::Display,
-    Attributes: PayloadBuilderAttributes,
 {
     // apply post-block EIP-7002 contract call
     let mut evm_post_block = Evm::builder()
@@ -919,7 +915,7 @@ where
         .build();
 
     // initialize a block from the env, because the post block call needs the block itself
-    apply_withdrawal_requests_contract_call(chain_spec, attributes.timestamp(), &mut evm_post_block)
+    apply_withdrawal_requests_contract_call(&mut evm_post_block)
         .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 

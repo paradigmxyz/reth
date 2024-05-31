@@ -18,7 +18,7 @@
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
@@ -379,7 +379,6 @@ impl StorageInner {
             chain_spec,
         );
 
-        // todo(onbjerg): when we rewrite this, add support for requests
         let block = Block {
             header,
             body: transactions,

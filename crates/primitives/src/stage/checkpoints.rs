@@ -71,7 +71,7 @@ impl Compact for MerkleCheckpoint {
         }
 
         let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (MerkleCheckpoint { target_block, last_account_key, walker_stack, state }, buf)
+        (Self { target_block, last_account_key, walker_stack, state }, buf)
     }
 }
 
@@ -198,7 +198,7 @@ impl StageCheckpoint {
     }
 
     /// Sets the block number.
-    pub fn with_block_number(mut self, block_number: BlockNumber) -> Self {
+    pub const fn with_block_number(mut self, block_number: BlockNumber) -> Self {
         self.block_number = block_number;
         self
     }
@@ -297,7 +297,7 @@ macro_rules! stage_unit_checkpoints {
         impl StageCheckpoint {
             $(
                 #[doc = $fn_get_doc]
-                pub fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
+pub const fn $fn_get_name(&self) -> Option<$checkpoint_ty> {
                     match self.stage_checkpoint {
                         Some(StageUnitCheckpoint::$enum_variant(checkpoint)) => Some(checkpoint),
                         _ => None,
@@ -305,7 +305,7 @@ macro_rules! stage_unit_checkpoints {
                 }
 
                 #[doc = $fn_build_doc]
-                pub fn $fn_build_name(
+pub const fn $fn_build_name(
                     mut self,
                     checkpoint: $checkpoint_ty,
                 ) -> Self {

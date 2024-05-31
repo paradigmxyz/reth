@@ -20,7 +20,6 @@ reth-ethereum-consensus.workspace = true
 # Ethereum
 revm-primitives.workspace = true
 revm-interpreter.workspace = true
-
 revm-precompile = { version = "7.0.0", features = ["std"], default-features = false }
 
 # Alloy
@@ -32,10 +31,10 @@ alloy-sol-types.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
-alloy-eips.workspace = true
+serde_json.workspace = true
 
 [features]
 optimism = []

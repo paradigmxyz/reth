@@ -15,7 +15,7 @@ pub struct RPCApi {
 impl RPCApi {
     /// Return a new RPCApi struct, with given module_map
     pub fn new(module_map: HashMap<String, String>) -> Self {
-        RPCApi { rpc_modules: Arc::new(RpcModules::new(module_map)) }
+        Self { rpc_modules: Arc::new(RpcModules::new(module_map)) }
     }
 }
 

@@ -18,7 +18,7 @@ impl Compact for Request {
     fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (raw, buf) = Bytes::from_compact(buf, buf.len());
 
-        (Request::decode_7685(&mut raw.as_ref()).expect("invalid eip-7685 request in db"), buf)
+        (Self::decode_7685(&mut raw.as_ref()).expect("invalid eip-7685 request in db"), buf)
     }
 }
 

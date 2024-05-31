@@ -45,14 +45,14 @@ pub struct Tx<K: TransactionKind> {
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
     #[inline]
-    pub fn new(inner: Transaction<K>) -> Self {
+    pub const fn new(inner: Transaction<K>) -> Self {
         Self::new_inner(inner, None)
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]
     #[track_caller]
-    pub fn new_with_metrics(
+    pub(crate) fn new_with_metrics(
         inner: Transaction<K>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
@@ -68,7 +68,7 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     #[inline]
-    fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
+    const fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
         // NOTE: These constants are needed to initialize `OnceCell` at compile-time, as array
         // initialization is not allowed with non-Copy types, and `const { }` blocks are not stable
         // yet.

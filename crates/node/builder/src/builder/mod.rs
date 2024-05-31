@@ -141,14 +141,14 @@ pub struct NodeBuilder<DB> {
 
 impl NodeBuilder<()> {
     /// Create a new [`NodeBuilder`].
-    pub fn new(config: NodeConfig) -> Self {
+    pub const fn new(config: NodeConfig) -> Self {
         Self { config, database: () }
     }
 }
 
 impl<DB> NodeBuilder<DB> {
     /// Returns a reference to the node builder's config.
-    pub fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig {
         &self.config
     }
 
@@ -160,11 +160,11 @@ impl<DB> NodeBuilder<DB> {
     /// Preconfigure the builder with the context to launch the node.
     ///
     /// This provides the task executor and the data directory for the node.
-    pub fn with_launch_context(
+    pub const fn with_launch_context(
         self,
         task_executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> WithLaunchContext<NodeBuilder<DB>> {
+    ) -> WithLaunchContext<Self> {
         WithLaunchContext { builder: self, task_executor, data_dir }
     }
 
@@ -221,12 +221,12 @@ pub struct WithLaunchContext<Builder> {
 
 impl<Builder> WithLaunchContext<Builder> {
     /// Returns a reference to the task executor.
-    pub fn task_executor(&self) -> &TaskExecutor {
+    pub const fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
     }
 
     /// Returns a reference to the data directory.
-    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.data_dir
     }
 }
@@ -236,7 +236,7 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Returns a reference to the node builder's config.
-    pub fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig {
         self.builder.config()
     }
 
@@ -411,7 +411,7 @@ where
     /// Check that the builder can be launched
     ///
     /// This is useful when writing tests to ensure that the builder is configured correctly.
-    pub fn check_launch(self) -> Self {
+    pub const fn check_launch(self) -> Self {
         self
     }
 }
@@ -434,7 +434,7 @@ pub struct BuilderContext<Node: FullNodeTypes> {
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Create a new instance of [BuilderContext]
-    pub fn new(
+    pub const fn new(
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
@@ -446,31 +446,31 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the configured provider to interact with the blockchain.
-    pub fn provider(&self) -> &Node::Provider {
+    pub const fn provider(&self) -> &Node::Provider {
         &self.provider
     }
 
     /// Returns the current head of the blockchain at launch.
-    pub fn head(&self) -> Head {
+    pub const fn head(&self) -> Head {
         self.head
     }
 
     /// Returns the config of the node.
-    pub fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig {
         &self.config
     }
 
     /// Returns the data dir of the node.
     ///
     /// This gives access to all relevant files and directories of the node's datadir.
-    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.data_dir
     }
 
     /// Returns the executor of the node.
     ///
     /// This can be used to execute async tasks or functions during the setup.
-    pub fn task_executor(&self) -> &TaskExecutor {
+    pub const fn task_executor(&self) -> &TaskExecutor {
         &self.executor
     }
 

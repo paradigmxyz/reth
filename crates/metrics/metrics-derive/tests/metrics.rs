@@ -1,5 +1,5 @@
 use metrics::{
-    set_recorder, Counter, Gauge, Histogram, Key, KeyName, Label, Recorder, SharedString, Unit,
+    Counter, Gauge, Histogram, Key, KeyName, Label, Metadata, Recorder, SharedString, Unit,
 };
 use once_cell::sync::Lazy;
 use reth_metrics_derive::Metrics;
@@ -113,27 +113,23 @@ fn test_describe(scope: &str) {
 #[test]
 #[serial]
 fn describe_metrics() {
-    let _ = set_recorder(&*RECORDER as &dyn Recorder); // ignore error
+    let _guard = RECORDER.enter();
 
     CustomMetrics::describe();
 
     test_describe("metrics_custom");
-
-    RECORDER.clear();
 }
 
 #[test]
 #[serial]
 fn describe_dynamic_metrics() {
-    let _ = set_recorder(&*RECORDER as &dyn Recorder); // ignore error
+    let _guard = RECORDER.enter();
 
     let scope = "local_scope";
 
     DynamicScopeMetrics::describe(scope);
 
     test_describe(scope);
-
-    RECORDER.clear();
 }
 
 fn test_register(scope: &str) {
@@ -171,27 +167,23 @@ fn test_register(scope: &str) {
 #[test]
 #[serial]
 fn register_metrics() {
-    let _ = set_recorder(&*RECORDER as &dyn Recorder); // ignore error
+    let _guard = RECORDER.enter();
 
     let _metrics = CustomMetrics::default();
 
     test_register("metrics_custom");
-
-    RECORDER.clear();
 }
 
 #[test]
 #[serial]
 fn register_dynamic_metrics() {
-    let _ = set_recorder(&*RECORDER as &dyn Recorder); // ignore error
+    let _guard = RECORDER.enter();
 
     let scope = "local_scope";
 
     let _metrics = DynamicScopeMetrics::new(scope);
 
     test_register(scope);
-
-    RECORDER.clear();
 }
 
 fn test_labels(scope: &str) {
@@ -225,27 +217,23 @@ fn test_labels(scope: &str) {
 #[test]
 #[serial]
 fn label_metrics() {
-    let _ = set_recorder(&*RECORDER as &dyn Recorder); // ignore error
+    let _guard = RECORDER.enter();
 
     let _metrics = CustomMetrics::new_with_labels(&[("key", "value")]);
 
     test_labels("metrics_custom");
-
-    RECORDER.clear();
 }
 
 #[test]
 #[serial]
 fn dynamic_label_metrics() {
-    let _ = set_recorder(&*RECORDER as &dyn Recorder); // ignore error
+    let _guard = RECORDER.enter();
 
     let scope = "local_scope";
 
     let _metrics = DynamicScopeMetrics::new_with_labels(scope, &[("key", "value")]);
 
     test_labels(scope);
-
-    RECORDER.clear();
 }
 
 struct TestRecorder {
@@ -270,6 +258,22 @@ struct TestMetric {
 impl TestRecorder {
     fn new() -> Self {
         Self { metrics: Mutex::new(HashMap::default()) }
+    }
+
+    /// Sets this recorder as the global recorder for the duration of the returned guard.
+    #[must_use]
+    fn enter(&'static self) -> impl Drop {
+        struct Reset {
+            recorder: &'static TestRecorder,
+        }
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                self.recorder.clear();
+            }
+        }
+
+        let _ = metrics::set_global_recorder(self);
+        Reset { recorder: self }
     }
 
     fn metrics_len(&self) -> usize {
@@ -298,7 +302,7 @@ impl TestRecorder {
     }
 }
 
-impl Recorder for TestRecorder {
+impl Recorder for &'static TestRecorder {
     fn describe_counter(&self, key: KeyName, _unit: Option<Unit>, description: SharedString) {
         self.record_metric(
             key.as_str(),
@@ -321,21 +325,21 @@ impl Recorder for TestRecorder {
         )
     }
 
-    fn register_counter(&self, key: &Key) -> Counter {
+    fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> Counter {
         let labels_vec: Vec<Label> = key.labels().cloned().collect();
         let labels = (!labels_vec.is_empty()).then_some(labels_vec);
         self.record_metric(key.name(), TestMetricTy::Counter, None, labels);
         Counter::noop()
     }
 
-    fn register_gauge(&self, key: &Key) -> Gauge {
+    fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
         let labels_vec: Vec<Label> = key.labels().cloned().collect();
         let labels = (!labels_vec.is_empty()).then_some(labels_vec);
         self.record_metric(key.name(), TestMetricTy::Gauge, None, labels);
         Gauge::noop()
     }
 
-    fn register_histogram(&self, key: &Key) -> Histogram {
+    fn register_histogram(&self, key: &Key, _metadata: &Metadata<'_>) -> Histogram {
         let labels_vec: Vec<Label> = key.labels().cloned().collect();
         let labels = (!labels_vec.is_empty()).then_some(labels_vec);
         self.record_metric(key.name(), TestMetricTy::Histogram, None, labels);

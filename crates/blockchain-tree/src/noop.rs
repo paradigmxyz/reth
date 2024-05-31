@@ -12,7 +12,7 @@ use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
     CanonStateSubscriptions, FullBundleStateDataProvider,
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 /// A BlockchainTree that does nothing.
 ///
@@ -74,10 +74,6 @@ impl BlockchainTreeEngine for NoopBlockchainTree {
 }
 
 impl BlockchainTreeViewer for NoopBlockchainTree {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        Default::default()
-    }
-
     fn header_by_hash(&self, _hash: BlockHash) -> Option<SealedHeader> {
         None
     }
@@ -90,16 +86,8 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
         None
     }
 
-    fn buffered_block_by_hash(&self, _block_hash: BlockHash) -> Option<SealedBlock> {
-        None
-    }
-
     fn buffered_header_by_hash(&self, _block_hash: BlockHash) -> Option<SealedHeader> {
         None
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        Default::default()
     }
 
     fn is_canonical(&self, _block_hash: BlockHash) -> Result<bool, ProviderError> {
@@ -112,10 +100,6 @@ impl BlockchainTreeViewer for NoopBlockchainTree {
 
     fn canonical_tip(&self) -> BlockNumHash {
         Default::default()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        (0, vec![])
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {

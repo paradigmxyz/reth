@@ -18,11 +18,10 @@ use reth_primitives::{
     SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
-    chain::{ChainSplit, ChainSplitTarget},
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
-    ChainSpecProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
-    StaticFileProviderFactory,
+    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
+    ProviderError, StaticFileProviderFactory,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -65,13 +64,14 @@ pub struct BlockchainTree<DB, E> {
     externals: TreeExternals<DB, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
+    /// Prune modes.
+    prune_modes: Option<PruneModes>,
     /// Broadcast channel for canon state changes notifications.
     canon_state_notification_sender: CanonStateNotificationSender,
-    /// Metrics for the blockchain tree.
-    metrics: TreeMetrics,
     /// Metrics for sync stages.
     sync_metrics_tx: Option<MetricEventsSender>,
-    prune_modes: Option<PruneModes>,
+    /// Metrics for the blockchain tree.
+    metrics: TreeMetrics,
 }
 
 impl<DB, E> BlockchainTree<DB, E> {
@@ -148,10 +148,10 @@ where
                 config.max_unconnected_blocks(),
             ),
             config,
-            canon_state_notification_sender,
-            metrics: Default::default(),
-            sync_metrics_tx: None,
             prune_modes,
+            canon_state_notification_sender,
+            sync_metrics_tx: None,
+            metrics: Default::default(),
         })
     }
 
@@ -190,14 +190,14 @@ where
         &self,
         block: BlockNumHash,
     ) -> Result<Option<BlockStatus>, InsertBlockErrorKind> {
+        // check if block is canonical
+        if self.is_block_hash_canonical(&block.hash)? {
+            return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
+        }
+
         let last_finalized_block = self.block_indices().last_finalized_block();
         // check db if block is finalized.
         if block.number <= last_finalized_block {
-            // check if block is canonical
-            if self.is_block_hash_canonical(&block.hash)? {
-                return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
-            }
-
             // check if block is inside database
             if self.externals.provider_factory.provider()?.block_number(block.hash)?.is_some() {
                 return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
@@ -209,11 +209,6 @@ where
             .into())
         }
 
-        // check if block is part of canonical chain
-        if self.is_block_hash_canonical(&block.hash)? {
-            return Ok(Some(BlockStatus::Valid(BlockAttachment::Canonical)))
-        }
-
         // is block inside chain
         if let Some(attachment) = self.is_block_inside_sidechain(&block) {
             return Ok(Some(BlockStatus::Valid(attachment)))
@@ -221,7 +216,10 @@ where
 
         // check if block is disconnected
         if let Some(block) = self.state.buffered_blocks.block(&block.hash) {
-            return Ok(Some(BlockStatus::Disconnected { missing_ancestor: block.parent_num_hash() }))
+            return Ok(Some(BlockStatus::Disconnected {
+                head: self.state.block_indices.canonical_tip(),
+                missing_ancestor: block.parent_num_hash(),
+            }))
         }
 
         Ok(None)
@@ -229,7 +227,7 @@ where
 
     /// Expose internal indices of the BlockchainTree.
     #[inline]
-    pub fn block_indices(&self) -> &BlockIndices {
+    pub const fn block_indices(&self) -> &BlockIndices {
         self.state.block_indices()
     }
 
@@ -237,7 +235,7 @@ where
     ///
     /// Caution: This will not return blocks from the canonical chain.
     #[inline]
-    pub fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
+    pub fn sidechain_block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         self.state.block_by_hash(block_hash)
     }
 
@@ -259,15 +257,10 @@ where
         self.state.receipts_by_block_hash(block_hash)
     }
 
-    /// Returns true if the block is included in a side-chain.
-    fn is_block_hash_inside_sidechain(&self, block_hash: BlockHash) -> bool {
-        self.block_by_hash(block_hash).is_some()
-    }
-
     /// Returns the block that's considered the `Pending` block, if it exists.
     pub fn pending_block(&self) -> Option<&SealedBlock> {
         let b = self.block_indices().pending_block_num_hash()?;
-        self.block_by_hash(b.hash)
+        self.sidechain_block_by_hash(b.hash)
     }
 
     /// Return items needed to execute on the pending state.
@@ -299,16 +292,14 @@ where
 
             // get parent hashes
             let mut parent_block_hashes = self.all_chain_hashes(chain_id);
-            let first_pending_block_number =
-                if let Some(key_value) = parent_block_hashes.first_key_value() {
-                    *key_value.0
-                } else {
-                    debug!(target: "blockchain_tree", ?chain_id, "No blockhashes stored");
-                    return None
-                };
+            let Some((first_pending_block_number, _)) = parent_block_hashes.first_key_value()
+            else {
+                debug!(target: "blockchain_tree", ?chain_id, "No block hashes stored");
+                return None
+            };
             let canonical_chain = canonical_chain
                 .iter()
-                .filter(|&(key, _)| key < first_pending_block_number)
+                .filter(|&(key, _)| &key < first_pending_block_number)
                 .collect::<Vec<_>>();
             parent_block_hashes.extend(canonical_chain);
 
@@ -388,7 +379,10 @@ where
             .lowest_ancestor(&block_hash)
             .ok_or(BlockchainTreeError::BlockBufferingFailed { block_hash })?;
 
-        Ok(BlockStatus::Disconnected { missing_ancestor: lowest_ancestor.parent_num_hash() })
+        Ok(BlockStatus::Disconnected {
+            head: self.state.block_indices.canonical_tip(),
+            missing_ancestor: lowest_ancestor.parent_num_hash(),
+        })
     }
 
     /// This tries to append the given block to the canonical chain.
@@ -910,8 +904,8 @@ where
         // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
         for (_, chain) in self.state.chains.iter() {
-            for (&number, blocks) in chain.blocks().iter() {
-                all_chain_blocks.push(BlockNumHash { number, hash: blocks.hash() })
+            for (&number, block) in chain.blocks().iter() {
+                all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
         }
         for block in all_chain_blocks.into_iter() {
@@ -934,14 +928,11 @@ where
         let include_blocks = self.state.buffered_blocks.remove_block_with_children(&new_block.hash);
         // then try to reinsert them into the tree
         for block in include_blocks.into_iter() {
-            // dont fail on error, just ignore the block.
+            // don't fail on error, just ignore the block.
             let _ = self
                 .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
                 .map_err(|err| {
-                    debug!(
-                        target: "blockchain_tree", %err,
-                        "Failed to insert buffered block",
-                    );
+                    debug!(target: "blockchain_tree", %err, "Failed to insert buffered block");
                     err
                 });
         }
@@ -998,7 +989,7 @@ where
             header = provider.header_by_number(num)?;
         }
 
-        if header.is_none() && self.is_block_hash_inside_sidechain(*hash) {
+        if header.is_none() && self.sidechain_block_by_hash(*hash).is_some() {
             return Ok(None)
         }
 
@@ -1064,7 +1055,9 @@ where
                     hash: block_hash,
                 }))
             }
-            return Ok(CanonicalOutcome::AlreadyCanonical { header })
+
+            let head = self.state.block_indices.canonical_tip();
+            return Ok(CanonicalOutcome::AlreadyCanonical { header, head })
         }
 
         let Some(chain_id) = self.block_indices().get_block_chain_id(&block_hash) else {
@@ -1470,7 +1463,7 @@ mod tests {
     }
 
     impl TreeTester {
-        fn with_chain_num(mut self, chain_num: usize) -> Self {
+        const fn with_chain_num(mut self, chain_num: usize) -> Self {
             self.chain_num = Some(chain_num);
             self
         }
@@ -2002,18 +1995,20 @@ mod tests {
 
         let mut canon_notif = tree.subscribe_canon_state();
         // genesis block 10 is already canonical
-        tree.make_canonical(B256::ZERO).unwrap();
+        let head = BlockNumHash::new(10, B256::ZERO);
+        tree.make_canonical(head.hash).unwrap();
 
         // make sure is_block_hash_canonical returns true for genesis block
         tree.is_block_hash_canonical(&B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(head.number);
 
         // block 2 parent is not known, block2 is buffered.
         assert_eq!(
             tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                head,
                 missing_ancestor: block2.parent_num_hash()
             })
         );
@@ -2030,7 +2025,7 @@ mod tests {
 
         assert_eq!(
             tree.is_block_known(block2.num_hash()).unwrap(),
-            Some(BlockStatus::Disconnected { missing_ancestor: block2.parent_num_hash() })
+            Some(BlockStatus::Disconnected { head, missing_ancestor: block2.parent_num_hash() })
         );
 
         // check if random block is known
@@ -2329,6 +2324,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2b.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                head: block2.header.num_hash(),
                 missing_ancestor: block2b.parent_num_hash()
             })
         );
