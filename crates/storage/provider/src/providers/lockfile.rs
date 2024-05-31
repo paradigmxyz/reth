@@ -1,3 +1,4 @@
+use reth_storage_errors::lockfile::StorageLockError;
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -5,7 +6,6 @@ use std::{
     process,
     sync::Arc,
 };
-use reth_storage_errors::lockfile::StorageLockError;
 use sysinfo::System;
 use thiserror::Error;
 
@@ -14,7 +14,8 @@ use thiserror::Error;
 pub(crate) struct StorageLock(Arc<StorageLockInner>);
 
 impl StorageLock {
-    /// Tries to acquires a write lock on the target directory, returning [StorageLockError] if unsuccessful.
+    /// Tries to acquires a write lock on the target directory, returning [StorageLockError] if
+    /// unsuccessful.
     pub(crate) fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
         let path = path.join("lock");
         let lock = match parse_lock_file_pid(&path)? {
@@ -45,15 +46,14 @@ impl Drop for StorageLock {
 #[derive(Debug)]
 struct StorageLockInner {
     file: File,
-    path: PathBuf
+    path: PathBuf,
 }
 
 impl StorageLockInner {
     /// Creates lock file and writes this process PID into it.
     fn new(file_path: impl AsRef<Path>) -> Result<Self, StorageLockError> {
         let path = file_path.as_ref().to_path_buf();
-        let mut file =
-            OpenOptions::new().create(true).write(true).open(&path)?;
+        let mut file = OpenOptions::new().create(true).write(true).open(&path)?;
         write!(file, "{}", process::id() as usize)?;
         Ok(Self { file, path })
     }
@@ -69,5 +69,3 @@ fn parse_lock_file_pid(path: impl AsRef<Path>) -> Result<Option<usize>, StorageL
     }
     Ok(None)
 }
-
-
