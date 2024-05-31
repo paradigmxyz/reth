@@ -279,8 +279,8 @@ reth-node-events = { path = "crates/node/events" }
 reth-testing-utils = { path = "testing/testing-utils" }
 
 # revm
-revm = { version = "8.0.0", features = ["std", "secp256k1", "taiko"], default-features = false }
-revm-primitives = { version = "3.1.1", features = ["std", "taiko"], default-features = false }
+revm = { version = "8.0.0", features = ["std", "secp256k1"], default-features = false }
+revm-primitives = { version = "3.1.1", features = ["std"], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "848d568" }
 
 # eth
@@ -414,10 +414,10 @@ alloy-rpc-types-trace = { git = "https://github.com/brechtpd/alloy", branch = "1
 revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v35_taiko_v2", default-features = false, features = [
     "std",
     "serde",
-    #"taiko",
+    "taiko",
 ]}
 revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v35_taiko_v2", default-features = false, features = [
-    #"std",
-    #"serde",
-    #"taiko",
+    "std",
+    "serde",
+    "taiko",
 ]}

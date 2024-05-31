@@ -39,4 +39,8 @@ optimism = [
     "reth-consensus-common/optimism",
     "reth-interfaces/optimism",
 ]
+taiko = [
+    "revm/taiko",
+    "reth-primitives/taiko",
+]
 js-tracer = ["revm-inspectors/js-tracer"]

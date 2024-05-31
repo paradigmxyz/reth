@@ -14,6 +14,7 @@ use std::{
     fmt::{Display, Formatter},
     sync::Arc,
 };
+use alloy_chains::ChainKind::Id;
 
 pub use alloy_eips::eip1559::BaseFeeParams;
 
@@ -65,6 +66,66 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
+        ]),
+        // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
+        deposit_contract: Some(DepositContract::new(
+            address!("00000000219ab540356cbb839cbe05303d7705fa"),
+            11052984,
+            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+        )),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        prune_delete_limit: 3500,
+    }
+    .into()
+});
+
+/// The Taiko A7 spec
+pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: 167009.into(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
+            .expect("Can't deserialize Mainnet genesis json"),
+        genesis_hash: Some(b256!(
+            "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
+        )),
+        // <https://etherscan.io/block/15537394>
+        paris_block_and_final_difficulty: Some((
+            15537394,
+            U256::from(58_750_003_716_598_352_816_469u128),
+        )),
+        fork_timestamps: ForkTimestamps::default().shanghai(0),
+        hardforks: BTreeMap::from([
+            (Hardfork::Shanghai, ForkCondition::Block(0)),
+        ]),
+        // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
+        deposit_contract: Some(DepositContract::new(
+            address!("00000000219ab540356cbb839cbe05303d7705fa"),
+            11052984,
+            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+        )),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        prune_delete_limit: 3500,
+    }
+    .into()
+});
+
+/// The Taiko A7 spec
+pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+    ChainSpec {
+        chain: 167000.into(),
+        genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
+            .expect("Can't deserialize Mainnet genesis json"),
+        genesis_hash: Some(b256!(
+            "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
+        )),
+        // <https://etherscan.io/block/15537394>
+        paris_block_and_final_difficulty: Some((
+            15537394,
+            U256::from(58_750_003_716_598_352_816_469u128),
+        )),
+        fork_timestamps: ForkTimestamps::default().shanghai(1681338455).cancun(1710338135),
+        hardforks: BTreeMap::from([
+            (Hardfork::Shanghai, ForkCondition::Block(0)),
         ]),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
@@ -581,6 +642,13 @@ impl ChainSpec {
     #[inline]
     pub fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
+    }
+
+    /// Returns `true` if this chain contains Taiko configuration.
+    #[inline]
+    pub fn is_taiko(&self) -> bool {
+        let id = self.chain.id();
+        id >= 167000 && id <= 168000
     }
 
     /// Returns `true` if this chain is Optimism mainnet.

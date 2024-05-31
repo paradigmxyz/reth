@@ -144,6 +144,8 @@ where
     where
         DB: Database<Error = ProviderError>,
     {
+        let is_taiko = self.chain_spec.is_taiko();
+
         // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.chain_spec,
@@ -156,6 +158,7 @@ where
         // execute transactions
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
+        let mut tx_number = 0;
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -172,6 +175,12 @@ where
             }
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, ());
+            if is_taiko && tx_number == 0 {
+                evm.tx_mut().taiko.is_anchor = true;
+                // set the treasury address
+                //tx_env.taiko.treasury = chain_spec.l2_contract.unwrap_or_default();
+            }
+            tx_number += 1;
 
             // Execute transaction.
             let res = evm.transact().map_err(move |err| {

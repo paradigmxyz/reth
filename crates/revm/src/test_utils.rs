@@ -154,6 +154,10 @@ impl ConfigureEvmEnv for TestEvmConfig {
         {
             cfg_env.handler_cfg.is_optimism = chain_spec.is_optimism();
         }
+        #[cfg(feature = "taiko")]
+        {
+            cfg_env.handler_cfg.is_taiko = chain_spec.is_taiko();
+        }
     }
 }
 

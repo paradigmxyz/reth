@@ -21,8 +21,13 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<'a, DB: Database + 'a>(&self, db: DB) -> Evm<'a, (), DB> {
-        EvmBuilder::default().with_db(db).build()
+    fn evm<'a, DB: Database + 'a>(&self, db: DB, is_taiko: bool) -> Evm<'a, (), DB> {
+        let builder = EvmBuilder::default().with_db(db);
+        if is_taiko {
+            builder.append_handler_register(revm::taiko::handler_register::taiko_handle_register).build()
+        } else {
+            builder.build()
+        }
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -34,7 +39,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         env: EnvWithHandlerCfg,
     ) -> Evm<'a, (), DB> {
-        let mut evm = self.evm(db);
+        let mut evm = self.evm(db, env.handler_cfg.is_taiko);
         evm.modify_spec_id(env.spec_id());
         evm.context.evm.env = env.env;
         evm

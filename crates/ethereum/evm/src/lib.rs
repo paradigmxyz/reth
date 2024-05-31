@@ -52,6 +52,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
+        cfg_env.handler_cfg.is_taiko = chain_spec.is_taiko();
     }
 }
 
