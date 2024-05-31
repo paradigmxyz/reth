@@ -100,7 +100,6 @@ pub enum DatabaseWriteOperation {
 
 /// Database log level.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum LogLevel {
     /// Enables logging for critical conditions, i.e. assertion failures.
     Fatal,
@@ -118,4 +117,47 @@ pub enum LogLevel {
     Trace,
     /// Enables logging for extra debug-level messages.
     Extra,
+}
+
+/// Internal Clap implementation
+impl LogLevel {
+    pub fn value_variants() -> &'static [LogLevel] {
+        &[
+            LogLevel::Fatal,
+            LogLevel::Error,
+            LogLevel::Warn,
+            LogLevel::Notice,
+            LogLevel::Verbose,
+            LogLevel::Debug,
+            LogLevel::Trace,
+            LogLevel::Extra,
+        ]
+    }
+
+    pub fn help_message(&self) -> &'static str {
+        match self {
+            LogLevel::Fatal => "Enables logging for critical conditions, i.e. assertion failures",
+            LogLevel::Error => "Enables logging for error conditions",
+            LogLevel::Warn => "Enables logging for warning conditions",
+            LogLevel::Notice => "Enables logging for normal but significant condition",
+            LogLevel::Verbose => "Enables logging for verbose informational",
+            LogLevel::Debug => "Enables logging for debug-level messages",
+            LogLevel::Trace => "Enables logging for trace debug-level messages",
+            LogLevel::Extra => "Enables logging for extra debug-level messages",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<LogLevel> {
+        match s.to_lowercase().as_str() {
+            "fatal" => Some(LogLevel::Fatal),
+            "error" => Some(LogLevel::Error),
+            "warn" => Some(LogLevel::Warn),
+            "notice" => Some(LogLevel::Notice),
+            "verbose" => Some(LogLevel::Verbose),
+            "debug" => Some(LogLevel::Debug),
+            "trace" => Some(LogLevel::Trace),
+            "extra" => Some(LogLevel::Extra),
+            _ => None,
+        }
+    }
 }

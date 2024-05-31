@@ -16,6 +16,3 @@ reth-fs-util.workspace = true
 
 thiserror.workspace = true
 clap = { workspace = true, features = ["derive"], optional = true }
-
-[features]
-clap = ["dep:clap"]

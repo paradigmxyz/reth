@@ -10,7 +10,7 @@ use crate::version::default_client_version;
 #[command(next_help_heading = "Database")]
 pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
-    #[arg(long = "db.log-level", value_enum)]
+    #[arg(skip)]
     pub log_level: Option<LogLevel>,
     /// Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an
     /// NFS volume.
