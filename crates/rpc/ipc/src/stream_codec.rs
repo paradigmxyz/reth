@@ -77,17 +77,18 @@ impl tokio_util::codec::Decoder for StreamCodec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Self::Item>> {
         if let Separator::Byte(separator) = self.incoming_separator {
-            if let Some(i) = buf.as_ref().iter().position(|&b| b == separator) {
-                let line = buf.split_to(i);
-                let _ = buf.split_to(1);
+            buf.as_ref().iter().position(|&b| b == separator).map_or_else(
+                || Ok(None),
+                |i| {
+                    let line = buf.split_to(i);
+                    let _ = buf.split_to(1);
 
-                match str::from_utf8(line.as_ref()) {
-                    Ok(s) => Ok(Some(s.to_string())),
-                    Err(_) => Err(io::Error::new(io::ErrorKind::Other, "invalid UTF-8")),
-                }
-            } else {
-                Ok(None)
-            }
+                    str::from_utf8(line.as_ref()).map_or_else(
+                        |_| Err(io::Error::new(io::ErrorKind::Other, "invalid UTF-8")),
+                        |s| Ok(Some(s.to_string())),
+                    )
+                },
+            )
         } else {
             let mut depth = 0;
             let mut in_str = false;
@@ -114,10 +115,8 @@ impl tokio_util::codec::Decoder for StreamCodec {
 
                 if depth == 0 && idx != start_idx && idx - start_idx + 1 > whitespaces {
                     let bts = buf.split_to(idx + 1);
-                    return match String::from_utf8(bts.into()) {
-                        Ok(val) => Ok(Some(val)),
-                        Err(_) => Ok(None),
-                    }
+                    return String::from_utf8(bts.into())
+                        .map_or_else(|_| Ok(None), |val| Ok(Some(val)))
                 }
             }
             Ok(None)

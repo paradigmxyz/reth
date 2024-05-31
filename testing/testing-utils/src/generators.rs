@@ -20,13 +20,14 @@ use std::{
 ///
 /// If `SEED` is not set, a random seed is used.
 pub fn rng() -> StdRng {
-    if let Ok(seed) = std::env::var("SEED") {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(seed.as_bytes());
-        StdRng::seed_from_u64(hasher.finish())
-    } else {
-        StdRng::from_rng(thread_rng()).expect("could not build rng")
-    }
+    std::env::var("SEED").map_or_else(
+        |_| StdRng::from_rng(thread_rng()).expect("could not build rng"),
+        |seed| {
+            let mut hasher = DefaultHasher::new();
+            hasher.write(seed.as_bytes());
+            StdRng::seed_from_u64(hasher.finish())
+        },
+    )
 }
 
 /// Generates a range of random [SealedHeader]s.

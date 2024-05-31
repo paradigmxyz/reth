@@ -218,10 +218,9 @@ impl MetricsAttr {
     const DEFAULT_SEPARATOR: &'static str = ".";
 
     fn separator(&self) -> String {
-        match &self.separator {
-            Some(sep) => sep.value(),
-            None => Self::DEFAULT_SEPARATOR.to_owned(),
-        }
+        self.separator
+            .as_ref()
+            .map_or_else(|| Self::DEFAULT_SEPARATOR.to_owned(), |sep| sep.value())
     }
 }
 
@@ -377,29 +376,24 @@ fn parse_single_attr<'a, T: WithAttrs + ToTokens>(
     ident: &str,
 ) -> Result<Option<&'a Attribute>> {
     let mut attr_iter = token.attrs().iter().filter(|a| a.path().is_ident(ident));
-    if let Some(attr) = attr_iter.next() {
-        if let Some(next_attr) = attr_iter.next() {
+    attr_iter.next().map_or(Ok(None), |attr| {
+        attr_iter.next().map_or(Ok(Some(attr)), |next_attr| {
             Err(Error::new_spanned(
                 next_attr,
                 format!("Duplicate `#[{ident}(..)]` attribute provided."),
             ))
-        } else {
-            Ok(Some(attr))
-        }
-    } else {
-        Ok(None)
-    }
+        })
+    })
 }
 
 fn parse_single_required_attr<'a, T: WithAttrs + ToTokens>(
     token: &'a T,
     ident: &str,
 ) -> Result<&'a Attribute> {
-    if let Some(attr) = parse_single_attr(token, ident)? {
-        Ok(attr)
-    } else {
-        Err(Error::new_spanned(token, format!("`#[{ident}(..)]` attribute must be provided.")))
-    }
+    (parse_single_attr(token, ident)?).map_or_else(
+        || Err(Error::new_spanned(token, format!("`#[{ident}(..)]` attribute must be provided."))),
+        Ok,
+    )
 }
 
 fn parse_docs_to_string<T: WithAttrs>(token: &T) -> Result<Option<String>> {

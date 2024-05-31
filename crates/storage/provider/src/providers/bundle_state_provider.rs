@@ -49,11 +49,10 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> AccountReader
     for BundleStateProvider<SP, BSDP>
 {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        if let Some(account) = self.bundle_state_data_provider.state().account(&address) {
-            Ok(account)
-        } else {
-            self.state_provider.basic_account(address)
-        }
+        self.bundle_state_data_provider
+            .state()
+            .account(&address)
+            .map_or_else(|| self.state_provider.basic_account(address), Ok)
     }
 }
 

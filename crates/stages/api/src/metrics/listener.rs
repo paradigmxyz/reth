@@ -74,10 +74,11 @@ impl MetricsListener {
 
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
-                let (processed, total) = match checkpoint.entities() {
-                    Some(entities) => (entities.processed, Some(entities.total)),
-                    None => (checkpoint.block_number, max_block_number),
-                };
+                let (processed, total) = checkpoint
+                    .entities()
+                    .map_or((checkpoint.block_number, max_block_number), |entities| {
+                        (entities.processed, Some(entities.total))
+                    });
 
                 stage_metrics.entities_processed.set(processed as f64);
 

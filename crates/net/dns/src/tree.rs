@@ -69,6 +69,7 @@ impl<K: EnrKeyUnambiguous> fmt::Display for DnsEntry<K> {
 impl<K: EnrKeyUnambiguous> FromStr for DnsEntry<K> {
     type Err = ParseDnsEntryError;
 
+    #[allow(clippy::option_if_let_else)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(s) = s.strip_prefix(ROOT_V1_PREFIX) {
             TreeRootEntry::parse_value(s).map(DnsEntry::Root)
@@ -154,11 +155,8 @@ impl FromStr for TreeRootEntry {
     type Err = ParseDnsEntryError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(s) = s.strip_prefix(ROOT_V1_PREFIX) {
-            Self::parse_value(s)
-        } else {
-            Err(UnknownEntry(s.to_string()))
-        }
+        s.strip_prefix(ROOT_V1_PREFIX)
+            .map_or_else(|| Err(UnknownEntry(s.to_string())), Self::parse_value)
     }
 }
 

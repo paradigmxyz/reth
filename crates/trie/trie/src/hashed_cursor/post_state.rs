@@ -206,10 +206,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     /// Returns `true` if the storage for the given
     /// The database is not checked since it already has no wiped storage entries.
     fn is_db_storage_wiped(&self) -> bool {
-        match self.post_state.storages.get(&self.hashed_address) {
-            Some(storage) => storage.wiped,
-            None => false,
-        }
+        self.post_state.storages.get(&self.hashed_address).map_or(false, |storage| storage.wiped)
     }
 
     /// Check if the slot was zeroed out in the post state.

@@ -239,12 +239,10 @@ where
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        if let Some(element) = self {
+        self.map_or(0, |element| {
             element.to_compact(buf);
             1
-        } else {
-            0
-        }
+        })
     }
 
     /// To be used by fixed sized types like `Option<B256>`.

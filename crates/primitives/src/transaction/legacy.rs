@@ -125,15 +125,14 @@ impl TxLegacy {
     /// Outputs the length of EIP-155 fields. Only outputs a non-zero value for EIP-155 legacy
     /// transactions.
     pub(crate) fn eip155_fields_len(&self) -> usize {
-        if let Some(id) = self.chain_id {
+        self.chain_id.map_or(
+            // this is either a pre-EIP-155 legacy transaction or a typed transaction
+            0,
             // EIP-155 encodes the chain ID and two zeroes, so we add 2 to the length of the chain
             // ID to get the length of all 3 fields
             // len(chain_id) + (0x00) + (0x00)
-            id.length() + 2
-        } else {
-            // this is either a pre-EIP-155 legacy transaction or a typed transaction
-            0
-        }
+            |id| id.length() + 2,
+        )
     }
 
     /// Encodes the legacy transaction in RLP for signing, including the EIP-155 fields if possible.

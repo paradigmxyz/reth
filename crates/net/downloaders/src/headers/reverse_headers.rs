@@ -719,10 +719,10 @@ where
                     trace!(target: "downloaders::headers", current=?current_tip, new=?target, %parent_block_number, "Updated sync target");
 
                     // Update the sync target hash
-                    self.sync_target = match self.sync_target.take() {
-                        Some(sync_target) => Some(sync_target.with_hash(target)),
-                        None => Some(SyncTargetBlock::from_hash(target)),
-                    };
+                    self.sync_target = self.sync_target.take().map_or_else(
+                        || Some(SyncTargetBlock::from_hash(target)),
+                        |sync_target| Some(sync_target.with_hash(target)),
+                    );
                     self.on_block_number_update(parent_block_number, parent_block_number);
                 }
             }

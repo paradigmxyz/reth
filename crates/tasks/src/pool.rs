@@ -133,6 +133,7 @@ pub struct BlockingTaskHandle<T> {
 impl<T> Future for BlockingTaskHandle<T> {
     type Output = thread::Result<T>;
 
+    #[allow(clippy::option_if_let_else)]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match ready!(self.project().rx.poll(cx)) {
             Ok(res) => Poll::Ready(res),

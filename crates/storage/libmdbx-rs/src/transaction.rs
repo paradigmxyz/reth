@@ -454,11 +454,10 @@ impl Transaction<RW> {
 
         mdbx_result({
             self.txn_execute(|txn| {
-                if let Some(d) = data_val {
-                    unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
-                } else {
-                    unsafe { ffi::mdbx_del(txn, dbi, &key_val, ptr::null()) }
-                }
+                data_val.map_or_else(
+                    || unsafe { ffi::mdbx_del(txn, dbi, &key_val, ptr::null()) },
+                    |d| unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) },
+                )
             })?
         })
         .map(|_| true)
@@ -549,17 +548,18 @@ impl TransactionPtr {
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {
-        if let Some(lock) = self.lock.try_lock() {
-            lock
-        } else {
-            tracing::debug!(
-                target: "libmdbx",
-                txn = %self.txn as usize,
-                backtrace = %std::backtrace::Backtrace::force_capture(),
-                "Transaction lock is already acquired, blocking..."
-            );
-            self.lock.lock()
-        }
+        self.lock.try_lock().map_or_else(
+            || {
+                tracing::debug!(
+                    target: "libmdbx",
+                    txn = %self.txn as usize,
+                    backtrace = %std::backtrace::Backtrace::force_capture(),
+                    "Transaction lock is already acquired, blocking..."
+                );
+                self.lock.lock()
+            },
+            |lock| lock,
+        )
     }
 
     /// Executes the given closure once the lock on the transaction is acquired.

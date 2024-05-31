@@ -500,11 +500,12 @@ where
                     .gas_used;
             }
         }
-        let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
-            StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
-        } else {
-            StageCheckpoint::new(unwind_to)
-        };
+        let checkpoint = stage_checkpoint.map_or_else(
+            || StageCheckpoint::new(unwind_to),
+            |stage_checkpoint| {
+                StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
+            },
+        );
 
         Ok(UnwindOutput { checkpoint })
     }

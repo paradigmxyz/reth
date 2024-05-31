@@ -20,14 +20,14 @@ use std::{fs, ops::RangeInclusive, path::Path};
 pub fn prepare_account_hashing(
     num_blocks: u64,
 ) -> (TestStageDB, AccountHashingStage, RangeInclusive<BlockNumber>) {
-    let (db, stage_range) = match std::env::var(constants::ACCOUNT_HASHING_DB) {
-        Ok(db) => {
+    let (db, stage_range) = std::env::var(constants::ACCOUNT_HASHING_DB).map_or_else(
+        |_| generate_testdata_db(num_blocks),
+        |db| {
             let path = Path::new(&db).to_path_buf();
             let range = find_stage_range(&path);
             (TestStageDB::new(&path), range)
-        }
-        Err(_) => generate_testdata_db(num_blocks),
-    };
+        },
+    );
 
     (db, AccountHashingStage::default(), stage_range)
 }

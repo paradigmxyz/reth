@@ -252,18 +252,23 @@ impl NodeConfig {
     /// Otherwise, if running in `debug.continuous` mode, the genesis hash is returned.
     /// Otherwise, `None` is returned. This is what the node will do by default.
     pub fn initial_pipeline_target(&self, genesis_hash: B256) -> Option<B256> {
-        if let Some(tip) = self.debug.tip {
-            // Set the provided tip as the initial pipeline target.
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            Some(tip)
-        } else if self.debug.continuous {
-            // Set genesis as the initial pipeline target.
-            // This will allow the downloader to start
-            debug!(target: "reth::cli", "Continuous sync mode enabled");
-            Some(genesis_hash)
-        } else {
-            None
-        }
+        self.debug.tip.map_or_else(
+            || {
+                if self.debug.continuous {
+                    // Set genesis as the initial pipeline target.
+                    // This will allow the downloader to start
+                    debug!(target: "reth::cli", "Continuous sync mode enabled");
+                    Some(genesis_hash)
+                } else {
+                    None
+                }
+            },
+            |tip| {
+                // Set the provided tip as the initial pipeline target.
+                debug!(target: "reth::cli", %tip, "Tip manually set");
+                Some(tip)
+            },
+        )
     }
 
     /// Returns pruning configuration.

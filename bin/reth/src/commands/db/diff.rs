@@ -58,10 +58,7 @@ impl Command {
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
         let second_db = open_db_read_only(&second_db_path, self.second_db.database_args())?;
 
-        let tables = match &self.table {
-            Some(table) => std::slice::from_ref(table),
-            None => Tables::ALL,
-        };
+        let tables = self.table.as_ref().map_or(Tables::ALL, |table| std::slice::from_ref(table));
 
         for table in tables {
             let mut primary_tx = tool.provider_factory.db_ref().tx()?;

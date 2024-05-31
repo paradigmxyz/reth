@@ -28,7 +28,7 @@ impl Database {
         flags: MDBX_db_flags_t,
     ) -> Result<Self> {
         let c_name = name.map(|n| CString::new(n).unwrap());
-        let name_ptr = if let Some(c_name) = &c_name { c_name.as_ptr() } else { ptr::null() };
+        let name_ptr = c_name.as_ref().map_or(ptr::null(), |c_name| c_name.as_ptr());
         let mut dbi: ffi::MDBX_dbi = 0;
         txn.txn_execute(|txn_ptr| {
             mdbx_result(unsafe { ffi::mdbx_dbi_open(txn_ptr, name_ptr, flags, &mut dbi) })

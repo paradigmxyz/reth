@@ -224,6 +224,7 @@ impl PeersInfo for NetworkHandle {
         self.inner.num_active_peers.load(Ordering::Relaxed)
     }
 
+    #[allow(clippy::option_if_let_else)]
     fn local_node_record(&self) -> NodeRecord {
         if let Some(discv4) = &self.inner.discv4 {
             discv4.node_record()

@@ -48,8 +48,8 @@ mod ipc;
 mod rpc_service;
 
 /// Ipc Server implementation
-
-// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
+///
+/// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
 pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
     endpoint: String,
@@ -303,11 +303,8 @@ impl<L> RpcServiceBuilder<L> {
         self,
         layer: Option<T>,
     ) -> RpcServiceBuilder<Stack<Either<T, Identity>, L>> {
-        let layer = if let Some(layer) = layer {
-            Either::Left(layer)
-        } else {
-            Either::Right(Identity::new())
-        };
+        let layer =
+            layer.map_or_else(|| Either::Right(Identity::new()), |layer| Either::Left(layer));
         self.layer(layer)
     }
 

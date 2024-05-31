@@ -24,6 +24,7 @@ impl JwtAuthValidator {
 impl AuthValidator for JwtAuthValidator {
     type ResponseBody = hyper::Body;
 
+    #[allow(clippy::option_if_let_else)]
     fn validate(&self, headers: &HeaderMap) -> Result<(), Response<Self::ResponseBody>> {
         match get_bearer(headers) {
             Some(jwt) => match self.secret.validate(&jwt) {

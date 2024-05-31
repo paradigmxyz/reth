@@ -389,13 +389,13 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn auth_jwt_secret(&self, default_jwt_path: PathBuf) -> Result<JwtSecret, JwtError> {
-        match self.auth_jwtsecret.as_ref() {
-            Some(fpath) => {
+        self.auth_jwtsecret.as_ref().map_or_else(
+            || get_or_create_jwt_secret_from_path(&default_jwt_path),
+            |fpath| {
                 debug!(target: "reth::cli", user_path=?fpath, "Reading JWT auth secret file");
                 JwtSecret::from_file(fpath)
-            }
-            None => get_or_create_jwt_secret_from_path(&default_jwt_path),
-        }
+            },
+        )
     }
 
     fn rpc_secret_key(&self) -> Option<JwtSecret> {

@@ -1894,12 +1894,10 @@ impl ReceiveCache {
     /// This will decrement the counter for each IP address and remove IPs that have reached 0.
     fn tick_ips(&mut self, tick: usize) {
         self.ip_messages.retain(|_, count| {
-            if let Some(reset) = count.checked_sub(tick) {
+            count.checked_sub(tick).map_or(false, |reset| {
                 *count = reset;
                 true
-            } else {
-                false
-            }
+            })
         });
     }
 

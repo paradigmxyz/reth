@@ -419,6 +419,7 @@ where
                 }
 
                 // Validate that the forkchoice state is consistent.
+                #[allow(clippy::option_if_let_else)]
                 let on_updated = if let Some(invalid_fcu_response) =
                     self.ensure_consistent_forkchoice_state(state)?
                 {
@@ -1125,14 +1126,10 @@ where
         }
 
         // now check the block itself
-        if let Some(status) = self
+        (self
             .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash())
-            .map_err(BeaconOnNewPayloadError::internal)?
-        {
-            Ok(Either::Left(status))
-        } else {
-            Ok(Either::Right(block))
-        }
+            .map_err(BeaconOnNewPayloadError::internal)?)
+        .map_or_else(|| Ok(Either::Right(block)), |status| Ok(Either::Left(status)))
     }
 
     /// Validates the payload attributes with respect to the header and fork choice state.
@@ -1158,6 +1155,7 @@ where
         //    forkchoiceState.headBlockHash and identified via buildProcessId value if
         //    payloadAttributes is not null and the forkchoice state has been updated successfully.
         //    The build process is specified in the Payload building section.
+        #[allow(clippy::option_if_let_else)]
         match <EngineT::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
             state.head_block_hash,
             attrs,

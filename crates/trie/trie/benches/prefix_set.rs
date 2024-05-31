@@ -184,10 +184,11 @@ mod implementations {
 
             match self.keys.binary_search(&prefix) {
                 Ok(_) => true,
-                Err(idx) => match self.keys.get(idx) {
-                    Some(key) => key.has_prefix(&prefix),
-                    None => false, // prefix > last key
-                },
+                Err(idx) => self.keys.get(idx).map_or(
+                    // prefix > last key
+                    false,
+                    |key| key.has_prefix(&prefix),
+                ),
             }
         }
     }

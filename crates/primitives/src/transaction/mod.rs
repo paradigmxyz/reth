@@ -392,11 +392,8 @@ impl Transaction {
         let fee = max_fee_per_gas - base_fee;
 
         // Compare the fee with max_priority_fee_per_gas (or gas price for non-EIP1559 transactions)
-        if let Some(priority_fee) = self.max_priority_fee_per_gas() {
-            Some(fee.min(priority_fee))
-        } else {
-            Some(fee)
-        }
+        self.max_priority_fee_per_gas()
+            .map_or(Some(fee), |priority_fee| Some(fee.min(priority_fee)))
     }
 
     /// Get the transaction's input field.

@@ -113,13 +113,13 @@ where
     pub fn new(database: ProviderFactory<DB>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
         let provider = database.provider()?;
         let best: ChainInfo = provider.chain_info()?;
-        match provider.header_by_number(best.best_number)? {
-            Some(header) => {
+        (provider.header_by_number(best.best_number)?).map_or_else(
+            || Err(ProviderError::HeaderNotFound(best.best_number.into())),
+            |header| {
                 drop(provider);
                 Ok(Self::with_latest(database, tree, header.seal(best.best_hash)))
-            }
-            None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
-        }
+            },
+        )
     }
 }
 
@@ -445,13 +445,8 @@ where
             }
             BlockId::Number(num_tag) => match num_tag {
                 BlockNumberOrTag::Pending => Ok(self.tree.pending_receipts()),
-                _ => {
-                    if let Some(num) = self.convert_block_number(num_tag)? {
-                        self.receipts_by_block(num.into())
-                    } else {
-                        Ok(None)
-                    }
-                }
+                _ => (self.convert_block_number(num_tag)?)
+                    .map_or_else(|| Ok(None), |num| self.receipts_by_block(num.into())),
             },
         }
     }

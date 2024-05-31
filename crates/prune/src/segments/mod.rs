@@ -87,13 +87,10 @@ impl PruneInput {
     ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one
-            .and_then(|checkpoint| match checkpoint.tx_number {
-                Some(tx_number) => Some(tx_number + 1),
-                _ => {
-                    error!(target: "pruner", ?checkpoint, "Expected transaction number in prune checkpoint, found None");
-                    None
-                },
-            })
+            .and_then(|checkpoint| checkpoint.tx_number.map_or_else(|| {
+                error!(target: "pruner", ?checkpoint, "Expected transaction number in prune checkpoint, found None");
+                None
+            }, |tx_number| Some(tx_number + 1)))
             // No checkpoint exists, prune from genesis
             .unwrap_or(0);
 

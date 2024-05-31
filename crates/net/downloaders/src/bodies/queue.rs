@@ -62,9 +62,9 @@ where
         // Set last max requested block number
         self.last_requested_block_number = request
             .last()
-            .map(|last| match self.last_requested_block_number {
-                Some(num) => last.number.max(num),
-                None => last.number,
+            .map(|last| {
+                self.last_requested_block_number
+                    .map_or_else(|| last.number, |num| last.number.max(num))
             })
             .or(self.last_requested_block_number);
         // Create request and push into the queue.

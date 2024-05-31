@@ -43,11 +43,9 @@ impl LogFormat {
         color: Option<String>,
         file_writer: Option<NonBlocking>,
     ) -> BoxedLayer<Registry> {
-        let ansi = if let Some(color) = color {
+        let ansi = color.map_or(false, |color| {
             std::env::var("RUST_LOG_STYLE").map(|val| val != "never").unwrap_or(color != "never")
-        } else {
-            false
-        };
+        });
         let target = std::env::var("RUST_LOG_TARGET")
             // `RUST_LOG_TARGET` always overrides default behaviour
             .map(|val| val != "0")

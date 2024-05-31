@@ -781,11 +781,10 @@ mod tests {
                 input: ExecInput,
                 output: Option<ExecOutput>,
             ) -> Result<(), TestRunnerError> {
-                let highest_block = match output.as_ref() {
-                    Some(output) => output.checkpoint,
-                    None => input.checkpoint(),
-                }
-                .block_number;
+                let highest_block = output
+                    .as_ref()
+                    .map_or_else(|| input.checkpoint(), |output| output.checkpoint)
+                    .block_number;
                 self.validate_db_blocks(highest_block, highest_block)
             }
         }

@@ -1451,11 +1451,10 @@ struct DisplayFork {
 
 impl Display for DisplayFork {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let name_with_eip = if let Some(eip) = &self.eip {
-            format!("{} ({})", self.name, eip)
-        } else {
-            self.name.clone()
-        };
+        let name_with_eip = self
+            .eip
+            .as_ref()
+            .map_or_else(|| self.name.clone(), |eip| format!("{} ({})", self.name, eip));
 
         match self.activated_at {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {

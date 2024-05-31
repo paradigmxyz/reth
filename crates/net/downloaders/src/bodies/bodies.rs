@@ -69,10 +69,10 @@ where
 {
     /// Returns the next contiguous request.
     fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader>>> {
-        let start_at = match self.in_progress_queue.last_requested_block_number {
-            Some(num) => num + 1,
-            None => *self.download_range.start(),
-        };
+        let start_at = self
+            .in_progress_queue
+            .last_requested_block_number
+            .map_or_else(|| *self.download_range.start(), |num| num + 1);
         // as the range is inclusive, we need to add 1 to the end.
         let items_left = (self.download_range.end() + 1).saturating_sub(start_at);
         let limit = items_left.min(self.request_limit);

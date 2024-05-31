@@ -924,11 +924,7 @@ where
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
 pub fn is_better_payload(best_payload: Option<impl BuiltPayload>, new_fees: U256) -> bool {
-    if let Some(best_payload) = best_payload {
-        new_fees > best_payload.fees()
-    } else {
-        true
-    }
+    best_payload.map_or(true, |best_payload| new_fees > best_payload.fees())
 }
 
 /// Returns the duration until the given unix timestamp in seconds.

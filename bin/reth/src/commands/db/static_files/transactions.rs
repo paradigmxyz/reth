@@ -27,11 +27,11 @@ impl Command {
         let tip = provider.last_block_number()?;
         let block_range = *self.block_ranges(tip).first().expect("has been generated before");
 
-        let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
-            Filters::WithFilters(inclusion_filter, phf)
-        } else {
-            Filters::WithoutFilters
-        };
+        let filters = self
+            .with_filters
+            .then_some(phf)
+            .flatten()
+            .map_or(Filters::WithoutFilters, |phf| Filters::WithFilters(inclusion_filter, phf));
 
         let mut rng = rand::thread_rng();
 

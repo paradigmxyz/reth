@@ -307,13 +307,16 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
     /// Returns the [MiningMode] intended for --dev mode.
     pub fn dev_mining_mode(&self, pending_transactions_listener: Receiver<B256>) -> MiningMode {
-        if let Some(interval) = self.node_config().dev.block_time {
-            MiningMode::interval(interval)
-        } else if let Some(max_transactions) = self.node_config().dev.block_max_transactions {
-            MiningMode::instant(max_transactions, pending_transactions_listener)
-        } else {
-            MiningMode::instant(1, pending_transactions_listener)
-        }
+        self.node_config().dev.block_time.map_or_else(
+            || {
+                if let Some(max_transactions) = self.node_config().dev.block_max_transactions {
+                    MiningMode::instant(max_transactions, pending_transactions_listener)
+                } else {
+                    MiningMode::instant(1, pending_transactions_listener)
+                }
+            },
+            MiningMode::interval,
+        )
     }
 }
 

@@ -266,10 +266,7 @@ impl PanickedTaskError {
     fn new(task_name: &'static str, error: Box<dyn Any>) -> Self {
         let error = match error.downcast::<String>() {
             Ok(value) => Some(*value),
-            Err(error) => match error.downcast::<&str>() {
-                Ok(value) => Some(value.to_string()),
-                Err(_) => None,
-            },
+            Err(error) => error.downcast::<&str>().map_or(None, |value| Some(value.to_string())),
         };
 
         Self { task_name, error }

@@ -1179,11 +1179,8 @@ impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(*block_hash)? {
-            self.header_td_by_number(num)
-        } else {
-            Ok(None)
-        }
+        (self.block_number(*block_hash)?)
+            .map_or_else(|| Ok(None), |num| self.header_td_by_number(num))
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
@@ -1641,8 +1638,7 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
     }
 }
 
-/// Calculates the hash of the given transaction
-
+// Calculates the hash of the given transaction
 impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
@@ -1812,11 +1808,7 @@ impl<TX: DbTx> ReceiptProvider for DatabaseProvider<TX> {
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
-        if let Some(id) = self.transaction_id(hash)? {
-            self.receipt(id)
-        } else {
-            Ok(None)
-        }
+        (self.transaction_id(hash)?).map_or_else(|| Ok(None), |id| self.receipt(id))
     }
 
     fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {

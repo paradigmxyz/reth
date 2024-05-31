@@ -17,10 +17,10 @@ impl<'a> Metric<'a> {
     }
 
     pub(crate) fn name(&self) -> String {
-        match self.rename.as_ref() {
-            Some(name) => name.value(),
-            None => self.field.ident.as_ref().map(ToString::to_string).unwrap_or_default(),
-        }
+        self.rename.as_ref().map_or_else(
+            || self.field.ident.as_ref().map(ToString::to_string).unwrap_or_default(),
+            |name| name.value(),
+        )
     }
 
     pub(crate) fn register_stmt(&self) -> Result<proc_macro2::TokenStream> {

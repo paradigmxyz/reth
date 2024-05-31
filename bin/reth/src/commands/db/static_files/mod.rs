@@ -104,11 +104,13 @@ impl Command {
         {
             if !self.only_bench {
                 for ((mode, compression), phf) in all_combinations.clone() {
-                    let filters = if let Some(phf) = self.with_filters.then_some(phf).flatten() {
-                        Filters::WithFilters(InclusionFilter::Cuckoo, phf)
-                    } else {
-                        Filters::WithoutFilters
-                    };
+                    let filters = self
+                        .with_filters
+                        .then_some(phf)
+                        .flatten()
+                        .map_or(Filters::WithoutFilters, |phf| {
+                            Filters::WithFilters(InclusionFilter::Cuckoo, phf)
+                        });
 
                     match mode {
                         StaticFileSegment::Headers => self.generate_static_file::<DatabaseEnv>(

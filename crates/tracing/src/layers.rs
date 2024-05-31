@@ -165,11 +165,12 @@ fn build_env_filter(
     default_directive: Option<Directive>,
     directives: &str,
 ) -> eyre::Result<EnvFilter> {
-    let env_filter = if let Some(default_directive) = default_directive {
-        EnvFilter::builder().with_default_directive(default_directive).from_env_lossy()
-    } else {
-        EnvFilter::builder().from_env_lossy()
-    };
+    let env_filter = default_directive.map_or_else(
+        || EnvFilter::builder().from_env_lossy(),
+        |default_directive| {
+            EnvFilter::builder().with_default_directive(default_directive).from_env_lossy()
+        },
+    );
 
     DEFAULT_ENV_FILTER_DIRECTIVES
         .into_iter()

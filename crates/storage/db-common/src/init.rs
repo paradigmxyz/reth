@@ -149,14 +149,12 @@ pub fn insert_state<'a, 'b, DB: Database>(
     let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
 
     for (address, account) in alloc {
-        let bytecode_hash = if let Some(code) = &account.code {
+        let bytecode_hash = account.code.as_ref().map(|code| {
             let bytecode = Bytecode::new_raw(code.clone());
             let hash = bytecode.hash_slow();
             contracts.insert(hash, bytecode);
-            Some(hash)
-        } else {
-            None
-        };
+            hash
+        });
 
         // get state
         let storage = account

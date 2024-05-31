@@ -193,16 +193,16 @@ impl StaticFileProviderRW {
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
         // there's no block data in static files.
-        let segment_max_block = match self.writer.user_header().block_range() {
-            Some(block_range) => Some(block_range.end()),
-            None => {
+        let segment_max_block = self.writer.user_header().block_range().map_or_else(
+            || {
                 if self.writer.user_header().expected_block_start() > 0 {
                     Some(self.writer.user_header().expected_block_start() - 1)
                 } else {
                     None
                 }
-            }
-        };
+            },
+            |block_range| Some(block_range.end()),
+        );
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
