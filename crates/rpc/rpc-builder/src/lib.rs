@@ -570,9 +570,20 @@ impl RpcModuleConfig {
     pub fn builder() -> RpcModuleConfigBuilder {
         RpcModuleConfigBuilder::default()
     }
+
     /// Returns a new RPC module config given the eth namespace config
     pub const fn new(eth: EthConfig) -> Self {
         Self { eth }
+    }
+
+    /// Get a reference to the eth namespace config
+    pub const fn eth(&self) -> &EthConfig {
+        &self.eth
+    }
+
+    /// Get a mutable reference to the eth namespace config
+    pub fn eth_mut(&mut self) -> &mut EthConfig {
+        &mut self.eth
     }
 }
 
@@ -595,6 +606,21 @@ impl RpcModuleConfigBuilder {
     pub fn build(self) -> RpcModuleConfig {
         let Self { eth } = self;
         RpcModuleConfig { eth: eth.unwrap_or_default() }
+    }
+
+    /// Get a reference to the eth namespace config, if any
+    pub const fn get_eth(&self) -> &Option<EthConfig> {
+        &self.eth
+    }
+
+    /// Get a mutable reference to the eth namespace config, if any
+    pub fn eth_mut(&mut self) -> &mut Option<EthConfig> {
+        &mut self.eth
+    }
+
+    /// Get the eth namespace config, creating a default if none is set
+    pub fn eth_mut_or_default(&mut self) -> &mut EthConfig {
+        self.eth.get_or_insert_with(EthConfig::default)
     }
 }
 
