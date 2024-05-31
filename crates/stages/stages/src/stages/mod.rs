@@ -429,8 +429,17 @@ mod tests {
             db.factory.block_body_indices(block).unwrap().map(|b| b.last_tx_num())
         );
 
+        let block = 80;
+        save_checkpoint_and_check(&db, StageId::Headers, block, None);
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(block)
+        );
+
         // When a checkpoint is ahead, we request a pipeline unwind.
-        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(89)));
+        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(block)));
     }
 
     #[test]
