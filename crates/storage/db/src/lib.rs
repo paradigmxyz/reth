@@ -92,15 +92,6 @@ use crate::mdbx::DatabaseArguments;
 use eyre::WrapErr;
 use std::path::Path;
 
-/// Access storage trait.
-pub trait StorageAccess {
-    /// Whether the storage has read-only access.
-    fn is_read_only(&self) -> bool;
-
-    /// Returns the path to the storage location.
-    fn path(&self) -> &Path;
-}
-
 /// Creates a new database at the specified path if it doesn't exist. Does NOT create tables. Check
 /// [`init_db`].
 pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
@@ -242,16 +233,6 @@ pub mod test_utils {
 
         fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
             self.db().tx_mut()
-        }
-    }
-
-    impl<DB: Database> StorageAccess for TempDatabase<DB> {
-        fn is_read_only(&self) -> bool {
-            self.db().is_read_only()
-        }
-
-        fn path(&self) -> &Path {
-            self.db().path()
         }
     }
 

@@ -10,7 +10,7 @@ use crate::{
 };
 use reth_db::{
     database::Database, init_db, mdbx::DatabaseArguments, models::StoredBlockBodyIndices,
-    DatabaseEnv, StorageAccess,
+    DatabaseEnv,
 };
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
@@ -35,8 +35,6 @@ mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
-use super::StorageLock;
-
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
@@ -48,44 +46,6 @@ pub struct ProviderFactory<DB> {
     chain_spec: Arc<ChainSpec>,
     /// Static File Provider
     static_file_provider: StaticFileProvider,
-    /// Read-write file lock
-    lockfile: Option<StorageLock>,
-}
-
-impl<DB: StorageAccess> ProviderFactory<DB> {
-    /// Create new storage provider factory that only has read-only access.
-    pub fn read_only(
-        db: DB,
-        chain_spec: Arc<ChainSpec>,
-        static_file_provider: StaticFileProvider,
-    ) -> ProviderResult<Self> {
-        if !(StorageAccess::is_read_only(&db) && StorageAccess::is_read_only(&static_file_provider))
-        {
-            return Err(ProviderError::InvalidAccess)
-        }
-
-        Ok(Self::new(db, chain_spec, static_file_provider))
-    }
-
-    /// Create new database provider factory with read-write access.
-    ///
-    /// Only one can be open across processes. It will return error on w
-    pub fn read_write(
-        db: DB,
-        chain_spec: Arc<ChainSpec>,
-        static_file_provider: StaticFileProvider,
-    ) -> ProviderResult<Self> {
-        let lockfile = Some(
-            StorageLock::acquire(
-                StorageAccess::path(&db),
-                StorageAccess::path(&static_file_provider),
-            )
-            .ok_or(ProviderError::InvalidAccess)?,
-        );
-        dbg!(&lockfile);
-
-        Ok(Self { db: Arc::new(db), chain_spec, static_file_provider, lockfile })
-    }
 }
 
 impl<DB> ProviderFactory<DB> {
@@ -95,7 +55,7 @@ impl<DB> ProviderFactory<DB> {
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self { db: Arc::new(db), chain_spec, static_file_provider, lockfile: None }
+        Self { db: Arc::new(db), chain_spec, static_file_provider }
     }
 
     /// Enables metrics on the static file provider.
@@ -129,7 +89,6 @@ impl ProviderFactory<DatabaseEnv> {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
-            lockfile: None,
         })
     }
 }
@@ -618,7 +577,6 @@ impl<DB> Clone for ProviderFactory<DB> {
             db: Arc::clone(&self.db),
             chain_spec: self.chain_spec.clone(),
             static_file_provider: self.static_file_provider.clone(),
-            lockfile: self.lockfile.clone(),
         }
     }
 }

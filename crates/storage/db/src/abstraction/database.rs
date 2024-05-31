@@ -2,14 +2,14 @@ use crate::{
     abstraction::common::Sealed,
     table::TableImporter,
     transaction::{DbTx, DbTxMut},
-    DatabaseError, StorageAccess,
+    DatabaseError,
 };
 use std::{fmt::Debug, sync::Arc};
 
 /// Main Database trait that can open read-only and read-write transactions.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
-pub trait Database: StorageAccess + Send + Sync + Sealed {
+pub trait Database: Send + Sync + Sealed {
     /// Read-Only database transaction
     type TX: DbTx + Send + Sync + Debug + 'static;
     /// Read-Write database transaction
@@ -65,16 +65,6 @@ impl<DB: Database> Database for Arc<DB> {
     }
 }
 
-impl<DB: Database> StorageAccess for Arc<DB> {
-    fn is_read_only(&self) -> bool {
-        <DB as StorageAccess>::is_read_only(self)
-    }
-
-    fn path(&self) -> &std::path::Path {
-        <DB as StorageAccess>::path(self)
-    }
-}
-
 impl<DB: Database> Database for &DB {
     type TX = <DB as Database>::TX;
     type TXMut = <DB as Database>::TXMut;
@@ -85,15 +75,5 @@ impl<DB: Database> Database for &DB {
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         <DB as Database>::tx_mut(self)
-    }
-}
-
-impl<DB: Database> StorageAccess for &DB {
-    fn is_read_only(&self) -> bool {
-        <DB as StorageAccess>::is_read_only(self)
-    }
-
-    fn path(&self) -> &std::path::Path {
-        <DB as StorageAccess>::path(self)
     }
 }

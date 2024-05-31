@@ -9,7 +9,7 @@ use crate::{
     database::Database,
     table::{DupSort, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
-    DatabaseError, StorageAccess,
+    DatabaseError,
 };
 use core::ops::Bound;
 use std::{collections::BTreeMap, ops::RangeBounds};
@@ -31,16 +31,6 @@ impl Database for DatabaseMock {
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Ok(TxMock::default())
-    }
-}
-
-impl StorageAccess for DatabaseMock {
-    fn is_read_only(&self) -> bool {
-        false
-    }
-
-    fn path(&self) -> &std::path::Path {
-        unreachable!()
     }
 }
 
