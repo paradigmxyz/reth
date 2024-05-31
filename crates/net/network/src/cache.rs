@@ -180,9 +180,7 @@ where
 #[cfg(test)]
 mod test {
     use std::hash::Hasher;
-
     use derive_more::{Constructor, Display};
-
     use super::*;
 
     #[derive(Debug, Hash, PartialEq, Eq, Display, Clone, Copy)]
