@@ -28,14 +28,14 @@ pub struct StoredBlockBodyIndices {
 
 impl StoredBlockBodyIndices {
     /// Return the range of transaction ids for this block.
-    pub fn tx_num_range(&self) -> Range<TxNumber> {
+    pub const fn tx_num_range(&self) -> Range<TxNumber> {
         self.first_tx_num..self.first_tx_num + self.tx_count
     }
 
     /// Return the index of last transaction in this block unless the block
     /// is empty in which case it refers to the last transaction in a previous
     /// non-empty block
-    pub fn last_tx_num(&self) -> TxNumber {
+    pub const fn last_tx_num(&self) -> TxNumber {
         self.first_tx_num.saturating_add(self.tx_count).saturating_sub(1)
     }
 
@@ -43,24 +43,24 @@ impl StoredBlockBodyIndices {
     ///
     /// Caution: If the block is empty, this is the number of the first transaction
     /// in the next non-empty block.
-    pub fn first_tx_num(&self) -> TxNumber {
+    pub const fn first_tx_num(&self) -> TxNumber {
         self.first_tx_num
     }
 
     /// Return the index of the next transaction after this block.
-    pub fn next_tx_num(&self) -> TxNumber {
+    pub const fn next_tx_num(&self) -> TxNumber {
         self.first_tx_num + self.tx_count
     }
 
     /// Return a flag whether the block is empty
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.tx_count == 0
     }
 
     /// Return number of transaction inside block
     ///
     /// NOTE: This is not the same as the number of transitions.
-    pub fn tx_count(&self) -> NumTransactions {
+    pub const fn tx_count(&self) -> NumTransactions {
         self.tx_count
     }
 }

@@ -62,9 +62,9 @@ mod tests {
         StaticFileSegment, B256, U256,
     };
     use reth_provider::{
-        providers::StaticFileWriter, AccountExtReader, DatabaseProviderFactory, ProviderFactory,
-        ProviderResult, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
-        StorageReader,
+        providers::StaticFileWriter, AccountExtReader, BlockReader, DatabaseProviderFactory,
+        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
+        StaticFileProviderFactory, StorageReader,
     };
     use reth_stages_api::{ExecInput, Stage};
     use reth_testing_utils::generators::{self, random_block, random_block_range, random_receipt};
@@ -279,9 +279,9 @@ mod tests {
         Ok(db)
     }
 
-    /// Simulates a pruning job that was never committed and compare the check consistency result
+    /// Simulates losing data to corruption and compare the check consistency result
     /// against the expected one.
-    fn simulate_no_commit_prune_and_check(
+    fn simulate_behind_checkpoint_corruption(
         db: &TestStageDB,
         prune_count: usize,
         segment: StaticFileSegment,
@@ -290,8 +290,8 @@ mod tests {
     ) {
         let static_file_provider = db.factory.static_file_provider();
 
-        // Simulate pruning by removing `prune_count` rows from the data file without updating its
-        // offset list and configuration.
+        // Simulate corruption by removing `prune_count` rows from the data file without updating
+        // its offset list and configuration.
         {
             let mut headers_writer = static_file_provider.latest_writer(segment).unwrap();
             let reader = headers_writer.inner().jar().open_data_reader().unwrap();
@@ -313,7 +313,7 @@ mod tests {
     /// Saves a checkpoint with `checkpoint_block_number` and compare the check consistency result
     /// against the expected one.
     fn save_checkpoint_and_check(
-        db: &TestStageDB, // replace DbType with your actual database type
+        db: &TestStageDB,
         stage_id: StageId,
         checkpoint_block_number: BlockNumber,
         expected: Option<PipelineTarget>,
@@ -373,11 +373,11 @@ mod tests {
 
         // Full node does not use receipts, therefore doesn't check for consistency on receipts
         // segment
-        simulate_no_commit_prune_and_check(&db, 1, StaticFileSegment::Receipts, full_node, None);
+        simulate_behind_checkpoint_corruption(&db, 1, StaticFileSegment::Receipts, full_node, None);
 
         // there are 2 to 3 transactions per block. however, if we lose one tx, we need to unwind to
         // the previous block.
-        simulate_no_commit_prune_and_check(
+        simulate_behind_checkpoint_corruption(
             &db,
             1,
             StaticFileSegment::Receipts,
@@ -385,7 +385,7 @@ mod tests {
             Some(PipelineTarget::Unwind(88)),
         );
 
-        simulate_no_commit_prune_and_check(
+        simulate_behind_checkpoint_corruption(
             &db,
             3,
             StaticFileSegment::Headers,
@@ -399,24 +399,47 @@ mod tests {
         let db = seed_data(90).unwrap();
 
         // When a checkpoint is behind, we delete data from static files.
-        save_checkpoint_and_check(&db, StageId::Bodies, 87, None);
+        let block = 87;
+        save_checkpoint_and_check(&db, StageId::Bodies, block, None);
         assert_eq!(
             db.factory
                 .static_file_provider()
                 .get_highest_static_file_block(StaticFileSegment::Transactions),
-            Some(87)
+            Some(block)
+        );
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Transactions),
+            db.factory.block_body_indices(block).unwrap().map(|b| b.last_tx_num())
         );
 
-        save_checkpoint_and_check(&db, StageId::Execution, 86, None);
+        let block = 86;
+        save_checkpoint_and_check(&db, StageId::Execution, block, None);
         assert_eq!(
             db.factory
                 .static_file_provider()
                 .get_highest_static_file_block(StaticFileSegment::Receipts),
-            Some(86)
+            Some(block)
+        );
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts),
+            db.factory.block_body_indices(block).unwrap().map(|b| b.last_tx_num())
+        );
+
+        let block = 80;
+        save_checkpoint_and_check(&db, StageId::Headers, block, None);
+        assert_eq!(
+            db.factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Headers),
+            Some(block)
         );
 
         // When a checkpoint is ahead, we request a pipeline unwind.
-        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(89)));
+        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(block)));
     }
 
     #[test]

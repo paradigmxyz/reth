@@ -47,7 +47,7 @@ impl BlockBuffer {
     }
 
     /// Return reference to buffered blocks
-    pub fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders> {
+    pub const fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders> {
         &self.blocks
     }
 

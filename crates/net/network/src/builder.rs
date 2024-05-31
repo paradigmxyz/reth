@@ -30,7 +30,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
     }
 
     /// Returns the network manager.
-    pub fn network(&self) -> &NetworkManager<C> {
+    pub const fn network(&self) -> &NetworkManager<C> {
         &self.network
     }
 

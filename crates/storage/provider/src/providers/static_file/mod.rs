@@ -42,7 +42,7 @@ impl LoadedJar {
         self.mmap_handle.clone()
     }
 
-    fn segment(&self) -> StaticFileSegment {
+    const fn segment(&self) -> StaticFileSegment {
         self.jar.user_header().segment()
     }
 }

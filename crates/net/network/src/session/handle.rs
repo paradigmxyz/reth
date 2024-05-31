@@ -42,7 +42,7 @@ impl PendingSessionHandle {
     }
 
     /// Returns the direction of the pending session (inbound or outbound).
-    pub fn direction(&self) -> Direction {
+    pub const fn direction(&self) -> Direction {
         self.direction
     }
 }
@@ -96,27 +96,27 @@ impl ActiveSessionHandle {
     }
 
     /// Returns the direction of the active session (inbound or outbound).
-    pub fn direction(&self) -> Direction {
+    pub const fn direction(&self) -> Direction {
         self.direction
     }
 
     /// Returns the assigned session id for this session.
-    pub fn session_id(&self) -> SessionId {
+    pub const fn session_id(&self) -> SessionId {
         self.session_id
     }
 
     /// Returns the negotiated eth version for this session.
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns the identifier of the remote peer.
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id
     }
 
     /// Returns the timestamp when the session has been established.
-    pub fn established(&self) -> Instant {
+    pub const fn established(&self) -> Instant {
         self.established
     }
 
@@ -131,7 +131,7 @@ impl ActiveSessionHandle {
     }
 
     /// Returns the address we're connected to.
-    pub fn remote_addr(&self) -> SocketAddr {
+    pub const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 

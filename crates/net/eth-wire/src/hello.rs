@@ -45,7 +45,7 @@ impl HelloMessageWithProtocols {
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessageWithProtocols::builder(id).build();
     /// ```
-    pub fn builder(id: PeerId) -> HelloMessageBuilder {
+    pub const fn builder(id: PeerId) -> HelloMessageBuilder {
         HelloMessageBuilder::new(id)
     }
 
@@ -127,7 +127,7 @@ impl HelloMessage {
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
     /// let status = HelloMessage::builder(id).build();
     /// ```
-    pub fn builder(id: PeerId) -> HelloMessageBuilder {
+    pub const fn builder(id: PeerId) -> HelloMessageBuilder {
         HelloMessageBuilder::new(id)
     }
 }
@@ -152,12 +152,12 @@ pub struct HelloMessageBuilder {
 
 impl HelloMessageBuilder {
     /// Create a new builder to configure a [`HelloMessage`]
-    pub fn new(id: PeerId) -> Self {
+    pub const fn new(id: PeerId) -> Self {
         Self { protocol_version: None, client_version: None, protocols: None, port: None, id }
     }
 
     /// Sets the port the client is listening on
-    pub fn port(mut self, port: u16) -> Self {
+    pub const fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
@@ -181,7 +181,7 @@ impl HelloMessageBuilder {
     }
 
     /// Sets protocol version.
-    pub fn protocol_version(mut self, protocol_version: ProtocolVersion) -> Self {
+    pub const fn protocol_version(mut self, protocol_version: ProtocolVersion) -> Self {
         self.protocol_version = Some(protocol_version);
         self
     }

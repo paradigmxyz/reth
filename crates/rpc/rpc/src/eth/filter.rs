@@ -533,20 +533,20 @@ pub struct EthFilterConfig {
 
 impl EthFilterConfig {
     /// Sets the maximum number of blocks that a filter can scan for logs.
-    pub fn max_blocks_per_filter(mut self, num: u64) -> Self {
+    pub const fn max_blocks_per_filter(mut self, num: u64) -> Self {
         self.max_blocks_per_filter = Some(num);
         self
     }
 
     /// Sets the maximum number of logs that can be returned in a single response in `eth_getLogs`
     /// calls.
-    pub fn max_logs_per_response(mut self, num: usize) -> Self {
+    pub const fn max_logs_per_response(mut self, num: usize) -> Self {
         self.max_logs_per_response = Some(num);
         self
     }
 
     /// Sets how long a filter remains valid after the last poll before it will be removed.
-    pub fn stale_filter_ttl(mut self, duration: Duration) -> Self {
+    pub const fn stale_filter_ttl(mut self, duration: Duration) -> Self {
         self.stale_filter_ttl = duration;
         self
     }

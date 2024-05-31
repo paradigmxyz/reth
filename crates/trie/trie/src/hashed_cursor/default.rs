@@ -54,7 +54,7 @@ pub struct DatabaseHashedStorageCursor<C> {
 
 impl<C> DatabaseHashedStorageCursor<C> {
     /// Create new [DatabaseHashedStorageCursor].
-    pub fn new(cursor: C, hashed_address: B256) -> Self {
+    pub const fn new(cursor: C, hashed_address: B256) -> Self {
         Self { cursor, hashed_address }
     }
 }

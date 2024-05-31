@@ -51,7 +51,7 @@ impl ExecInput {
     }
 
     /// Return true if this is the first block range to execute.
-    pub fn is_first_range(&self) -> bool {
+    pub const fn is_first_range(&self) -> bool {
         self.checkpoint.is_none()
     }
 
@@ -167,7 +167,7 @@ pub struct ExecOutput {
 
 impl ExecOutput {
     /// Mark the stage as done, checkpointing at the given place.
-    pub fn done(checkpoint: StageCheckpoint) -> Self {
+    pub const fn done(checkpoint: StageCheckpoint) -> Self {
         Self { checkpoint, done: true }
     }
 }

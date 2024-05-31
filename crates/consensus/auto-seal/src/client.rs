@@ -23,7 +23,7 @@ pub struct AutoSealClient {
 }
 
 impl AutoSealClient {
-    pub(crate) fn new(storage: Storage) -> Self {
+    pub(crate) const fn new(storage: Storage) -> Self {
         Self { storage }
     }
 

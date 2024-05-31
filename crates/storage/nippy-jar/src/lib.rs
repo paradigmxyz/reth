@@ -41,7 +41,7 @@ mod cursor;
 pub use cursor::NippyJarCursor;
 
 mod writer;
-pub use writer::NippyJarWriter;
+pub use writer::{ConsistencyFailStrategy, NippyJarWriter};
 
 const NIPPY_JAR_VERSION: usize = 1;
 
@@ -153,7 +153,7 @@ impl NippyJar<()> {
     }
 
     /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
-    pub fn uses_filters(&self) -> bool {
+    pub const fn uses_filters(&self) -> bool {
         self.filter.is_some() && self.phf.is_some()
     }
 }
@@ -207,17 +207,17 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the user header.
-    pub fn user_header(&self) -> &H {
+    pub const fn user_header(&self) -> &H {
         &self.user_header
     }
 
     /// Gets total columns in jar.
-    pub fn columns(&self) -> usize {
+    pub const fn columns(&self) -> usize {
         self.columns
     }
 
     /// Gets total rows in jar.
-    pub fn rows(&self) -> usize {
+    pub const fn rows(&self) -> usize {
         self.rows
     }
 
@@ -232,7 +232,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the compressor.
-    pub fn compressor(&self) -> Option<&Compressors> {
+    pub const fn compressor(&self) -> Option<&Compressors> {
         self.compressor.as_ref()
     }
 
@@ -382,7 +382,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self.freeze_filters()?;
 
         // Creates the writer, data and offsets file
-        let mut writer = NippyJarWriter::new(self, true)?;
+        let mut writer = NippyJarWriter::new(self, ConsistencyFailStrategy::Heal)?;
 
         // Append rows to file while holding offsets in memory
         writer.append_rows(columns, total_rows)?;
@@ -543,7 +543,7 @@ impl DataReader {
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u8 {
+    pub const fn offset_size(&self) -> u8 {
         self.offset_size
     }
 
@@ -1114,7 +1114,7 @@ mod tests {
         assert!(initial_offset_size > 0);
 
         // Appends a third row
-        let mut writer = NippyJarWriter::new(nippy, true).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
@@ -1145,7 +1145,7 @@ mod tests {
         // Writer will execute a consistency check and verify first that the offset list on disk
         // doesn't match the nippy.rows, and prune it. Then, it will prune the data file
         // accordingly as well.
-        let writer = NippyJarWriter::new(nippy, true).unwrap();
+        let writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_offset_size,
@@ -1171,7 +1171,7 @@ mod tests {
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk,
         // while the data has been.
-        let mut writer = NippyJarWriter::new(nippy, true).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
@@ -1194,7 +1194,7 @@ mod tests {
 
         // Writer will execute a consistency check and verify that the data file has more data than
         // it should, and resets it to the last offset of the list (on disk here)
-        let writer = NippyJarWriter::new(nippy, true).unwrap();
+        let writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_data_size,
@@ -1210,7 +1210,7 @@ mod tests {
             assert_eq!(nippy.max_row_size, 0);
             assert_eq!(nippy.rows, 0);
 
-            let mut writer = NippyJarWriter::new(nippy, true).unwrap();
+            let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[0]))).unwrap();
@@ -1245,7 +1245,7 @@ mod tests {
             assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
             assert_eq!(nippy.rows, 1);
 
-            let mut writer = NippyJarWriter::new(nippy, true).unwrap();
+            let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[1]))).unwrap();
@@ -1276,7 +1276,7 @@ mod tests {
 
     fn prune_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
-        let mut writer = NippyJarWriter::new(nippy, true).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
@@ -1306,7 +1306,7 @@ mod tests {
         }
 
         // This should prune from the ondisk offset list and clear the jar.
-        let mut writer = NippyJarWriter::new(nippy, true).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         writer.prune_rows(1).unwrap();
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
@@ -1343,6 +1343,6 @@ mod tests {
         data_file.set_len(data_len - 32 * missing_offsets).unwrap();
 
         // runs the consistency check.
-        let _ = NippyJarWriter::new(nippy, true).unwrap();
+        let _ = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
     }
 }

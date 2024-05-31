@@ -81,7 +81,7 @@ pub struct ExecutionStage<E> {
 
 impl<E> ExecutionStage<E> {
     /// Create new execution stage with specified config.
-    pub fn new(
+    pub const fn new(
         executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
@@ -606,7 +606,9 @@ where
     // Check if we had any unexpected shutdown after committing to static files, but
     // NOT committing to database.
     match next_static_file_receipt_num.cmp(&next_receipt_num) {
-        Ordering::Greater => static_file_producer.prune_receipts(
+        // It can be equal when it's a chain of empty blocks, but we still need to update the last
+        // block in the range.
+        Ordering::Greater | Ordering::Equal => static_file_producer.prune_receipts(
             next_static_file_receipt_num - next_receipt_num,
             start_block.saturating_sub(1),
         )?,
@@ -641,7 +643,6 @@ where
                 segment: StaticFileSegment::Receipts,
             })
         }
-        Ordering::Equal => {}
     }
 
     Ok(static_file_producer)

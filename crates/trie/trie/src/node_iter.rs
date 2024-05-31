@@ -15,7 +15,7 @@ pub struct TrieBranchNode {
 
 impl TrieBranchNode {
     /// Creates a new `TrieBranchNode`.
-    pub fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
+    pub const fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
         Self { key, value, children_are_in_trie }
     }
 }
@@ -48,7 +48,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [TrieNodeIter].
-    pub fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
         Self {
             walker,
             hashed_cursor,
@@ -60,7 +60,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
 
     /// Sets the last iterated hashed key and returns the modified [TrieNodeIter].
     /// This is used to resume iteration from the last checkpoint.
-    pub fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
+    pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);
         self
     }

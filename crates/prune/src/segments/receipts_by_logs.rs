@@ -16,7 +16,7 @@ pub struct ReceiptsByLogs {
 }
 
 impl ReceiptsByLogs {
-    pub fn new(config: ReceiptsLogPruneConfig) -> Self {
+    pub const fn new(config: ReceiptsLogPruneConfig) -> Self {
         Self { config }
     }
 }

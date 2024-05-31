@@ -7,15 +7,15 @@ pub trait DatabaseMetrics {
     /// Reports metrics for the database.
     fn report_metrics(&self) {
         for (name, value, labels) in self.gauge_metrics() {
-            gauge!(name, value, labels);
+            gauge!(name, labels).set(value);
         }
 
         for (name, value, labels) in self.counter_metrics() {
-            counter!(name, value, labels);
+            counter!(name, labels).increment(value);
         }
 
         for (name, value, labels) in self.histogram_metrics() {
-            histogram!(name, value, labels);
+            histogram!(name, labels).record(value);
         }
     }
 
@@ -50,12 +50,12 @@ pub struct DatabaseMetadataValue {
 
 impl DatabaseMetadataValue {
     /// Creates a new [DatabaseMetadataValue] with the given freelist size.
-    pub fn new(freelist_size: Option<usize>) -> Self {
+    pub const fn new(freelist_size: Option<usize>) -> Self {
         Self { freelist_size }
     }
 
     /// Returns the freelist size, if available.
-    pub fn freelist_size(&self) -> Option<usize> {
+    pub const fn freelist_size(&self) -> Option<usize> {
         self.freelist_size
     }
 }

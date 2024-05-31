@@ -19,7 +19,7 @@ pub struct NetApi<Net, Eth> {
 
 impl<Net, Eth> NetApi<Net, Eth> {
     /// Returns a new instance with the given network and eth interface implementations
-    pub fn new(network: Net, eth: Eth) -> Self {
+    pub const fn new(network: Net, eth: Eth) -> Self {
         Self { network, eth }
     }
 }

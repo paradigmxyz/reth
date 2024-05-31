@@ -101,7 +101,7 @@ where
     }
 
     /// Returns access to the [`PeersManager`]
-    pub(crate) fn peers(&self) -> &PeersManager {
+    pub(crate) const fn peers(&self) -> &PeersManager {
         &self.peers_manager
     }
 

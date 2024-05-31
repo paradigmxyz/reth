@@ -146,7 +146,7 @@ impl StaticFileProviderInner {
         Ok(provider)
     }
 
-    pub fn is_read_only(&self) -> bool {
+    pub const fn is_read_only(&self) -> bool {
         self.access.is_read_only()
     }
 }
@@ -502,16 +502,17 @@ impl StaticFileProvider {
         Ok(())
     }
 
-    /// Ensures that any broken invariants return a pipeline target to unwind to.
+    /// Ensures that any broken invariants which cannot be healed on the spot return a pipeline
+    /// target to unwind to.
     ///
     /// Two types of consistency checks are done for:
     ///
     /// 1) When a static file fails to commit but the underlying data was changed.
     /// 2) When a static file was committed, but the required database transaction was not.
     ///
-    /// For 1) it can self-heal if `read_only` is set to `false`. Otherwise, it will return an
-    /// error.
-    /// For 2) the invariants below are checked, and if broken, require a pipeline unwind
+    /// For 1) it can self-heal if `self.access.is_read_only()` is set to `false`. Otherwise, it
+    /// will return an error.
+    /// For 2) the invariants below are checked, and if broken, might require a pipeline unwind
     /// to heal.
     ///
     /// For each static file segment:
@@ -520,7 +521,7 @@ impl StaticFileProvider {
     /// * its highest block should match the stage checkpoint block number if it's equal or higher
     ///   than the corresponding database table last entry.
     ///
-    /// Returns a [`Option`] of [`PipelineTarget::Unwind`] if any healing is required.
+    /// Returns a [`Option`] of [`PipelineTarget::Unwind`] if any healing is further required.
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
@@ -671,14 +672,14 @@ impl StaticFileProvider {
             .unwrap_or_default()
             .block_number;
 
-        // If the checkpoint is ahead, then we lost static file data. May have been an interrupted
-        // unwind that committed the static file changes or data corruption.
+        // If the checkpoint is ahead, then we lost static file data. May be data corruption.
         if checkpoint_block_number > highest_static_file_block {
             return Ok(Some(highest_static_file_block));
         }
 
         // If the checkpoint is behind, then we failed to do a database commit **but committed** to
-        // static files. All we need to do is to unwind those rows.
+        // static files on executing a stage, or the reverse on unwinding a stage.
+        // All we need to do is to prune the extra static file rows.
         if checkpoint_block_number < highest_static_file_block {
             info!(
                 target: "reth::providers",
