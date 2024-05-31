@@ -1,6 +1,6 @@
 //! Consist of types adjacent to the fee history cache and its configs
 
-use crate::eth::{cache::EthStateCache, error::EthApiError, gas_oracle::MAX_HEADER_HISTORY};
+use crate::eth::{cache::EthStateCache, error::EthApiError};
 use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -12,6 +12,7 @@ use reth_primitives::{
     ChainSpec, Receipt, SealedBlock, TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
+use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 use reth_rpc_types::TxGasAndReward;
 use serde::{Deserialize, Serialize};
 use std::{

@@ -13,4 +13,4 @@ workspace = true
 
 [dependencies]
 # reth
-reth-rpc.workspace = true
+reth-primitives.workspace = true
