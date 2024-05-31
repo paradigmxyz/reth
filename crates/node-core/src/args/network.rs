@@ -373,6 +373,7 @@ impl Default for DiscoveryArgs {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_network_types::RetryStrategy;
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -430,7 +431,6 @@ mod tests {
 
     #[test]
     fn parse_retry_strategy_args() {
-        use reth_network_types::RetryStrategy;
         let tests = vec![
             (
                 "1",
