@@ -2,8 +2,6 @@
 
 use reth_storage_errors::lockfile::StorageLockError;
 use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Write},
     path::{Path, PathBuf},
     process,
     sync::Arc,
@@ -56,7 +54,6 @@ struct StorageLockInner {
 impl StorageLockInner {
     /// Creates lock file and writes this process PID into it.
     fn new(file_path: PathBuf) -> Result<Self, StorageLockError> {
-        
         // Create the directory if it doesn't exist
         if let Some(parent) = file_path.parent() {
             std::fs::create_dir_all(parent)?;

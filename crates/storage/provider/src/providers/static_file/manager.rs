@@ -117,15 +117,14 @@ pub struct StaticFileProviderInner {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
-    #[allow(dead_code)]
     /// Write lock for when access is [StaticFileAccess::RW].
-    lock_file: Option<StorageLock>,
+    _lock_file: Option<StorageLock>,
 }
 
 impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
-        let lock_file = if access.is_read_write() {
+        let _lock_file = if access.is_read_write() {
             Some(StorageLock::try_acquire(path.as_ref())?)
         } else {
             None
@@ -140,7 +139,7 @@ impl StaticFileProviderInner {
             load_filters: false,
             metrics: None,
             access,
-            lock_file,
+            _lock_file,
         };
 
         Ok(provider)

@@ -137,7 +137,7 @@ pub struct DatabaseEnv {
     metrics: Option<Arc<DatabaseEnvMetrics>>,
     #[allow(dead_code)]
     /// Write lock for when dealing with a read-write environment.
-    lock_file: Option<StorageLock>,
+    _lock_file: Option<StorageLock>,
 }
 
 impl Database for DatabaseEnv {
@@ -255,7 +255,7 @@ impl DatabaseEnv {
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
     ) -> Result<Self, DatabaseError> {
-        let lock_file = if kind.is_rw() {
+        let _lock_file = if kind.is_rw() {
             Some(
                 StorageLock::try_acquire(path)
                     .map_err(|err| DatabaseError::Other(err.to_string()))?,
@@ -395,7 +395,7 @@ impl DatabaseEnv {
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
-            lock_file,
+            _lock_file,
         };
 
         Ok(env)
