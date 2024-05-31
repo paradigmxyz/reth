@@ -340,10 +340,10 @@ impl StaticFileProviderRW {
     fn truncate(
         &mut self,
         segment: StaticFileSegment,
-        truncated_rows: u64,
+        num_rows: u64,
         last_block: Option<u64>,
     ) -> ProviderResult<()> {
-        let mut remaining_rows = truncated_rows;
+        let mut remaining_rows = num_rows;
         while remaining_rows > 0 {
             let len = match segment {
                 StaticFileSegment::Headers => {
@@ -387,7 +387,7 @@ impl StaticFileProviderRW {
         if let Some(last_block) = last_block {
             let mut expected_block_start = self.writer.user_header().expected_block_start();
 
-            if truncated_rows == 0 {
+            if num_rows == 0 {
                 // Edge case for when we are unwinding a chain of empty blocks that goes across
                 // files, and therefore, the only reference point to know which file
                 // we are supposed to be at is `last_block`.
