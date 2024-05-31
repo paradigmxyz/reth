@@ -9,7 +9,7 @@ use reth_downloaders::{
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{client::BodiesClient, downloader::BodyDownloader},
     headers::{client::HeadersClient, downloader::HeaderDownloader},
 };

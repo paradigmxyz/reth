@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
@@ -123,23 +123,23 @@ where
     }
 
     /// Returns whether or not the sync controller is set to run the pipeline continuously.
-    pub(crate) fn run_pipeline_continuously(&self) -> bool {
+    pub(crate) const fn run_pipeline_continuously(&self) -> bool {
         self.run_pipeline_continuously
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
     #[allow(dead_code)]
-    pub(crate) fn is_pipeline_sync_pending(&self) -> bool {
+    pub(crate) const fn is_pipeline_sync_pending(&self) -> bool {
         self.pending_pipeline_target.is_some() && self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is idle.
-    pub(crate) fn is_pipeline_idle(&self) -> bool {
+    pub(crate) const fn is_pipeline_idle(&self) -> bool {
         self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is active.
-    pub(crate) fn is_pipeline_active(&self) -> bool {
+    pub(crate) const fn is_pipeline_active(&self) -> bool {
         !self.is_pipeline_idle()
     }
 
@@ -418,8 +418,8 @@ enum PipelineState<DB: Database> {
 
 impl<DB: Database> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
-    fn is_idle(&self) -> bool {
-        matches!(self, PipelineState::Idle(_))
+    const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle(_))
     }
 }
 
@@ -429,7 +429,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
-    use reth_interfaces::{p2p::either::Either, test_utils::TestFullBlockClient};
+    use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
         Header, PruneModes, SealedHeader, MAINNET,
@@ -478,7 +478,7 @@ mod tests {
 
         /// Sets the max block for the pipeline to run.
         #[allow(dead_code)]
-        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+        const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
             self.max_block = Some(max_block);
             self
         }
@@ -516,13 +516,13 @@ mod tests {
 
     impl<Client> TestSyncControllerBuilder<Client> {
         /// Create a new [TestSyncControllerBuilder].
-        fn new() -> Self {
+        const fn new() -> Self {
             Self { max_block: None, client: None }
         }
 
         /// Sets the max block for the pipeline to run.
         #[allow(dead_code)]
-        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+        const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
             self.max_block = Some(max_block);
             self
         }

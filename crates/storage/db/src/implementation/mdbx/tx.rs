@@ -9,8 +9,8 @@ use crate::{
     DatabaseError,
 };
 use once_cell::sync::OnceCell;
-use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
@@ -45,14 +45,14 @@ pub struct Tx<K: TransactionKind> {
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
     #[inline]
-    pub fn new(inner: Transaction<K>) -> Self {
+    pub const fn new(inner: Transaction<K>) -> Self {
         Self::new_inner(inner, None)
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]
     #[track_caller]
-    pub fn new_with_metrics(
+    pub(crate) fn new_with_metrics(
         inner: Transaction<K>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
@@ -68,7 +68,7 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     #[inline]
-    fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
+    const fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
         // NOTE: These constants are needed to initialize `OnceCell` at compile-time, as array
         // initialization is not allowed with non-Copy types, and `const { }` blocks are not stable
         // yet.
@@ -395,8 +395,8 @@ mod tests {
         database::Database, mdbx::DatabaseArguments, models::client_version::ClientVersion, tables,
         transaction::DbTx, DatabaseEnv, DatabaseEnvKind,
     };
-    use reth_interfaces::db::DatabaseError;
     use reth_libmdbx::MaxReadTransactionDuration;
+    use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
     use tempfile::tempdir;
 

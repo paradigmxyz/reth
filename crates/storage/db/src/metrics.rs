@@ -1,6 +1,5 @@
 use crate::Tables;
 use metrics::{Gauge, Histogram};
-use reth_libmdbx::CommitLatency;
 use reth_metrics::{metrics::Counter, Metrics};
 use rustc_hash::{FxHashMap, FxHasher};
 use std::{
@@ -18,7 +17,7 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 /// Requires a metric recorder to be registered before creating an instance of this struct.
 /// Otherwise, metric recording will no-op.
 #[derive(Debug)]
-pub struct DatabaseEnvMetrics {
+pub(crate) struct DatabaseEnvMetrics {
     /// Caches OperationMetrics handles for each table and operation tuple.
     operations: FxHashMap<(Tables, Operation), OperationMetrics>,
     /// Caches TransactionMetrics handles for counters grouped by only transaction mode.
@@ -124,13 +123,14 @@ impl DatabaseEnvMetrics {
     }
 
     /// Record metrics for closing a database transactions.
+    #[cfg(feature = "mdbx")]
     pub(crate) fn record_closed_transaction(
         &self,
         mode: TransactionMode,
         outcome: TransactionOutcome,
         open_duration: Duration,
         close_duration: Option<Duration>,
-        commit_latency: Option<CommitLatency>,
+        commit_latency: Option<reth_libmdbx::CommitLatency>,
     ) {
         self.transactions
             .get(&mode)
@@ -152,18 +152,19 @@ pub(crate) enum TransactionMode {
     /// Read-write transaction mode.
     ReadWrite,
 }
+
 impl TransactionMode {
     /// Returns the transaction mode as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            TransactionMode::ReadOnly => "read-only",
-            TransactionMode::ReadWrite => "read-write",
+            Self::ReadOnly => "read-only",
+            Self::ReadWrite => "read-write",
         }
     }
 
     /// Returns `true` if the transaction mode is read-only.
     pub(crate) const fn is_read_only(&self) -> bool {
-        matches!(self, TransactionMode::ReadOnly)
+        matches!(self, Self::ReadOnly)
     }
 }
 
@@ -182,15 +183,15 @@ impl TransactionOutcome {
     /// Returns the transaction outcome as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            TransactionOutcome::Commit => "commit",
-            TransactionOutcome::Abort => "abort",
-            TransactionOutcome::Drop => "drop",
+            Self::Commit => "commit",
+            Self::Abort => "abort",
+            Self::Drop => "drop",
         }
     }
 
     /// Returns `true` if the transaction outcome is a commit.
     pub(crate) const fn is_commit(&self) -> bool {
-        matches!(self, TransactionOutcome::Commit)
+        matches!(self, Self::Commit)
     }
 }
 
@@ -221,15 +222,15 @@ impl Operation {
     /// Returns the operation as a string.
     pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            Operation::Get => "get",
-            Operation::Put => "put",
-            Operation::Delete => "delete",
-            Operation::CursorUpsert => "cursor-upsert",
-            Operation::CursorInsert => "cursor-insert",
-            Operation::CursorAppend => "cursor-append",
-            Operation::CursorAppendDup => "cursor-append-dup",
-            Operation::CursorDeleteCurrent => "cursor-delete-current",
-            Operation::CursorDeleteCurrentDuplicates => "cursor-delete-current-duplicates",
+            Self::Get => "get",
+            Self::Put => "put",
+            Self::Delete => "delete",
+            Self::CursorUpsert => "cursor-upsert",
+            Self::CursorInsert => "cursor-insert",
+            Self::CursorAppend => "cursor-append",
+            Self::CursorAppendDup => "cursor-append-dup",
+            Self::CursorDeleteCurrent => "cursor-delete-current",
+            Self::CursorDeleteCurrentDuplicates => "cursor-delete-current-duplicates",
         }
     }
 }
@@ -248,12 +249,12 @@ enum Labels {
 
 impl Labels {
     /// Converts each label variant into its corresponding string representation.
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub(crate) const fn as_str(&self) -> &'static str {
         match self {
-            Labels::Table => "table",
-            Labels::TransactionMode => "mode",
-            Labels::TransactionOutcome => "outcome",
-            Labels::Operation => "operation",
+            Self::Table => "table",
+            Self::TransactionMode => "mode",
+            Self::TransactionOutcome => "outcome",
+            Self::Operation => "operation",
         }
     }
 }
@@ -304,11 +305,12 @@ pub(crate) struct TransactionOutcomeMetrics {
 impl TransactionOutcomeMetrics {
     /// Record transaction closing with the duration it was open and the duration it took to close
     /// it.
+    #[cfg(feature = "mdbx")]
     pub(crate) fn record(
         &self,
         open_duration: Duration,
         close_duration: Option<Duration>,
-        commit_latency: Option<CommitLatency>,
+        commit_latency: Option<reth_libmdbx::CommitLatency>,
     ) {
         self.open_duration_seconds.record(open_duration);
 

@@ -73,7 +73,7 @@ pub struct Receipts {
 
 impl Receipts {
     /// Create a new `Receipts` instance with an empty vector.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { receipt_vec: vec![] }
     }
 
@@ -157,7 +157,7 @@ impl FromIterator<Vec<Option<Receipt>>> for Receipts {
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
-        ReceiptWithBloom { receipt, bloom }
+        Self { receipt, bloom }
     }
 }
 
@@ -173,7 +173,7 @@ pub struct ReceiptWithBloom {
 
 impl ReceiptWithBloom {
     /// Create new [ReceiptWithBloom]
-    pub fn new(receipt: Receipt, bloom: Bloom) -> Self {
+    pub const fn new(receipt: Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -188,7 +188,7 @@ impl ReceiptWithBloom {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
 }
@@ -245,7 +245,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
         arbitrary_receipt().boxed()
     }
 
-    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -430,7 +430,7 @@ pub struct ReceiptWithBloomRef<'a> {
 
 impl<'a> ReceiptWithBloomRef<'a> {
     /// Create new [ReceiptWithBloomRef]
-    pub fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
+    pub const fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -440,7 +440,7 @@ impl<'a> ReceiptWithBloomRef<'a> {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: self.receipt, bloom: &self.bloom }
     }
 }

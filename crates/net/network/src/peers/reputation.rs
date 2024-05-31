@@ -46,7 +46,7 @@ pub(crate) const MAX_TRUSTED_PEER_REPUTATION_CHANGE: Reputation = 2 * REPUTATION
 
 /// Returns `true` if the given reputation is below the [`BANNED_REPUTATION`] threshold
 #[inline]
-pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
+pub(crate) const fn is_banned_reputation(reputation: i32) -> bool {
     reputation < BANNED_REPUTATION
 }
 
@@ -122,7 +122,7 @@ pub(crate) struct ReputationChange(Reputation);
 impl ReputationChange {
     /// Helper type for easier conversion
     #[inline]
-    pub(crate) fn as_i32(self) -> Reputation {
+    pub(crate) const fn as_i32(self) -> Reputation {
         self.0
     }
 }
@@ -135,6 +135,6 @@ impl From<ReputationChange> for Reputation {
 
 impl From<Reputation> for ReputationChange {
     fn from(value: Reputation) -> Self {
-        ReputationChange(value)
+        Self(value)
     }
 }

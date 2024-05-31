@@ -20,12 +20,12 @@ use reth_eth_wire::{
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     PooledTransactions, RequestTxHashes, Transactions,
 };
-use reth_interfaces::{
-    p2p::error::{RequestError, RequestResult},
-    sync::SyncStateProvider,
-};
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{Peers, ReputationChangeKind};
+use reth_network_p2p::{
+    error::{RequestError, RequestResult},
+    sync::SyncStateProvider,
+};
 use reth_network_types::PeerId;
 use reth_primitives::{
     FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
@@ -1231,9 +1231,8 @@ where
         // this can potentially validate >200k transactions. More if the message size
         // is bigger than the soft limit on a `PooledTransactions` response which is
         // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
-        let acc = &mut poll_durations.acc_pending_imports;
         let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_pending_imports,
             "net::tx",
             "Batched pool imports stream",
             DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
@@ -1242,9 +1241,8 @@ where
         );
 
         // Advance network/peer related events (update peers map).
-        let acc = &mut poll_durations.acc_network_events;
         let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_network_events,
             "net::tx",
             "Network events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1261,9 +1259,8 @@ where
         // We don't expect this buffer to be large, since only pending transactions are
         // emitted here.
         let mut new_txs = Vec::new();
-        let acc = &mut poll_durations.acc_imported_txns;
         let maybe_more_pending_txns = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_imported_txns,
             "net::tx",
             "Pending transactions stream",
             DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
@@ -1284,9 +1281,8 @@ where
         // this can potentially queue >200k transactions for insertion to pool. More
         // if the message size is bigger than the soft limit on a `PooledTransactions`
         // response which is 2 MiB.
-        let acc = &mut poll_durations.acc_fetch_events;
         let maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_fetch_events,
             "net::tx",
             "Transaction fetch events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1308,9 +1304,8 @@ where
         // validated until they are inserted into the pool, this can potentially queue
         // >13k transactions for insertion to pool. More if the message size is bigger
         // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
-        let acc = &mut poll_durations.acc_tx_events;
         let maybe_more_tx_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_tx_events,
             "net::tx",
             "Network transaction events stream",
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
@@ -1322,20 +1317,18 @@ where
         // capacity for this (fetch txns).
         //
         // Sends at most one request.
-        let acc = &mut poll_durations.acc_pending_fetch;
         duration_metered_exec!(
             {
                 if this.has_capacity_for_fetching_pending_hashes() {
                     this.on_fetch_hashes_pending_fetch();
                 }
             },
-            acc
+            poll_durations.acc_pending_fetch
         );
 
         // Advance commands (propagate/fetch/serve txns).
-        let acc = &mut poll_durations.acc_cmds;
         let maybe_more_commands = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_cmds,
             "net::tx",
             "Commands channel",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1437,8 +1430,8 @@ impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
     fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
-            PooledTransactionsHashesBuilder::Eth68(msg) => {
+            Self::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
+            Self::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
                 msg.types.push(pooled_tx.transaction.tx_type());
@@ -1448,8 +1441,8 @@ impl PooledTransactionsHashesBuilder {
 
     fn push(&mut self, tx: &PropagateTransaction) {
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(tx.hash()),
-            PooledTransactionsHashesBuilder::Eth68(msg) => {
+            Self::Eth66(msg) => msg.0.push(tx.hash()),
+            Self::Eth68(msg) => {
                 msg.hashes.push(tx.hash());
                 msg.sizes.push(tx.size);
                 msg.types.push(tx.transaction.tx_type().into());
@@ -1460,17 +1453,15 @@ impl PooledTransactionsHashesBuilder {
     /// Create a builder for the negotiated version of the peer's session
     fn new(version: EthVersion) -> Self {
         match version {
-            EthVersion::Eth66 | EthVersion::Eth67 => {
-                PooledTransactionsHashesBuilder::Eth66(Default::default())
-            }
-            EthVersion::Eth68 => PooledTransactionsHashesBuilder::Eth68(Default::default()),
+            EthVersion::Eth66 | EthVersion::Eth67 => Self::Eth66(Default::default()),
+            EthVersion::Eth68 => Self::Eth68(Default::default()),
         }
     }
 
     fn build(self) -> NewPooledTransactionHashes {
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => msg.into(),
-            PooledTransactionsHashesBuilder::Eth68(msg) => msg.into(),
+            Self::Eth66(msg) => msg.into(),
+            Self::Eth68(msg) => msg.into(),
         }
     }
 }
@@ -1487,8 +1478,8 @@ enum TransactionSource {
 
 impl TransactionSource {
     /// Whether the transaction were sent as broadcast.
-    fn is_broadcast(&self) -> bool {
-        matches!(self, TransactionSource::Broadcast)
+    const fn is_broadcast(&self) -> bool {
+        matches!(self, Self::Broadcast)
     }
 }
 
@@ -1619,8 +1610,11 @@ mod tests {
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
-    use reth_interfaces::sync::{NetworkSyncUpdater, SyncState};
     use reth_network_api::NetworkInfo;
+    use reth_network_p2p::{
+        error::{RequestError, RequestResult},
+        sync::{NetworkSyncUpdater, SyncState},
+    };
     use reth_primitives::hex;
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};

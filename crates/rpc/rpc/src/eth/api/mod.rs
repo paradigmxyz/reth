@@ -11,10 +11,9 @@ use crate::eth::{
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
-
 use async_trait::async_trait;
+use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
-use reth_interfaces::RethResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -391,7 +390,7 @@ where
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
     async fn protocol_version(&self) -> RethResult<U64> {
-        let status = self.network().network_status().await?;
+        let status = self.network().network_status().await.map_err(RethError::other)?;
         Ok(U64::from(status.protocol_version))
     }
 

@@ -413,9 +413,9 @@ fix-lint-other-targets:
 	-- -D warnings
 
 fix-lint:
-	make lint-reth && \
-	make lint-op-reth && \
-	make lint-other-targets && \
+	make fix-lint-reth && \
+	make fix-lint-op-reth && \
+	make fix-lint-other-targets && \
 	make fmt
 
 .PHONY: rustdocs

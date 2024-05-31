@@ -148,8 +148,8 @@ impl<D> From<PlatformPath<D>> for PathBuf {
 
 impl<D> PlatformPath<D> {
     /// Returns the path joined with another path
-    pub fn join<P: AsRef<Path>>(&self, path: P) -> PlatformPath<D> {
-        PlatformPath::<D>(self.0.join(path), std::marker::PhantomData)
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
+        Self(self.0.join(path), std::marker::PhantomData)
     }
 }
 
@@ -161,7 +161,7 @@ impl<D> PlatformPath<D> {
 
         let path = self.0.join(chain_name);
 
-        let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
+        let platform_path = Self(path, std::marker::PhantomData);
         ChainPath::new(platform_path, chain)
     }
 
@@ -194,7 +194,7 @@ impl<D: XdgPath> MaybePlatformPath<D> {
     }
 
     /// Returns true if a custom path is set
-    pub fn is_some(&self) -> bool {
+    pub const fn is_some(&self) -> bool {
         self.0.is_some()
     }
 
@@ -257,6 +257,7 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
 ///  * mainnet: `<DIR>/mainnet`
 ///  * goerli: `<DIR>/goerli`
 ///  * sepolia: `<DIR>/sepolia`
+///
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,7 +265,7 @@ pub struct ChainPath<D>(PlatformPath<D>, Chain);
 
 impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
-    pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
+    pub const fn new(path: PlatformPath<D>, chain: Chain) -> Self {
         Self(path, chain)
     }
 

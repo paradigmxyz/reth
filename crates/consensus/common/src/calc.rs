@@ -67,7 +67,7 @@ pub fn base_block_reward(
 /// - Definition: [Yellow Paper][yp] (page 15, 11.3)
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
+pub const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
     base_block_reward + (base_block_reward >> 5) * ommers as u128
 }
 
@@ -91,7 +91,7 @@ pub fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
 ///
 /// [oe]: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn ommer_reward(
+pub const fn ommer_reward(
     base_block_reward: u128,
     block_number: BlockNumber,
     ommer_block_number: BlockNumber,

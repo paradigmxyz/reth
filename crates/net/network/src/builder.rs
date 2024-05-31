@@ -25,12 +25,12 @@ pub struct NetworkBuilder<C, Tx, Eth> {
 impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
     /// Consumes the type and returns all fields.
     pub fn split(self) -> (NetworkManager<C>, Tx, Eth) {
-        let NetworkBuilder { network, transactions, request_handler } = self;
+        let Self { network, transactions, request_handler } = self;
         (network, transactions, request_handler)
     }
 
     /// Returns the network manager.
-    pub fn network(&self) -> &NetworkManager<C> {
+    pub const fn network(&self) -> &NetworkManager<C> {
         &self.network
     }
 
@@ -46,7 +46,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
 
     /// Consumes the type and returns all fields and also return a [`NetworkHandle`].
     pub fn split_with_handle(self) -> (NetworkHandle, NetworkManager<C>, Tx, Eth) {
-        let NetworkBuilder { network, transactions, request_handler } = self;
+        let Self { network, transactions, request_handler } = self;
         let handle = network.handle().clone();
         (handle, network, transactions, request_handler)
     }
@@ -57,7 +57,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
     ) -> NetworkBuilder<C, TransactionsManager<Pool>, Eth> {
-        let NetworkBuilder { mut network, request_handler, .. } = self;
+        let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
@@ -70,7 +70,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
         self,
         client: Client,
     ) -> NetworkBuilder<C, Tx, EthRequestHandler<Client>> {
-        let NetworkBuilder { mut network, transactions, .. } = self;
+        let Self { mut network, transactions, .. } = self;
         let (tx, rx) = mpsc::channel(ETH_REQUEST_CHANNEL_CAPACITY);
         network.set_eth_request_handler(tx);
         let peers = network.handle().peers_handle().clone();

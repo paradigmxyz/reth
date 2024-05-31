@@ -20,7 +20,7 @@ where
     /// Creates a new `EventStream`.
     pub fn new(receiver: tokio::sync::broadcast::Receiver<T>) -> Self {
         let inner = tokio_stream::wrappers::BroadcastStream::new(receiver);
-        EventStream { inner }
+        Self { inner }
     }
 }
 
@@ -36,7 +36,7 @@ where
                 Poll::Ready(Some(Ok(item))) => return Poll::Ready(Some(item)),
                 Poll::Ready(Some(Err(e))) => {
                     warn!("BroadcastStream lagged: {e:?}");
-                    continue;
+                    continue
                 }
                 Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => return Poll::Pending,

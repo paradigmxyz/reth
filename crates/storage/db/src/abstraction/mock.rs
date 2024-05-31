@@ -138,8 +138,8 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
 
     fn walk(&mut self, start_key: Option<T::Key>) -> Result<Walker<'_, T, Self>, DatabaseError> {
         let start: IterPairResult<T> = match start_key {
-            Some(key) => <CursorMock as DbCursorRO<T>>::seek(self, key).transpose(),
-            None => <CursorMock as DbCursorRO<T>>::first(self).transpose(),
+            Some(key) => <Self as DbCursorRO<T>>::seek(self, key).transpose(),
+            None => <Self as DbCursorRO<T>>::first(self).transpose(),
         };
 
         Ok(Walker::new(self, start))
@@ -160,8 +160,8 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
         };
 
         let start: IterPairResult<T> = match start_key {
-            Some(key) => <CursorMock as DbCursorRO<T>>::seek(self, key).transpose(),
-            None => <CursorMock as DbCursorRO<T>>::first(self).transpose(),
+            Some(key) => <Self as DbCursorRO<T>>::seek(self, key).transpose(),
+            None => <Self as DbCursorRO<T>>::first(self).transpose(),
         };
 
         Ok(RangeWalker::new(self, start, end_key))
@@ -172,8 +172,8 @@ impl<T: Table> DbCursorRO<T> for CursorMock {
         start_key: Option<T::Key>,
     ) -> Result<ReverseWalker<'_, T, Self>, DatabaseError> {
         let start: IterPairResult<T> = match start_key {
-            Some(key) => <CursorMock as DbCursorRO<T>>::seek(self, key).transpose(),
-            None => <CursorMock as DbCursorRO<T>>::last(self).transpose(),
+            Some(key) => <Self as DbCursorRO<T>>::seek(self, key).transpose(),
+            None => <Self as DbCursorRO<T>>::last(self).transpose(),
         };
         Ok(ReverseWalker::new(self, start))
     }

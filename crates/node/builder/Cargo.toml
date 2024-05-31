@@ -16,6 +16,7 @@ workspace = true
 reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-blockchain-tree.workspace = true
+reth-db-common.workspace = true
 reth-exex.workspace = true
 reth-evm.workspace = true
 reth-provider.workspace = true
@@ -31,7 +32,7 @@ reth-payload-builder.workspace = true
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
-reth-interfaces.workspace = true
+reth-network-p2p.workspace = true
 reth-static-file.workspace = true
 reth-prune.workspace = true
 reth-stages.workspace = true
@@ -39,7 +40,7 @@ reth-config.workspace = true
 reth-downloaders.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
-
+reth-rpc-types.workspace = true
 ## async
 futures.workspace = true
 tokio = { workspace = true, features = [

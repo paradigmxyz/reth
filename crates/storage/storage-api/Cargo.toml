@@ -1,0 +1,24 @@
+[package]
+name = "reth-storage-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth storage provider traits and types"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-execution-types.workspace = true
+reth-db.workspace = true
+reth-primitives.workspace = true
+reth-storage-errors.workspace = true
+reth-trie.workspace = true
+
+revm.workspace = true
+
+auto_impl.workspace = true

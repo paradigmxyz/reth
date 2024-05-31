@@ -220,12 +220,12 @@ pub struct RpcContext<'a, Node: FullNodeComponents> {
 
 impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
     /// Returns the config of the node.
-    pub fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig {
         self.config
     }
 
     /// Returns a reference to the configured node.
-    pub fn node(&self) -> &Node {
+    pub const fn node(&self) -> &Node {
         &self.node
     }
 

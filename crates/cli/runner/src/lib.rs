@@ -58,7 +58,10 @@ impl CliRunner {
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
         // the current thread but we want to exit right away.
-        std::thread::spawn(move || drop(tokio_runtime));
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || drop(tokio_runtime))
+            .unwrap();
 
         command_res
     }
@@ -92,7 +95,10 @@ impl CliRunner {
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
         // the current thread but we want to exit right away.
-        std::thread::spawn(move || drop(tokio_runtime));
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || drop(tokio_runtime))
+            .unwrap();
 
         Ok(())
     }

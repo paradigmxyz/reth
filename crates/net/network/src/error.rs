@@ -19,10 +19,10 @@ pub enum ServiceKind {
 
 impl ServiceKind {
     /// Returns the appropriate flags for each variant.
-    pub fn flags(&self) -> &'static str {
+    pub const fn flags(&self) -> &'static str {
         match self {
-            ServiceKind::Listener(_) => "--port",
-            ServiceKind::Discovery(_) => "--discovery.port",
+            Self::Listener(_) => "--port",
+            Self::Discovery(_) => "--discovery.port",
         }
     }
 }
@@ -30,8 +30,8 @@ impl ServiceKind {
 impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ServiceKind::Listener(addr) => write!(f, "{addr} (listener service)"),
-            ServiceKind::Discovery(addr) => write!(f, "{addr} (discovery service)"),
+            Self::Listener(addr) => write!(f, "{addr} (listener service)"),
+            Self::Discovery(addr) => write!(f, "{addr} (discovery service)"),
         }
     }
 }
@@ -67,12 +67,12 @@ impl NetworkError {
     /// Converts a `std::io::Error` to a more descriptive `NetworkError`.
     pub fn from_io_error(err: io::Error, kind: ServiceKind) -> Self {
         match err.kind() {
-            ErrorKind::AddrInUse => NetworkError::AddressAlreadyInUse { kind, error: err },
+            ErrorKind::AddrInUse => Self::AddressAlreadyInUse { kind, error: err },
             _ => {
                 if let ServiceKind::Discovery(_) = kind {
-                    return NetworkError::Discovery(err)
+                    return Self::Discovery(err)
                 }
-                NetworkError::Io(err)
+                Self::Io(err)
             }
         }
     }
@@ -127,28 +127,28 @@ pub enum BackoffKind {
 
 impl BackoffKind {
     /// Returns true if the backoff is considered severe.
-    pub(crate) fn is_severe(&self) -> bool {
-        matches!(self, BackoffKind::Medium | BackoffKind::High)
+    pub(crate) const fn is_severe(&self) -> bool {
+        matches!(self, Self::Medium | Self::High)
     }
 }
 
 impl SessionError for EthStreamError {
     fn merits_discovery_ban(&self) -> bool {
         match self {
-            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+            Self::P2PStreamError(P2PStreamError::HandshakeError(
                 P2PHandshakeError::HelloNotInHandshake,
             )) |
-            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
+            Self::P2PStreamError(P2PStreamError::HandshakeError(
                 P2PHandshakeError::NonHelloMessageInHandshake,
             )) => true,
-            EthStreamError::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
+            Self::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
             _ => false,
         }
     }
 
     fn is_fatal_protocol_error(&self) -> bool {
         match self {
-            EthStreamError::P2PStreamError(err) => {
+            Self::P2PStreamError(err) => {
                 matches!(
                     err,
                     P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities) |
@@ -177,7 +177,7 @@ impl SessionError for EthStreamError {
                         P2PStreamError::MismatchedProtocolVersion { .. }
                 )
             }
-            EthStreamError::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
+            Self::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
             _ => false,
         }
     }
@@ -214,19 +214,17 @@ impl SessionError for EthStreamError {
         // [`SessionError::is_fatal_protocol_error`]
         match self {
             // timeouts
-            EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse) |
-            EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
-                P2PHandshakeError::NoResponse,
-            )) |
-            EthStreamError::P2PStreamError(P2PStreamError::PingTimeout) => Some(BackoffKind::Low),
+            Self::EthHandshakeError(EthHandshakeError::NoResponse) |
+            Self::P2PStreamError(P2PStreamError::HandshakeError(P2PHandshakeError::NoResponse)) |
+            Self::P2PStreamError(P2PStreamError::PingTimeout) => Some(BackoffKind::Low),
             // malformed messages
-            EthStreamError::P2PStreamError(P2PStreamError::Rlp(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::UnknownReservedMessageId(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::UnknownDisconnectReason(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::MessageTooBig { .. }) |
-            EthStreamError::P2PStreamError(P2PStreamError::EmptyProtocolMessage) |
-            EthStreamError::P2PStreamError(P2PStreamError::PingerError(_)) |
-            EthStreamError::P2PStreamError(P2PStreamError::Snap(_)) => Some(BackoffKind::Medium),
+            Self::P2PStreamError(P2PStreamError::Rlp(_)) |
+            Self::P2PStreamError(P2PStreamError::UnknownReservedMessageId(_)) |
+            Self::P2PStreamError(P2PStreamError::UnknownDisconnectReason(_)) |
+            Self::P2PStreamError(P2PStreamError::MessageTooBig { .. }) |
+            Self::P2PStreamError(P2PStreamError::EmptyProtocolMessage) |
+            Self::P2PStreamError(P2PStreamError::PingerError(_)) |
+            Self::P2PStreamError(P2PStreamError::Snap(_)) => Some(BackoffKind::Medium),
             _ => None,
         }
     }
@@ -235,25 +233,25 @@ impl SessionError for EthStreamError {
 impl SessionError for PendingSessionHandshakeError {
     fn merits_discovery_ban(&self) -> bool {
         match self {
-            PendingSessionHandshakeError::Eth(eth) => eth.merits_discovery_ban(),
-            PendingSessionHandshakeError::Ecies(_) => true,
-            PendingSessionHandshakeError::Timeout => false,
+            Self::Eth(eth) => eth.merits_discovery_ban(),
+            Self::Ecies(_) => true,
+            Self::Timeout => false,
         }
     }
 
     fn is_fatal_protocol_error(&self) -> bool {
         match self {
-            PendingSessionHandshakeError::Eth(eth) => eth.is_fatal_protocol_error(),
-            PendingSessionHandshakeError::Ecies(_) => true,
-            PendingSessionHandshakeError::Timeout => false,
+            Self::Eth(eth) => eth.is_fatal_protocol_error(),
+            Self::Ecies(_) => true,
+            Self::Timeout => false,
         }
     }
 
     fn should_backoff(&self) -> Option<BackoffKind> {
         match self {
-            PendingSessionHandshakeError::Eth(eth) => eth.should_backoff(),
-            PendingSessionHandshakeError::Ecies(_) => Some(BackoffKind::Low),
-            PendingSessionHandshakeError::Timeout => Some(BackoffKind::Medium),
+            Self::Eth(eth) => eth.should_backoff(),
+            Self::Ecies(_) => Some(BackoffKind::Low),
+            Self::Timeout => Some(BackoffKind::Medium),
         }
     }
 }

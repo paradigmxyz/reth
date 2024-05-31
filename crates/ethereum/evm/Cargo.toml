@@ -15,13 +15,19 @@ workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
-reth-interfaces.workspace = true
 reth-ethereum-consensus.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
 
-[dev-dependencies]
-reth-revm = { workspace = true, features = ["test-utils"] }
+# Alloy
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-sol-types.workspace = true
+
+[dev-dependencies]
+reth-testing-utils.workspace = true
+reth-revm = { workspace = true, features = ["test-utils"] }
+secp256k1.workspace = true
+serde_json.workspace = true
 

@@ -1002,6 +1002,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// For all transactions:
     ///   - decreased basefee: promotes from `basefee` to `pending` sub-pool.
     ///   - increased basefee: demotes from `pending` to `basefee` sub-pool.
+    ///
     /// Individually:
     ///   - decreased sender allowance: demote from (`basefee`|`pending`) to `queued`.
     ///   - increased sender allowance: promote from `queued` to
@@ -1703,7 +1704,7 @@ pub(crate) struct PendingFees {
 
 impl Default for PendingFees {
     fn default() -> Self {
-        PendingFees { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
+        Self { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
     }
 }
 

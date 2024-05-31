@@ -3,14 +3,10 @@
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
 use reth_evm::{
     execute::{
-        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, Executor,
+        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionError, BlockExecutionInput,
+        BlockExecutionOutput, BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     ConfigureEvm,
-};
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
 };
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_primitives::{
@@ -359,7 +355,12 @@ where
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput {
+            state: self.state.take_bundle(),
+            receipts,
+            requests: vec![],
+            gas_used,
+        })
     }
 }
 
@@ -377,7 +378,7 @@ pub struct OpBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
     /// Returns the receipts of the executed blocks.
-    pub fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts {
         self.batch_record.receipts()
     }
 
@@ -424,6 +425,7 @@ where
         BatchBlockExecutionOutput::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
+            self.batch_record.take_requests(),
             self.batch_record.first_block().unwrap_or_default(),
         )
     }
@@ -539,6 +541,7 @@ mod tests {
                             body: vec![tx, tx_deposit],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![addr, addr],
                     },
@@ -620,6 +623,7 @@ mod tests {
                             body: vec![tx, tx_deposit],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![addr, addr],
                     },

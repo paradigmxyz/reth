@@ -1,0 +1,97 @@
+[package]
+name = "reth-stages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Staged syncing primitives used in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-codecs.workspace = true
+reth-config.workspace = true
+reth-consensus.workspace = true
+reth-db.workspace = true
+reth-etl.workspace = true
+reth-evm.workspace = true
+reth-exex.workspace = true
+reth-network-p2p.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-storage-errors.workspace = true
+reth-revm.workspace = true
+reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-trie = { workspace = true, features = ["metrics"] }
+
+reth-testing-utils = { workspace = true, optional = true }
+
+# async
+tokio = { workspace = true, features = ["sync"] }
+futures-util.workspace = true
+
+# observability
+tracing.workspace = true
+
+# misc
+thiserror.workspace = true
+itertools.workspace = true
+rayon.workspace = true
+num-traits = "0.2.15"
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth
+reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
+reth-evm-ethereum.workspace = true
+reth-execution-errors.workspace = true
+reth-consensus = { workspace = true, features = ["test-utils"] }
+reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-downloaders.workspace = true
+reth-revm.workspace = true
+reth-static-file.workspace = true
+reth-testing-utils.workspace = true
+reth-trie = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-network-types.workspace = true
+
+alloy-rlp.workspace = true
+itertools.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
+assert_matches.workspace = true
+rand.workspace = true
+paste.workspace = true
+tempfile.workspace = true
+
+# Stage benchmarks
+criterion = { workspace = true, features = ["async_tokio"] }
+
+# io
+serde_json.workspace = true
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
+
+[features]
+test-utils = [
+    "reth-network-p2p/test-utils",
+    "reth-db/test-utils",
+    "reth-provider/test-utils",
+    "reth-stages-api/test-utils",
+    "dep:reth-testing-utils",
+    "dep:tempfile",
+]
+
+[[bench]]
+name = "criterion"
+harness = false
+required-features = ["test-utils"]

@@ -7,20 +7,19 @@ $ reth --help
 Usage: reth [OPTIONS] <COMMAND>
 
 Commands:
-  node             Start the node
-  init             Initialize the database from a genesis file
-  init-state       Initialize the database from a state dump file
-  import           This syncs RLP encoded blocks from a file
-  import-receipts  This imports RLP encoded receipts from a file
-  dump-genesis     Dumps genesis block JSON configuration to stdout
-  db               Database debugging utilities
-  stage            Manipulate individual stages
-  p2p              P2P Debugging utilities
-  test-vectors     Generate Test Vectors
-  config           Write config to stdout
-  debug            Various debug routines
-  recover          Scripts for node recovery
-  help             Print this message or the help of the given subcommand(s)
+  node          Start the node
+  init          Initialize the database from a genesis file
+  init-state    Initialize the database from a state dump file
+  import        This syncs RLP encoded blocks from a file
+  dump-genesis  Dumps genesis block JSON configuration to stdout
+  db            Database debugging utilities
+  stage         Manipulate individual stages
+  p2p           P2P Debugging utilities
+  test-vectors  Generate Test Vectors
+  config        Write config to stdout
+  debug         Various debug routines
+  recover       Scripts for node recovery
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
       --chain <CHAIN_OR_PATH>

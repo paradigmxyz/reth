@@ -1,4 +1,4 @@
-//! Reth network interface definitions.
+//! Reth interface definitions and commonly used types for the reth-network crate.
 //!
 //! Provides abstractions for the reth-network crate.
 //!
@@ -13,15 +13,16 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_eth_wire::{DisconnectReason, EthVersion, Status};
-use reth_network_types::PeerId;
-use reth_primitives::NodeRecord;
+use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
+use reth_rpc_types::NetworkStatus;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
-use reth_eth_wire::capability::Capabilities;
-use reth_rpc_types::NetworkStatus;
+use reth_network_types::NodeRecord;
+
+/// The PeerId type.
+pub type PeerId = alloy_primitives::B512;
 
 /// Network Error
 pub mod error;
@@ -153,12 +154,12 @@ pub enum PeerKind {
 impl PeerKind {
     /// Returns `true` if the peer is trusted.
     pub const fn is_trusted(&self) -> bool {
-        matches!(self, PeerKind::Trusted)
+        matches!(self, Self::Trusted)
     }
 
     /// Returns `true` if the peer is basic.
     pub const fn is_basic(&self) -> bool {
-        matches!(self, PeerKind::Basic)
+        matches!(self, Self::Basic)
     }
 }
 
@@ -196,21 +197,21 @@ pub enum Direction {
 
 impl Direction {
     /// Returns `true` if this an incoming connection.
-    pub fn is_incoming(&self) -> bool {
-        matches!(self, Direction::Incoming)
+    pub const fn is_incoming(&self) -> bool {
+        matches!(self, Self::Incoming)
     }
 
     /// Returns `true` if this an outgoing connection.
-    pub fn is_outgoing(&self) -> bool {
-        matches!(self, Direction::Outgoing(_))
+    pub const fn is_outgoing(&self) -> bool {
+        matches!(self, Self::Outgoing(_))
     }
 }
 
 impl std::fmt::Display for Direction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Direction::Incoming => write!(f, "incoming"),
-            Direction::Outgoing(_) => write!(f, "outgoing"),
+            Self::Incoming => write!(f, "incoming"),
+            Self::Outgoing(_) => write!(f, "outgoing"),
         }
     }
 }

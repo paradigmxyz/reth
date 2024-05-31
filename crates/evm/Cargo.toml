@@ -12,11 +12,14 @@ workspace = true
 
 [dependencies]
 # reth
+reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 revm-primitives.workspace = true
-revm.workspace = true
-reth-interfaces.workspace = true
+reth-storage-errors.workspace = true
 
+revm.workspace = true
+
+auto_impl.workspace = true
 futures-util.workspace = true
 parking_lot = { workspace = true, optional = true }
 

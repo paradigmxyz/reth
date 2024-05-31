@@ -56,7 +56,11 @@ struct NodeState<DB> {
 }
 
 impl<DB> NodeState<DB> {
-    fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
+    const fn new(
+        db: DB,
+        network: Option<NetworkHandle>,
+        latest_block: Option<BlockNumber>,
+    ) -> Self {
         Self {
             db,
             network,
@@ -315,7 +319,7 @@ impl<DB> NodeState<DB> {
                     warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
                 }
             }
         }
@@ -398,38 +402,38 @@ pub enum NodeEvent {
 }
 
 impl From<NetworkEvent> for NodeEvent {
-    fn from(event: NetworkEvent) -> NodeEvent {
-        NodeEvent::Network(event)
+    fn from(event: NetworkEvent) -> Self {
+        Self::Network(event)
     }
 }
 
 impl From<PipelineEvent> for NodeEvent {
-    fn from(event: PipelineEvent) -> NodeEvent {
-        NodeEvent::Pipeline(event)
+    fn from(event: PipelineEvent) -> Self {
+        Self::Pipeline(event)
     }
 }
 
 impl From<BeaconConsensusEngineEvent> for NodeEvent {
     fn from(event: BeaconConsensusEngineEvent) -> Self {
-        NodeEvent::ConsensusEngine(event)
+        Self::ConsensusEngine(event)
     }
 }
 
 impl From<ConsensusLayerHealthEvent> for NodeEvent {
     fn from(event: ConsensusLayerHealthEvent) -> Self {
-        NodeEvent::ConsensusLayerHealth(event)
+        Self::ConsensusLayerHealth(event)
     }
 }
 
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
-        NodeEvent::Pruner(event)
+        Self::Pruner(event)
     }
 }
 
 impl From<StaticFileProducerEvent> for NodeEvent {
     fn from(event: StaticFileProducerEvent) -> Self {
-        NodeEvent::StaticFileProducer(event)
+        Self::StaticFileProducer(event)
     }
 }
 

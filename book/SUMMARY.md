@@ -32,7 +32,6 @@
     - [`reth init`](./cli/reth/init.md)
     - [`reth init-state`](./cli/reth/init-state.md)
     - [`reth import`](./cli/reth/import.md)
-    - [`reth import-receipts`](./cli/reth/import-receipts.md)
     - [`reth dump-genesis`](./cli/reth/dump-genesis.md)
     - [`reth db`](./cli/reth/db.md)
       - [`reth db stats`](./cli/reth/db/stats.md)

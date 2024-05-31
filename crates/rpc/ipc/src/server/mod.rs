@@ -284,7 +284,7 @@ pub struct RpcServiceBuilder<L>(tower::ServiceBuilder<L>);
 
 impl Default for RpcServiceBuilder<Identity> {
     fn default() -> Self {
-        RpcServiceBuilder(tower::ServiceBuilder::new())
+        Self(tower::ServiceBuilder::new())
     }
 }
 
@@ -577,7 +577,7 @@ pub struct Builder<HttpMiddleware, RpcMiddleware> {
 
 impl Default for Builder<Identity, Identity> {
     fn default() -> Self {
-        Builder {
+        Self {
             settings: Settings::default(),
             id_provider: Arc::new(RandomIntegerIdProvider),
             rpc_middleware: RpcServiceBuilder::new(),
@@ -588,31 +588,31 @@ impl Default for Builder<Identity, Identity> {
 
 impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// Set the maximum size of a request body in bytes. Default is 10 MiB.
-    pub fn max_request_body_size(mut self, size: u32) -> Self {
+    pub const fn max_request_body_size(mut self, size: u32) -> Self {
         self.settings.max_request_body_size = size;
         self
     }
 
     /// Set the maximum size of a response body in bytes. Default is 10 MiB.
-    pub fn max_response_body_size(mut self, size: u32) -> Self {
+    pub const fn max_response_body_size(mut self, size: u32) -> Self {
         self.settings.max_response_body_size = size;
         self
     }
 
     /// Set the maximum size of a log
-    pub fn max_log_length(mut self, size: u32) -> Self {
+    pub const fn max_log_length(mut self, size: u32) -> Self {
         self.settings.max_log_length = size;
         self
     }
 
     /// Set the maximum number of connections allowed. Default is 100.
-    pub fn max_connections(mut self, max: u32) -> Self {
+    pub const fn max_connections(mut self, max: u32) -> Self {
         self.settings.max_connections = max;
         self
     }
 
     /// Set the maximum number of connections allowed. Default is 1024.
-    pub fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
+    pub const fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
         self.settings.max_subscriptions_per_connection = max;
         self
     }
@@ -634,7 +634,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// # Panics
     ///
     /// Panics if the buffer capacity is 0.
-    pub fn set_message_buffer_capacity(mut self, c: u32) -> Self {
+    pub const fn set_message_buffer_capacity(mut self, c: u32) -> Self {
         self.settings.message_buffer_capacity = c;
         self
     }
