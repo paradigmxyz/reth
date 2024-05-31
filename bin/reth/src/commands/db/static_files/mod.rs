@@ -102,7 +102,7 @@ impl Command {
         let provider_factory = Arc::new(ProviderFactory::new(
             db,
             chain,
-            StaticFileProvider::read_only(data_dir.static_files())?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         ));
 
         {

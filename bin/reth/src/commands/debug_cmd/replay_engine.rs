@@ -83,7 +83,7 @@ impl Command {
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -97,13 +97,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             ))
-            .build(ProviderFactory::new(
-                db,
-                self.chain.clone(),
-                StaticFileProvider::read_only(
-                    self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-                )?,
-            ))
+            .build(provider_factory.clone())
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -125,7 +119,7 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             db.clone(),
             self.chain.clone(),
-            StaticFileProvider::read_only(data_dir.static_files())?,
+            StaticFileProvider::read_write(data_dir.static_files())?,
         );
 
         let consensus: Arc<dyn Consensus> =
@@ -149,7 +143,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )
