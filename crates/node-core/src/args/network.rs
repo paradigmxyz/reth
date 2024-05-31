@@ -17,8 +17,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_network_types::DNSNodeRecord;
-use reth_primitives::{mainnet_nodes, ChainSpec};
+use reth_primitives::{mainnet_nodes, ChainSpec, DNSNodeRecord};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},

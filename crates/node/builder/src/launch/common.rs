@@ -10,7 +10,6 @@ use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_net_common::dns_node_record_resolve::resolve_dns_node_record;
 use reth_network_types::RetryStrategy;
 use reth_node_core::{
     cli::config::RethRpcConfig,
