@@ -25,11 +25,17 @@ pub use block_hash::*;
 mod header;
 pub use header::*;
 
+mod prune_checkpoint;
+pub use prune_checkpoint::*;
+
 mod receipts;
 pub use receipts::*;
 
 mod requests;
 pub use requests::*;
+
+mod stage_checkpoint;
+pub use stage_checkpoint::*;
 
 mod state;
 pub use state::*;

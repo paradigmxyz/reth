@@ -1,14 +1,23 @@
-use alloy_eips::eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE};
+use alloy_eips::{
+    eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
+    eip7002::WithdrawalRequest,
+};
+use alloy_rlp::Buf;
 use reth_consensus_common::calc;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    revm::env::fill_tx_env_with_beacon_root_contract_call, Address, ChainSpec, Header, Withdrawal,
-    B256, U256,
+    revm::env::{
+        fill_tx_env_with_beacon_root_contract_call,
+        fill_tx_env_with_withdrawal_requests_contract_call,
+    },
+    Address, ChainSpec, Header, Request, Withdrawal, B256, U256,
 };
 use reth_storage_errors::provider::ProviderError;
 use revm::{
     interpreter::Host,
-    primitives::{Account, AccountInfo, Bytecode, EvmStorageSlot},
+    primitives::{
+        Account, AccountInfo, Bytecode, EvmStorageSlot, ExecutionResult, FixedBytes, ResultAndState,
+    },
     Database, DatabaseCommit, Evm,
 };
 use std::collections::HashMap;
@@ -237,4 +246,90 @@ pub fn insert_post_block_withdrawals_balance_increments(
             }
         }
     }
+}
+
+/// Applies the post-block call to the EIP-7002 withdrawal requests contract.
+///
+/// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
+/// returned. Otherwise, the withdrawal requests are returned.
+#[inline]
+pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommit>(
+    evm: &mut Evm<'_, EXT, DB>,
+) -> Result<Vec<Request>, BlockExecutionError>
+where
+    DB::Error: std::fmt::Display,
+{
+    // get previous env
+    let previous_env = Box::new(evm.context.env().clone());
+
+    // modify env for pre block call
+    fill_tx_env_with_withdrawal_requests_contract_call(&mut evm.context.evm.env);
+
+    let ResultAndState { result, mut state } = match evm.transact() {
+        Ok(res) => res,
+        Err(e) => {
+            evm.context.evm.env = previous_env;
+            return Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: format!("execution failed: {e}"),
+            }
+            .into())
+        }
+    };
+
+    // cleanup the state
+    state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
+    state.remove(&evm.block().coinbase);
+    evm.context.evm.db.commit(state);
+
+    // re-set the previous env
+    evm.context.evm.env = previous_env;
+
+    let mut data = match result {
+        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
+        ExecutionResult::Revert { output, .. } => {
+            Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: format!("execution reverted: {output}"),
+            })
+        }
+        ExecutionResult::Halt { reason, .. } => {
+            Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: format!("execution halted: {reason:?}"),
+            })
+        }
+    }?;
+
+    // Withdrawals are encoded as a series of withdrawal requests, each with the following
+    // format:
+    //
+    // +------+--------+--------+
+    // | addr | pubkey | amount |
+    // +------+--------+--------+
+    //    20      48        8
+
+    const WITHDRAWAL_REQUEST_SIZE: usize = 20 + 48 + 8;
+    let mut withdrawal_requests = Vec::with_capacity(data.len() / WITHDRAWAL_REQUEST_SIZE);
+    while data.has_remaining() {
+        if data.remaining() < WITHDRAWAL_REQUEST_SIZE {
+            return Err(BlockValidationError::WithdrawalRequestsContractCall {
+                message: "invalid withdrawal request length".to_string(),
+            }
+            .into())
+        }
+
+        let mut source_address = Address::ZERO;
+        data.copy_to_slice(source_address.as_mut_slice());
+
+        let mut validator_public_key = FixedBytes::<48>::ZERO;
+        data.copy_to_slice(validator_public_key.as_mut_slice());
+
+        let amount = data.get_u64();
+
+        withdrawal_requests.push(Request::WithdrawalRequest(WithdrawalRequest {
+            source_address,
+            validator_public_key,
+            amount,
+        }));
+    }
+
+    Ok(withdrawal_requests)
 }

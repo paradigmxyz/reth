@@ -50,7 +50,7 @@ use std::{
     collections::HashMap,
     pin::Pin,
     task::{ready, Context, Poll},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::{debug, trace};
@@ -430,7 +430,6 @@ impl TransactionFetcher {
         let budget_find_idle_fallback_peer = self
             .search_breadth_budget_find_idle_fallback_peer(&has_capacity_wrt_pending_pool_imports);
 
-        let acc = &mut search_durations.find_idle_peer;
         let peer_id = duration_metered_exec!(
             {
                 let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
@@ -444,7 +443,7 @@ impl TransactionFetcher {
 
                 peer_id
             },
-            acc
+            search_durations.find_idle_peer
         );
 
         // peer should always exist since `is_session_active` already checked
@@ -460,7 +459,6 @@ impl TransactionFetcher {
                 &has_capacity_wrt_pending_pool_imports,
             );
 
-        let acc = &mut search_durations.fill_request;
         duration_metered_exec!(
             {
                 self.fill_request_from_hashes_pending_fetch(
@@ -469,7 +467,7 @@ impl TransactionFetcher {
                     budget_fill_request,
                 )
             },
-            acc
+            search_durations.fill_request
         );
 
         // free unused memory

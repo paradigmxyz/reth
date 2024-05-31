@@ -38,11 +38,17 @@ pub(crate) struct MakeCanonicalDurationsRecorder {
     start: Instant,
     pub(crate) actions: Vec<(MakeCanonicalAction, Duration)>,
     latest: Option<Duration>,
+    current_metrics: MakeCanonicalMetrics,
 }
 
 impl Default for MakeCanonicalDurationsRecorder {
     fn default() -> Self {
-        Self { start: Instant::now(), actions: Vec::new(), latest: None }
+        Self {
+            start: Instant::now(),
+            actions: Vec::new(),
+            latest: None,
+            current_metrics: MakeCanonicalMetrics::default(),
+        }
     }
 }
 
@@ -54,10 +60,7 @@ impl MakeCanonicalDurationsRecorder {
         let duration = elapsed - self.latest.unwrap_or_default();
 
         self.actions.push((action, duration));
-        MakeCanonicalMetrics::new_with_labels(&[("action", action.as_str())])
-            .duration
-            .record(duration);
-
+        self.current_metrics.record(action, duration);
         self.latest = Some(elapsed);
     }
 }
@@ -89,30 +92,61 @@ pub(crate) enum MakeCanonicalAction {
     ClearTrieUpdatesForOtherChilds,
 }
 
-impl MakeCanonicalAction {
-    const fn as_str(&self) -> &'static str {
-        match self {
-            Self::CloneOldBlocks => "clone old blocks",
-            Self::FindCanonicalHeader => "find canonical header",
-            Self::SplitChain => "split chain",
-            Self::SplitChainForks => "split chain forks",
-            Self::MergeAllChains => "merge all chains",
-            Self::UpdateCanonicalIndex => "update canonical index",
-            Self::RetrieveStateTrieUpdates => "retrieve state trie updates",
-            Self::CommitCanonicalChainToDatabase => "commit canonical chain to database",
-            Self::RevertCanonicalChainFromDatabase => "revert canonical chain from database",
-            Self::InsertOldCanonicalChain => "insert old canonical chain",
-            Self::ClearTrieUpdatesForOtherChilds => {
-                "clear trie updates of other childs chains after fork choice update"
+/// Canonicalization metrics
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree.make_canonical")]
+struct MakeCanonicalMetrics {
+    /// Duration of the clone old blocks action.
+    clone_old_blocks: Histogram,
+    /// Duration of the find canonical header action.
+    find_canonical_header: Histogram,
+    /// Duration of the split chain action.
+    split_chain: Histogram,
+    /// Duration of the split chain forks action.
+    split_chain_forks: Histogram,
+    /// Duration of the merge all chains action.
+    merge_all_chains: Histogram,
+    /// Duration of the update canonical index action.
+    update_canonical_index: Histogram,
+    /// Duration of the retrieve state trie updates action.
+    retrieve_state_trie_updates: Histogram,
+    /// Duration of the commit canonical chain to database action.
+    commit_canonical_chain_to_database: Histogram,
+    /// Duration of the revert canonical chain from database action.
+    revert_canonical_chain_from_database: Histogram,
+    /// Duration of the insert old canonical chain action.
+    insert_old_canonical_chain: Histogram,
+    /// Duration of the clear trie updates of other childs chains after fork choice update action.
+    clear_trie_updates_for_other_childs: Histogram,
+}
+
+impl MakeCanonicalMetrics {
+    /// Records the duration for the given action.
+    pub(crate) fn record(&self, action: MakeCanonicalAction, duration: Duration) {
+        match action {
+            MakeCanonicalAction::CloneOldBlocks => self.clone_old_blocks.record(duration),
+            MakeCanonicalAction::FindCanonicalHeader => self.find_canonical_header.record(duration),
+            MakeCanonicalAction::SplitChain => self.split_chain.record(duration),
+            MakeCanonicalAction::SplitChainForks => self.split_chain_forks.record(duration),
+            MakeCanonicalAction::MergeAllChains => self.merge_all_chains.record(duration),
+            MakeCanonicalAction::UpdateCanonicalIndex => {
+                self.update_canonical_index.record(duration)
+            }
+            MakeCanonicalAction::RetrieveStateTrieUpdates => {
+                self.retrieve_state_trie_updates.record(duration)
+            }
+            MakeCanonicalAction::CommitCanonicalChainToDatabase => {
+                self.commit_canonical_chain_to_database.record(duration)
+            }
+            MakeCanonicalAction::RevertCanonicalChainFromDatabase => {
+                self.revert_canonical_chain_from_database.record(duration)
+            }
+            MakeCanonicalAction::InsertOldCanonicalChain => {
+                self.insert_old_canonical_chain.record(duration)
+            }
+            MakeCanonicalAction::ClearTrieUpdatesForOtherChilds => {
+                self.clear_trie_updates_for_other_childs.record(duration)
             }
         }
     }
-}
-
-#[derive(Metrics)]
-#[metrics(scope = "blockchain_tree.make_canonical")]
-/// Canonicalization metrics
-struct MakeCanonicalMetrics {
-    /// The time it took to execute an action
-    duration: Histogram,
 }
