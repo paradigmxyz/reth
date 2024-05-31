@@ -64,7 +64,7 @@ impl TrustedPeer {
         Self { host, tcp_port: port, udp_port: port, id }
     }
 
-    /// Resolves the host in a [DNSNodeRecord] to an IP address, returning a [NodeRecord].
+    /// Resolves the host in a [TrustedPeer] to an IP address, returning a [NodeRecord].
     pub async fn resolve(
         &self,
         retry_strategy: Option<RetryStrategy>,
