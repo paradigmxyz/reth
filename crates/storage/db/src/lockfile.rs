@@ -49,7 +49,6 @@ impl Drop for StorageLock {
 
 #[derive(Debug)]
 struct StorageLockInner {
-    _file: File,
     path: PathBuf,
 }
 
@@ -59,7 +58,7 @@ impl StorageLockInner {
         let path = file_path.as_ref().to_path_buf();
         let mut file = OpenOptions::new().create(true).write(true).open(&path)?;
         write!(file, "{}", process::id() as usize)?;
-        Ok(Self { _file: file, path })
+        Ok(Self { path })
     }
 }
 
