@@ -129,7 +129,7 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds boot nodes in the form a list of [`DNSNodeRecord`]s, parsed enodes.
+    /// Adds boot nodes in the form a list of [`TrustedPeer`]s, parsed enodes.
     pub fn add_unsigned_boot_nodes<T: Into<TrustedPeer>>(
         mut self,
         enodes: impl Iterator<Item = T>,
@@ -429,7 +429,7 @@ pub enum BootNode {
 }
 
 impl BootNode {
-    /// Parses a [`DNSNodeRecord`] and serializes according to CL format. Note: [`discv5`] is
+    /// Parses a [`TrustedPeer`] and serializes according to CL format. Note: [`discv5`] is
     /// originally a CL library hence needs this format to add the node.
     pub fn from_unsigned(node_record: TrustedPeer) -> Result<Self, secp256k1::Error> {
         let TrustedPeer { host, udp_port, id, .. } = node_record;

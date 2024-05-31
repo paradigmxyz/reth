@@ -7210,6 +7210,7 @@ dependencies = [
  "reth-net-nat",
  "reth-network",
  "reth-network-p2p",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",

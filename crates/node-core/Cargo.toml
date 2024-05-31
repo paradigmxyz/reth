@@ -94,6 +94,7 @@ procfs = "0.16.0"
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
+reth-network-types.workspace = true
 
 [features]
 optimism = [

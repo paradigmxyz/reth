@@ -312,8 +312,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_dns_node_record() {
-        use trusted_peer::*;
-
         // Set up tests
         let tests = vec![
             (
