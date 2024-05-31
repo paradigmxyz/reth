@@ -1,74 +1,73 @@
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process,
     sync::Arc,
 };
+use reth_storage_errors::lockfile::StorageLockError;
 use sysinfo::System;
+use thiserror::Error;
 
-#[allow(dead_code)]
+// #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct StorageLock(Arc<StorageLockInner>);
 
 impl StorageLock {
-    /// Acquires a lock for each type of storage. It will return [Option::None] if any of the locks
-    /// fails to be acquired.
-    pub(crate) fn acquire(database_path: &Path, static_file_path: &Path) -> Option<Self> {
-        match (
-            acquire_storage_kind_lock(database_path.join("lockfile")),
-            acquire_storage_kind_lock(static_file_path.join("lockfile")),
-        ) {
-            (Some(database_lock), Some(static_file_lock)) => {
-                Some(Self(Arc::new(StorageLockInner { static_file_lock, database_lock })))
+    /// Tries to acquires a write lock on the target directory, returning [StorageLockError] if unsuccessful.
+    pub(crate) fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
+        let path = path.join("lock");
+        let lock = match parse_lock_file_pid(&path)? {
+            Some(pid) => {
+                if System::new_all().process(pid.into()).is_some() {
+                    return Err(StorageLockError::Taken)
+                } else {
+                    // If PID is no longer active, take hold of the lock.
+                    StorageLockInner::new(path)
+                }
             }
-            _ => None,
+            None => StorageLockInner::new(path),
+        };
+        Ok(Self(Arc::new(lock?)))
+    }
+}
+
+impl Drop for StorageLock {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.0) == 1 {
+            if let Err(e) = std::fs::remove_file(&self.0.path) {
+                eprintln!("Failed to delete lock file: {}", e);
+            }
         }
     }
 }
 
 #[derive(Debug)]
 struct StorageLockInner {
-    /// Static files lockfile.
-    #[allow(dead_code)]
-    static_file_lock: File,
-    /// Database lockfile.
-    #[allow(dead_code)]
-    database_lock: File,
+    file: File,
+    path: PathBuf
 }
 
-fn acquire_storage_kind_lock(path: impl AsRef<Path>) -> Option<File> {
-    match check_lock_file(&path) {
-        Some(pid) => {
-            if is_process_running(pid) {
-                None
-            } else {
-                create_lock_file(path)
-            }
-        }
-        None => create_lock_file(path),
+impl StorageLockInner {
+    /// Creates lock file and writes this process PID into it.
+    fn new(file_path: impl AsRef<Path>) -> Result<Self, StorageLockError> {
+        let path = file_path.as_ref().to_path_buf();
+        let mut file =
+            OpenOptions::new().create(true).write(true).open(&path)?;
+        write!(file, "{}", process::id() as usize)?;
+        Ok(Self { file, path })
     }
 }
 
-fn check_lock_file(path: impl AsRef<Path>) -> Option<usize> {
+/// Parses the PID from the lock file if it exists.
+fn parse_lock_file_pid(path: impl AsRef<Path>) -> Result<Option<usize>, StorageLockError> {
     if path.as_ref().exists() {
-        let mut file = File::open(path).expect("Unable to open lock file");
+        let mut file = File::open(path)?;
         let mut contents = String::new();
-        file.read_to_string(&mut contents).expect("Unable to read lock file");
-        contents.trim().parse().ok()
-    } else {
-        None
+        file.read_to_string(&mut contents)?;
+        return Ok(contents.trim().parse().ok())
     }
+    Ok(None)
 }
 
-fn create_lock_file(path: impl AsRef<Path>) -> Option<File> {
-    let mut file =
-        OpenOptions::new().create(true).write(true).open(path).expect("Unable to create lock file");
-    write!(file, "{}", process::id() as usize).expect("Unable to write to lock file");
-    Some(file)
-}
 
-fn is_process_running(pid: usize) -> bool {
-    let system = System::new_all();
-    system.process(pid.into()).is_some()
-}
