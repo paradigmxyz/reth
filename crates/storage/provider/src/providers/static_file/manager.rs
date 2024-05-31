@@ -3,16 +3,16 @@ use super::{
     StaticFileProviderRWRefMut, BLOCKS_PER_STATIC_FILE,
 };
 use crate::{
-    providers::lockfile::StorageLock, to_range, BlockHashReader, BlockNumReader, BlockReader,
-    BlockSource, DatabaseProvider, HeaderProvider, ReceiptProvider, RequestsProvider,
-    StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, WithdrawalsProvider,
+    to_range, BlockHashReader, BlockNumReader, BlockReader, BlockSource, DatabaseProvider,
+    HeaderProvider, ReceiptProvider, RequestsProvider, StageCheckpointReader, StatsReader,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider,
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     cursor::DbCursorRO,
+    lockfile::StorageLock,
     models::StoredBlockBodyIndices,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
     table::Table,

@@ -1,3 +1,5 @@
+//! Storage lock utils.
+
 use reth_storage_errors::lockfile::StorageLockError;
 use std::{
     fs::{File, OpenOptions},
@@ -7,16 +9,18 @@ use std::{
     sync::Arc,
 };
 use sysinfo::System;
-use thiserror::Error;
 
-// #[allow(dead_code)]
+/// A lock for a storage directory to ensure exclusive read-write access.
+///
+/// This lock stores the PID of the process holding it and is released on a graceful shutdown.
+/// On resuming from a crash, the stored PID helps verify that no other process holds the lock.
 #[derive(Debug, Clone)]
-pub(crate) struct StorageLock(Arc<StorageLockInner>);
+pub struct StorageLock(Arc<StorageLockInner>);
 
 impl StorageLock {
     /// Tries to acquires a write lock on the target directory, returning [StorageLockError] if
     /// unsuccessful.
-    pub(crate) fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
+    pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
         let path = path.join("lock");
         let lock = match parse_lock_file_pid(&path)? {
             Some(pid) => {
@@ -45,7 +49,7 @@ impl Drop for StorageLock {
 
 #[derive(Debug)]
 struct StorageLockInner {
-    file: File,
+    _file: File,
     path: PathBuf,
 }
 
@@ -55,7 +59,7 @@ impl StorageLockInner {
         let path = file_path.as_ref().to_path_buf();
         let mut file = OpenOptions::new().create(true).write(true).open(&path)?;
         write!(file, "{}", process::id() as usize)?;
-        Ok(Self { file, path })
+        Ok(Self { _file: file, path })
     }
 }
 
