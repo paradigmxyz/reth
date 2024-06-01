@@ -58,11 +58,11 @@ where
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
-        self.on_blocking_task(|this| async move {
+        self.on_blocking_task(|this| Box::pin(async move {
             let state = this.state_at(at)?;
             this.estimate_gas_with(cfg, block_env, request, state, state_override)
-        })
-        .await
+        }))
+        .await?
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -373,19 +373,22 @@ where
         request: TransactionRequest,
         block_number: Option<BlockId>,
     ) -> EthResult<AccessListWithGasUsed> {
+        let block_id = block_number.unwrap_or_default();
+        let (cfg, block, at) = self.evm_env_at(block_id).await?;
+
         self.on_blocking_task(|this| async move {
-            this.create_access_list_with(request, block_number).await
+            this.create_access_list_with(cfg, block, at, request).await
         })
-        .await
+        .await?
     }
 
     async fn create_access_list_with(
         &self,
+        cfg: CfgEnvWithHandlerCfg,
+        block: BlockEnv,
+        at: BlockId,
         mut request: TransactionRequest,
-        at: Option<BlockId>,
     ) -> EthResult<AccessListWithGasUsed> {
-        let block_id = at.unwrap_or_default();
-        let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
 
         let mut env = build_call_evm_env(cfg, block, request.clone())?;

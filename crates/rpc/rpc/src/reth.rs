@@ -57,7 +57,7 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<HashMap<Address, U256>> {
-        self.on_blocking_task(|this| async move { this.try_balance_changes_in_block(block_id) })
+        self.spawn_blocking(|this| async move { this.try_balance_changes_in_block(block_id) })
             .await
     }
 

@@ -152,22 +152,6 @@ where
         self.inner.gas_cap
     }
 
-    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static,
-    {
-        self.on_blocking_task(|_| c).await
-    }
-
-    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: FnOnce() -> EthResult<R> + Send + 'static,
-        R: Send + 'static,
-    {
-        self.spawn_tracing_task_with(move |_| c()).await
-    }
-
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox> {
         self.state_at_block_id(at)
     }
@@ -185,7 +169,7 @@ where
         F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        self.spawn_tracing_task_with(move |this| {
+        self.spawn_blocking(move |this| {
             let state = this.state_at(at)?;
             f(state)
         })
@@ -256,7 +240,7 @@ where
             return Ok(Some(tx))
         }
 
-        self.on_blocking_task(|this| async move {
+        self.on_blocking_task(move |this| {
             Ok(this.provider().transaction_by_hash(hash)?.map(|tx| tx.envelope_encoded()))
         })
         .await
@@ -265,7 +249,7 @@ where
     async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>> {
         // Try to find the transaction on disk
         let mut resp = self
-            .on_blocking_task(|this| async move {
+            .on_blocking_task(move |this|  {
                 match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
@@ -809,7 +793,7 @@ where
         }
 
         // replay all transactions of the block
-        self.spawn_tracing_task_with(move |this| {
+        self.spawn_blocking(move |this| {
             // we need to get the state of the parent block because we're replaying this block on
             // top of its parent block's state
             let state_at = block.parent_hash;
@@ -887,20 +871,6 @@ where
     Network: NetworkInfo + 'static,
     EvmConfig: ConfigureEvm,
 {
-    /// Spawns the given closure on a new blocking tracing task
-    async fn spawn_tracing_task_with<F, T>(&self, f: F) -> EthResult<T>
-    where
-        F: FnOnce(Self) -> EthResult<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let this = self.clone();
-        self.inner
-            .blocking_task_pool
-            .spawn(move || f(this))
-            .await
-            .map_err(|_| EthApiError::InternalBlockingTaskError)?
-    }
-
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.
     pub(crate) async fn legacy_gas_price(&self, gas_price: Option<U256>) -> EthResult<U256> {

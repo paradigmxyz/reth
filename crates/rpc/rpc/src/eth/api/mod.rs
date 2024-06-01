@@ -310,9 +310,10 @@ where
             return Ok(pending.origin.into_actual_pending())
         }
 
+        let mut lock = self.inner.pending_block.lock().await;
+        
         // no pending block from the CL yet, so we need to build it ourselves via txpool
-        self.on_blocking_task(|this| async move {
-            let mut lock = this.inner.pending_block.lock().await;
+        self.on_blocking_task(move |this| {
             let now = Instant::now();
 
             // check if the block is still good
@@ -416,15 +417,21 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> CallBlocking
-    for EthApi<Provider, Pool, Network, EvmConfig>
-{
-    fn spawn_blocking<F>(&self, f: Pin<Box<F>>)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        _ = self.inner.task_spawner().spawn_blocking(f);
-    }
+impl<Provider, Pool, Network, EvmConfig> CallBlocking for EthApi<Provider, Pool, Network, EvmConfig> {
+        fn spawn_blocking<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
+        where
+        Self: Sized,
+            F: FnOnce(Self) -> EthResult<T> + Send + 'static,
+            T: Send + 'static,
+        {
+            let this = self.clone();
+            let fut = self.inner
+            .blocking_task_pool()
+            .spawn(move || f(this));
+            async move {
+                fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)
+            }
+        }
 }
 
 /// The default gas limit for eth_call and adjacent calls.
@@ -507,4 +514,10 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     pub const fn task_spawner(&self) -> &dyn TaskSpawner {
         &*self.task_spawner
     }
+
+        /// Returns a handle to the blocking thread pool.
+        #[inline]
+        pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
+            &self.blocking_task_pool
+        }
 }
