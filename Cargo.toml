@@ -155,6 +155,7 @@ useless_let_if_seq = "warn"
 use_self = "warn"
 missing_const_for_fn = "warn"
 empty_line_after_doc_comments = "warn"
+iter_on_single_items = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -165,7 +166,6 @@ collection_is_never_read = "allow"
 debug_assert_with_mut_call = "allow"
 fallible_impl_from = "allow"
 future_not_send = "allow"
-iter_on_single_items = "warn"
 needless_collect = "allow"
 non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
