@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
     eth::{
-        api::pending_block::PendingBlockEnv,
+        api::{pending_block::PendingBlockEnv, CallBlocking},
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
         revm_utils::{prepare_call_env, EvmOverrides},

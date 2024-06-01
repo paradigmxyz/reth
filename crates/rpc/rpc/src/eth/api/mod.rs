@@ -1,16 +1,8 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use crate::eth::{
-    api::{
-        fee_history::FeeHistoryCache,
-        pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
-    },
-    cache::EthStateCache,
-    error::{EthApiError, EthResult},
-    gas_oracle::GasPriceOracle,
-    signer::EthSigner,
-};
+use std::pin::Pin;
+
 use async_trait::async_trait;
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
@@ -33,7 +25,19 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
+use traits::CallBlocking;
+
+use crate::eth::{
+    api::{
+        fee_history::FeeHistoryCache,
+        pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
+    },
+    cache::EthStateCache,
+    error::{EthApiError, EthResult},
+    gas_oracle::GasPriceOracle,
+    signer::EthSigner,
+};
 
 pub mod block;
 mod call;
@@ -164,28 +168,6 @@ where
         };
 
         Self { inner: Arc::new(inner) }
-    }
-
-    /// Executes the future on a new blocking task.
-    ///
-    /// This accepts a closure that creates a new future using a clone of this type and spawns the
-    /// future onto a new task that is allowed to block.
-    ///
-    /// Note: This is expected for futures that are dominated by blocking IO operations.
-    pub(crate) async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
-    where
-        C: FnOnce(Self) -> F,
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        let f = c(this);
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = f.await;
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
     /// Returns the state cache frontend
@@ -434,6 +416,17 @@ where
     }
 }
 
+impl<Provider, Pool, Network, EvmConfig> CallBlocking
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
+    fn spawn_blocking<F>(&self, f: Pin<Box<F>>)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        _ = self.inner.task_spawner().spawn_blocking(f);
+    }
+}
+
 /// The default gas limit for eth_call and adjacent calls.
 ///
 /// This is different from the default to regular 30M block gas limit
@@ -499,13 +492,19 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// Returns a handle to data on disk.
     #[inline]
-    pub fn provider(&self) -> &Provider {
+    pub const fn provider(&self) -> &Provider {
         &self.provider
     }
 
     /// Returns a handle to data in memory.
     #[inline]
-    pub fn cache(&self) -> &EthStateCache {
+    pub const fn cache(&self) -> &EthStateCache {
         &self.eth_cache
+    }
+
+    /// Returns a handle to the task spawner.
+    #[inline]
+    pub const fn task_spawner(&self) -> &dyn TaskSpawner {
+        &*self.task_spawner
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::{
     eth::{
-        api::EthTransactions,
+        api::{CallBlocking, EthTransactions},
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             apply_state_overrides, build_call_evm_env, caller_gas_allowance,

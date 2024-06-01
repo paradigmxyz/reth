@@ -20,7 +20,7 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{EthBlocks, EthTransactions},
+        api::{CallBlocking, EthBlocks, EthTransactions},
         error::EthApiError,
         revm_utils::EvmOverrides,
         EthApi,
