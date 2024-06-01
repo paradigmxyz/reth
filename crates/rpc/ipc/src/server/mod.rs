@@ -48,8 +48,8 @@ mod ipc;
 mod rpc_service;
 
 /// Ipc Server implementation
-
-// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
+///
+/// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
 pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
     endpoint: String,
