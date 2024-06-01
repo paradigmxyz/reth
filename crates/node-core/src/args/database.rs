@@ -26,15 +26,23 @@ impl DatabaseArgs {
             .with_exclusive(self.exclusive)
     }
 
-    fn parse_args_from(args: Vec<&str>) -> DatabaseArgs {
+    /// Parses command-line arguments into a DatabaseArgs struct.
+    pub fn parse() -> Self {
+        let args: Vec<String> = std::env::args().collect();
+        Self::parse_from_args(&args)
+    }
+
+    /// Parses a slice of arguments into a DatabaseArgs struct.
+    pub fn parse_from_args(args: &[String]) -> Self {
         let mut log_level = None;
         let mut exclusive = None;
 
         for arg in args.iter() {
             if arg.starts_with("--db.log-level=") {
-                let level_str = &arg["--db.log-level=".len()..];
-                log_level = LogLevel::from_str(level_str);
-            } else if *arg == "--db.exclusive" {
+                if let Some(level_str) = arg.strip_prefix("--db.log-level=") {
+                    log_level = LogLevel::from_str(level_str);
+                }
+            } else if arg == "--db.exclusive" {
                 exclusive = Some(true);
             }
         }
@@ -64,33 +72,46 @@ mod tests {
 
     #[test]
     fn test_parse_log_level_fatal() {
-        let args = DatabaseArgs::parse_args_from(vec!["reth", "--db.log-level=fatal"]);
+        let args = DatabaseArgs::parse_from_args(&[
+            "reth".to_string(),
+            "--db.log-level=fatal".to_string(),
+        ]);
         assert_eq!(args.log_level, Some(LogLevel::Fatal));
     }
 
     #[test]
     fn test_parse_log_level_debug() {
-        let args = DatabaseArgs::parse_args_from(vec!["reth", "--db.log-level=debug"]);
+        let args = DatabaseArgs::parse_from_args(&[
+            "reth".to_string(),
+            "--db.log-level=debug".to_string(),
+        ]);
         assert_eq!(args.log_level, Some(LogLevel::Debug));
     }
 
     #[test]
     fn test_parse_exclusive() {
-        let args = DatabaseArgs::parse_args_from(vec!["reth", "--db.exclusive"]);
+        let args =
+            DatabaseArgs::parse_from_args(&["reth".to_string(), "--db.exclusive".to_string()]);
         assert_eq!(args.exclusive, Some(true));
     }
 
     #[test]
     fn test_parse_combined_args() {
-        let args =
-            DatabaseArgs::parse_args_from(vec!["reth", "--db.log-level=warn", "--db.exclusive"]);
+        let args = DatabaseArgs::parse_from_args(&[
+            "reth".to_string(),
+            "--db.log-level=warn".to_string(),
+            "--db.exclusive".to_string(),
+        ]);
         assert_eq!(args.log_level, Some(LogLevel::Warn));
         assert_eq!(args.exclusive, Some(true));
     }
 
     #[test]
     fn test_invalid_log_level() {
-        let args = DatabaseArgs::parse_args_from(vec!["reth", "--db.log-level=invalid"]);
+        let args = DatabaseArgs::parse_from_args(&[
+            "reth".to_string(),
+            "--db.log-level=invalid".to_string(),
+        ]);
         assert_eq!(args.log_level, None);
     }
 }
