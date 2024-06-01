@@ -4,7 +4,7 @@ use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use reth_stages::{stages::AccountHashingStage, Stage, UnwindInput};
 use tracing::info;
 
@@ -30,7 +30,11 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
 
     if should_run {
         dry_run(
-            ProviderFactory::new(output_db, db_tool.chain.clone(), output_datadir.static_files())?,
+            ProviderFactory::new(
+                output_db,
+                db_tool.chain.clone(),
+                StaticFileProvider::read_only(output_datadir.static_files())?,
+            ),
             to,
             from,
         )

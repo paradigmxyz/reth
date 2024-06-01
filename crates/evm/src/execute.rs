@@ -245,7 +245,7 @@ mod tests {
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Err(BlockExecutionError::UnavailableForTest)
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
     }
 

@@ -31,8 +31,8 @@ use reth_primitives::{
     stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
 use reth_provider::{
-    BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockExecutionWriter, HeaderSyncMode, ProviderFactory,
+    StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -156,6 +156,9 @@ impl Command {
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
         let secret_key = get_secret_key(&network_secret_path)?;
+        let static_files = StaticFileProvider::read_only(
+            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+        )?;
         let network = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
@@ -165,11 +168,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             ))
-            .build(ProviderFactory::new(
-                db,
-                self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-            )?)
+            .build(ProviderFactory::new(db, self.chain.clone(), static_files))
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -210,8 +209,11 @@ impl Command {
 
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(provider_factory.clone())?;

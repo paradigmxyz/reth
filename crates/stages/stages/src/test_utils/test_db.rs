@@ -16,7 +16,7 @@ use reth_primitives::{
     StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{
-    providers::{StaticFileProviderRWRefMut, StaticFileWriter},
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -37,8 +37,11 @@ impl Default for TestStageDB {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
         Self {
             temp_static_files_dir: static_dir,
-            factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone(), static_dir_path)
-                .unwrap(),
+            factory: ProviderFactory::new(
+                create_test_rw_db(),
+                MAINNET.clone(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
         }
     }
 }
@@ -52,9 +55,8 @@ impl TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                static_dir_path,
-            )
-            .unwrap(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
         }
     }
 
@@ -225,13 +227,17 @@ impl TestStageDB {
         let blocks = blocks.into_iter().collect::<Vec<_>>();
 
         {
-            let mut headers_writer = provider.latest_writer(StaticFileSegment::Headers)?;
+            let mut headers_writer = storage_kind
+                .is_static()
+                .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, &block.header, U256::ZERO)
             })?;
 
-            headers_writer.commit()?;
+            if let Some(mut writer) = headers_writer {
+                writer.commit()?;
+            }
         }
 
         {
@@ -313,6 +319,42 @@ impl TestStageDB {
                 Ok(tx.put::<tables::Receipts>(tx_num, receipt)?)
             })
         })
+    }
+
+    /// Insert collection of ([TxNumber], [Receipt]) organized by respective block numbers into the
+    /// corresponding table or static file segment.
+    pub fn insert_receipts_by_block<I, J>(
+        &self,
+        receipts: I,
+        storage_kind: StorageKind,
+    ) -> ProviderResult<()>
+    where
+        I: IntoIterator<Item = (BlockNumber, J)>,
+        J: IntoIterator<Item = (TxNumber, Receipt)>,
+    {
+        match storage_kind {
+            StorageKind::Database(_) => self.commit(|tx| {
+                receipts.into_iter().try_for_each(|(_, receipts)| {
+                    for (tx_num, receipt) in receipts {
+                        tx.put::<tables::Receipts>(tx_num, receipt)?;
+                    }
+                    Ok(())
+                })
+            }),
+            StorageKind::Static => {
+                let provider = self.factory.static_file_provider();
+                let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
+                let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
+                    writer.increment_block(StaticFileSegment::Receipts, block_num)?;
+                    for (tx_num, receipt) in receipts {
+                        writer.append_receipt(tx_num, receipt)?;
+                    }
+                    Ok(())
+                });
+                writer.commit_without_sync_all()?;
+                res
+            }
+        }
     }
 
     pub fn insert_transaction_senders<I>(&self, transaction_senders: I) -> ProviderResult<()>

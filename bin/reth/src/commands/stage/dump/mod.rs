@@ -17,7 +17,7 @@ use reth_db::{
 };
 use reth_node_core::dirs::PlatformPath;
 use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -105,8 +105,11 @@ impl Command {
         let db_path = data_dir.db();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db,
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         info!(target: "reth::cli", "Database opened");
 

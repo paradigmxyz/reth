@@ -14,7 +14,10 @@
 
 use reth::{
     primitives::ChainSpecBuilder,
-    providers::{providers::BlockchainProvider, ProviderFactory},
+    providers::{
+        providers::{BlockchainProvider, StaticFileProvider},
+        ProviderFactory,
+    },
     utils::db::open_db_read_only,
 };
 use reth_db::{mdbx::DatabaseArguments, models::client_version::ClientVersion};
@@ -44,7 +47,11 @@ async fn main() -> eyre::Result<()> {
         DatabaseArguments::new(ClientVersion::default()),
     )?);
     let spec = Arc::new(ChainSpecBuilder::mainnet().build());
-    let factory = ProviderFactory::new(db.clone(), spec.clone(), db_path.join("static_files"))?;
+    let factory = ProviderFactory::new(
+        db.clone(),
+        spec.clone(),
+        StaticFileProvider::read_only(db_path.join("static_files"))?,
+    );
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the

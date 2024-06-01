@@ -136,6 +136,11 @@ impl StaticFileSegment {
     pub const fn is_headers(&self) -> bool {
         matches!(self, Self::Headers)
     }
+
+    /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
+    pub const fn is_receipts(&self) -> bool {
+        matches!(self, Self::Receipts)
+    }
 }
 
 /// A segment header that contains information common to all segments. Used for storage.
