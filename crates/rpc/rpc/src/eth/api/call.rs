@@ -324,7 +324,7 @@ where
 
         // Pick a point that's close to the estimated gas
         let mut mid_gas_limit = std::cmp::min(
-            gas_used * 3,
+            res.result.gas_used() * 3,
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
         );
 
