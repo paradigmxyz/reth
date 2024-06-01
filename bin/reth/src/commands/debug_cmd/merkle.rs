@@ -24,8 +24,9 @@ use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, PruneModes};
 use reth_provider::{
-    BlockNumReader, BlockWriter, BundleStateWithReceipts, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    providers::StaticFileProvider, BlockNumReader, BlockWriter, BundleStateWithReceipts,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory,
+    StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -102,8 +103,10 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-            )?)
+                StaticFileProvider::read_only(
+                    self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+                )?,
+            ))
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -122,7 +125,11 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
+        let factory = ProviderFactory::new(
+            &db,
+            self.chain.clone(),
+            StaticFileProvider::read_only(data_dir.static_files())?,
+        );
         let provider_rw = factory.provider_rw()?;
 
         // Configure and build network

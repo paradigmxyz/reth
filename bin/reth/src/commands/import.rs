@@ -29,8 +29,9 @@ use reth_network_p2p::{
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
-    ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockNumReader, ChainSpecProvider, HeaderProvider,
+    HeaderSyncMode, ProviderError, ProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory,
 };
 use reth_stages::{prelude::*, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -117,8 +118,11 @@ impl ImportCommand {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 

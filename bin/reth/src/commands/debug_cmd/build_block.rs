@@ -35,8 +35,9 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
-    BundleStateWithReceipts, ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockHashReader, BlockReader, BlockWriter, BundleStateWithReceipts, ProviderFactory,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
@@ -113,8 +114,10 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-        )?;
+            StaticFileProvider::read_only(
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+            )?,
+        );
         let provider = factory.provider()?;
 
         let best_number =
@@ -155,8 +158,8 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
             Arc::clone(&self.chain),
-            data_dir.static_files(),
-        )?;
+            StaticFileProvider::read_only(data_dir.static_files())?,
+        );
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));

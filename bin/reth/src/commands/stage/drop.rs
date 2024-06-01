@@ -16,7 +16,10 @@ use reth_fs_util as fs;
 use reth_primitives::{
     stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
 };
-use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::{StaticFileProvider, StaticFileWriter},
+    ProviderFactory, StaticFileProviderFactory,
+};
 use std::sync::Arc;
 
 /// `reth drop-stage` command
@@ -59,8 +62,11 @@ impl Command {
         fs::create_dir_all(&db_path)?;
 
         let db = open_db(db_path.as_ref(), self.db.database_args())?;
-        let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db,
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
         let static_file_provider = provider_factory.static_file_provider();
 
         let tool = DbTool::new(provider_factory, self.chain.clone())?;

@@ -2179,6 +2179,7 @@ mod tests {
         use super::*;
         use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
         use reth_primitives::U256;
+        use reth_provider::providers::StaticFileProvider;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
 
@@ -2235,8 +2236,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
             env.db
@@ -2292,8 +2296,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2313,8 +2320,11 @@ mod tests {
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&next_head].into_iter(),
             );
 
@@ -2354,8 +2364,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2406,8 +2419,11 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
 
@@ -2452,8 +2468,11 @@ mod tests {
             let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), temp_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(temp_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2479,9 +2498,10 @@ mod tests {
         use super::*;
         use reth_db::test_utils::create_test_static_files_dir;
         use reth_primitives::{genesis::Genesis, Hardfork, U256};
-        use reth_provider::test_utils::blocks::BlockchainTestData;
+        use reth_provider::{
+            providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
+        };
         use reth_testing_utils::{generators::random_block, GenesisAllocator};
-
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
             let mut rng = generators::rng();
@@ -2551,8 +2571,11 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1, &block2].into_iter(),
             );
 
@@ -2620,8 +2643,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2664,8 +2690,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis].into_iter(),
             );
 
@@ -2728,8 +2757,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&data.genesis, &block1].into_iter(),
             );
 

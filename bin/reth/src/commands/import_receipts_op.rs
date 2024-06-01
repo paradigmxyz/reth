@@ -16,8 +16,8 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, Receipts, StaticFileSegment};
 use reth_provider::{
-    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    providers::StaticFileProvider, BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use tracing::{debug, error, info, trace};
 
@@ -77,8 +77,11 @@ impl ImportReceiptsOpCommand {
 
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), chain_spec.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            chain_spec.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         import_receipts_from_file(
             provider_factory,

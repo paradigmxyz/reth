@@ -100,7 +100,7 @@ where
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory()?
+            .with_provider_factory().await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
