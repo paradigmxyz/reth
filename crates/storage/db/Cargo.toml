@@ -88,7 +88,7 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
-optimism = ["reth-primitives/optimism"]
+optimism = ["reth-primitives/optimism", "reth-codecs/optimism"]
 
 [[bench]]
 name = "hash_keys"
