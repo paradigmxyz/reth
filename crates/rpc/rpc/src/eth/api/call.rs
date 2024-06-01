@@ -296,7 +296,7 @@ where
         //
         // NOTE: this is the gas the transaction used, which is less than the
         // transaction requires to succeed.
-        let gas_used = res.result.gas_used();
+        let mut gas_used = res.result.gas_used();
         // the lowest value is capped by the gas used by the unconstrained transaction
         let mut lowest_gas_limit = gas_used.saturating_sub(1);
 
@@ -313,6 +313,8 @@ where
             // Re-execute the transaction with the new gas limit and update the result and
             // environment.
             (res, env) = self.transact(&mut db, env)?;
+            // Update the gas used based on the new result.
+            gas_used = res.result.gas_used();
             // Update the gas limit estimates (highest and lowest) based on the execution result.
             update_estimated_gas_range(
                 res.result,
