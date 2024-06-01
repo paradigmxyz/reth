@@ -156,9 +156,6 @@ impl Command {
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
         let secret_key = get_secret_key(&network_secret_path)?;
-        let static_files = StaticFileProvider::read_only(
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-        )?;
         let network = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
