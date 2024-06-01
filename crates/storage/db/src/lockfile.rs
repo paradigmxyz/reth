@@ -1,6 +1,7 @@
 //! Storage lock utils.
 
 use reth_storage_errors::lockfile::StorageLockError;
+use reth_tracing::tracing::error;
 use std::{
     path::{Path, PathBuf},
     process,
@@ -42,8 +43,8 @@ impl Drop for StorageLock {
             // TODO: should only happen during tests that the file does not exist: tempdir is
             // getting dropped first. However, tempdir shouldn't be dropped
             // before any of the storage providers.
-            if let Err(e) = std::fs::remove_file(&self.0.file_path) {
-                eprintln!("Failed to delete lock file: {}", e);
+            if let Err(err) = reth_fs_util::remove_file(&self.0.file_path) {
+                error!(%err, "Failed to delete lock file");
             }
         }
     }
@@ -59,10 +60,10 @@ impl StorageLockInner {
     fn new(file_path: PathBuf) -> Result<Self, StorageLockError> {
         // Create the directory if it doesn't exist
         if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            reth_fs_util::create_dir_all(parent)?;
         }
 
-        std::fs::write(&file_path, format!("{}", process::id()))?;
+        reth_fs_util::write(&file_path, format!("{}", process::id()))?;
 
         Ok(Self { file_path })
     }
@@ -71,7 +72,7 @@ impl StorageLockInner {
 /// Parses the PID from the lock file if it exists.
 fn parse_lock_file_pid(path: &Path) -> Result<Option<usize>, StorageLockError> {
     if path.exists() {
-        let contents = std::fs::read_to_string(path)?;
+        let contents = reth_fs_util::read_to_string(path)?;
         return Ok(contents.trim().parse().ok())
     }
     Ok(None)

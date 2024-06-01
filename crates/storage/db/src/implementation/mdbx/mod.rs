@@ -135,7 +135,6 @@ pub struct DatabaseEnv {
     inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
-    #[allow(dead_code)]
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
 }

@@ -1,3 +1,4 @@
+use reth_fs_util::FsPathError;
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -12,8 +13,8 @@ pub enum StorageLockError {
 }
 
 /// TODO: turn into variant once ProviderError
-impl From<std::io::Error> for StorageLockError {
-    fn from(source: std::io::Error) -> Self {
+impl From<FsPathError> for StorageLockError {
+    fn from(source: FsPathError) -> Self {
         Self::Other(source.to_string())
     }
 }
