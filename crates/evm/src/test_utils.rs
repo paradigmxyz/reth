@@ -25,20 +25,21 @@ impl MockExecutorProvider {
 }
 
 impl BlockExecutorProvider for MockExecutorProvider {
-    type Executor<DB: Database<Error = ProviderError>> = Self;
+    type Error = ProviderError;
+    type Executor<DB: Database<Error: Into<Self::Error>>> = Self;
 
-    type BatchExecutor<DB: Database<Error = ProviderError>> = Self;
+    type BatchExecutor<DB: Database<Error: Into<Self::Error>>> = Self;
 
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<Self::Error>>,
     {
         self.clone()
     }
 
     fn batch_executor<DB>(&self, _: DB, _: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<Self::Error>>,
     {
         self.clone()
     }
