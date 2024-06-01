@@ -2325,7 +2325,7 @@ mod tests {
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
-                [&next_head].into_iter(),
+                std::iter::once(&next_head),
             );
 
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
@@ -2695,7 +2695,7 @@ mod tests {
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
                 ),
-                [&genesis].into_iter(),
+                std::iter::once(&genesis),
             );
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
