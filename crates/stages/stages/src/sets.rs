@@ -262,7 +262,11 @@ pub struct OfflineStages<EF> {
 
 impl<EF> OfflineStages<EF> {
     /// Create a new set of offline stages with default values.
-    pub fn new(executor_factory: EF, stages_config: StageConfig, prune_modes: PruneModes) -> Self {
+    pub const fn new(
+        executor_factory: EF,
+        stages_config: StageConfig,
+        prune_modes: PruneModes,
+    ) -> Self {
         Self { executor_factory, stages_config, prune_modes }
     }
 }
@@ -301,7 +305,11 @@ pub struct ExecutionStages<E> {
 
 impl<E> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
-    pub fn new(executor_factory: E, stages_config: StageConfig, prune_modes: PruneModes) -> Self {
+    pub const fn new(
+        executor_factory: E,
+        stages_config: StageConfig,
+        prune_modes: PruneModes,
+    ) -> Self {
         Self { executor_factory, stages_config, prune_modes }
     }
 }

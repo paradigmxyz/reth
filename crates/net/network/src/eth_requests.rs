@@ -1,8 +1,8 @@
 //! Blocks/Headers management for the p2p network.
 
 use crate::{
-    budget::DEFAULT_BUDGET_TRY_DRAIN_STREAM, metrics::EthRequestHandlerMetrics, peers::PeersHandle,
-    poll_nested_stream_with_budget,
+    budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
+    metrics::EthRequestHandlerMetrics, peers::PeersHandle,
 };
 use alloy_rlp::Encodable;
 use futures::StreamExt;
@@ -18,6 +18,7 @@ use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::sync::{mpsc::Receiver, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
@@ -239,10 +240,12 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
-        let maybe_more_incoming_requests = poll_nested_stream_with_budget!(
+        let mut acc = Duration::ZERO;
+        let maybe_more_incoming_requests = metered_poll_nested_stream_with_budget!(
+            acc,
             "net::eth",
             "Incoming eth requests stream",
-            DEFAULT_BUDGET_TRY_DRAIN_STREAM,
+            DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS,
             this.incoming_requests.poll_next_unpin(cx),
             |incoming| {
                 match incoming {
@@ -261,6 +264,8 @@ where
                 }
             },
         );
+
+        this.metrics.acc_duration_poll_eth_req_handler.set(acc.as_secs_f64());
 
         // stream is fully drained and import futures pending
         if maybe_more_incoming_requests {

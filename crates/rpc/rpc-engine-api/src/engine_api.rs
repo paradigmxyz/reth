@@ -565,9 +565,11 @@ where
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         let start = Instant::now();
+        let gas_used = payload.gas_used;
         let res = Self::new_payload_v1(self, payload).await;
-        self.inner.metrics.latency.new_payload_v1.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v1.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -576,9 +578,11 @@ where
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         let start = Instant::now();
+        let gas_used = payload.execution_payload.gas_used;
         let res = Self::new_payload_v2(self, payload).await;
-        self.inner.metrics.latency.new_payload_v2.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v2.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -592,10 +596,12 @@ where
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
         let res =
             Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
-        self.inner.metrics.latency.new_payload_v3.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v3.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -607,10 +613,12 @@ where
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.payload_inner.gas_used;
         let res =
             Self::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root).await;
-        self.inner.metrics.latency.new_payload_v4.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v4.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 

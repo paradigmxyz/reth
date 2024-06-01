@@ -142,7 +142,7 @@ pub struct EnvironmentFlags {
 
 impl EnvironmentFlags {
     /// Configures the mdbx flags to use when opening the environment.
-    pub(crate) fn make_flags(&self) -> ffi::MDBX_env_flags_t {
+    pub(crate) const fn make_flags(&self) -> ffi::MDBX_env_flags_t {
         let mut flags = 0;
 
         if self.no_sub_dir {

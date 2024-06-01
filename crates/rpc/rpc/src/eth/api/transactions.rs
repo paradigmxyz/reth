@@ -309,9 +309,7 @@ where
             None => return Ok(None),
             Some(tx) => {
                 let res = match tx {
-                    tx @ TransactionSource::Pool(_) => {
-                        (tx, BlockId::Number(BlockNumberOrTag::Pending))
-                    }
+                    tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
                     TransactionSource::Block {
                         transaction,
                         index,
@@ -384,17 +382,14 @@ where
 
         // set nonce if not already set before
         if request.nonce.is_none() {
-            let nonce =
-                self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
+            let nonce = self.get_transaction_count(from, Some(BlockId::pending()))?;
             // note: `.to()` can't panic because the nonce is constructed from a `u64`
             request.nonce = Some(nonce.to::<u64>());
         }
 
         let chain_id = self.chain_id();
 
-        let estimated_gas = self
-            .estimate_gas_at(request.clone(), BlockId::Number(BlockNumberOrTag::Pending), None)
-            .await?;
+        let estimated_gas = self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
         let gas_limit = estimated_gas;
 
         let TransactionRequest {

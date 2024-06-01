@@ -367,7 +367,7 @@ pub enum OptimismInvalidTransactionError {
 
 impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
-    fn error_code(&self) -> i32 {
+    const fn error_code(&self) -> i32 {
         match self {
             Self::InvalidChainId | Self::GasTooLow | Self::GasTooHigh => {
                 EthRpcErrorCode::InvalidInput.code()
@@ -380,7 +380,7 @@ impl RpcInvalidTransactionError {
     /// Converts the halt error
     ///
     /// Takes the configured gas limit of the transaction which is attached to the error
-    pub(crate) fn halt(reason: HaltReason, gas_limit: u64) -> Self {
+    pub(crate) const fn halt(reason: HaltReason, gas_limit: u64) -> Self {
         match reason {
             HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
             HaltReason::NonceOverflow => Self::NonceMaxValue,
@@ -389,7 +389,7 @@ impl RpcInvalidTransactionError {
     }
 
     /// Converts the out of gas error
-    pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
+    pub(crate) const fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
         match reason {
             OutOfGasError::Basic => Self::BasicOutOfGas(gas_limit),
             OutOfGasError::Memory => Self::MemoryOutOfGas(gas_limit),
@@ -508,7 +508,7 @@ impl RevertError {
         }
     }
 
-    fn error_code(&self) -> i32 {
+    const fn error_code(&self) -> i32 {
         EthRpcErrorCode::ExecutionError.code()
     }
 }

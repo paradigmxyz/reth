@@ -194,7 +194,7 @@ impl<D: XdgPath> MaybePlatformPath<D> {
     }
 
     /// Returns true if a custom path is set
-    pub fn is_some(&self) -> bool {
+    pub const fn is_some(&self) -> bool {
         self.0.is_some()
     }
 
@@ -265,7 +265,7 @@ pub struct ChainPath<D>(PlatformPath<D>, Chain);
 
 impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
-    pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
+    pub const fn new(path: PlatformPath<D>, chain: Chain) -> Self {
         Self(path, chain)
     }
 

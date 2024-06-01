@@ -245,7 +245,7 @@ pub trait EthApi {
     #[method(name = "feeHistory")]
     async fn fee_history(
         &self,
-        block_count: u64,
+        block_count: U64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> RpcResult<FeeHistory>;

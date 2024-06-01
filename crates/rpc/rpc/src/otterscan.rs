@@ -26,7 +26,7 @@ pub struct OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth> {
     /// Creates a new instance of `Otterscan`.
-    pub fn new(eth: Eth) -> Self {
+    pub const fn new(eth: Eth) -> Self {
         Self { eth }
     }
 }

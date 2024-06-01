@@ -81,37 +81,37 @@ impl Default for EthConfig {
 
 impl EthConfig {
     /// Configures the caching layer settings
-    pub fn state_cache(mut self, cache: EthStateCacheConfig) -> Self {
+    pub const fn state_cache(mut self, cache: EthStateCacheConfig) -> Self {
         self.cache = cache;
         self
     }
 
     /// Configures the gas price oracle settings
-    pub fn gpo_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
+    pub const fn gpo_config(mut self, gas_oracle_config: GasPriceOracleConfig) -> Self {
         self.gas_oracle = gas_oracle_config;
         self
     }
 
     /// Configures the maximum number of tracing requests
-    pub fn max_tracing_requests(mut self, max_requests: usize) -> Self {
+    pub const fn max_tracing_requests(mut self, max_requests: usize) -> Self {
         self.max_tracing_requests = max_requests;
         self
     }
 
     /// Configures the maximum block length to scan per `eth_getLogs` request
-    pub fn max_blocks_per_filter(mut self, max_blocks: u64) -> Self {
+    pub const fn max_blocks_per_filter(mut self, max_blocks: u64) -> Self {
         self.max_blocks_per_filter = max_blocks;
         self
     }
 
     /// Configures the maximum number of logs per response
-    pub fn max_logs_per_response(mut self, max_logs: usize) -> Self {
+    pub const fn max_logs_per_response(mut self, max_logs: usize) -> Self {
         self.max_logs_per_response = max_logs;
         self
     }
 
     /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
-    pub fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
+    pub const fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
         self.rpc_gas_cap = rpc_gas_cap;
         self
     }

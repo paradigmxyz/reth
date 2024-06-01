@@ -74,13 +74,18 @@ impl BlockBatchRecord {
     }
 
     /// Returns the recorded receipts.
-    pub fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts {
         &self.receipts
     }
 
     /// Returns all recorded receipts.
     pub fn take_receipts(&mut self) -> Receipts {
         std::mem::take(&mut self.receipts)
+    }
+
+    /// Returns the recorded requests.
+    pub fn requests(&self) -> &[Requests] {
+        &self.requests
     }
 
     /// Returns all recorded requests.

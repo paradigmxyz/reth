@@ -24,7 +24,7 @@ pub struct Account {
 
 impl Account {
     /// Whether the account has bytecode.
-    pub fn has_bytecode(&self) -> bool {
+    pub const fn has_bytecode(&self) -> bool {
         self.bytecode_hash.is_some()
     }
 
