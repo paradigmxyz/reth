@@ -1,6 +1,9 @@
 //! Optimism block executor.
 
+extern crate alloc;
+
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
+use alloc::sync::Arc;
 use reth_evm::{
     execute::{
         BatchBlockExecutionOutput, BatchExecutor, BlockExecutionError, BlockExecutionInput,
@@ -23,7 +26,6 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
-use std::sync::Arc;
 use tracing::trace;
 
 /// Provides executors to execute regular ethereum blocks
@@ -442,6 +444,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::{collections::HashMap, str::FromStr};
     use reth_primitives::{
         b256, Account, Address, Block, ChainSpecBuilder, Signature, StorageKey, StorageValue,
         Transaction, TransactionSigned, TxEip1559, BASE_MAINNET,
@@ -449,7 +452,6 @@ mod tests {
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
-    use std::{collections::HashMap, str::FromStr};
 
     fn create_op_state_provider() -> StateProviderTest {
         let mut db = StateProviderTest::default();

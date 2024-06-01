@@ -1,13 +1,15 @@
 //! Optimism-specific implementation and utilities for the executor
 
+extern crate alloc;
+
 use crate::OptimismBlockExecutionError;
+use alloc::sync::Arc;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, B256, U256};
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
     DatabaseCommit, L1BlockInfo,
 };
-use std::sync::Arc;
 use tracing::trace;
 
 /// The address of the create2 deployer

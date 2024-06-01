@@ -8,6 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{

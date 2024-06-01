@@ -29,6 +29,7 @@ revm-primitives.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+ff = { version = "0.13.0", default-features = false }
 
 [dev-dependencies]
 reth-revm = { workspace = true, features = ["test-utils"] }
@@ -39,3 +40,7 @@ optimism = [
     "reth-provider/optimism",
     "reth-optimism-consensus/optimism",
 ]
+default = ["std"]
+alloc = ["ff/alloc"]
+std = ["alloc"]
+build-std = ["alloc"]
