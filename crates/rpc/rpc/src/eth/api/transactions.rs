@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
     eth::{
-        api::{pending_block::PendingBlockEnv, CallBlocking},
+        api::{pending_block::PendingBlockEnv, SpawnBlocking},
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
         revm_utils::{prepare_call_env, EvmOverrides},
@@ -43,7 +43,6 @@ use revm::{
     GetInspector, Inspector,
 };
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use std::future::Future;
 
 use crate::eth::{
     api::{BuildReceipt, EthTransactions, StateCacheDB},
@@ -240,7 +239,7 @@ where
             return Ok(Some(tx))
         }
 
-        self.on_blocking_task(move |this| {
+        self.spawn_blocking(move |this| {
             Ok(this.provider().transaction_by_hash(hash)?.map(|tx| tx.envelope_encoded()))
         })
         .await
@@ -249,7 +248,7 @@ where
     async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>> {
         // Try to find the transaction on disk
         let mut resp = self
-            .on_blocking_task(move |this|  {
+            .spawn_blocking(move |this| {
                 match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
@@ -329,7 +328,7 @@ where
 
     async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>
     where
-        Self: BuildReceipt + Clone + Send + 'static,
+        Self: BuildReceipt + SpawnBlocking + Clone + Send + 'static,
     {
         let result = self.load_transaction_and_receipt(hash).await?;
 

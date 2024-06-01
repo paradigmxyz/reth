@@ -1,8 +1,6 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::future::Future;
-
 use crate::eth::{
     error::{EthApiError, EthResult},
     revm_utils::EvmOverrides,
@@ -27,6 +25,8 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
 use crate::eth::{api::BuildReceipt, revm_utils::FillableTransaction};
 use revm_primitives::db::{Database, DatabaseRef};
+
+use super::SpawnBlocking;
 
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
@@ -219,7 +219,7 @@ pub trait EthTransactions: Send + Sync {
     /// Note: The tx receipt is not available for pending transactions.
     async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>
     where
-        Self: BuildReceipt + Clone + 'static,
+        Self: BuildReceipt + SpawnBlocking + Clone + 'static,
     {
         let result = self.load_transaction_and_receipt(hash).await?;
 
@@ -237,10 +237,10 @@ pub trait EthTransactions: Send + Sync {
         hash: TxHash,
     ) -> EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>>
     where
-        Self: Clone + 'static,
+        Self: SpawnBlocking + Clone + 'static,
     {
         let this = self.clone();
-        self.spawn_blocking_future(async move {
+        self.spawn_blocking(move |_| {
             let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
                 Some((tx, meta)) => (tx, meta),
                 None => return Ok(None),

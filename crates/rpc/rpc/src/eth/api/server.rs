@@ -20,7 +20,7 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{CallBlocking, EthBlocks, EthTransactions},
+        api::{EthBlocks, EthTransactions, SpawnBlocking},
         error::EthApiError,
         revm_utils::EvmOverrides,
         EthApi,
@@ -33,7 +33,7 @@ use super::{BuildReceipt, EthApiSpec};
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EthApiSpec + EthTransactions + BuildReceipt + CallBlocking,
+    Self: EthApiSpec + EthTransactions + BuildReceipt + SpawnBlocking,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt
         + ChainSpecProvider
@@ -214,7 +214,8 @@ where
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        Ok(CallBlocking::spawn_blocking(self, move |this| this.balance(address, block_number)).await?)
+        Ok(SpawnBlocking::spawn_blocking(self, move |this| this.balance(address, block_number))
+            .await?)
     }
 
     /// Handler for: `eth_getStorageAt`
@@ -225,7 +226,9 @@ where
         block_number: Option<BlockId>,
     ) -> Result<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        let res: B256 = CallBlocking::spawn_blocking(self, move |this| this.storage_at(address, index, block_number) )
+        let res: B256 = SpawnBlocking::spawn_blocking(self, move |this| {
+            this.storage_at(address, index, block_number)
+        })
         .await?;
         Ok(res)
     }
@@ -237,14 +240,16 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(CallBlocking::spawn_blocking(self, move |this| this.get_transaction_count(address, block_number))
-            .await?)
+        Ok(SpawnBlocking::spawn_blocking(self, move |this| {
+            this.get_transaction_count(address, block_number)
+        })
+        .await?)
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        Ok(CallBlocking::spawn_blocking(self, move |this| this.get_code(address, block_number))
+        Ok(SpawnBlocking::spawn_blocking(self, move |this| this.get_code(address, block_number))
             .await?)
     }
 

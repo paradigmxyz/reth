@@ -2,7 +2,7 @@
 
 use crate::{
     eth::{
-        api::{CallBlocking, EthTransactions},
+        api::{EthTransactions, SpawnBlocking},
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             apply_state_overrides, build_call_evm_env, caller_gas_allowance,
@@ -58,11 +58,11 @@ where
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
-        self.on_blocking_task(|this| Box::pin(async move {
+        self.spawn_blocking(move |this| {
             let state = this.state_at(at)?;
             this.estimate_gas_with(cfg, block_env, request, state, state_override)
-        }))
-        .await?
+        })
+        .await
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -376,13 +376,10 @@ where
         let block_id = block_number.unwrap_or_default();
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
 
-        self.on_blocking_task(|this| async move {
-            this.create_access_list_with(cfg, block, at, request).await
-        })
-        .await?
+        self.spawn_blocking(move |this| this.create_access_list_with(cfg, block, at, request)).await
     }
 
-    async fn create_access_list_with(
+    fn create_access_list_with(
         &self,
         cfg: CfgEnvWithHandlerCfg,
         block: BlockEnv,

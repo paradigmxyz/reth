@@ -1,8 +1,6 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use std::pin::Pin;
-
 use async_trait::async_trait;
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
@@ -26,7 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Mutex;
-use traits::CallBlocking;
+use traits::SpawnBlocking;
 
 use crate::eth::{
     api::{
@@ -311,40 +309,42 @@ where
         }
 
         let mut lock = self.inner.pending_block.lock().await;
-        
-        // no pending block from the CL yet, so we need to build it ourselves via txpool
-        self.on_blocking_task(move |this| {
-            let now = Instant::now();
 
-            // check if the block is still good
-            if let Some(pending_block) = lock.as_ref() {
-                // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                    pending.origin.header().hash() == pending_block.block.parent_hash &&
-                    now <= pending_block.expires_at
-                {
-                    return Ok(Some(pending_block.block.clone()))
-                }
+        let now = Instant::now();
+
+        // check if the block is still good
+        if let Some(pending_block) = lock.as_ref() {
+            // this is guaranteed to be the `latest` header
+            if pending.block_env.number.to::<u64>() == pending_block.block.number &&
+                pending.origin.header().hash() == pending_block.block.parent_hash &&
+                now <= pending_block.expires_at
+            {
+                return Ok(Some(pending_block.block.clone()))
             }
+        }
 
-            // we rebuild the block
-            let pending_block = match pending.build_block(this.provider(), this.pool()) {
-                Ok(block) => block,
-                Err(err) => {
-                    tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
-                }
-            };
+        // no pending block from the CL yet, so we need to build it ourselves via txpool
+        let pending_block = match self
+            .spawn_blocking(move |this| {
+                // we rebuild the block
+                pending.build_block(this.provider(), this.pool())
+            })
+            .await
+        {
+            Ok(block) => block,
+            Err(err) => {
+                tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
+                return Ok(None)
+            }
+        };
 
-            let now = Instant::now();
-            *lock = Some(PendingBlock {
-                block: pending_block.clone(),
-                expires_at: now + Duration::from_secs(1),
-            });
+        let now = Instant::now();
+        *lock = Some(PendingBlock {
+            block: pending_block.clone(),
+            expires_at: now + Duration::from_secs(1),
+        });
 
-            Ok(Some(pending_block))
-        })
-        .await
+        Ok(Some(pending_block))
     }
 }
 
@@ -417,21 +417,21 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> CallBlocking for EthApi<Provider, Pool, Network, EvmConfig> {
-        fn spawn_blocking<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
-        where
+impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Send + Sync + 'static,
+{
+    fn spawn_blocking<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
+    where
         Self: Sized,
-            F: FnOnce(Self) -> EthResult<T> + Send + 'static,
-            T: Send + 'static,
-        {
-            let this = self.clone();
-            let fut = self.inner
-            .blocking_task_pool()
-            .spawn(move || f(this));
-            async move {
-                fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)
-            }
-        }
+        F: FnOnce(Self) -> EthResult<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let this = self.clone();
+        let fut = self.inner.blocking_task_pool().spawn(move || f(this));
+        async move { fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)? }
+    }
 }
 
 /// The default gas limit for eth_call and adjacent calls.
@@ -515,9 +515,9 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
         &*self.task_spawner
     }
 
-        /// Returns a handle to the blocking thread pool.
-        #[inline]
-        pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
-            &self.blocking_task_pool
-        }
+    /// Returns a handle to the blocking thread pool.
+    #[inline]
+    pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
+        &self.blocking_task_pool
+    }
 }
