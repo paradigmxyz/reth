@@ -206,9 +206,8 @@ where
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.
         let mut highest_gas_limit = tx_request_gas_limit
-            .map_or(block_env_gas_limit, |tx_gas_limit| {
-                U256::from(tx_gas_limit).max(block_env_gas_limit)
-            });
+            .map(|tx_gas_limit| U256::from(tx_gas_limit).max(block_env_gas_limit))
+            .unwrap_or(block_env_gas_limit);
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
@@ -223,7 +222,7 @@ where
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
                 if let Ok(code) = db.db.account_code(to) {
-                    let no_code_callee = code.map_or(true, |code| code.is_empty());
+                    let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // If the tx is a simple transfer (call to an account with no code) we can
                         // shortcircuit. But simply returning
