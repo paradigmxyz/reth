@@ -1518,7 +1518,7 @@ pub struct RpcServerConfig {
     jwt_secret: Option<JwtSecret>,
 }
 
-/// === impl RpcServerConfig ===
+// === impl RpcServerConfig ===
 
 impl RpcServerConfig {
     /// Creates a new config with only http set
