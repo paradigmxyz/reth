@@ -149,7 +149,7 @@ pub struct BlockExecutionInput<'a, Block> {
 
 impl<'a, Block> BlockExecutionInput<'a, Block> {
     /// Creates a new input.
-    pub fn new(block: &'a Block, total_difficulty: U256) -> Self {
+    pub const fn new(block: &'a Block, total_difficulty: U256) -> Self {
         Self { block, total_difficulty }
     }
 }
@@ -245,7 +245,7 @@ mod tests {
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Err(BlockExecutionError::UnavailableForTest)
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
     }
 

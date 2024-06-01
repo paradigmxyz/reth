@@ -35,12 +35,11 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
-    BundleStateWithReceipts, ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockHashReader, BlockReader, BlockWriter, BundleStateWithReceipts, ProviderFactory,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
-#[cfg(feature = "optimism")]
-use reth_rpc_types::engine::OptimismPayloadAttributes;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -115,8 +114,10 @@ impl Command {
         let factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-        )?;
+            StaticFileProvider::read_only(
+                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+            )?,
+        );
         let provider = factory.provider()?;
 
         let best_number =
@@ -157,8 +158,8 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
             Arc::clone(&self.chain),
-            data_dir.static_files(),
-        )?;
+            StaticFileProvider::read_only(data_dir.static_files())?,
+        );
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
@@ -257,7 +258,7 @@ impl Command {
             #[cfg(feature = "optimism")]
             reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
                 best_block.hash(),
-                OptimismPayloadAttributes {
+                reth_rpc_types::engine::OptimismPayloadAttributes {
                     payload_attributes: payload_attrs,
                     transactions: None,
                     no_tx_pool: None,

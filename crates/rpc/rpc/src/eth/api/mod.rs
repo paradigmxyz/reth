@@ -10,6 +10,7 @@ use crate::eth::{
     error::{EthApiError, EthResult},
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
+    traits::RawTransactionForwarder,
 };
 use async_trait::async_trait;
 use reth_errors::{RethError, RethResult};
@@ -48,7 +49,6 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::eth::traits::RawTransactionForwarder;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.

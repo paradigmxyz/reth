@@ -9,9 +9,9 @@
 ![](./assets/reth-beta.png)
 
 **[Install](https://paradigmxyz.github.io/reth/installation/installation.html)**
-| [User Book](https://paradigmxyz.github.io/reth)
+| [User Book](https://reth.rs)
 | [Developer Docs](./docs)
-| [Crate Docs](https://paradigmxyz.github.io/reth/docs)
+| [Crate Docs](https://reth.rs/docs)
 
 _The project is still work in progress, see the [disclaimer below](#status)._
 

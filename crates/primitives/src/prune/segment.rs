@@ -28,7 +28,7 @@ pub enum PruneSegment {
 
 impl PruneSegment {
     /// Returns minimum number of blocks to left in the database for this segment.
-    pub fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
+    pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {
             Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
                 0
@@ -53,12 +53,12 @@ pub enum PrunePurpose {
 
 impl PrunePurpose {
     /// Returns true if the purpose is [`PrunePurpose::User`].
-    pub fn is_user(self) -> bool {
+    pub const fn is_user(self) -> bool {
         matches!(self, Self::User)
     }
 
     /// Returns true if the purpose is [`PrunePurpose::StaticFile`].
-    pub fn is_static_file(self) -> bool {
+    pub const fn is_static_file(self) -> bool {
         matches!(self, Self::StaticFile)
     }
 }

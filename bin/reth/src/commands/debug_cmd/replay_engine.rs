@@ -25,8 +25,8 @@ use reth_node_core::engine::engine_store::{EngineMessageStore, StoredEngineApiMe
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{ChainSpec, PruneModes};
 use reth_provider::{
-    providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory,
-    StaticFileProviderFactory,
+    providers::{BlockchainProvider, StaticFileProvider},
+    CanonStateSubscriptions, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
@@ -100,8 +100,10 @@ impl Command {
             .build(ProviderFactory::new(
                 db,
                 self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-            )?)
+                StaticFileProvider::read_only(
+                    self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
+                )?,
+            ))
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -120,8 +122,11 @@ impl Command {
 
         // Initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            self.chain.clone(),
+            StaticFileProvider::read_only(data_dir.static_files())?,
+        );
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));

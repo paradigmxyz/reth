@@ -33,7 +33,7 @@ pub struct OnForkChoiceUpdated {
 
 impl OnForkChoiceUpdated {
     /// Returns the determined status of the received ForkchoiceState.
-    pub fn forkchoice_status(&self) -> ForkchoiceStatus {
+    pub const fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status
     }
 

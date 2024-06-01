@@ -280,7 +280,7 @@ impl Default for EtlConfig {
 
 impl EtlConfig {
     /// Creates an ETL configuration
-    pub fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
+    pub const fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
         Self { dir, file_size }
     }
 
@@ -324,6 +324,13 @@ pub struct PruneConfig {
 impl Default for PruneConfig {
     fn default() -> Self {
         Self { block_interval: 5, segments: PruneModes::none() }
+    }
+}
+
+impl PruneConfig {
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 }
 

@@ -74,19 +74,19 @@ pub enum CanonicalError {
 
 impl CanonicalError {
     /// Returns `true` if the error is fatal.
-    pub fn is_fatal(&self) -> bool {
+    pub const fn is_fatal(&self) -> bool {
         matches!(self, Self::CanonicalCommit(_) | Self::CanonicalRevert(_))
     }
 
     /// Returns `true` if the underlying error matches
     /// [BlockchainTreeError::BlockHashNotFoundInChain].
-    pub fn is_block_hash_not_found(&self) -> bool {
+    pub const fn is_block_hash_not_found(&self) -> bool {
         matches!(self, Self::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. }))
     }
 
     /// Returns `Some(BlockNumber)` if the underlying error matches
     /// [CanonicalError::OptimisticTargetRevert].
-    pub fn optimistic_revert_block_number(&self) -> Option<BlockNumber> {
+    pub const fn optimistic_revert_block_number(&self) -> Option<BlockNumber> {
         match self {
             Self::OptimisticTargetRevert(block_number) => Some(*block_number),
             _ => None,
@@ -137,13 +137,13 @@ impl InsertBlockError {
 
     /// Returns the error kind
     #[inline]
-    pub fn kind(&self) -> &InsertBlockErrorKind {
+    pub const fn kind(&self) -> &InsertBlockErrorKind {
         &self.inner.kind
     }
 
     /// Returns the block that resulted in the error
     #[inline]
-    pub fn block(&self) -> &SealedBlock {
+    pub const fn block(&self) -> &SealedBlock {
         &self.inner.block
     }
 
@@ -198,7 +198,7 @@ impl std::error::Error for InsertBlockErrorData {
 }
 
 impl InsertBlockErrorData {
-    fn new(block: SealedBlock, kind: InsertBlockErrorKind) -> Self {
+    const fn new(block: SealedBlock, kind: InsertBlockErrorKind) -> Self {
         Self { block, kind }
     }
 
@@ -238,17 +238,17 @@ pub enum InsertBlockErrorKind {
 
 impl InsertBlockErrorKind {
     /// Returns true if the error is a tree error
-    pub fn is_tree_error(&self) -> bool {
+    pub const fn is_tree_error(&self) -> bool {
         matches!(self, Self::Tree(_))
     }
 
     /// Returns true if the error is a consensus error
-    pub fn is_consensus_error(&self) -> bool {
+    pub const fn is_consensus_error(&self) -> bool {
         matches!(self, Self::Consensus(_))
     }
 
     /// Returns true if this error is a state root error
-    pub fn is_state_root_error(&self) -> bool {
+    pub const fn is_state_root_error(&self) -> bool {
         // we need to get the state root errors inside of the different variant branches
         match self {
             Self::Execution(err) => {
@@ -280,7 +280,7 @@ impl InsertBlockErrorKind {
     /// Returns true if the error is caused by an invalid block
     ///
     /// This is intended to be used to determine if the block should be marked as invalid.
-    pub fn is_invalid_block(&self) -> bool {
+    pub const fn is_invalid_block(&self) -> bool {
         match self {
             Self::SenderRecovery | Self::Consensus(_) => true,
             // other execution errors that are considered internal errors
@@ -296,7 +296,6 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::CanonicalRevert { .. } |
                     BlockExecutionError::CanonicalCommit { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
-                    BlockExecutionError::UnavailableForTest => false,
                     BlockExecutionError::Other(_) => false,
                 }
             }
@@ -331,7 +330,7 @@ impl InsertBlockErrorKind {
     }
 
     /// Returns true if this is a block pre merge error.
-    pub fn is_block_pre_merge(&self) -> bool {
+    pub const fn is_block_pre_merge(&self) -> bool {
         matches!(
             self,
             Self::Execution(BlockExecutionError::Validation(
@@ -341,17 +340,17 @@ impl InsertBlockErrorKind {
     }
 
     /// Returns true if the error is an execution error
-    pub fn is_execution_error(&self) -> bool {
+    pub const fn is_execution_error(&self) -> bool {
         matches!(self, Self::Execution(_))
     }
 
     /// Returns true if the error is an internal error
-    pub fn is_internal(&self) -> bool {
+    pub const fn is_internal(&self) -> bool {
         matches!(self, Self::Internal(_))
     }
 
     /// Returns the error if it is a tree error
-    pub fn as_tree_error(&self) -> Option<BlockchainTreeError> {
+    pub const fn as_tree_error(&self) -> Option<BlockchainTreeError> {
         match self {
             Self::Tree(err) => Some(*err),
             _ => None,
@@ -359,7 +358,7 @@ impl InsertBlockErrorKind {
     }
 
     /// Returns the error if it is a consensus error
-    pub fn as_consensus_error(&self) -> Option<&ConsensusError> {
+    pub const fn as_consensus_error(&self) -> Option<&ConsensusError> {
         match self {
             Self::Consensus(err) => Some(err),
             _ => None,
@@ -367,7 +366,7 @@ impl InsertBlockErrorKind {
     }
 
     /// Returns the error if it is an execution error
-    pub fn as_execution_error(&self) -> Option<&BlockExecutionError> {
+    pub const fn as_execution_error(&self) -> Option<&BlockExecutionError> {
         match self {
             Self::Execution(err) => Some(err),
             _ => None,

@@ -33,7 +33,7 @@ impl ConnectionListener {
     }
 
     /// Creates a new connection listener stream.
-    pub(crate) fn new(listener: TcpListener, local_address: SocketAddr) -> Self {
+    pub(crate) const fn new(listener: TcpListener, local_address: SocketAddr) -> Self {
         Self { local_address, incoming: TcpListenerStream { inner: listener } }
     }
 
@@ -55,7 +55,7 @@ impl ConnectionListener {
     }
 
     /// Returns the socket address this listener listens on.
-    pub fn local_address(&self) -> SocketAddr {
+    pub const fn local_address(&self) -> SocketAddr {
         self.local_address
     }
 }

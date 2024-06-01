@@ -154,7 +154,7 @@ mod tests {
     use super::*;
     use reth_errors::{RethError, RethResult};
 
-    fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
+    const fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
 
     #[test]
     fn can_convert_rpc() {

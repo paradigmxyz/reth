@@ -11,7 +11,7 @@ use clap::Parser;
 use reth_db::init_db;
 use reth_db_common::init::init_genesis;
 use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::sync::Arc;
 use tracing::info;
 
@@ -56,7 +56,11 @@ impl InitCommand {
         let db = Arc::new(init_db(&db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
-        let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db,
+            self.chain,
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         info!(target: "reth::cli", "Writing genesis block");
 

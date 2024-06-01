@@ -58,7 +58,7 @@ impl CanonicalChain {
     }
 
     #[inline]
-    pub(crate) fn inner(&self) -> &BTreeMap<BlockNumber, BlockHash> {
+    pub(crate) const fn inner(&self) -> &BTreeMap<BlockNumber, BlockHash> {
         &self.chain
     }
 
