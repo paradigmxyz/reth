@@ -1,6 +1,6 @@
 # reth stage dump account-hashing
 
-AccountHashing stage
+`AccountHashing` stage
 
 ```bash
 $ reth stage dump account-hashing --help

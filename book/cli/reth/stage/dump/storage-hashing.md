@@ -1,6 +1,6 @@
 # reth stage dump storage-hashing
 
-StorageHashing stage
+`StorageHashing` stage
 
 ```bash
 $ reth stage dump storage-hashing --help
