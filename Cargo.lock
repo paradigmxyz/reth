@@ -6686,6 +6686,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-engine-tree"
+version = "0.2.0-beta.7"
+dependencies = [
+ "aquamarine",
+ "futures",
+ "metrics",
+ "reth-blockchain-tree-api",
+ "reth-metrics",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "reth-errors"
 version = "0.2.0-beta.7"
 dependencies = [

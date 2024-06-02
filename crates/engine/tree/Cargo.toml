@@ -1,0 +1,27 @@
+[package]
+name = "reth-engine-tree"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-blockchain-tree-api.workspace = true
+
+# common
+tokio = { workspace = true, features = ["macros", "sync"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+futures.workspace = true
+
+# metrics
+reth-metrics = { workspace = true, features = ["common"] }
+metrics.workspace = true
+
+# misc
+aquamarine.workspace = true
