@@ -8,8 +8,8 @@ Usage: reth stage dump [OPTIONS] <COMMAND>
 
 Commands:
   execution        Execution stage
-  storage-hashing  StorageHashing stage
-  account-hashing  AccountHashing stage
+  storage-hashing  `StorageHashing` stage
+  account-hashing  `AccountHashing` stage
   merkle           Merkle stage
   help             Print this message or the help of the given subcommand(s)
 
