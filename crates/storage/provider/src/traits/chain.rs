@@ -107,8 +107,7 @@ impl CanonStateNotification {
     /// Returns the new committed [Chain] for [Self::Reorg] and [Self::Commit] variants.
     pub fn committed(&self) -> Arc<Chain> {
         match self {
-            Self::Commit { new } => new.clone(),
-            Self::Reorg { new, .. } => new.clone(),
+            Self::Commit { new } | Self::Reorg { new, .. } => new.clone(),
         }
     }
 
@@ -118,8 +117,7 @@ impl CanonStateNotification {
     /// new block.
     pub fn tip(&self) -> &SealedBlockWithSenders {
         match self {
-            Self::Commit { new } => new.tip(),
-            Self::Reorg { new, .. } => new.tip(),
+            Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
         }
     }
 

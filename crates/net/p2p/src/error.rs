@@ -61,11 +61,11 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
-                RequestError::ChannelClosed => None,
-                RequestError::ConnectionDropped => None,
-                RequestError::UnsupportedCapability => None,
-                RequestError::Timeout => Some(ReputationChangeKind::Timeout),
+                RequestError::ChannelClosed |
+                RequestError::ConnectionDropped |
+                RequestError::UnsupportedCapability |
                 RequestError::BadResponse => None,
+                RequestError::Timeout => Some(ReputationChangeKind::Timeout),
             }
         } else {
             None

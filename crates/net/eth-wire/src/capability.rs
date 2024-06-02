@@ -331,8 +331,7 @@ impl SharedCapability {
     /// message id space.
     pub const fn message_id_offset(&self) -> u8 {
         match self {
-            Self::Eth { offset, .. } => *offset,
-            Self::UnknownCapability { offset, .. } => *offset,
+            Self::Eth { offset, .. } | Self::UnknownCapability { offset, .. } => *offset,
         }
     }
 

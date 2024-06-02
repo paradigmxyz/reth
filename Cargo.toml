@@ -156,6 +156,7 @@ use_self = "warn"
 missing_const_for_fn = "warn"
 empty_line_after_doc_comments = "warn"
 iter_on_single_items = "warn"
+match_same_arms = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.

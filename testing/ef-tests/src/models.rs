@@ -333,9 +333,9 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::Istanbul => spec_builder.istanbul_activated(),
             ForkSpec::Berlin => spec_builder.berlin_activated(),
             ForkSpec::London | ForkSpec::BerlinToLondonAt5 => spec_builder.london_activated(),
-            ForkSpec::Merge => spec_builder.paris_activated(),
-            ForkSpec::MergeEOF => spec_builder.paris_activated(),
-            ForkSpec::MergeMeterInitCode => spec_builder.paris_activated(),
+            ForkSpec::Merge |
+            ForkSpec::MergeEOF |
+            ForkSpec::MergeMeterInitCode |
             ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::Shanghai => spec_builder.shanghai_activated(),
             ForkSpec::Cancun => spec_builder.cancun_activated(),

@@ -26,8 +26,7 @@ impl<'a> EnumHandler<'a> {
                 //  The following method will advance the
                 // `fields_iterator` by itself and stop right before the next variant.
                 FieldTypes::EnumVariant(name) => self.to(name, ident),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
-                FieldTypes::StructField(_) => unreachable!(),
+                FieldTypes::EnumUnnamedField(_) | FieldTypes::StructField(_) => unreachable!(),
             }
         }
         self.enum_lines
@@ -39,8 +38,7 @@ impl<'a> EnumHandler<'a> {
                 //  The following method will advance the
                 // `fields_iterator` by itself and stop right before the next variant.
                 FieldTypes::EnumVariant(name) => self.from(name, ident),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
-                FieldTypes::StructField(_) => unreachable!(),
+                FieldTypes::EnumUnnamedField(_) | FieldTypes::StructField(_) => unreachable!(),
             }
         }
         self.enum_lines

@@ -431,8 +431,9 @@ impl DownloadRequest {
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
-            Self::GetBlockHeaders { priority, .. } => priority,
-            Self::GetBlockBodies { priority, .. } => priority,
+            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } => {
+                priority
+            }
         }
     }
 

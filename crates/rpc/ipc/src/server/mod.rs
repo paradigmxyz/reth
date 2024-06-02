@@ -860,8 +860,8 @@ mod tests {
 
         loop {
             match select(closed, stream.next()).await {
-                // subscription closed.
-                Either::Left((_, _)) => break Ok(()),
+                // subscription closed or stream is closed.
+                Either::Left((_, _)) | Either::Right((None, _)) => break Ok(()),
 
                 // received new item from the stream.
                 Either::Right((Some(Ok(item)), c)) => {
@@ -879,9 +879,6 @@ mod tests {
 
                 // Send back back the error.
                 Either::Right((Some(Err(e)), _)) => break Err(e.into()),
-
-                // Stream is closed.
-                Either::Right((None, _)) => break Ok(()),
             }
         }
     }
