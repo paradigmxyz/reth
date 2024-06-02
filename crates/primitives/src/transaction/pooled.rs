@@ -119,9 +119,9 @@ impl PooledTransactionsElement {
     /// Returns the signature of the transaction.
     pub const fn signature(&self) -> &Signature {
         match self {
-            Self::Legacy { signature, .. }
-            | Self::Eip2930 { signature, .. }
-            | Self::Eip1559 { signature, .. } => signature,
+            Self::Legacy { signature, .. } |
+            Self::Eip2930 { signature, .. } |
+            Self::Eip1559 { signature, .. } => signature,
             Self::BlobTransaction(blob_tx) => &blob_tx.signature,
         }
     }
