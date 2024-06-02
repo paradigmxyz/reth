@@ -24,7 +24,7 @@ pub const DEFAULT_ENV_CACHE_MAX_LEN: u32 = 1000;
 /// Default number of concurrent database requests.
 pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
 
-/// Settings for the [EthStateCache](crate::eth::cache::EthStateCache).
+/// Settings for the [`EthStateCache`](crate::eth::cache::EthStateCache).
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthStateCacheConfig {

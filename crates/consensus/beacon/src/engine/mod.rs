@@ -95,7 +95,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// received by Engine API (JSON-RPC).
 ///
 /// The consensus engine is idle until it receives the first
-/// [BeaconEngineMessage::ForkchoiceUpdated] message from the CL which would initiate the sync. At
+/// [`BeaconEngineMessage::ForkchoiceUpdated`] message from the CL which would initiate the sync. At
 /// first, the consensus engine would run the [Pipeline] until the latest known block hash.
 /// Afterward, it would attempt to create/restore the [`BlockchainTreeEngine`] from the blocks
 /// that are currently available. In case the restoration is successful, the consensus engine would
@@ -107,10 +107,10 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// ## New Payload (`engine_newPayloadV{}`)
 ///
 /// The engine receives new payloads from the CL. If the payload is connected to the canonical
-/// chain, it will be fully validated added to a chain in the [BlockchainTreeEngine]: `VALID`
+/// chain, it will be fully validated added to a chain in the [`BlockchainTreeEngine`]: `VALID`
 ///
 /// If the payload's chain is disconnected (at least 1 block is missing) then it will be buffered:
-/// `SYNCING` ([BlockStatus::Disconnected]).
+/// `SYNCING` ([`BlockStatus::Disconnected`]).
 ///
 /// ## Forkchoice Update (FCU) (`engine_forkchoiceUpdatedV{}`)
 ///
@@ -125,12 +125,12 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 ///
 /// ### The chain is connected
 ///
-/// All blocks of the `head_hash`'s chain are present in the [BlockchainTreeEngine] and are
+/// All blocks of the `head_hash`'s chain are present in the [`BlockchainTreeEngine`] and are
 /// committed to the canonical chain. This also includes reorgs.
 ///
 /// ### The chain is disconnected
 ///
-/// In this case the [BlockchainTreeEngine] doesn't know how the new chain connects to the existing
+/// In this case the [`BlockchainTreeEngine`] doesn't know how the new chain connects to the existing
 /// canonical chain. It could be a simple commit (new blocks extend the current head) or a re-org
 /// that requires unwinding the canonical chain.
 ///
@@ -231,7 +231,7 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     EngineT: EngineTypes + Unpin + 'static,
 {
-    /// Create a new instance of the [BeaconConsensusEngine].
+    /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Client,
@@ -264,15 +264,15 @@ where
         )
     }
 
-    /// Create a new instance of the [BeaconConsensusEngine] using the given channel to configure
-    /// the [BeaconEngineMessage] communication channel.
+    /// Create a new instance of the [`BeaconConsensusEngine`] using the given channel to configure
+    /// the [`BeaconEngineMessage`] communication channel.
     ///
     /// By default the engine is started with idle pipeline.
     /// The pipeline can be launched immediately in one of the following ways descending in
     /// priority:
-    /// - Explicit [Option::Some] target block hash provided via a constructor argument.
+    /// - Explicit [`Option::Some`] target block hash provided via a constructor argument.
     /// - The process was previously interrupted amidst the pipeline run. This is checked by
-    ///   comparing the checkpoints of the first ([StageId::Headers]) and last ([StageId::Finish])
+    ///   comparing the checkpoints of the first ([`StageId::Headers`]) and last ([`StageId::Finish`])
     ///   stages. In this case, the latest available header in the database is used as the target.
     ///
     /// Propagates any database related error.
@@ -334,7 +334,7 @@ where
         Ok((this, handle))
     }
 
-    /// Returns current [EngineHookContext] that's used for polling engine hooks.
+    /// Returns current [`EngineHookContext`] that's used for polling engine hooks.
     fn current_engine_hook_context(&self) -> RethResult<EngineHookContext> {
         Ok(EngineHookContext {
             tip_block_number: self.blockchain.canonical_tip().number,
@@ -732,7 +732,7 @@ where
     ///     - It is fully validated and deemed VALID
     ///     - Any other ancestor of the invalid payload with a higher blockNumber is INVALID
     ///   - 0x0000000000000000000000000000000000000000000000000000000000000000 if the above
-    ///     conditions are satisfied by a PoW block.
+    ///     conditions are satisfied by a `PoW` block.
     ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
     ///     the above conditions.
     fn latest_valid_hash_for_invalid_payload(
@@ -841,9 +841,9 @@ where
     /// made canonical.
     ///
     /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
-    /// return an instance of [OnForkChoiceUpdated] that is INVALID.
+    /// return an instance of [`OnForkChoiceUpdated`] that is INVALID.
     ///
-    /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
+    /// This also updates the safe and finalized blocks in the [`CanonChainTracker`], if they are
     /// consistent with the head block.
     fn ensure_consistent_forkchoice_state(
         &self,
@@ -971,7 +971,7 @@ where
     ///
     /// If the newest head is not invalid, then this will trigger a new pipeline run to sync the gap
     ///
-    /// See [Self::on_forkchoice_updated] and [BlockchainTreeEngine::make_canonical].
+    /// See [`Self::on_forkchoice_updated`] and [`BlockchainTreeEngine::make_canonical`].
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
@@ -1320,7 +1320,7 @@ where
     /// Attempt to form a new canonical chain based on the current sync target.
     ///
     /// This is invoked when we successfully __downloaded__ a new block from the network which
-    /// resulted in [BlockStatus::Valid].
+    /// resulted in [`BlockStatus::Valid`].
     ///
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
@@ -1385,7 +1385,7 @@ where
         }
     }
 
-    /// Event handler for events emitted by the [EngineSyncController].
+    /// Event handler for events emitted by the [`EngineSyncController`].
     ///
     /// This returns a result to indicate whether the engine future should resolve (fatal error).
     fn on_sync_event(
@@ -1785,7 +1785,7 @@ where
 }
 
 /// On initialization, the consensus engine will poll the message receiver and return
-/// [Poll::Pending] until the first forkchoice update message is received.
+/// [`Poll::Pending`] until the first forkchoice update message is received.
 ///
 /// As soon as the consensus engine receives the first forkchoice updated message and updates the
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
@@ -1946,13 +1946,13 @@ enum BlockchainTreeAction<EngineT: EngineTypes> {
     /// Action to insert a new block that we successfully downloaded from the network.
     /// There are several outcomes for inserting a downloaded block into the tree:
     ///
-    /// ## [BlockStatus::Valid]
+    /// ## [`BlockStatus::Valid`]
     ///
     /// The block is connected to the current canonical chain and is valid.
     /// If the block is an ancestor of the current forkchoice head, then we can try again to
     /// make the chain canonical.
     ///
-    /// ## [BlockStatus::Disconnected]
+    /// ## [`BlockStatus::Disconnected`]
     ///
     /// The block is not connected to the canonical chain, and we need to download the
     /// missing parent first.

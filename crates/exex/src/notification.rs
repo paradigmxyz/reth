@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use reth_provider::{CanonStateNotification, Chain};
 
-/// Notifications sent to an ExEx.
+/// Notifications sent to an `ExEx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExExNotification {
     /// Chain got committed without a reorg, and only the new chain is returned.
@@ -25,7 +25,7 @@ pub enum ExExNotification {
 }
 
 impl ExExNotification {
-    /// Returns the committed chain from the [Self::ChainCommitted] and [Self::ChainReorged]
+    /// Returns the committed chain from the [`Self::ChainCommitted`] and [`Self::ChainReorged`]
     /// variants, if any.
     pub fn committed_chain(&self) -> Option<Arc<Chain>> {
         match self {
@@ -34,7 +34,7 @@ impl ExExNotification {
         }
     }
 
-    /// Returns the reverted chain from the [Self::ChainReorged] and [Self::ChainReverted] variants,
+    /// Returns the reverted chain from the [`Self::ChainReorged`] and [`Self::ChainReverted`] variants,
     /// if any.
     pub fn reverted_chain(&self) -> Option<Arc<Chain>> {
         match self {

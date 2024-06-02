@@ -296,7 +296,7 @@ where
         self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).collect()
     }
 
-    /// Returns the [BlobTransaction] for the given transaction if the sidecar exists.
+    /// Returns the [`BlobTransaction`] for the given transaction if the sidecar exists.
     ///
     /// Caution: this assumes the given transaction is eip-4844
     fn get_blob_transaction(&self, transaction: TransactionSigned) -> Option<BlobTransaction> {
@@ -308,7 +308,7 @@ where
         None
     }
 
-    /// Returns converted [PooledTransactionsElement] for the given transaction hashes.
+    /// Returns converted [`PooledTransactionsElement`] for the given transaction hashes.
     pub(crate) fn get_pooled_transaction_elements(
         &self,
         tx_hashes: Vec<TxHash>,
@@ -351,7 +351,7 @@ where
         elements
     }
 
-    /// Returns converted [PooledTransactionsElement] for the given transaction hash.
+    /// Returns converted [`PooledTransactionsElement`] for the given transaction hash.
     pub(crate) fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
@@ -725,7 +725,7 @@ where
         self.get_pool_data().get_transactions_by_sender(sender_id)
     }
 
-    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    /// Returns all transactions that where submitted with the given [`TransactionOrigin`]
     pub(crate) fn get_transactions_by_origin(
         &self,
         origin: TransactionOrigin,
@@ -934,9 +934,9 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Returns all transactions that were promoted to the pending pool and adhere to the given
-    /// [TransactionListenerKind].
+    /// [`TransactionListenerKind`].
     ///
-    /// If the kind is [TransactionListenerKind::PropagateOnly], then only transactions that
+    /// If the kind is [`TransactionListenerKind::PropagateOnly`], then only transactions that
     /// are allowed to be propagated are returned.
     pub(crate) fn pending_transactions(
         &self,
@@ -1078,7 +1078,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
         }
     }
 
-    /// Returns the [TransactionId] of the added transaction
+    /// Returns the [`TransactionId`] of the added transaction
     #[cfg(test)]
     pub(crate) fn id(&self) -> &TransactionId {
         match self {
@@ -1103,9 +1103,9 @@ pub(crate) struct OnNewCanonicalStateOutcome<T: PoolTransaction> {
 
 impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
     /// Returns all transactions that were promoted to the pending pool and adhere to the given
-    /// [TransactionListenerKind].
+    /// [`TransactionListenerKind`].
     ///
-    /// If the kind is [TransactionListenerKind::PropagateOnly], then only transactions that
+    /// If the kind is [`TransactionListenerKind::PropagateOnly`], then only transactions that
     /// are allowed to be propagated are returned.
     pub(crate) fn pending_transactions(
         &self,
@@ -1116,9 +1116,9 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
     }
 
     /// Returns all FULL transactions that were promoted to the pending pool and adhere to the given
-    /// [TransactionListenerKind].
+    /// [`TransactionListenerKind`].
     ///
-    /// If the kind is [TransactionListenerKind::PropagateOnly], then only transactions that
+    /// If the kind is [`TransactionListenerKind::PropagateOnly`], then only transactions that
     /// are allowed to be propagated are returned.
     pub(crate) fn full_pending_transactions(
         &self,

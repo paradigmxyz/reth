@@ -4,7 +4,7 @@ use thiserror::Error;
 /// Thrown when the payload or attributes are known to be invalid before processing.
 ///
 /// This is used mainly for
-/// [validate_version_specific_fields](crate::validate_version_specific_fields), which validates
+/// [`validate_version_specific_fields`](crate::validate_version_specific_fields), which validates
 /// both execution payloads and forkchoice update attributes with respect to a method version.
 #[derive(Error, Debug)]
 pub enum EngineObjectValidationError {
@@ -37,14 +37,14 @@ pub enum VersionSpecificValidationError {
     /// block root
     #[error("parent beacon block root not supported before V3")]
     ParentBeaconBlockRootNotSupportedBeforeV3,
-    /// Thrown if engine_forkchoiceUpdatedV1 or engine_newPayloadV1 contains withdrawals
+    /// Thrown if `engine_forkchoiceUpdatedV1` or `engine_newPayloadV1` contains withdrawals
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
-    /// Thrown if engine_forkchoiceUpdated or engine_newPayload contains no withdrawals after
+    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains no withdrawals after
     /// Shanghai
     #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
-    /// Thrown if engine_forkchoiceUpdated or engine_newPayload contains withdrawals before
+    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains withdrawals before
     /// Shanghai
     #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,

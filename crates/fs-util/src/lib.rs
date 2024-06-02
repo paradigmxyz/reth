@@ -13,10 +13,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Result alias for [FsPathError].
+/// Result alias for [`FsPathError`].
 pub type Result<T> = std::result::Result<T, FsPathError>;
 
-/// Various error variants for `std::fs` operations that serve as an addition to the io::Error which
+/// Various error variants for `std::fs` operations that serve as an addition to the `io::Error` which
 /// does not provide any information about the path.
 #[derive(Debug, thiserror::Error)]
 pub enum FsPathError {

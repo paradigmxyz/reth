@@ -33,7 +33,7 @@ pub struct Discv4Config {
     pub ping_expiration: Duration,
     /// The rate at which new random lookups should be triggered.
     pub lookup_interval: Duration,
-    /// The duration of we consider a FindNode request timed out.
+    /// The duration of we consider a `FindNode` request timed out.
     pub request_timeout: Duration,
     /// The duration after which we consider an enr request timed out.
     pub enr_expiration: Duration,
@@ -97,7 +97,7 @@ impl Discv4Config {
         self
     }
 
-    /// Returns the corresponding [`ResolveNatInterval`], if a [NatResolver] and an interval was
+    /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was
     /// configured
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
         let resolver = self.external_ip_resolver?;
@@ -258,7 +258,7 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// A set of lists that can ban IP's or PeerIds from the server. See
+    /// A set of lists that can ban IP's or `PeerIds` from the server. See
     /// [`BanList`].
     pub fn ban_list(&mut self, ban_list: BanList) -> &mut Self {
         self.config.ban_list = ban_list;

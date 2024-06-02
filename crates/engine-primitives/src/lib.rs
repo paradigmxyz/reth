@@ -12,7 +12,7 @@ use core::fmt;
 use reth_primitives::ChainSpec;
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
-/// [PayloadAttributes] trait for ethereum mainnet and optimism types.
+/// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 pub mod traits;
 use serde::{de::DeserializeOwned, ser::Serialize};
 pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
@@ -21,7 +21,7 @@ pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 pub mod error;
 pub use error::{EngineObjectValidationError, VersionSpecificValidationError};
 
-/// Contains types used in implementations of the [PayloadAttributes] trait.
+/// Contains types used in implementations of the [`PayloadAttributes`] trait.
 pub mod payload;
 pub use payload::PayloadOrAttributes;
 
@@ -70,7 +70,7 @@ pub trait EngineTypes:
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
 /// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
 ///
-/// Otherwise, this will return [EngineObjectValidationError::UnsupportedFork].
+/// Otherwise, this will return [`EngineObjectValidationError::UnsupportedFork`].
 pub fn validate_payload_timestamp(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,
@@ -187,13 +187,13 @@ pub fn validate_withdrawals_presence(
 /// Before Cancun, the `parentBeaconBlockRoot` field must be [None].
 ///
 /// If the engine API message version is V1 or V2, and the timestamp is post-Cancun, then this will
-/// return [EngineObjectValidationError::UnsupportedFork].
+/// return [`EngineObjectValidationError::UnsupportedFork`].
 ///
 /// If the timestamp is before the Cancun fork and the engine API message version is V3, then this
-/// will return [EngineObjectValidationError::UnsupportedFork].
+/// will return [`EngineObjectValidationError::UnsupportedFork`].
 ///
 /// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
-/// this will return [VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun].
+/// this will return [`VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun`].
 ///
 /// This implements the following Engine API spec rules:
 ///
@@ -317,10 +317,10 @@ impl MessageValidationKind {
 /// Validates the presence or exclusion of fork-specific fields based on the ethereum execution
 /// payload, or payload attributes, and the message version.
 ///
-/// The object being validated is provided by the [PayloadOrAttributes] argument, which can be
+/// The object being validated is provided by the [`PayloadOrAttributes`] argument, which can be
 /// either an execution payload, or payload attributes.
 ///
-/// The version is provided by the [EngineApiMessageVersion] argument.
+/// The version is provided by the [`EngineApiMessageVersion`] argument.
 pub fn validate_version_specific_fields<Type>(
     chain_spec: &ChainSpec,
     version: EngineApiMessageVersion,

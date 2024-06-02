@@ -42,7 +42,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         output: Option<ExecOutput>,
     ) -> Result<(), TestRunnerError>;
 
-    /// Run [Stage::execute] and return a receiver for the result.
+    /// Run [`Stage::execute`] and return a receiver for the result.
     fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
@@ -58,7 +58,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
         rx
     }
 
-    /// Run a hook after [Stage::execute]. Required for Headers & Bodies stages.
+    /// Run a hook after [`Stage::execute`]. Required for Headers & Bodies stages.
     async fn after_execution(&self, _seed: Self::Seed) -> Result<(), TestRunnerError> {
         Ok(())
     }
@@ -68,7 +68,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
-    /// Run [Stage::unwind] and return a receiver for the result.
+    /// Run [`Stage::unwind`] and return a receiver for the result.
     async fn unwind(&self, input: UnwindInput) -> Result<UnwindOutput, StageError> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
@@ -81,7 +81,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         rx.await.unwrap()
     }
 
-    /// Run a hook before [Stage::unwind]. Required for MerkleStage.
+    /// Run a hook before [`Stage::unwind`]. Required for `MerkleStage`.
     fn before_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
         Ok(())
     }

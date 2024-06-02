@@ -368,7 +368,7 @@ where
         self.network.local_addr()
     }
 
-    /// The [PeerId] of this peer.
+    /// The [`PeerId`] of this peer.
     pub fn peer_id(&self) -> PeerId {
         *self.network.peer_id()
     }
@@ -440,7 +440,7 @@ impl<C> Peer<C>
 where
     C: BlockReader + HeaderProvider + Clone,
 {
-    /// Installs a new [TestPool]
+    /// Installs a new [`TestPool`]
     pub fn install_test_pool(&mut self) {
         self.install_transactions_manager(TestPoolBuilder::default().into())
     }

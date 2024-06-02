@@ -110,7 +110,7 @@ pub enum PruneInterruptReason {
 }
 
 impl PruneInterruptReason {
-    /// Creates new [PruneInterruptReason] based on the [PruneLimiter].
+    /// Creates new [`PruneInterruptReason`] based on the [`PruneLimiter`].
     pub fn new(limiter: &PruneLimiter) -> Self {
         if limiter.is_time_limit_reached() {
             Self::Timeout
@@ -133,10 +133,10 @@ impl PruneInterruptReason {
 }
 
 impl PruneProgress {
-    /// Creates new [PruneProgress].
+    /// Creates new [`PruneProgress`].
     ///
-    /// If `done == true`, returns [PruneProgress::Finished], otherwise
-    /// [PruneProgress::HasMoreData] is returned with [PruneInterruptReason] according to the passed
+    /// If `done == true`, returns [`PruneProgress::Finished`], otherwise
+    /// [`PruneProgress::HasMoreData`] is returned with [`PruneInterruptReason`] according to the passed
     /// limiter.
     pub fn new(done: bool, limiter: &PruneLimiter) -> Self {
         if done {

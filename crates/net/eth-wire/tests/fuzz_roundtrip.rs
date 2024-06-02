@@ -21,7 +21,7 @@ where
     assert_eq!(thing, decoded, "expected: {thing:?}, got: {decoded:?}");
 }
 
-/// This method delegates to roundtrip_encoding, but is used to enforce that each type input to the
+/// This method delegates to `roundtrip_encoding`, but is used to enforce that each type input to the
 /// macro has a proper Default, Clone, and Serialize impl. These trait implementations are
 /// necessary for test-fuzz to autogenerate a corpus.
 ///

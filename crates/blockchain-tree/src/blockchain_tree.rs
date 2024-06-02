@@ -46,13 +46,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// canonical blocks to the tree (by removing them from the database), and commit the sidechain
 /// blocks to the database to become the canonical chain (reorg).
 ///
-/// include_mmd!("docs/mermaid/tree.mmd")
+/// `include_mmd!("docs/mermaid/tree.mmd`")
 ///
 /// # Main functions
-/// * [BlockchainTree::insert_block]: Connect a block to a chain, execute it, and if valid, insert
+/// * [`BlockchainTree::insert_block`]: Connect a block to a chain, execute it, and if valid, insert
 ///   the block into the tree.
-/// * [BlockchainTree::finalize_block]: Remove chains that branch off of the now finalized block.
-/// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
+/// * [`BlockchainTree::finalize_block`]: Remove chains that branch off of the now finalized block.
+/// * [`BlockchainTree::make_canonical`]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
 pub struct BlockchainTree<DB, E> {
@@ -179,9 +179,9 @@ where
     /// Check if the block is known to blockchain tree or database and return its status.
     ///
     /// Function will check:
-    /// * if block is inside database returns [BlockStatus::Valid].
-    /// * if block is inside buffer returns [BlockStatus::Disconnected].
-    /// * if block is part of the canonical returns [BlockStatus::Valid].
+    /// * if block is inside database returns [`BlockStatus::Valid`].
+    /// * if block is inside buffer returns [`BlockStatus::Disconnected`].
+    /// * if block is part of the canonical returns [`BlockStatus::Valid`].
     ///
     /// Returns an error if
     ///    - an error occurred while reading from the database.
@@ -225,7 +225,7 @@ where
         Ok(None)
     }
 
-    /// Expose internal indices of the BlockchainTree.
+    /// Expose internal indices of the `BlockchainTree`.
     #[inline]
     pub const fn block_indices(&self) -> &BlockIndices {
         self.state.block_indices()
@@ -272,7 +272,7 @@ where
     ///       needed for evm `BLOCKHASH` opcode.
     /// Return none if:
     ///     * block unknown.
-    ///     * chain_id not present in state.
+    ///     * `chain_id` not present in state.
     ///     * there are no parent hashes stored.
     pub fn post_state_data(&self, block_hash: BlockHash) -> Option<BundleStateData> {
         trace!(target: "blockchain_tree", ?block_hash, "Searching for post state data");
@@ -730,8 +730,8 @@ where
 
     /// Check if block is found inside a sidechain and its attachment.
     ///
-    /// if it is canonical or extends the canonical chain, return [BlockAttachment::Canonical]
-    /// if it does not extend the canonical chain, return [BlockAttachment::HistoricalFork]
+    /// if it is canonical or extends the canonical chain, return [`BlockAttachment::Canonical`]
+    /// if it does not extend the canonical chain, return [`BlockAttachment::HistoricalFork`]
     /// if the block is not in the tree or its chain id is not valid, return None
     #[track_caller]
     fn is_block_inside_sidechain(&self, block: &BlockNumHash) -> Option<BlockAttachment> {
@@ -754,7 +754,7 @@ where
 
     /// Insert a block (with recovered senders) into the tree.
     ///
-    /// Returns the [BlockStatus] on success:
+    /// Returns the [`BlockStatus`] on success:
     ///
     /// - The block is already part of a sidechain in the tree, or
     /// - The block is already part of the canonical chain, or
@@ -767,7 +767,7 @@ where
     /// This means that if the block becomes canonical, we need to fetch the missing blocks over
     /// P2P.
     ///
-    /// If the [BlockValidationKind::SkipStateRootValidation] variant is provided the state root is
+    /// If the [`BlockValidationKind::SkipStateRootValidation`] variant is provided the state root is
     /// not validated.
     ///
     /// # Note
@@ -1353,7 +1353,7 @@ where
     ///
     /// NOTE: this method should not be called during the pipeline sync, because otherwise the sync
     /// checkpoint metric will get overwritten. Buffered blocks metrics are updated in
-    /// [BlockBuffer](crate::block_buffer::BlockBuffer) during the pipeline sync.
+    /// [`BlockBuffer`](crate::block_buffer::BlockBuffer) during the pipeline sync.
     pub(crate) fn update_chains_metrics(&mut self) {
         let height = self.state.block_indices.canonical_tip().number;
 

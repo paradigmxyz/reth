@@ -18,12 +18,12 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 /// Otherwise, metric recording will no-op.
 #[derive(Debug)]
 pub(crate) struct DatabaseEnvMetrics {
-    /// Caches OperationMetrics handles for each table and operation tuple.
+    /// Caches `OperationMetrics` handles for each table and operation tuple.
     operations: FxHashMap<(Tables, Operation), OperationMetrics>,
-    /// Caches TransactionMetrics handles for counters grouped by only transaction mode.
+    /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
-    /// Caches TransactionOutcomeMetrics handles for counters grouped by transaction mode and
+    /// Caches `TransactionOutcomeMetrics` handles for counters grouped by transaction mode and
     /// outcome. Can only be updated at tx close, as outcome is only known at that point.
     transaction_outcomes:
         FxHashMap<(TransactionMode, TransactionOutcome), TransactionOutcomeMetrics>,
@@ -336,8 +336,8 @@ impl TransactionOutcomeMetrics {
 pub(crate) struct OperationMetrics {
     /// Total number of database operations made
     calls_total: Counter,
-    /// The time it took to execute a database operation (put/upsert/insert/append/append_dup) with
-    /// value larger than [LARGE_VALUE_THRESHOLD_BYTES] bytes.
+    /// The time it took to execute a database operation (`put/upsert/insert/append/append_dup`) with
+    /// value larger than [`LARGE_VALUE_THRESHOLD_BYTES`] bytes.
     large_value_duration_seconds: Histogram,
 }
 
@@ -345,7 +345,7 @@ impl OperationMetrics {
     /// Record operation metric.
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
-    /// larger than [LARGE_VALUE_THRESHOLD_BYTES].
+    /// larger than [`LARGE_VALUE_THRESHOLD_BYTES`].
     pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
         self.calls_total.increment(1);
 

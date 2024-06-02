@@ -12,7 +12,7 @@ pub use reth_storage_errors::provider::ProviderError;
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
 ///
-/// This executor does not validate the output, see [BatchExecutor] for that.
+/// This executor does not validate the output, see [`BatchExecutor`] for that.
 pub trait Executor<DB> {
     /// The input type for the executor.
     type Input<'a>;
@@ -25,7 +25,7 @@ pub trait Executor<DB> {
     ///
     /// # Note
     /// Execution happens without any validation of the output. To validate the output, use the
-    /// [BatchExecutor].
+    /// [`BatchExecutor`].
     ///
     /// # Returns
     /// The output of the block execution.
@@ -91,7 +91,7 @@ pub trait BatchExecutor<DB> {
 ///
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 ///
-/// TODO(mattsse): combine with BundleStateWithReceipts
+/// TODO(mattsse): combine with `BundleStateWithReceipts`
 #[derive(Debug)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
@@ -166,7 +166,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// # Verification
     ///
-    /// The on [Executor::execute] the executor is expected to validate the execution output of the
+    /// The on [`Executor::execute`] the executor is expected to validate the execution output of the
     /// input, this includes:
     /// - Cumulative gas used must match the input's gas used.
     /// - Receipts must match the input's receipts root.

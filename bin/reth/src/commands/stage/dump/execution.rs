@@ -117,8 +117,8 @@ fn import_tables_with_range<DB: Database>(
     Ok(())
 }
 
-/// Dry-run an unwind to FROM block, so we can get the PlainStorageState and
-/// PlainAccountState safely. There might be some state dependency from an address
+/// Dry-run an unwind to FROM block, so we can get the `PlainStorageState` and
+/// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
 async fn unwind_and_copy<DB: Database>(
     db_tool: &DbTool<DB>,

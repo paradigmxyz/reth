@@ -74,12 +74,12 @@ use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_B
 /// Resolves with the result of each transaction import.
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
 
-/// Api to interact with [TransactionsManager] task.
+/// Api to interact with [`TransactionsManager`] task.
 ///
-/// This can be obtained via [TransactionsManager::handle] and can be used to manually interact with
-/// the [TransactionsManager] task once it is spawned.
+/// This can be obtained via [`TransactionsManager::handle`] and can be used to manually interact with
+/// the [`TransactionsManager`] task once it is spawned.
 ///
-/// For example [TransactionsHandle::get_peer_transaction_hashes] returns the transaction hashes
+/// For example [`TransactionsHandle::get_peer_transaction_hashes`] returns the transaction hashes
 /// known by a specific peer.
 #[derive(Debug, Clone)]
 pub struct TransactionsHandle {
@@ -211,11 +211,11 @@ pub struct TransactionsManager<Pool> {
     /// The import process includes:
     ///  - validation of the transactions, e.g. transaction is well formed: valid tx type, fees are
     ///    valid, or for 4844 transaction the blobs are valid. See also
-    ///    [EthTransactionValidator](reth_transaction_pool::validate::EthTransactionValidator)
+    ///    [`EthTransactionValidator`](reth_transaction_pool::validate::EthTransactionValidator)
     /// - if the transaction is valid, it is added into the pool.
     ///
     /// Once the new transaction reaches the __pending__ state it will be emitted by the pool via
-    /// [TransactionPool::pending_transactions_listener] and arrive at the `pending_transactions`
+    /// [`TransactionPool::pending_transactions_listener`] and arrive at the `pending_transactions`
     /// receiver.
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// Stats on pending pool imports that help the node self-monitor.
@@ -226,12 +226,12 @@ pub struct TransactionsManager<Pool> {
     peers: HashMap<PeerId, PeerMetadata>,
     /// Send half for the command channel.
     ///
-    /// This is kept so that a new [TransactionsHandle] can be created at any time.
+    /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     ///
     /// This will only receive commands if a user manually sends a command to the manager through
-    /// the [TransactionsHandle] to interact with this type directly.
+    /// the [`TransactionsHandle`] to interact with this type directly.
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
     /// A stream that yields new __pending__ transactions.
     ///
@@ -244,7 +244,7 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
-    /// TransactionsManager metrics
+    /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
 
@@ -404,7 +404,7 @@ where
     /// Propagate the transactions to all connected peers either as full objects or hashes.
     ///
     /// The message for new pooled hashes depends on the negotiated version of the stream.
-    /// See [NewPooledTransactionHashes]
+    /// See [`NewPooledTransactionHashes`]
     ///
     /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
@@ -1406,7 +1406,7 @@ impl FullTransactionsBuilder {
         self.transactions.push(Arc::clone(&transaction.transaction));
     }
 
-    /// Returns whether or not any transactions are in the [FullTransactionsBuilder].
+    /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
     fn is_empty(&self) -> bool {
         self.transactions.is_empty()
     }

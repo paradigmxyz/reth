@@ -1,4 +1,4 @@
-//! Commonly used NodeRecord type for peers.
+//! Commonly used `NodeRecord` type for peers.
 
 use std::{
     fmt,
@@ -49,11 +49,11 @@ impl NodeRecord {
     }
 
     /// Converts the `address` into an [`Ipv4Addr`] if the `address` is a mapped
-    /// [Ipv6Addr](std::net::Ipv6Addr).
+    /// [`Ipv6Addr`](std::net::Ipv6Addr).
     ///
     /// Returns `true` if the address was converted.
     ///
-    /// See also [std::net::Ipv6Addr::to_ipv4_mapped]
+    /// See also [`std::net::Ipv6Addr::to_ipv4_mapped`]
     pub fn convert_ipv4_mapped(&mut self) -> bool {
         // convert IPv4 mapped IPv6 address
         if let IpAddr::V6(v6) = self.address {
@@ -65,7 +65,7 @@ impl NodeRecord {
         false
     }
 
-    /// Same as [Self::convert_ipv4_mapped] but consumes the type
+    /// Same as [`Self::convert_ipv4_mapped`] but consumes the type
     pub fn into_ipv4_mapped(mut self) -> Self {
         self.convert_ipv4_mapped();
         self

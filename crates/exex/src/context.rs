@@ -9,7 +9,7 @@ use tokio::sync::mpsc::{Receiver, UnboundedSender};
 
 use crate::{ExExEvent, ExExNotification};
 
-/// Captures the context that an ExEx has access to.
+/// Captures the context that an `ExEx` has access to.
 #[derive(Debug)]
 pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.

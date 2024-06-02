@@ -92,7 +92,7 @@ pub enum Subcommands {
     Path,
 }
 
-/// db_ro_exec opens a database in read-only mode, and then execute with the provided command
+/// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
     ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
         let db = open_db_read_only($db_path, $db_args)?;

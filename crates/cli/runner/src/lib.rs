@@ -27,7 +27,7 @@ impl CliRunner {
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
     /// until the process receives a `SIGINT` or `SIGTERM` signal.
     ///
-    /// Tasks spawned by the command via the [TaskExecutor] are shut down and an attempt is made to
+    /// Tasks spawned by the command via the [`TaskExecutor`] are shut down and an attempt is made to
     /// drive their shutdown to completion after the command has finished.
     pub fn run_command_until_exit<F, E>(
         self,
@@ -80,7 +80,7 @@ impl CliRunner {
     /// Executes a regular future as a spawned blocking task until completion or until external
     /// signal received.
     ///
-    /// See [Runtime::spawn_blocking](tokio::runtime::Runtime::spawn_blocking) .
+    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking) .
     pub fn run_blocking_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>> + Send + 'static,
@@ -104,7 +104,7 @@ impl CliRunner {
     }
 }
 
-/// [CliRunner] configuration when executing commands asynchronously
+/// [`CliRunner`] configuration when executing commands asynchronously
 struct AsyncCliRunner {
     context: CliContext,
     task_manager: TaskManager,
@@ -124,7 +124,7 @@ impl AsyncCliRunner {
     }
 }
 
-/// Additional context provided by the [CliRunner] when executing commands
+/// Additional context provided by the [`CliRunner`] when executing commands
 #[derive(Debug)]
 pub struct CliContext {
     /// Used to execute/spawn tasks

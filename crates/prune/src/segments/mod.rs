@@ -33,10 +33,10 @@ pub use transactions::Transactions;
 /// A segment represents a pruning of some portion of the data.
 ///
 /// Segments are called from [Pruner](crate::Pruner) with the following lifecycle:
-/// 1. Call [Segment::prune] with `delete_limit` of [PruneInput].
-/// 2. If [Segment::prune] returned a [Some] in `checkpoint` of [PruneOutput], call
-///    [Segment::save_checkpoint].
-/// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
+/// 1. Call [`Segment::prune`] with `delete_limit` of [`PruneInput`].
+/// 2. If [`Segment::prune`] returned a [Some] in `checkpoint` of [`PruneOutput`], call
+///    [`Segment::save_checkpoint`].
+/// 3. Subtract `pruned` of [`PruneOutput`] from `delete_limit` of next [`PruneInput`].
 pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Segment of data that's pruned.
     fn segment(&self) -> PruneSegment;
@@ -44,14 +44,14 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Prune mode with which the segment was initialized
     fn mode(&self) -> Option<PruneMode>;
 
-    /// Prune data for [Self::segment] using the provided input.
+    /// Prune data for [`Self::segment`] using the provided input.
     fn prune(
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
-    /// Save checkpoint for [Self::segment] to the database.
+    /// Save checkpoint for [`Self::segment`] to the database.
     fn save_checkpoint(
         &self,
         provider: &DatabaseProviderRW<DB>,
@@ -61,7 +61,7 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     }
 }
 
-/// Segment pruning input, see [Segment::prune].
+/// Segment pruning input, see [`Segment::prune`].
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub struct PruneInput {
@@ -151,7 +151,7 @@ impl PruneInput {
     }
 }
 
-/// Segment pruning output, see [Segment::prune].
+/// Segment pruning output, see [`Segment::prune`].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct PruneOutput {
     pub(crate) progress: PruneProgress,
@@ -162,13 +162,13 @@ pub struct PruneOutput {
 }
 
 impl PruneOutput {
-    /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
+    /// Returns a [`PruneOutput`] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
     pub(crate) const fn done() -> Self {
         Self { progress: PruneProgress::Finished, pruned: 0, checkpoint: None }
     }
 
-    /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
+    /// Returns a [`PruneOutput`] with `done = false`, `pruned = 0` and `checkpoint = None`.
     /// Use when pruning is needed but cannot be done.
     pub(crate) const fn not_done(
         reason: PruneInterruptReason,
@@ -187,7 +187,7 @@ pub(crate) struct PruneOutputCheckpoint {
 }
 
 impl PruneOutputCheckpoint {
-    /// Converts [PruneOutputCheckpoint] to [PruneCheckpoint] with the provided [PruneMode]
+    /// Converts [`PruneOutputCheckpoint`] to [`PruneCheckpoint`] with the provided [`PruneMode`]
     pub(crate) const fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
         PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
     }

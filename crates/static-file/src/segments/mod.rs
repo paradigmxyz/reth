@@ -1,4 +1,4 @@
-//! StaticFile segment implementations and utilities.
+//! `StaticFile` segment implementations and utilities.
 
 mod transactions;
 pub use transactions::Transactions;
@@ -33,7 +33,7 @@ pub trait Segment<DB: Database>: Send + Sync {
     /// Returns the [`StaticFileSegment`].
     fn segment(&self) -> StaticFileSegment;
 
-    /// Move data to static files for the provided block range. [StaticFileProvider] will handle the
+    /// Move data to static files for the provided block range. [`StaticFileProvider`] will handle the
     /// management of and writing to files.
     fn copy_to_static_files(
         &self,

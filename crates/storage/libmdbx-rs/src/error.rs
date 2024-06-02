@@ -109,12 +109,12 @@ pub enum Error {
     #[error("invalid parameter specified or active write transaction")]
     DecodeErrorLenDiff,
     /// If the [Environment](crate::Environment) was opened with
-    /// [EnvironmentKind::WriteMap](crate::EnvironmentKind::WriteMap) flag, nested transactions are
+    /// [`EnvironmentKind::WriteMap`](crate::EnvironmentKind::WriteMap) flag, nested transactions are
     /// not supported.
     #[error("nested transactions are not supported with WriteMap")]
     NestedTransactionsUnsupportedWithWriteMap,
     /// If the [Environment](crate::Environment) was opened with in read-only mode
-    /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
+    /// [`Mode::ReadOnly`](crate::flags::Mode::ReadOnly), write transactions can't be opened.
     #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
     /// Read transaction has been timed out.

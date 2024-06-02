@@ -38,10 +38,10 @@ pub use set::*;
 pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
-/// [Pipeline::run_as_fut].
+/// [`Pipeline::run_as_fut`].
 pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
 
-/// The pipeline type itself with the result of [Pipeline::run_as_fut]
+/// The pipeline type itself with the result of [`Pipeline::run_as_fut`]
 pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -53,19 +53,19 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// tip.
 ///
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
-/// [Pipeline::set_max_block]).
+/// [`Pipeline::set_max_block`]).
 ///
-/// include_mmd!("docs/mermaid/pipeline.mmd")
+/// `include_mmd!("docs/mermaid/pipeline.mmd`")
 ///
 /// # Unwinding
 ///
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
-/// request an unwind manually (see [Pipeline::unwind]).
+/// request an unwind manually (see [`Pipeline::unwind`]).
 ///
 /// # Defaults
 ///
-/// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
+/// The [`DefaultStages`](crate::sets::DefaultStages) are used to fully sync reth.
 pub struct Pipeline<DB: Database> {
     /// Provider factory.
     provider_factory: ProviderFactory<DB>,
@@ -195,8 +195,8 @@ where
     /// up to the block that caused the error.
     ///
     /// Returns the control flow after it ran the pipeline.
-    /// This will be [ControlFlow::Continue] or [ControlFlow::NoProgress] of the _last_ stage in the
-    /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
+    /// This will be [`ControlFlow::Continue`] or [`ControlFlow::NoProgress`] of the _last_ stage in the
+    /// pipeline (for example the `Finish` stage). Or [`ControlFlow::Unwind`] of the stage that caused
     /// the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         self.move_to_static_files()?;
@@ -240,12 +240,12 @@ where
     /// all data from the database to static files for corresponding
     /// [segments](reth_primitives::static_file::StaticFileSegment), according to their [stage
     /// checkpoints](StageCheckpoint):
-    /// - [StaticFileSegment::Headers](reth_primitives::static_file::StaticFileSegment::Headers) ->
-    ///   [StageId::Headers]
-    /// - [StaticFileSegment::Receipts](reth_primitives::static_file::StaticFileSegment::Receipts)
-    ///   -> [StageId::Execution]
-    /// - [StaticFileSegment::Transactions](reth_primitives::static_file::StaticFileSegment::Transactions)
-    ///   -> [StageId::Bodies]
+    /// - [`StaticFileSegment::Headers`](reth_primitives::static_file::StaticFileSegment::Headers) ->
+    ///   [`StageId::Headers`]
+    /// - [`StaticFileSegment::Receipts`](reth_primitives::static_file::StaticFileSegment::Receipts)
+    ///   -> [`StageId::Execution`]
+    /// - [`StaticFileSegment::Transactions`](reth_primitives::static_file::StaticFileSegment::Transactions)
+    ///   -> [`StageId::Bodies`]
     ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.

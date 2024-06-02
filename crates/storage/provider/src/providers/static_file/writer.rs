@@ -26,8 +26,8 @@ pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFi
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
 pub struct StaticFileProviderRW {
-    /// Reference back to the provider. We need [Weak] here because [StaticFileProviderRW] is
-    /// stored in a [dashmap::DashMap] inside the parent [StaticFileProvider].which is an [Arc].
+    /// Reference back to the provider. We need [Weak] here because [`StaticFileProviderRW`] is
+    /// stored in a [`dashmap::DashMap`] inside the parent [`StaticFileProvider`].which is an [Arc].
     /// If we were to use an [Arc] here, we would create a reference cycle.
     reader: Weak<StaticFileProviderInner>,
     /// A [`NippyJarWriter`] instance.
@@ -120,10 +120,10 @@ impl StaticFileProviderRW {
     /// Checks the consistency of the file and heals it if necessary and `read_only` is set to
     /// false. If the check fails, it will return an error.
     ///
-    /// If healing does happen, it will update the end range on the [SegmentHeader]. However, for
+    /// If healing does happen, it will update the end range on the [`SegmentHeader`]. However, for
     /// transaction based segments, the block end range has to be found and healed externally.
     ///
-    /// Check [NippyJarWriter::ensure_file_consistency] for more on healing.
+    /// Check [`NippyJarWriter::ensure_file_consistency`] for more on healing.
     pub fn ensure_file_consistency(&mut self, read_only: bool) -> ProviderResult<()> {
         let inconsistent_error = || {
             ProviderError::NippyJar(
@@ -333,7 +333,7 @@ impl StaticFileProviderRW {
     /// Truncates a number of rows from disk. It deletes and loads an older static file if block
     /// goes beyond the start of the current block range.
     ///
-    /// **last_block** should be passed only with transaction based segments.
+    /// **`last_block`** should be passed only with transaction based segments.
     ///
     /// # Note
     /// Commits to the configuration file at the end.

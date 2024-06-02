@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-/// A [BodiesClient] for testing.
+/// A [`BodiesClient`] for testing.
 #[derive(Debug, Default)]
 pub struct TestBodiesClient {
     bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,

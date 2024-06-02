@@ -8,12 +8,12 @@ pub type PoolResult<T> = Result<T, PoolError>;
 /// A trait for additional errors that can be thrown by the transaction pool.
 ///
 /// For example during validation
-/// [TransactionValidator::validate_transaction](crate::validate::TransactionValidator::validate_transaction)
+/// [`TransactionValidator::validate_transaction`](crate::validate::TransactionValidator::validate_transaction)
 pub trait PoolTransactionError: std::error::Error + Send + Sync {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
-    /// See [PoolError::is_bad_transaction].
+    /// See [`PoolError::is_bad_transaction`].
     fn is_bad_transaction(&self) -> bool;
 }
 
@@ -82,7 +82,7 @@ impl PoolError {
     /// context of the transaction pool and warrants peer penalization.
     ///
     /// Not all error variants are caused by the incorrect composition of the transaction (See also
-    /// [InvalidPoolTransactionError]) and can be caused by the current state of the transaction
+    /// [`InvalidPoolTransactionError`]) and can be caused by the current state of the transaction
     /// pool. For example the transaction pool is already full or the error was caused my an
     /// internal error, such as database errors.
     ///
@@ -169,7 +169,7 @@ pub enum Eip4844PoolTransactionError {
 
 /// Represents errors that can happen when validating transactions for the pool
 ///
-/// See [TransactionValidator](crate::TransactionValidator).
+/// See [`TransactionValidator`](crate::TransactionValidator).
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidPoolTransactionError {
     /// Hard consensus errors
@@ -180,7 +180,7 @@ pub enum InvalidPoolTransactionError {
     #[error("transaction's gas limit {0} exceeds block's gas limit {1}")]
     ExceedsGasLimit(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
-    /// respect the max_init_code_size.
+    /// respect the `max_init_code_size`.
     #[error("transaction's size {0} exceeds max_init_code_size {1}")]
     ExceedsMaxInitCodeSize(usize, usize),
     /// Thrown if the input data of a transaction is greater
@@ -212,7 +212,7 @@ impl InvalidPoolTransactionError {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
-    /// See [PoolError::is_bad_transaction].
+    /// See [`PoolError::is_bad_transaction`].
     #[inline]
     fn is_bad_transaction(&self) -> bool {
         match self {

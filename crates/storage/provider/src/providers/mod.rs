@@ -129,12 +129,12 @@ where
 {
     /// Ensures that the given block number is canonical (synced)
     ///
-    /// This is a helper for guarding the [HistoricalStateProvider] against block numbers that are
+    /// This is a helper for guarding the [`HistoricalStateProvider`] against block numbers that are
     /// out of range and would lead to invalid results, mainly during initial sync.
     ///
-    /// Verifying the block_number would be expensive since we need to lookup sync table
+    /// Verifying the `block_number` would be expensive since we need to lookup sync table
     /// Instead, we ensure that the `block_number` is within the range of the
-    /// [Self::best_block_number] which is updated when a block is synced.
+    /// [`Self::best_block_number`] which is updated when a block is synced.
     #[inline]
     fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
         let latest = self.best_block_number()?;
@@ -315,7 +315,7 @@ where
 
     /// Returns the block with senders with matching number or hash from database.
     ///
-    /// **NOTE: If [TransactionVariant::NoHash] is provided then the transactions have invalid
+    /// **NOTE: If [`TransactionVariant::NoHash`] is provided then the transactions have invalid
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
@@ -634,7 +634,7 @@ where
     /// Returns the state provider for pending state.
     ///
     /// If there's no pending block available then the latest state provider is returned:
-    /// [Self::latest]
+    /// [`Self::latest`]
     fn pending(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 

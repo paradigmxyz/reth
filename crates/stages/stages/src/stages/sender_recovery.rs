@@ -24,7 +24,7 @@ use thiserror::Error;
 use tracing::*;
 
 /// Maximum amount of transactions to read from disk at one time before we flush their senders to
-/// disk. Since each rayon worker will hold at most 100 transactions (WORKER_CHUNK_SIZE), we
+/// disk. Since each rayon worker will hold at most 100 transactions (`WORKER_CHUNK_SIZE`), we
 /// effectively max limit each batch to 1000 channels in memory.
 const BATCH_SIZE: usize = 100_000;
 
@@ -42,7 +42,7 @@ pub struct SenderRecoveryStage {
 }
 
 impl SenderRecoveryStage {
-    /// Create new instance of [SenderRecoveryStage].
+    /// Create new instance of [`SenderRecoveryStage`].
     pub const fn new(config: SenderRecoveryConfig) -> Self {
         Self { commit_threshold: config.commit_threshold }
     }
@@ -506,10 +506,10 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TransactionSenders] table above a given
+        /// 1. If there are any entries in the [`tables::TransactionSenders`] table above a given
         ///    block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        ///    [tables::TransactionSenders] is not empty.
+        ///    [`tables::TransactionSenders`] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db

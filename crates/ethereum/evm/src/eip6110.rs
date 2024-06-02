@@ -17,7 +17,7 @@ sol! {
 }
 
 /// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa)
-/// (address is from the passed [ChainSpec]) deposits from receipts, and return them as a
+/// (address is from the passed [`ChainSpec`]) deposits from receipts, and return them as a
 /// [vector](Vec) of (requests)[Request].
 pub fn parse_deposits_from_receipts<'a, I>(
     chain_spec: &ChainSpec,

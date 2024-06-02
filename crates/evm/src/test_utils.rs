@@ -11,7 +11,7 @@ use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 use std::sync::Arc;
 
-/// A [BlockExecutorProvider] that returns mocked execution results.
+/// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
 pub struct MockExecutorProvider {
     exec_results: Arc<Mutex<Vec<BatchBlockExecutionOutput>>>,

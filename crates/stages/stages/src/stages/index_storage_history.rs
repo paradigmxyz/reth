@@ -33,7 +33,7 @@ pub struct IndexStorageHistoryStage {
 }
 
 impl IndexStorageHistoryStage {
-    /// Create new instance of [IndexStorageHistoryStage].
+    /// Create new instance of [`IndexStorageHistoryStage`].
     pub const fn new(
         config: IndexHistoryConfig,
         etl_config: EtlConfig,

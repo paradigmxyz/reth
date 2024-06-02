@@ -26,7 +26,7 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Engine: EngineTypes;
 }
 
-/// A helper trait that is downstream of the [NodeTypes] trait and adds stateful components to the
+/// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.

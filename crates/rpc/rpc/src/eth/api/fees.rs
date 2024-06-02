@@ -50,7 +50,7 @@ where
 
     /// Reports the fee history, for the given amount of blocks, up until the given newest block.
     ///
-    /// If `reward_percentiles` are provided the [FeeHistory] will include the _approximated_
+    /// If `reward_percentiles` are provided the [`FeeHistory`] will include the _approximated_
     /// rewards for the requested range.
     pub(crate) async fn fee_history(
         &self,

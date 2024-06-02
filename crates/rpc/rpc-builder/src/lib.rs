@@ -1,20 +1,20 @@
 //! Configure reth RPC.
 //!
 //! This crate contains several builder and config types that allow to configure the selection of
-//! [RethRpcModule] specific to transports (ws, http, ipc).
+//! [`RethRpcModule`] specific to transports (ws, http, ipc).
 //!
-//! The [RpcModuleBuilder] is the main entrypoint for configuring all reth modules. It takes
+//! The [`RpcModuleBuilder`] is the main entrypoint for configuring all reth modules. It takes
 //! instances of components required to start the servers, such as provider impls, network and
-//! transaction pool. [RpcModuleBuilder::build] returns a [TransportRpcModules] which contains the
+//! transaction pool. [`RpcModuleBuilder::build`] returns a [`TransportRpcModules`] which contains the
 //! transport specific config (what APIs are available via this transport).
 //!
-//! The [RpcServerConfig] is used to configure the [RpcServer] type which contains all transport
-//! implementations (http server, ws server, ipc server). [RpcServer::start] requires the
-//! [TransportRpcModules] so it can start the servers with the configured modules.
+//! The [`RpcServerConfig`] is used to configure the [`RpcServer`] type which contains all transport
+//! implementations (http server, ws server, ipc server). [`RpcServer::start`] requires the
+//! [`TransportRpcModules`] so it can start the servers with the configured modules.
 //!
 //! # Examples
 //!
-//! Configure only an http server with a selection of [RethRpcModule]s
+//! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
 //! use reth_evm::ConfigureEvm;
@@ -268,7 +268,7 @@ where
         .await
 }
 
-/// A builder type to configure the RPC module: See [RpcModule]
+/// A builder type to configure the RPC module: See [`RpcModule`]
 ///
 /// This is the main entrypoint and the easiest way to configure an RPC server.
 #[derive(Debug, Clone)]
@@ -328,11 +328,11 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 
-    /// Configure a [NoopTransactionPool] instance.
+    /// Configure a [`NoopTransactionPool`] instance.
     ///
     /// Caution: This will configure a pool API that does absolutely nothing.
-    /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
-    /// requires a [TransactionPool] implementation.
+    /// This is only intended for allow easier setup of namespaces that depend on the [`EthApi`] which
+    /// requires a [`TransactionPool`] implementation.
     pub fn with_noop_pool(
         self,
     ) -> RpcModuleBuilder<Provider, NoopTransactionPool, Network, Tasks, Events, EvmConfig> {
@@ -359,11 +359,11 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 
-    /// Configure a [NoopNetwork] instance.
+    /// Configure a [`NoopNetwork`] instance.
     ///
     /// Caution: This will configure a network API that does absolutely nothing.
-    /// This is only intended for allow easier setup of namespaces that depend on the [EthApi] which
-    /// requires a [NetworkInfo] implementation.
+    /// This is only intended for allow easier setup of namespaces that depend on the [`EthApi`] which
+    /// requires a [`NetworkInfo`] implementation.
     pub fn with_noop_network(
         self,
     ) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events, EvmConfig> {
@@ -390,10 +390,10 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
     }
 
-    /// Configure [TokioTaskExecutor] as the task executor to use for additional tasks.
+    /// Configure [`TokioTaskExecutor`] as the task executor to use for additional tasks.
     ///
     /// This will spawn additional tasks directly via `tokio::task::spawn`, See
-    /// [TokioTaskExecutor].
+    /// [`TokioTaskExecutor`].
     pub fn with_tokio_executor(
         self,
     ) -> RpcModuleBuilder<Provider, Pool, Network, TokioTaskExecutor, Events, EvmConfig> {
@@ -451,10 +451,10 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm + 'static,
 {
-    /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
+    /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can be
     /// used to start the transport server(s).
     ///
-    /// This behaves exactly as [RpcModuleBuilder::build] for the [TransportRpcModules], but also
+    /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but also
     /// configures the auth (engine api) server, which exposes a subset of the `eth_` namespace.
     pub fn build_with_auth_server<EngineApi, EngineT>(
         self,
@@ -483,7 +483,7 @@ where
         (modules, auth_module, registry)
     }
 
-    /// Converts the builder into a [RethModuleRegistry] which can be used to create all components.
+    /// Converts the builder into a [`RethModuleRegistry`] which can be used to create all components.
     ///
     /// This is useful for getting access to API handlers directly:
     ///
@@ -518,10 +518,10 @@ where
         RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config)
     }
 
-    /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
+    /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can be
     /// used to start the transport server(s).
     ///
-    /// See also [RpcServer::start]
+    /// See also [`RpcServer::start`]
     pub fn build(self, module_config: TransportRpcModuleConfig) -> TransportRpcModules<()> {
         let mut modules = TransportRpcModules::default();
 
@@ -566,7 +566,7 @@ pub struct RpcModuleConfig {
 // === impl RpcModuleConfig ===
 
 impl RpcModuleConfig {
-    /// Convenience method to create a new [RpcModuleConfigBuilder]
+    /// Convenience method to create a new [`RpcModuleConfigBuilder`]
     pub fn builder() -> RpcModuleConfigBuilder {
         RpcModuleConfigBuilder::default()
     }
@@ -587,7 +587,7 @@ impl RpcModuleConfig {
     }
 }
 
-/// Configures [RpcModuleConfig]
+/// Configures [`RpcModuleConfig`]
 #[derive(Clone, Debug, Default)]
 pub struct RpcModuleConfigBuilder {
     eth: Option<EthConfig>,
@@ -602,7 +602,7 @@ impl RpcModuleConfigBuilder {
         self
     }
 
-    /// Consumes the type and creates the [RpcModuleConfig]
+    /// Consumes the type and creates the [`RpcModuleConfig`]
     pub fn build(self) -> RpcModuleConfig {
         let Self { eth } = self;
         RpcModuleConfig { eth: eth.unwrap_or_default() }
@@ -628,7 +628,7 @@ impl RpcModuleConfigBuilder {
 ///
 /// # Example
 ///
-/// Create a [RpcModuleSelection] from a selection.
+/// Create a [`RpcModuleSelection`] from a selection.
 ///
 /// ```
 /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
@@ -652,12 +652,12 @@ impl RpcModuleSelection {
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
-    /// Returns a selection of [RethRpcModule] with all [RethRpcModule::all_variants].
+    /// Returns a selection of [`RethRpcModule`] with all [`RethRpcModule::all_variants`].
     pub fn all_modules() -> HashSet<RethRpcModule> {
         RethRpcModule::modules().into_iter().collect()
     }
 
-    /// Returns the [RpcModuleSelection::STANDARD_MODULES] as a selection.
+    /// Returns the [`RpcModuleSelection::STANDARD_MODULES`] as a selection.
     pub fn standard_modules() -> HashSet<RethRpcModule> {
         HashSet::from(Self::STANDARD_MODULES)
     }
@@ -669,7 +669,7 @@ impl RpcModuleSelection {
         Self::all_modules()
     }
 
-    /// Creates a new _unique_ [RpcModuleSelection::Selection] from the given items.
+    /// Creates a new _unique_ [`RpcModuleSelection::Selection`] from the given items.
     ///
     /// # Note
     ///
@@ -677,7 +677,7 @@ impl RpcModuleSelection {
     ///
     /// # Example
     ///
-    /// Create a selection from the [RethRpcModule] string identifiers
+    /// Create a selection from the [`RethRpcModule`] string identifiers
     ///
     /// ```
     /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
@@ -686,7 +686,7 @@ impl RpcModuleSelection {
     /// assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));
     /// ```
     ///
-    /// Create a unique selection from the [RethRpcModule] string identifiers
+    /// Create a unique selection from the [`RethRpcModule`] string identifiers
     ///
     /// ```
     /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
@@ -719,7 +719,7 @@ impl RpcModuleSelection {
         }
     }
 
-    /// Returns an iterator over all configured [RethRpcModule]
+    /// Returns an iterator over all configured [`RethRpcModule`]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
             Self::All => Box::new(RethRpcModule::modules().into_iter()),
@@ -728,7 +728,7 @@ impl RpcModuleSelection {
         }
     }
 
-    /// Clones the set of configured [RethRpcModule].
+    /// Clones the set of configured [`RethRpcModule`].
     pub fn to_selection(&self) -> HashSet<RethRpcModule> {
         match self {
             Self::All => Self::all_modules(),
@@ -737,7 +737,7 @@ impl RpcModuleSelection {
         }
     }
 
-    /// Converts the selection into a [HashSet].
+    /// Converts the selection into a [`HashSet`].
     pub fn into_selection(self) -> HashSet<RethRpcModule> {
         match self {
             Self::All => Self::all_modules(),
@@ -878,7 +878,7 @@ pub enum RethRpcModule {
     Ots,
     /// For single non-standard `eth_` namespace call `eth_callBundle`
     ///
-    /// This is separate from [RethRpcModule::Eth] because it is a non standardized call that
+    /// This is separate from [`RethRpcModule::Eth`] because it is a non standardized call that
     /// should be opt-in.
     EthCallBundle,
 }
@@ -1045,7 +1045,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         self.modules.values().cloned().collect()
     }
 
-    /// Returns a merged RpcModule
+    /// Returns a merged `RpcModule`
     pub fn module(&self) -> RpcModule<()> {
         let mut module = RpcModule::new(());
         for methods in self.modules.values().cloned() {
@@ -1060,12 +1060,12 @@ impl<Provider: ChainSpecProvider, Pool, Network, Tasks, Events, EvmConfig>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
 {
-    /// Instantiates AdminApi
+    /// Instantiates `AdminApi`
     pub fn admin_api(&self) -> AdminApi<Network> {
         AdminApi::new(self.network.clone(), self.provider.chain_spec())
     }
 
-    /// Instantiates Web3Api
+    /// Instantiates `Web3Api`
     pub fn web3_api(&self) -> Web3Api<Network> {
         Web3Api::new(self.network.clone())
     }
@@ -1107,7 +1107,7 @@ where
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
         self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
@@ -1118,7 +1118,7 @@ where
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_ots(&mut self) -> &mut Self {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -1129,7 +1129,7 @@ where
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -1140,7 +1140,7 @@ where
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_trace(&mut self) -> &mut Self {
         let trace_api = self.trace_api();
         self.modules.insert(RethRpcModule::Trace, trace_api.into_rpc().into());
@@ -1171,7 +1171,7 @@ where
 
     /// Register Net Namespace
     ///
-    /// See also [Self::eth_api]
+    /// See also [`Self::eth_api`]
     ///
     /// # Panics
     ///
@@ -1184,7 +1184,7 @@ where
 
     /// Register Reth namespace
     ///
-    /// See also [Self::eth_api]
+    /// See also [`Self::eth_api`]
     ///
     /// # Panics
     ///
@@ -1219,8 +1219,8 @@ where
         modules
     }
 
-    /// Populates a new [RpcModule] based on the selected [RethRpcModule]s in the given
-    /// [RpcModuleSelection]
+    /// Populates a new [`RpcModule`] based on the selected [`RethRpcModule`]s in the given
+    /// [`RpcModuleSelection`]
     pub fn module_for(&mut self, config: &RpcModuleSelection) -> RpcModule<()> {
         let mut module = RpcModule::new(());
         let all_methods = self.reth_methods(config.iter_selection());
@@ -1230,14 +1230,14 @@ where
         module
     }
 
-    /// Returns the [Methods] for the given [RethRpcModule]
+    /// Returns the [Methods] for the given [`RethRpcModule`]
     ///
     /// If this is the first time the namespace is requested, a new instance of API implementation
     /// will be created.
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn reth_methods(
         &mut self,
         namespaces: impl Iterator<Item = RethRpcModule>,
@@ -1318,19 +1318,19 @@ where
             .collect::<Vec<_>>()
     }
 
-    /// Returns the [EthStateCache] frontend
+    /// Returns the [`EthStateCache`] frontend
     ///
-    /// This will spawn exactly one [EthStateCache] service if this is the first time the cache is
+    /// This will spawn exactly one [`EthStateCache`] service if this is the first time the cache is
     /// requested.
     pub fn eth_cache(&mut self) -> EthStateCache {
         self.with_eth(|handlers| handlers.cache.clone())
     }
 
-    /// Creates the [EthHandlers] type the first time this is called.
+    /// Creates the [`EthHandlers`] type the first time this is called.
     ///
-    /// This will spawn the required service tasks for [EthApi] for:
-    ///   - [EthStateCache]
-    ///   - [FeeHistoryCache]
+    /// This will spawn the required service tasks for [`EthApi`] for:
+    ///   - [`EthStateCache`]
+    ///   - [`FeeHistoryCache`]
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,
@@ -1409,18 +1409,18 @@ where
         EthHandlers { api, cache, filter, pubsub, blocking_task_pool }
     }
 
-    /// Returns the configured [EthHandlers] or creates it if it does not exist yet
+    /// Returns the configured [`EthHandlers`] or creates it if it does not exist yet
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
         self.with_eth(|handlers| handlers.clone())
     }
 
-    /// Returns the configured [EthApi] or creates it if it does not exist yet
+    /// Returns the configured [`EthApi`] or creates it if it does not exist yet
     ///
-    /// Caution: This will spawn the necessary tasks required by the [EthApi]: [EthStateCache].
+    /// Caution: This will spawn the necessary tasks required by the [`EthApi`]: [`EthStateCache`].
     ///
     /// # Panics
     ///
@@ -1429,57 +1429,57 @@ where
         self.with_eth(|handlers| handlers.api.clone())
     }
 
-    /// Instantiates TraceApi
+    /// Instantiates `TraceApi`
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn trace_api(&mut self) -> TraceApi<Provider, EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth = self.eth_handlers();
         TraceApi::new(self.provider.clone(), eth.api, self.blocking_pool_guard.clone())
     }
 
-    /// Instantiates [EthBundle] Api
+    /// Instantiates [`EthBundle`] Api
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn bundle_api(&mut self) -> EthBundle<EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         EthBundle::new(eth_api, self.blocking_pool_guard.clone())
     }
 
-    /// Instantiates OtterscanApi
+    /// Instantiates `OtterscanApi`
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn otterscan_api(&mut self) -> OtterscanApi<EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         OtterscanApi::new(eth_api)
     }
 
-    /// Instantiates DebugApi
+    /// Instantiates `DebugApi`
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn debug_api(&mut self) -> DebugApi<Provider, EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         DebugApi::new(self.provider.clone(), eth_api, self.blocking_pool_guard.clone())
     }
 
-    /// Instantiates NetApi
+    /// Instantiates `NetApi`
     ///
     /// # Panics
     ///
-    /// If called outside of the tokio runtime. See also [Self::eth_api]
+    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn net_api(&mut self) -> NetApi<Network, EthApi<Provider, Pool, Network, EvmConfig>> {
         let eth_api = self.eth_api();
         NetApi::new(self.network.clone(), eth_api)
     }
 
-    /// Instantiates RethApi
+    /// Instantiates `RethApi`
     pub fn reth_api(&self) -> RethApi<Provider> {
         RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
     }
@@ -1494,8 +1494,8 @@ where
 ///
 /// Http and WS share the same settings: [`ServerBuilder`].
 ///
-/// Once the [RpcModule] is built via [RpcModuleBuilder] the servers can be started, See also
-/// [ServerBuilder::build] and [Server::start](jsonrpsee::server::Server::start).
+/// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
+/// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
 #[derive(Default, Debug)]
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
@@ -1538,8 +1538,8 @@ impl RpcServerConfig {
 
     /// Configures the http server
     ///
-    /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
-    /// To set a custom [IdProvider], please use [Self::with_id_provider].
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for convenience.
+    /// To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
     pub fn with_http(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
         self.http_server_config =
             Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
@@ -1565,24 +1565,24 @@ impl RpcServerConfig {
 
     /// Configures the ws server
     ///
-    /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
-    /// To set a custom [IdProvider], please use [Self::with_id_provider].
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for convenience.
+    /// To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
     pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
         self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
 
-    /// Configures the [SocketAddr] of the http server
+    /// Configures the [`SocketAddr`] of the http server
     ///
-    /// Default is [Ipv4Addr::LOCALHOST] and [DEFAULT_HTTP_RPC_PORT]
+    /// Default is [`Ipv4Addr::LOCALHOST`] and [`DEFAULT_HTTP_RPC_PORT`]
     pub const fn with_http_address(mut self, addr: SocketAddr) -> Self {
         self.http_addr = Some(addr);
         self
     }
 
-    /// Configures the [SocketAddr] of the ws server
+    /// Configures the [`SocketAddr`] of the ws server
     ///
-    /// Default is [Ipv4Addr::LOCALHOST] and [DEFAULT_WS_RPC_PORT]
+    /// Default is [`Ipv4Addr::LOCALHOST`] and [`DEFAULT_WS_RPC_PORT`]
     pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
         self
@@ -1590,16 +1590,16 @@ impl RpcServerConfig {
 
     /// Configures the ipc server
     ///
-    /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
-    /// To set a custom [IdProvider], please use [Self::with_id_provider].
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for convenience.
+    /// To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
     pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
 
-    /// Sets a custom [IdProvider] for all configured transports.
+    /// Sets a custom [`IdProvider`] for all configured transports.
     ///
-    /// By default all transports use [EthSubscriptionIdProvider]
+    /// By default all transports use [`EthSubscriptionIdProvider`]
     pub fn with_id_provider<I>(mut self, id_provider: I) -> Self
     where
         I: IdProvider + Clone + 'static,
@@ -1619,7 +1619,7 @@ impl RpcServerConfig {
 
     /// Configures the endpoint of the ipc server
     ///
-    /// Default is [DEFAULT_IPC_ENDPOINT]
+    /// Default is [`DEFAULT_IPC_ENDPOINT`]
     pub fn with_ipc_endpoint(mut self, path: impl Into<String>) -> Self {
         self.ipc_endpoint = Some(path.into());
         self
@@ -1633,19 +1633,19 @@ impl RpcServerConfig {
 
     /// Returns true if any server is configured.
     ///
-    /// If no server is configured, no server will be be launched on [RpcServerConfig::start].
+    /// If no server is configured, no server will be be launched on [`RpcServerConfig::start`].
     pub const fn has_server(&self) -> bool {
         self.http_server_config.is_some() ||
             self.ws_server_config.is_some() ||
             self.ipc_server_config.is_some()
     }
 
-    /// Returns the [SocketAddr] of the http server
+    /// Returns the [`SocketAddr`] of the http server
     pub const fn http_address(&self) -> Option<SocketAddr> {
         self.http_addr
     }
 
-    /// Returns the [SocketAddr] of the ws server
+    /// Returns the [`SocketAddr`] of the ws server
     pub const fn ws_address(&self) -> Option<SocketAddr> {
         self.ws_addr
     }
@@ -1655,17 +1655,17 @@ impl RpcServerConfig {
         self.ipc_endpoint.clone()
     }
 
-    /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
+    /// Convenience function to do [`RpcServerConfig::build`] and [`RpcServer::start`] in one step
     pub async fn start(self, modules: TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
         self.build(&modules).await?.start(modules).await
     }
 
-    /// Creates the [CorsLayer] if any
+    /// Creates the [`CorsLayer`] if any
     fn maybe_cors_layer(cors: Option<String>) -> Result<Option<CorsLayer>, CorsDomainError> {
         cors.as_deref().map(cors::create_cors_layer).transpose()
     }
 
-    /// Creates the [AuthLayer] if any
+    /// Creates the [`AuthLayer`] if any
     fn maybe_jwt_layer(&self) -> Option<AuthLayer<JwtAuthValidator>> {
         self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
     }
@@ -1805,7 +1805,7 @@ impl RpcServerConfig {
     ///
     /// This consumes the builder and returns a server.
     ///
-    /// Note: The server is not started and does nothing unless polled, See also [RpcServer::start]
+    /// Note: The server is not started and does nothing unless polled, See also [`RpcServer::start`]
     pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
         let mut server = RpcServer::empty();
         server.ws_http = self.build_ws_http(modules).await?;
@@ -1864,25 +1864,25 @@ impl TransportRpcModuleConfig {
         Self::default().with_ipc(ipc)
     }
 
-    /// Sets the [RpcModuleSelection] for the http transport.
+    /// Sets the [`RpcModuleSelection`] for the http transport.
     pub fn with_http(mut self, http: impl Into<RpcModuleSelection>) -> Self {
         self.http = Some(http.into());
         self
     }
 
-    /// Sets the [RpcModuleSelection] for the ws transport.
+    /// Sets the [`RpcModuleSelection`] for the ws transport.
     pub fn with_ws(mut self, ws: impl Into<RpcModuleSelection>) -> Self {
         self.ws = Some(ws.into());
         self
     }
 
-    /// Sets the [RpcModuleSelection] for the http transport.
+    /// Sets the [`RpcModuleSelection`] for the http transport.
     pub fn with_ipc(mut self, ipc: impl Into<RpcModuleSelection>) -> Self {
         self.ipc = Some(ipc.into());
         self
     }
 
-    /// Sets a custom [RpcModuleConfig] for the configured modules.
+    /// Sets a custom [`RpcModuleConfig`] for the configured modules.
     pub const fn with_config(mut self, config: RpcModuleConfig) -> Self {
         self.config = Some(config);
         self
@@ -1913,22 +1913,22 @@ impl TransportRpcModuleConfig {
         self.http.is_none() && self.ws.is_none() && self.ipc.is_none()
     }
 
-    /// Returns the [RpcModuleSelection] for the http transport
+    /// Returns the [`RpcModuleSelection`] for the http transport
     pub const fn http(&self) -> Option<&RpcModuleSelection> {
         self.http.as_ref()
     }
 
-    /// Returns the [RpcModuleSelection] for the ws transport
+    /// Returns the [`RpcModuleSelection`] for the ws transport
     pub const fn ws(&self) -> Option<&RpcModuleSelection> {
         self.ws.as_ref()
     }
 
-    /// Returns the [RpcModuleSelection] for the ipc transport
+    /// Returns the [`RpcModuleSelection`] for the ipc transport
     pub const fn ipc(&self) -> Option<&RpcModuleSelection> {
         self.ipc.as_ref()
     }
 
-    /// Returns the [RpcModuleConfig] for the configured modules
+    /// Returns the [`RpcModuleConfig`] for the configured modules
     pub const fn config(&self) -> Option<&RpcModuleConfig> {
         self.config.as_ref()
     }
@@ -1973,7 +1973,7 @@ pub struct TransportRpcModules<Context = ()> {
 // === impl TransportRpcModules ===
 
 impl TransportRpcModules {
-    /// Returns the [TransportRpcModuleConfig] used to configure this instance.
+    /// Returns the [`TransportRpcModuleConfig`] used to configure this instance.
     pub const fn module_config(&self) -> &TransportRpcModuleConfig {
         &self.config
     }
@@ -2131,7 +2131,7 @@ impl RpcServer {
     pub const fn http_local_addr(&self) -> Option<SocketAddr> {
         self.ws_http.http_local_addr
     }
-    /// Return the JwtSecret of the server
+    /// Return the `JwtSecret` of the server
     pub const fn jwt(&self) -> Option<JwtSecret> {
         self.ws_http.jwt_secret
     }
@@ -2192,7 +2192,7 @@ impl fmt::Debug for RpcServer {
 
 /// A handle to the spawned servers.
 ///
-/// When this type is dropped or [RpcServerHandle::stop] has been called the server will be stopped.
+/// When this type is dropped or [`RpcServerHandle::stop`] has been called the server will be stopped.
 #[derive(Clone, Debug)]
 #[must_use = "Server stops if dropped"]
 pub struct RpcServerHandle {

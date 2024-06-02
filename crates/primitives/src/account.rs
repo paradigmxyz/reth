@@ -28,7 +28,7 @@ impl Account {
         self.bytecode_hash.is_some()
     }
 
-    /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0 &&
+    /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0 &&
     /// bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
         self.nonce == 0 &&
@@ -36,7 +36,7 @@ impl Account {
             self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
     }
 
-    /// Makes an [Account] from [GenesisAccount] type
+    /// Makes an [Account] from [`GenesisAccount`] type
     pub fn from_genesis_account(value: &GenesisAccount) -> Self {
         Self {
             // nonce must exist, so we default to zero when converting a genesis account

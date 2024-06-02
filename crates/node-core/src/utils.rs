@@ -37,7 +37,7 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
     }
 }
 
-/// Collect the peers from the [NetworkManager] and write them to the given `persistent_peers_file`,
+/// Collect the peers from the [`NetworkManager`] and write them to the given `persistent_peers_file`,
 /// if configured.
 pub fn write_peers_to_file<C>(network: &NetworkManager<C>, persistent_peers_file: Option<PathBuf>)
 where

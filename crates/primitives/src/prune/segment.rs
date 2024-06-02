@@ -47,7 +47,7 @@ impl PruneSegment {
 pub enum PrunePurpose {
     /// Prune data according to user configuration.
     User,
-    /// Prune data according to highest static_files to delete the data from database.
+    /// Prune data according to highest `static_files` to delete the data from database.
     StaticFile,
 }
 
@@ -63,7 +63,7 @@ impl PrunePurpose {
     }
 }
 
-/// PruneSegment error type.
+/// `PruneSegment` error type.
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.

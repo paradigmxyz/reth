@@ -19,46 +19,46 @@ use tokio::sync::{
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 
-/// Metrics for an ExEx.
+/// Metrics for an `ExEx`.
 #[derive(Metrics)]
 #[metrics(scope = "exex")]
 struct ExExMetrics {
-    /// The total number of notifications sent to an ExEx.
+    /// The total number of notifications sent to an `ExEx`.
     notifications_sent_total: Counter,
-    /// The total number of events an ExEx has sent to the manager.
+    /// The total number of events an `ExEx` has sent to the manager.
     events_sent_total: Counter,
 }
 
-/// A handle to an ExEx used by the [`ExExManager`] to communicate with ExEx's.
+/// A handle to an `ExEx` used by the [`ExExManager`] to communicate with `ExEx`'s.
 ///
-/// A handle should be created for each ExEx with a unique ID. The channels returned by
-/// [`ExExHandle::new`] should be given to the ExEx, while the handle itself should be given to the
+/// A handle should be created for each `ExEx` with a unique ID. The channels returned by
+/// [`ExExHandle::new`] should be given to the `ExEx`, while the handle itself should be given to the
 /// manager in [`ExExManager::new`].
 #[derive(Debug)]
 pub struct ExExHandle {
     /// The execution extension's ID.
     id: String,
-    /// Metrics for an ExEx.
+    /// Metrics for an `ExEx`.
     metrics: ExExMetrics,
 
-    /// Channel to send [`ExExNotification`]s to the ExEx.
+    /// Channel to send [`ExExNotification`]s to the `ExEx`.
     sender: PollSender<ExExNotification>,
-    /// Channel to receive [`ExExEvent`]s from the ExEx.
+    /// Channel to receive [`ExExEvent`]s from the `ExEx`.
     receiver: UnboundedReceiver<ExExEvent>,
-    /// The ID of the next notification to send to this ExEx.
+    /// The ID of the next notification to send to this `ExEx`.
     next_notification_id: usize,
 
-    /// The finished block number of the ExEx.
+    /// The finished block number of the `ExEx`.
     ///
-    /// If this is `None`, the ExEx has not emitted a `FinishedHeight` event.
+    /// If this is `None`, the `ExEx` has not emitted a `FinishedHeight` event.
     finished_height: Option<BlockNumber>,
 }
 
 impl ExExHandle {
-    /// Create a new handle for the given ExEx.
+    /// Create a new handle for the given `ExEx`.
     ///
     /// Returns the handle, as well as a [`UnboundedSender`] for [`ExExEvent`]s and a
-    /// [`Receiver`] for [`ExExNotification`]s that should be given to the ExEx.
+    /// [`Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new(id: String) -> (Self, UnboundedSender<ExExEvent>, Receiver<ExExNotification>) {
         let (notification_tx, notification_rx) = mpsc::channel(1);
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -139,7 +139,7 @@ impl ExExHandle {
     }
 }
 
-/// Metrics for the ExEx manager.
+/// Metrics for the `ExEx` manager.
 #[derive(Metrics)]
 #[metrics(scope = "exex_manager")]
 pub struct ExExManagerMetrics {
@@ -151,7 +151,7 @@ pub struct ExExManagerMetrics {
     ///
     /// Note that this might be slightly bigger than the maximum capacity in some cases.
     buffer_size: Gauge,
-    /// Current number of ExEx's on the node.
+    /// Current number of `ExEx`'s on the node.
     num_exexs: Gauge,
 }
 
@@ -166,7 +166,7 @@ pub struct ExExManagerMetrics {
 /// - Monitoring
 #[derive(Debug)]
 pub struct ExExManager {
-    /// Handles to communicate with the ExEx's.
+    /// Handles to communicate with the `ExEx`'s.
     exex_handles: Vec<ExExHandle>,
 
     /// [`ExExNotification`] channel from the [`ExExManagerHandle`]s.
@@ -191,22 +191,22 @@ pub struct ExExManager {
     /// Whether the manager is ready to receive new notifications.
     is_ready: watch::Sender<bool>,
 
-    /// The finished height of all ExEx's.
+    /// The finished height of all `ExEx`'s.
     finished_height: watch::Sender<FinishedExExHeight>,
 
-    /// A handle to the ExEx manager.
+    /// A handle to the `ExEx` manager.
     handle: ExExManagerHandle,
-    /// Metrics for the ExEx manager.
+    /// Metrics for the `ExEx` manager.
     metrics: ExExManagerMetrics,
 }
 
 impl ExExManager {
     /// Create a new [`ExExManager`].
     ///
-    /// You must provide an [`ExExHandle`] for each ExEx and the maximum capacity of the
+    /// You must provide an [`ExExHandle`] for each `ExEx` and the maximum capacity of the
     /// notification buffer in the manager.
     ///
-    /// When the capacity is exceeded (which can happen if an ExEx is slow) no one can send
+    /// When the capacity is exceeded (which can happen if an `ExEx` is slow) no one can send
     /// notifications over [`ExExManagerHandle`]s until there is capacity again.
     pub fn new(handles: Vec<ExExHandle>, max_capacity: usize) -> Self {
         let num_exexs = handles.len();
@@ -363,9 +363,9 @@ impl Future for ExExManager {
 /// A handle to communicate with the [`ExExManager`].
 #[derive(Debug)]
 pub struct ExExManagerHandle {
-    /// Channel to send notifications to the ExEx manager.
+    /// Channel to send notifications to the `ExEx` manager.
     exex_tx: UnboundedSender<ExExNotification>,
-    /// The number of ExEx's running on the node.
+    /// The number of `ExEx`'s running on the node.
     num_exexs: usize,
     /// A watch channel denoting whether the manager is ready for new notifications or not.
     ///
@@ -378,7 +378,7 @@ pub struct ExExManagerHandle {
     is_ready: ReusableBoxFuture<'static, watch::Receiver<bool>>,
     /// The current capacity of the manager's internal notification buffer.
     current_capacity: Arc<AtomicUsize>,
-    /// The finished height of all ExEx's.
+    /// The finished height of all `ExEx`'s.
     finished_height: watch::Receiver<FinishedExExHeight>,
 }
 
@@ -422,12 +422,12 @@ impl ExExManagerHandle {
         self.exex_tx.send(notification)
     }
 
-    /// Get the current capacity of the ExEx manager's internal notification buffer.
+    /// Get the current capacity of the `ExEx` manager's internal notification buffer.
     pub fn capacity(&self) -> usize {
         self.current_capacity.load(Ordering::Relaxed)
     }
 
-    /// Whether there is capacity in the ExEx manager's internal notification buffer.
+    /// Whether there is capacity in the `ExEx` manager's internal notification buffer.
     ///
     /// If this returns `false`, the owner of the handle should **NOT** send new notifications over
     /// the channel until the manager is ready again, as this can lead to unbounded memory growth.
@@ -435,12 +435,12 @@ impl ExExManagerHandle {
         self.current_capacity.load(Ordering::Relaxed) > 0
     }
 
-    /// Returns `true` if there are ExEx's installed in the node.
+    /// Returns `true` if there are `ExEx`'s installed in the node.
     pub const fn has_exexs(&self) -> bool {
         self.num_exexs > 0
     }
 
-    /// The finished height of all ExEx's.
+    /// The finished height of all `ExEx`'s.
     pub fn finished_height(&self) -> watch::Receiver<FinishedExExHeight> {
         self.finished_height.clone()
     }

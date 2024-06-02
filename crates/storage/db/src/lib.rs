@@ -171,7 +171,7 @@ pub mod test_utils {
         }
     }
 
-    /// Create static_files path for testing
+    /// Create `static_files` path for testing
     pub fn create_test_static_files_dir() -> (TempDir, PathBuf) {
         let temp_dir = TempDir::with_prefix("reth-test-static-").expect(ERROR_TEMPDIR);
         let path = temp_dir.path().to_path_buf();
