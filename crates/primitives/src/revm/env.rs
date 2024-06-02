@@ -215,7 +215,7 @@ fn fill_tx_env_with_system_contract_call(
     env.block.basefee = U256::ZERO;
 }
 
-/// Fill transaction environment from [TransactionSignedEcRecovered].
+/// Fill transaction environment from [`TransactionSignedEcRecovered`].
 #[cfg(not(feature = "optimism"))]
 pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
     fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
