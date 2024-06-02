@@ -218,7 +218,7 @@ RPC:
           [default: 8546]
 
       --ws.origins <ws.origins>
-          Origins from which to accept `WebSocket requests`
+          Origins from which to accept `WebSocket` requests
 
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
