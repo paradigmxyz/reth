@@ -385,8 +385,8 @@ impl Hardfork {
     pub const fn holesky_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Shanghai |
-            Self::Cancun |
+            Self::Shanghai => Some(1696000704),
+            Self::Cancun => Some(1707305664),
             Self::Frontier |
             Self::Homestead |
             Self::Dao |

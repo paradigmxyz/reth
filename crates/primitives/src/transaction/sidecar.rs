@@ -268,7 +268,7 @@ impl BlobTransaction {
         // the outer header is for the entire transaction, so we check the length here
         let outer_consumed = outer_remaining_len - data.len();
         if outer_consumed != outer_header.payload_length {
-            return Err(RlpError::UnexpectedLength);
+            return Err(RlpError::UnexpectedLength)
         }
 
         Ok(Self { transaction, hash, signature, sidecar })
@@ -354,7 +354,7 @@ mod tests {
 
             // Ensure the entry is a file and not a directory
             if !file_path.is_file() || file_path.extension().unwrap_or_default() != "json" {
-                continue;
+                continue
             }
 
             // Read the contents of the JSON file into a string.
