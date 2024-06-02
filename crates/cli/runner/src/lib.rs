@@ -27,8 +27,8 @@ impl CliRunner {
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
     /// until the process receives a `SIGINT` or `SIGTERM` signal.
     ///
-    /// Tasks spawned by the command via the [`TaskExecutor`] are shut down and an attempt is made to
-    /// drive their shutdown to completion after the command has finished.
+    /// Tasks spawned by the command via the [`TaskExecutor`] are shut down and an attempt is made
+    /// to drive their shutdown to completion after the command has finished.
     pub fn run_command_until_exit<F, E>(
         self,
         command: impl FnOnce(CliContext) -> F,

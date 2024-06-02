@@ -1005,8 +1005,8 @@ impl TransactionSigned {
     /// Note:
     ///
     /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
-    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that the
-    /// signature has a low `s` value.
+    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
+    /// the signature has a low `s` value.
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1144,8 +1144,8 @@ impl TransactionSigned {
         self.transaction.encode_with_signature(&self.signature, out, with_header);
     }
 
-    /// Output the length of the `encode_inner(out`, true). Note to assume that `with_header` is only
-    /// `true`.
+    /// Output the length of the `encode_inner(out`, true). Note to assume that `with_header` is
+    /// only `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
         match &self.transaction {
             Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
@@ -1412,8 +1412,8 @@ impl Decodable for TransactionSigned {
     /// transaction is encoded in this format, and does not start with a RLP header:
     /// `tx-type || rlp(tx-data)`.
     ///
-    /// This is because [`Header::decode`] does not advance the buffer, and returns a length-1 string
-    /// header if the first byte is less than `0xf7`.
+    /// This is because [`Header::decode`] does not advance the buffer, and returns a length-1
+    /// string header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
             return Err(RlpError::InputTooShort)

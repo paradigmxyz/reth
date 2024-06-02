@@ -52,7 +52,8 @@ impl<DB> Deref for StaticFileProducer<DB> {
     }
 }
 
-/// Static File producer routine. See [`StaticFileProducerInner::run`] for more detailed description.
+/// Static File producer routine. See [`StaticFileProducerInner::run`] for more detailed
+/// description.
 #[derive(Debug)]
 pub struct StaticFileProducerInner<DB> {
     /// Provider factory

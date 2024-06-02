@@ -45,8 +45,8 @@ impl TxnManager {
         txn_manager
     }
 
-    /// Spawns a new [`std::thread`] that listens to incoming [`TxnManagerMessage`] messages, executes
-    /// an FFI function, and returns the result on the provided channel.
+    /// Spawns a new [`std::thread`] that listens to incoming [`TxnManagerMessage`] messages,
+    /// executes an FFI function, and returns the result on the provided channel.
     ///
     /// - [`TxnManagerMessage::Begin`] opens a new transaction with [`ffi::mdbx_txn_begin_ex`]
     /// - [`TxnManagerMessage::Abort`] aborts a transaction with [`ffi::mdbx_txn_abort`]

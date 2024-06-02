@@ -343,8 +343,8 @@ impl Decodable for EnrRequest {
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
 ///
-/// This packet is used to respond to an `ENRRequest` packet and includes the requested ENR along with
-/// the hash of the original request.
+/// This packet is used to respond to an `ENRRequest` packet and includes the requested ENR along
+/// with the hash of the original request.
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct EnrResponse {
     /// The hash of the `ENRRequest` packet being replied to.

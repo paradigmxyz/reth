@@ -59,9 +59,9 @@ impl From<HeadersResponseError> for ReverseHeadersDownloaderError {
 /// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
 /// requests at a time but yielding them in batches on [`Stream::poll_next`].
 ///
-/// **Note:** This downloader downloads in reverse, see also [`HeadersDirection::Falling`], this means
-/// the batches of headers that this downloader yields will start at the chain tip and move towards
-/// the local head: falling block numbers.
+/// **Note:** This downloader downloads in reverse, see also [`HeadersDirection::Falling`], this
+/// means the batches of headers that this downloader yields will start at the chain tip and move
+/// towards the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
@@ -1154,8 +1154,8 @@ impl ReverseHeadersDownloaderBuilder {
     ///
     /// This essentially determines how much memory the downloader can use for buffering responses
     /// that arrive out of order. The total number of buffered headers is `request_limit *
-    /// max_buffered_responses`. If the [`ReverseHeadersDownloader`]'s buffered responses exceeds this
-    /// threshold it waits until there's capacity again before sending new requests.
+    /// max_buffered_responses`. If the [`ReverseHeadersDownloader`]'s buffered responses exceeds
+    /// this threshold it waits until there's capacity again before sending new requests.
     pub const fn max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
         self.max_buffered_responses = max_buffered_responses;
         self

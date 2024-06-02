@@ -767,8 +767,8 @@ where
     /// This means that if the block becomes canonical, we need to fetch the missing blocks over
     /// P2P.
     ///
-    /// If the [`BlockValidationKind::SkipStateRootValidation`] variant is provided the state root is
-    /// not validated.
+    /// If the [`BlockValidationKind::SkipStateRootValidation`] variant is provided the state root
+    /// is not validated.
     ///
     /// # Note
     ///

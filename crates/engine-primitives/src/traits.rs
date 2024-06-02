@@ -62,8 +62,8 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// Returns the withdrawals for the running payload job.
     fn withdrawals(&self) -> &Withdrawals;
 
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload (that
-    /// has the `parent` as its parent).
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
     ///
     /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
     /// based on its timestamp.

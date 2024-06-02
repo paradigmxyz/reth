@@ -28,8 +28,8 @@ impl Account {
         self.bytecode_hash.is_some()
     }
 
-    /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0 &&
-    /// bytecode = None (or hash is [`KECCAK_EMPTY`]).
+    /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0
+    /// && bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
         self.nonce == 0 &&
             self.balance.is_zero() &&

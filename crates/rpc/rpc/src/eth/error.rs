@@ -647,8 +647,8 @@ pub enum SignError {
     NoChainId,
 }
 
-/// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if it is
-/// [`ExecutionResult::Success`].
+/// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if it
+/// is [`ExecutionResult::Success`].
 pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
     match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),

@@ -195,9 +195,9 @@ where
     /// up to the block that caused the error.
     ///
     /// Returns the control flow after it ran the pipeline.
-    /// This will be [`ControlFlow::Continue`] or [`ControlFlow::NoProgress`] of the _last_ stage in the
-    /// pipeline (for example the `Finish` stage). Or [`ControlFlow::Unwind`] of the stage that caused
-    /// the unwind.
+    /// This will be [`ControlFlow::Continue`] or [`ControlFlow::NoProgress`] of the _last_ stage in
+    /// the pipeline (for example the `Finish` stage). Or [`ControlFlow::Unwind`] of the stage
+    /// that caused the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         self.move_to_static_files()?;
 
@@ -240,8 +240,8 @@ where
     /// all data from the database to static files for corresponding
     /// [segments](reth_primitives::static_file::StaticFileSegment), according to their [stage
     /// checkpoints](StageCheckpoint):
-    /// - [`StaticFileSegment::Headers`](reth_primitives::static_file::StaticFileSegment::Headers) ->
-    ///   [`StageId::Headers`]
+    /// - [`StaticFileSegment::Headers`](reth_primitives::static_file::StaticFileSegment::Headers)
+    ///   -> [`StageId::Headers`]
     /// - [`StaticFileSegment::Receipts`](reth_primitives::static_file::StaticFileSegment::Receipts)
     ///   -> [`StageId::Execution`]
     /// - [`StaticFileSegment::Transactions`](reth_primitives::static_file::StaticFileSegment::Transactions)

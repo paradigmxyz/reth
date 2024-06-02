@@ -210,8 +210,8 @@ pub(crate) fn build_call_evm_env(
 
 /// Configures a new [`TxEnv`]  for the [`TransactionRequest`]
 ///
-/// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are `None`, they
-/// fall back to the [`BlockEnv`]'s settings.
+/// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are `None`,
+/// they fall back to the [`BlockEnv`]'s settings.
 pub(crate) fn create_txn_env(
     block_env: &BlockEnv,
     request: TransactionRequest,
@@ -346,8 +346,8 @@ impl CallFees {
     /// If the `maxFeePerBlobGas` or `blobVersionedHashes` are set we treat it as an EIP-4844
     /// transaction.
     ///
-    /// Note: Due to the `Default` impl of [`BlockEnv`] (Some(0)) this assumes the `block_blob_fee` is
-    /// always `Some`
+    /// Note: Due to the `Default` impl of [`BlockEnv`] (Some(0)) this assumes the `block_blob_fee`
+    /// is always `Some`
     fn ensure_fees(
         call_gas_price: Option<U256>,
         call_max_fee: Option<U256>,

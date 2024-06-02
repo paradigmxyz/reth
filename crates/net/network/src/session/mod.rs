@@ -955,8 +955,8 @@ async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`].
 ///
-/// If additional [`RlpxSubProtocolHandlers`] are provided, the hello message will be updated to also
-/// negotiate the additional protocols.
+/// If additional [`RlpxSubProtocolHandlers`] are provided, the hello message will be updated to
+/// also negotiate the additional protocols.
 #[allow(clippy::too_many_arguments)]
 async fn authenticate_stream(
     stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,

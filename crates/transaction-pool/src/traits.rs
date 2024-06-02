@@ -870,8 +870,8 @@ pub trait EthPoolTransaction: PoolTransaction {
 
 /// The default [`PoolTransaction`] for the [Pool](crate::Pool) for Ethereum.
 ///
-/// This type is essentially a wrapper around [`TransactionSignedEcRecovered`] with additional fields
-/// derived from the transaction that are frequently used by the pools for ordering.
+/// This type is essentially a wrapper around [`TransactionSignedEcRecovered`] with additional
+/// fields derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthPooledTransaction {
     /// `EcRecovered` transaction info

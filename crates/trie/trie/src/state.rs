@@ -236,8 +236,8 @@ impl HashedPostState {
             .root()
     }
 
-    /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie updates.
-    /// See [`Self::state_root`] for more info.
+    /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie
+    /// updates. See [`Self::state_root`] for more info.
     pub fn state_root_with_updates<TX: DbTx>(
         &self,
         tx: &TX,

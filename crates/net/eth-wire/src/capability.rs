@@ -550,8 +550,8 @@ pub enum SharedCapabilityError {
     /// Unsupported `eth` version.
     #[error(transparent)]
     UnsupportedVersion(#[from] ParseVersionError),
-    /// Thrown when the message id for a [`SharedCapability`] overlaps with the reserved p2p message
-    /// id space [`MAX_RESERVED_MESSAGE_ID`].
+    /// Thrown when the message id for a [`SharedCapability`] overlaps with the reserved p2p
+    /// message id space [`MAX_RESERVED_MESSAGE_ID`].
     #[error("message id offset `{0}` is reserved")]
     ReservedMessageIdOffset(u8),
 }

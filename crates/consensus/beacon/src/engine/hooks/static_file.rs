@@ -36,8 +36,8 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
 
     /// Advances the `static_file_producer` state.
     ///
-    /// This checks for the result in the channel, or returns pending if the `static_file_producer` is
-    /// idle.
+    /// This checks for the result in the channel, or returns pending if the `static_file_producer`
+    /// is idle.
     fn poll_static_file_producer(
         &mut self,
         cx: &mut Context<'_>,

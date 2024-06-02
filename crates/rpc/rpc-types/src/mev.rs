@@ -160,8 +160,8 @@ impl PrivacyHint {
         self
     }
 
-    /// Sets the flag indicating inclusion of contract address and returns the modified `PrivacyHint`
-    /// instance.
+    /// Sets the flag indicating inclusion of contract address and returns the modified
+    /// `PrivacyHint` instance.
     pub const fn with_contract_address(mut self) -> Self {
         self.contract_address = true;
         self
@@ -173,8 +173,8 @@ impl PrivacyHint {
         self
     }
 
-    /// Sets the flag indicating inclusion of function selector and returns the modified `PrivacyHint`
-    /// instance.
+    /// Sets the flag indicating inclusion of function selector and returns the modified
+    /// `PrivacyHint` instance.
     pub const fn with_function_selector(mut self) -> Self {
         self.function_selector = true;
         self
@@ -186,8 +186,8 @@ impl PrivacyHint {
         self
     }
 
-    /// Sets the flag indicating inclusion of transaction hash and returns the modified `PrivacyHint`
-    /// instance.
+    /// Sets the flag indicating inclusion of transaction hash and returns the modified
+    /// `PrivacyHint` instance.
     pub const fn with_tx_hash(mut self) -> Self {
         self.tx_hash = true;
         self

@@ -32,8 +32,8 @@ struct ExExMetrics {
 /// A handle to an `ExEx` used by the [`ExExManager`] to communicate with `ExEx`'s.
 ///
 /// A handle should be created for each `ExEx` with a unique ID. The channels returned by
-/// [`ExExHandle::new`] should be given to the `ExEx`, while the handle itself should be given to the
-/// manager in [`ExExManager::new`].
+/// [`ExExHandle::new`] should be given to the `ExEx`, while the handle itself should be given to
+/// the manager in [`ExExManager::new`].
 #[derive(Debug)]
 pub struct ExExHandle {
     /// The execution extension's ID.

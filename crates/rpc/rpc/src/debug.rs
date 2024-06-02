@@ -256,8 +256,8 @@ where
             .await
     }
 
-    /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given block
-    /// execution using the final state of parent block as the base.
+    /// The `debug_traceCall` method lets you run an `eth_call` within the context of the given
+    /// block execution using the final state of parent block as the base.
     ///
     /// Differences compare to `eth_call`:
     ///  - `debug_traceCall` executes with __enabled__ basefee check, `eth_call` does not: <https://github.com/paradigmxyz/reth/issues/6240>

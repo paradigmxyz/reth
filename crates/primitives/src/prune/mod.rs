@@ -136,8 +136,8 @@ impl PruneProgress {
     /// Creates new [`PruneProgress`].
     ///
     /// If `done == true`, returns [`PruneProgress::Finished`], otherwise
-    /// [`PruneProgress::HasMoreData`] is returned with [`PruneInterruptReason`] according to the passed
-    /// limiter.
+    /// [`PruneProgress::HasMoreData`] is returned with [`PruneInterruptReason`] according to the
+    /// passed limiter.
     pub fn new(done: bool, limiter: &PruneLimiter) -> Self {
         if done {
             Self::Finished

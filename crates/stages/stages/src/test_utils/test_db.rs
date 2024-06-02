@@ -321,8 +321,8 @@ impl TestStageDB {
         })
     }
 
-    /// Insert collection of ([`TxNumber`], [Receipt]) organized by respective block numbers into the
-    /// corresponding table or static file segment.
+    /// Insert collection of ([`TxNumber`], [Receipt]) organized by respective block numbers into
+    /// the corresponding table or static file segment.
     pub fn insert_receipts_by_block<I, J>(
         &self,
         receipts: I,

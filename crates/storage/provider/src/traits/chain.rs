@@ -114,8 +114,8 @@ impl CanonStateNotification {
 
     /// Returns the new tip of the chain.
     ///
-    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least 1
-    /// new block.
+    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
+    /// 1 new block.
     pub fn tip(&self) -> &SealedBlockWithSenders {
         match self {
             Self::Commit { new } => new.tip(),

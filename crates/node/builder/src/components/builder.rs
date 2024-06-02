@@ -203,8 +203,8 @@ where
 
     /// Configures the executor builder.
     ///
-    /// This accepts a [`ExecutorBuilder`] instance that will be used to create the node's components
-    /// for execution.
+    /// This accepts a [`ExecutorBuilder`] instance that will be used to create the node's
+    /// components for execution.
     pub fn executor<EB>(
         self,
         executor_builder: EB,

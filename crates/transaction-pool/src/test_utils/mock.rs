@@ -1422,8 +1422,8 @@ impl NonConflictingSetOutcome {
     /// Introduces artificial nonce gaps into the transaction set, at random, with a range of gap
     /// sizes.
     ///
-    /// If this is a [`NonConflictingSetOutcome::BlobsOnly`], then nonce gaps will not be introduced.
-    /// Otherwise, the nonce gaps will be introduced to the mixed transaction set.
+    /// If this is a [`NonConflictingSetOutcome::BlobsOnly`], then nonce gaps will not be
+    /// introduced. Otherwise, the nonce gaps will be introduced to the mixed transaction set.
     ///
     /// See [`MockTransactionSet::with_nonce_gaps`] for more information on the generation process.
     pub fn with_nonce_gaps(

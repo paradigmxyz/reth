@@ -166,8 +166,8 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// # Verification
     ///
-    /// The on [`Executor::execute`] the executor is expected to validate the execution output of the
-    /// input, this includes:
+    /// The on [`Executor::execute`] the executor is expected to validate the execution output of
+    /// the input, this includes:
     /// - Cumulative gas used must match the input's gas used.
     /// - Receipts must match the input's receipts root.
     ///

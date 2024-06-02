@@ -832,7 +832,8 @@ impl EnvironmentBuilder {
         self
     }
 
-    /// Set the Handle-Slow-Readers callback. See [`HandleSlowReadersCallback`] for more information.
+    /// Set the Handle-Slow-Readers callback. See [`HandleSlowReadersCallback`] for more
+    /// information.
     #[cfg(not(windows))]
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);

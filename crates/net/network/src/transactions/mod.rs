@@ -76,8 +76,8 @@ pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>>
 
 /// Api to interact with [`TransactionsManager`] task.
 ///
-/// This can be obtained via [`TransactionsManager::handle`] and can be used to manually interact with
-/// the [`TransactionsManager`] task once it is spawned.
+/// This can be obtained via [`TransactionsManager::handle`] and can be used to manually interact
+/// with the [`TransactionsManager`] task once it is spawned.
 ///
 /// For example [`TransactionsHandle::get_peer_transaction_hashes`] returns the transaction hashes
 /// known by a specific peer.

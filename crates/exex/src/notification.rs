@@ -34,8 +34,8 @@ impl ExExNotification {
         }
     }
 
-    /// Returns the reverted chain from the [`Self::ChainReorged`] and [`Self::ChainReverted`] variants,
-    /// if any.
+    /// Returns the reverted chain from the [`Self::ChainReorged`] and [`Self::ChainReverted`]
+    /// variants, if any.
     pub fn reverted_chain(&self) -> Option<Arc<Chain>> {
         match self {
             Self::ChainReorged { old, new: _ } | Self::ChainReverted { old } => Some(old.clone()),

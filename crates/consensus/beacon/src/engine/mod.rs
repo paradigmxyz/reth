@@ -130,9 +130,9 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 ///
 /// ### The chain is disconnected
 ///
-/// In this case the [`BlockchainTreeEngine`] doesn't know how the new chain connects to the existing
-/// canonical chain. It could be a simple commit (new blocks extend the current head) or a re-org
-/// that requires unwinding the canonical chain.
+/// In this case the [`BlockchainTreeEngine`] doesn't know how the new chain connects to the
+/// existing canonical chain. It could be a simple commit (new blocks extend the current head) or a
+/// re-org that requires unwinding the canonical chain.
 ///
 /// This further distinguishes between two variants:
 ///
@@ -272,8 +272,9 @@ where
     /// priority:
     /// - Explicit [`Option::Some`] target block hash provided via a constructor argument.
     /// - The process was previously interrupted amidst the pipeline run. This is checked by
-    ///   comparing the checkpoints of the first ([`StageId::Headers`]) and last ([`StageId::Finish`])
-    ///   stages. In this case, the latest available header in the database is used as the target.
+    ///   comparing the checkpoints of the first ([`StageId::Headers`]) and last
+    ///   ([`StageId::Finish`]) stages. In this case, the latest available header in the database is
+    ///   used as the target.
     ///
     /// Propagates any database related error.
     #[allow(clippy::too_many_arguments)]

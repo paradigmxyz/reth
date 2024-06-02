@@ -365,8 +365,8 @@ pub fn amend_listen_config_wrt_rlpx(
     ListenConfig::from_two_sockets(discv5_socket_ipv4, discv5_socket_ipv6)
 }
 
-/// Returns the sockets that can be used for discv5 with respect to the `RLPx` address. ENR specs only
-/// acknowledge one address per IP version.
+/// Returns the sockets that can be used for discv5 with respect to the `RLPx` address. ENR specs
+/// only acknowledge one address per IP version.
 pub fn discv5_sockets_wrt_rlpx_addr(
     rlpx_addr: IpAddr,
     discv5_addr_ipv4: Option<Ipv4Addr>,

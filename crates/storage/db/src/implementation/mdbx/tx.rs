@@ -236,8 +236,8 @@ impl<K: TransactionKind> MetricsHandler<K> {
     /// is more than [`LONG_TRANSACTION_DURATION`] and `record_backtrace == true`.
     /// The backtrace is recorded and logged just once, guaranteed by `backtrace_recorded` atomic.
     ///
-    /// NOTE: Backtrace is recorded using [`Backtrace::force_capture`], so `RUST_BACKTRACE` env var is
-    /// not needed.
+    /// NOTE: Backtrace is recorded using [`Backtrace::force_capture`], so `RUST_BACKTRACE` env var
+    /// is not needed.
     fn log_backtrace_on_long_read_transaction(&self) {
         if self.record_backtrace &&
             !self.backtrace_recorded.load(Ordering::Relaxed) &&

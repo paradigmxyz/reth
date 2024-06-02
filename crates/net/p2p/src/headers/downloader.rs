@@ -15,7 +15,8 @@ pub trait HeaderDownloader:
 {
     /// Updates the gap to sync which ranges from local head to the sync target
     ///
-    /// See also [`HeaderDownloader::update_sync_target`] and [`HeaderDownloader::update_local_head`]
+    /// See also [`HeaderDownloader::update_sync_target`] and
+    /// [`HeaderDownloader::update_local_head`]
     fn update_sync_gap(&mut self, head: SealedHeader, target: SyncTarget) {
         self.update_local_head(head);
         self.update_sync_target(target);

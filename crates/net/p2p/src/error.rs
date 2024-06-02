@@ -56,8 +56,8 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
     /// [`RequestError::ConnectionDropped`] should be ignored here because this is already handled
     /// when the dropped connection is handled.
     ///
-    /// [`RequestError::UnsupportedCapability`] is not used yet because we only support active session
-    /// for eth protocol.
+    /// [`RequestError::UnsupportedCapability`] is not used yet because we only support active
+    /// session for eth protocol.
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {

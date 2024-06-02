@@ -60,8 +60,8 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// The `validation_kind` parameter controls which validation checks are performed.
     ///
     /// Caution: If the block was received from the consensus layer, this should always be called
-    /// with [`BlockValidationKind::Exhaustive`] to validate the state root, if possible to adhere to
-    /// the engine API spec.
+    /// with [`BlockValidationKind::Exhaustive`] to validate the state root, if possible to adhere
+    /// to the engine API spec.
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,

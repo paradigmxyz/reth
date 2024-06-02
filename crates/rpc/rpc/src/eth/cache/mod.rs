@@ -277,8 +277,8 @@ impl EthStateCache {
 /// handles messages and does LRU lookups and never blocking IO.
 ///
 /// Caution: The channel for the data is _unbounded_ it is assumed that this is mainly used by the
-/// [`EthApi`](crate::EthApi) which is typically invoked by the RPC server, which already uses permits
-/// to limit concurrent requests.
+/// [`EthApi`](crate::EthApi) which is typically invoked by the RPC server, which already uses
+/// permits to limit concurrent requests.
 #[must_use = "Type does nothing unless spawned"]
 pub(crate) struct EthStateCacheService<
     Provider,

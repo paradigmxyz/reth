@@ -64,8 +64,8 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of the canonical chain.
     ///
-    /// if [`BlockValidationKind::Exhaustive`] is specified, the method will verify the state root of
-    /// the block.
+    /// if [`BlockValidationKind::Exhaustive`] is specified, the method will verify the state root
+    /// of the block.
     pub fn new_canonical_fork<DB, E>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,

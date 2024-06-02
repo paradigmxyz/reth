@@ -77,8 +77,8 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
     /// Returns a new EVM with the given inspector.
     ///
-    /// Caution: This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is
-    /// up to the caller to call an appropriate method to fill the transaction and block
+    /// Caution: This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It
+    /// is up to the caller to call an appropriate method to fill the transaction and block
     /// environment before executing any transactions using the provided EVM.
     fn evm_with_inspector<'a, DB, I>(&'a self, db: DB, inspector: I) -> Evm<'a, I, DB>
     where

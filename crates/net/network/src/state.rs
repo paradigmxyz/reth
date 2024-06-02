@@ -63,8 +63,9 @@ pub struct NetworkState<C> {
     discovery: Discovery,
     /// The type that handles requests.
     ///
-    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type will
-    /// then queue in the request and notify the fetcher once the result has been received.
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
+    /// will then queue in the request and notify the fetcher once the result has been
+    /// received.
     state_fetcher: StateFetcher,
 }
 

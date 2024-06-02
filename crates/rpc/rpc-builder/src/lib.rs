@@ -5,8 +5,8 @@
 //!
 //! The [`RpcModuleBuilder`] is the main entrypoint for configuring all reth modules. It takes
 //! instances of components required to start the servers, such as provider impls, network and
-//! transaction pool. [`RpcModuleBuilder::build`] returns a [`TransportRpcModules`] which contains the
-//! transport specific config (what APIs are available via this transport).
+//! transaction pool. [`RpcModuleBuilder::build`] returns a [`TransportRpcModules`] which contains
+//! the transport specific config (what APIs are available via this transport).
 //!
 //! The [`RpcServerConfig`] is used to configure the [`RpcServer`] type which contains all transport
 //! implementations (http server, ws server, ipc server). [`RpcServer::start`] requires the
@@ -331,8 +331,8 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     /// Configure a [`NoopTransactionPool`] instance.
     ///
     /// Caution: This will configure a pool API that does absolutely nothing.
-    /// This is only intended for allow easier setup of namespaces that depend on the [`EthApi`] which
-    /// requires a [`TransactionPool`] implementation.
+    /// This is only intended for allow easier setup of namespaces that depend on the [`EthApi`]
+    /// which requires a [`TransactionPool`] implementation.
     pub fn with_noop_pool(
         self,
     ) -> RpcModuleBuilder<Provider, NoopTransactionPool, Network, Tasks, Events, EvmConfig> {
@@ -362,8 +362,8 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     /// Configure a [`NoopNetwork`] instance.
     ///
     /// Caution: This will configure a network API that does absolutely nothing.
-    /// This is only intended for allow easier setup of namespaces that depend on the [`EthApi`] which
-    /// requires a [`NetworkInfo`] implementation.
+    /// This is only intended for allow easier setup of namespaces that depend on the [`EthApi`]
+    /// which requires a [`NetworkInfo`] implementation.
     pub fn with_noop_network(
         self,
     ) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, Events, EvmConfig> {
@@ -451,11 +451,12 @@ where
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm + 'static,
 {
-    /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can be
-    /// used to start the transport server(s).
+    /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
+    /// be used to start the transport server(s).
     ///
-    /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but also
-    /// configures the auth (engine api) server, which exposes a subset of the `eth_` namespace.
+    /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but
+    /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
+    /// namespace.
     pub fn build_with_auth_server<EngineApi, EngineT>(
         self,
         module_config: TransportRpcModuleConfig,
@@ -483,7 +484,8 @@ where
         (modules, auth_module, registry)
     }
 
-    /// Converts the builder into a [`RethModuleRegistry`] which can be used to create all components.
+    /// Converts the builder into a [`RethModuleRegistry`] which can be used to create all
+    /// components.
     ///
     /// This is useful for getting access to API handlers directly:
     ///
@@ -518,8 +520,8 @@ where
         RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config)
     }
 
-    /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can be
-    /// used to start the transport server(s).
+    /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
+    /// be used to start the transport server(s).
     ///
     /// See also [`RpcServer::start`]
     pub fn build(self, module_config: TransportRpcModuleConfig) -> TransportRpcModules<()> {
@@ -1538,8 +1540,8 @@ impl RpcServerConfig {
 
     /// Configures the http server
     ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for convenience.
-    /// To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
     pub fn with_http(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
         self.http_server_config =
             Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
@@ -1565,8 +1567,8 @@ impl RpcServerConfig {
 
     /// Configures the ws server
     ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for convenience.
-    /// To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
     pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
         self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
@@ -1590,8 +1592,8 @@ impl RpcServerConfig {
 
     /// Configures the ipc server
     ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for convenience.
-    /// To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
     pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
@@ -1805,7 +1807,8 @@ impl RpcServerConfig {
     ///
     /// This consumes the builder and returns a server.
     ///
-    /// Note: The server is not started and does nothing unless polled, See also [`RpcServer::start`]
+    /// Note: The server is not started and does nothing unless polled, See also
+    /// [`RpcServer::start`]
     pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
         let mut server = RpcServer::empty();
         server.ws_http = self.build_ws_http(modules).await?;
@@ -2192,7 +2195,8 @@ impl fmt::Debug for RpcServer {
 
 /// A handle to the spawned servers.
 ///
-/// When this type is dropped or [`RpcServerHandle::stop`] has been called the server will be stopped.
+/// When this type is dropped or [`RpcServerHandle::stop`] has been called the server will be
+/// stopped.
 #[derive(Clone, Debug)]
 #[must_use = "Server stops if dropped"]
 pub struct RpcServerHandle {

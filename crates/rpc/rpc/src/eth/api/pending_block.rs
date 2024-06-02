@@ -293,8 +293,8 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [`CfgEnvWithHandlerCfg`]
-/// and [`BlockEnv`] to execute the pre block contract call.
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
+/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] to execute the pre block contract call.
 ///
 /// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
@@ -332,8 +332,8 @@ where
 
 /// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block state transitions.
 ///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [`CfgEnvWithHandlerCfg`]
-/// and [`BlockEnv`].
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
+/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`].
 ///
 /// This uses [`apply_blockhashes_update`].
 fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
@@ -398,7 +398,8 @@ impl PendingBlockEnvOrigin {
     /// Returns the hash of the block the pending block should be built on.
     ///
     /// For the [`PendingBlockEnvOrigin::ActualPending`] this is the parent hash of the block.
-    /// For the [`PendingBlockEnvOrigin::DerivedFromLatest`] this is the hash of the _latest_ header.
+    /// For the [`PendingBlockEnvOrigin::DerivedFromLatest`] this is the hash of the _latest_
+    /// header.
     fn build_target_hash(&self) -> B256 {
         match self {
             Self::ActualPending(block) => block.parent_hash,

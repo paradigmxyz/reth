@@ -150,8 +150,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             OFFSET_SIZE_BYTES as usize) as u64; // expected size of the data file
         let actual_offsets_file_size = self.offsets_file.get_ref().metadata()?.len();
 
-        if check_mode.should_err()
-            && expected_offsets_file_size.cmp(&actual_offsets_file_size) != Ordering::Equal
+        if check_mode.should_err() &&
+            expected_offsets_file_size.cmp(&actual_offsets_file_size) != Ordering::Equal
         {
             return Err(NippyJarError::InconsistentState);
         }
@@ -170,8 +170,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                 self.jar.rows = ((actual_offsets_file_size.
                     saturating_sub(1). // first byte is the size of one offset
                     saturating_sub(OFFSET_SIZE_BYTES as u64) / // expected size of the data file
-                    (self.jar.columns as u64))
-                    / OFFSET_SIZE_BYTES as u64) as usize;
+                    (self.jar.columns as u64)) /
+                    OFFSET_SIZE_BYTES as u64) as usize;
 
                 // Freeze row count changed
                 self.jar.freeze_config()?;

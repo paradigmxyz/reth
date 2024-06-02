@@ -156,8 +156,8 @@ where
 
     /// Sends a message to the service to start building a new payload for the given payload.
     ///
-    /// This is the same as [`PayloadBuilderHandle::new_payload`] but does not wait for the result and
-    /// returns the receiver instead
+    /// This is the same as [`PayloadBuilderHandle::new_payload`] but does not wait for the result
+    /// and returns the receiver instead
     pub fn send_new_payload(
         &self,
         attr: Engine::PayloadBuilderAttributes,
@@ -244,7 +244,8 @@ where
     /// with it.
     ///
     /// This also takes a stream of chain events that will be forwarded to the generator to apply
-    /// additional logic when new state is committed. See also [`PayloadJobGenerator::on_new_state`].
+    /// additional logic when new state is committed. See also
+    /// [`PayloadJobGenerator::on_new_state`].
     pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let (payload_events, _) = broadcast::channel(PAYLOAD_EVENTS_BUFFER_SIZE);

@@ -72,8 +72,8 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// All components are configured with a [`NodeComponentsBuilder`] that is responsible for actually
 /// creating the node components during the launch process. The
-/// [`ComponentsBuilder`](crate::components::ComponentsBuilder) is a general purpose implementation of
-/// the [`NodeComponentsBuilder`] trait that can be used to configure the executor, network,
+/// [`ComponentsBuilder`](crate::components::ComponentsBuilder) is a general purpose implementation
+/// of the [`NodeComponentsBuilder`] trait that can be used to configure the executor, network,
 /// transaction pool and payload builder of the node. It enforces the correct order of
 /// configuration, for example the network and the payload builder depend on the transaction pool
 /// type that is configured first.
@@ -105,8 +105,8 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// invoked to allow for custom rpc modules to be injected into the rpc server:
 /// [`NodeBuilder::extend_rpc_modules`]
 ///
-/// Finally all components are created and all services are launched and a [`NodeHandle`] is returned
-/// that can be used to interact with the node: [`FullNode`]
+/// Finally all components are created and all services are launched and a [`NodeHandle`] is
+/// returned that can be used to interact with the node: [`FullNode`]
 ///
 /// The following diagram shows the flow of the node builder from CLI to a launched node.
 ///
@@ -117,13 +117,14 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// The node builder is fully type safe, it uses the [`NodeTypes`] trait to enforce that all
 /// components are configured with the correct types. However the database types and with that the
 /// provider trait implementations are currently created by the builder itself during the launch
-/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's components,
-/// that depend on the database, are configured separately. In order to have a nice trait that
-/// encapsulates the entire node the [`FullNodeComponents`] trait was introduced. This trait has
-/// convenient associated types for all the components of the node. After [`NodeBuilder::launch`] the
-/// [`NodeHandle`] contains an instance of [`FullNode`] that implements the [`FullNodeComponents`] trait
-/// and has access to all the components of the node. Internally the node builder uses several
-/// generic adapter types that are then map to traits with associated types for ease of use.
+/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
+/// components, that depend on the database, are configured separately. In order to have a nice
+/// trait that encapsulates the entire node the [`FullNodeComponents`] trait was introduced. This
+/// trait has convenient associated types for all the components of the node. After
+/// [`NodeBuilder::launch`] the [`NodeHandle`] contains an instance of [`FullNode`] that implements
+/// the [`FullNodeComponents`] trait and has access to all the components of the node. Internally
+/// the node builder uses several generic adapter types that are then map to traits with associated
+/// types for ease of use.
 ///
 /// ### Limitations
 ///
@@ -520,8 +521,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Convenience function to start the network.
     ///
-    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`] connected
-    /// to that network.
+    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
+    /// connected to that network.
     pub fn start_network<Pool>(
         &self,
         builder: NetworkBuilder<Node::Provider, (), ()>,

@@ -54,7 +54,8 @@ impl FeeHistoryCache {
         self.config().resolution
     }
 
-    /// Returns all blocks that are missing in the cache in the [`lower_bound`, `upper_bound`] range.
+    /// Returns all blocks that are missing in the cache in the [`lower_bound`, `upper_bound`]
+    /// range.
     ///
     /// This function is used to populate the cache with missing blocks, which can happen if the
     /// node switched to stage sync node.

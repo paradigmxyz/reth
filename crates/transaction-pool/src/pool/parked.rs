@@ -19,8 +19,8 @@ use std::{
 /// This pool is a bijection: at all times each set (`best`, `by_id`) contains the same
 /// transactions.
 ///
-/// Note: This type is generic over [`ParkedPool`] which enforces that the underlying transaction type
-/// is [`ValidPoolTransaction`] wrapped in an [Arc].
+/// Note: This type is generic over [`ParkedPool`] which enforces that the underlying transaction
+/// type is [`ValidPoolTransaction`] wrapped in an [Arc].
 #[derive(Debug, Clone)]
 pub struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.

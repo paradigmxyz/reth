@@ -249,8 +249,8 @@ impl StateFetcher {
 
     /// Called on a `GetBlockHeaders` response from a peer.
     ///
-    /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a direct
-    /// followup request or get the peer reported if the response was a
+    /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a
+    /// direct followup request or get the peer reported if the response was a
     /// [`EthResponseValidator::reputation_change_err`]
     pub(crate) fn on_block_headers_response(
         &mut self,

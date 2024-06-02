@@ -64,8 +64,8 @@ impl TaskDownloader {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
 
-    /// Spawns the given `downloader` via the given [`TaskSpawner`] returns a [`TaskDownloader`] that's
-    /// connected to that task.
+    /// Spawns the given `downloader` via the given [`TaskSpawner`] returns a [`TaskDownloader`]
+    /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
         T: BodyDownloader + 'static,

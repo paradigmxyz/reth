@@ -49,8 +49,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
 
     /// Installs a new protocol on top of the raw p2p stream.
     ///
-    /// This accepts a closure that receives a [`ProtocolConnection`] that will yield messages for the
-    /// given capability.
+    /// This accepts a closure that receives a [`ProtocolConnection`] that will yield messages for
+    /// the given capability.
     pub fn install_protocol<F, Proto>(
         &mut self,
         cap: &Capability,
@@ -401,8 +401,8 @@ pub struct RlpxSatelliteStream<St, Primary> {
 impl<St, Primary> RlpxSatelliteStream<St, Primary> {
     /// Installs a new protocol on top of the raw p2p stream.
     ///
-    /// This accepts a closure that receives a [`ProtocolConnection`] that will yield messages for the
-    /// given capability.
+    /// This accepts a closure that receives a [`ProtocolConnection`] that will yield messages for
+    /// the given capability.
     pub fn install_protocol<F, Proto>(
         &mut self,
         cap: &Capability,

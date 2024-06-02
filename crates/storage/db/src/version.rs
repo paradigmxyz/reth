@@ -69,7 +69,8 @@ pub fn get_db_version<P: AsRef<Path>>(db_path: P) -> Result<u64, DatabaseVersion
     }
 }
 
-/// Creates a database version file with [`DB_VERSION_FILE_NAME`] name containing [`DB_VERSION`] string.
+/// Creates a database version file with [`DB_VERSION_FILE_NAME`] name containing [`DB_VERSION`]
+/// string.
 ///
 /// This function will create a file if it does not exist,
 /// and will entirely replace its contents if it does.

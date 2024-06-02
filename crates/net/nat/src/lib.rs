@@ -153,8 +153,8 @@ impl ResolveNatInterval {
     /// This method can return the following values:
     ///
     ///  * `Poll::Pending` if the next [`IpAddr`] has not yet been resolved.
-    ///  * `Poll::Ready(Option<IpAddr>)` if the next [`IpAddr`] has been resolved. This returns `None`
-    ///    if the attempt was unsuccessful.
+    ///  * `Poll::Ready(Option<IpAddr>)` if the next [`IpAddr`] has been resolved. This returns
+    ///    `None` if the attempt was unsuccessful.
     pub fn poll_tick(&mut self, cx: &mut Context<'_>) -> Poll<Option<IpAddr>> {
         if self.interval.poll_tick(cx).is_ready() {
             self.future = Some(Box::pin(self.resolver.external_addr()));

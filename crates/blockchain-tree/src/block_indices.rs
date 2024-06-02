@@ -24,8 +24,8 @@ pub struct BlockIndices {
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
     ///
     /// This maintains insertion order for all child blocks, so
-    /// [`BlockIndices::pending_block_num_hash`] returns always the same block: the first child block
-    /// we inserted.
+    /// [`BlockIndices::pending_block_num_hash`] returns always the same block: the first child
+    /// block we inserted.
     ///
     /// NOTE: It contains just blocks that are forks as a key and not all blocks.
     fork_to_child: HashMap<BlockHash, LinkedHashSet<BlockHash>>,

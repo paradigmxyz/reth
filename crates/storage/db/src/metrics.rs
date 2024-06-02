@@ -336,8 +336,8 @@ impl TransactionOutcomeMetrics {
 pub(crate) struct OperationMetrics {
     /// Total number of database operations made
     calls_total: Counter,
-    /// The time it took to execute a database operation (`put/upsert/insert/append/append_dup`) with
-    /// value larger than [`LARGE_VALUE_THRESHOLD_BYTES`] bytes.
+    /// The time it took to execute a database operation (`put/upsert/insert/append/append_dup`)
+    /// with value larger than [`LARGE_VALUE_THRESHOLD_BYTES`] bytes.
     large_value_duration_seconds: Histogram,
 }
 
