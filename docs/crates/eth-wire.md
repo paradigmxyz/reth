@@ -368,5 +368,3 @@ impl<S> UnauthedP2PStream<S> {
 
 ```
 Similarly, UnauthedEthStream does the `Status` handshake and returns an `EthStream`. The code is [here](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/ethstream.rs)
-
-
