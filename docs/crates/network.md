@@ -145,7 +145,7 @@ pub struct NetworkConfig<C> {
     pub executor: Option<TaskExecutor>,
     /// The `Status` message to send to peers at the beginning.
     pub status: Status,
-    /// Sets the hello message for the p2p handshake in `RLPx`
+    /// Sets the hello message for the p2p handshake in ``RLPx``
     pub hello_message: HelloMessage,
 }
 ```
@@ -312,7 +312,7 @@ pub struct NetworkState<C> {
     genesis_hash: B256,
     /// The type that handles requests.
     ///
-    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type will
+    /// The fetcher streams ``RLPx`` related requests on a per-peer basis to this type. This type will
     /// then queue in the request and notify the fetcher once the result has been received.
     state_fetcher: StateFetcher,
 }
