@@ -12,6 +12,7 @@ use parking_lot::RwLock;
 use reth_db::{
     codecs::CompactU256,
     cursor::DbCursorRO,
+    lockfile::StorageLock,
     models::StoredBlockBodyIndices,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
     table::Table,
@@ -57,6 +58,11 @@ impl StaticFileAccess {
     /// Returns `true` if read-only access.
     pub const fn is_read_only(&self) -> bool {
         matches!(self, Self::RO)
+    }
+
+    /// Returns `true` if read-write access.
+    pub const fn is_read_write(&self) -> bool {
+        matches!(self, Self::RW)
     }
 }
 
@@ -111,11 +117,19 @@ pub struct StaticFileProviderInner {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
+    /// Write lock for when access is [StaticFileAccess::RW].
+    _lock_file: Option<StorageLock>,
 }
 
 impl StaticFileProviderInner {
     /// Creates a new [`StaticFileProviderInner`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
+        let _lock_file = if access.is_read_write() {
+            Some(StorageLock::try_acquire(path.as_ref())?)
+        } else {
+            None
+        };
+
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
@@ -125,6 +139,7 @@ impl StaticFileProviderInner {
             load_filters: false,
             metrics: None,
             access,
+            _lock_file,
         };
 
         Ok(provider)
