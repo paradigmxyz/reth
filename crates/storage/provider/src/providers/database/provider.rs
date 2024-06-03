@@ -374,10 +374,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///
     /// If UNWIND is false we will just read the state/blocks and return them.
     ///
-    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all the
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
     ///    transaction ids.
-    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table and the
-    ///    [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to    reconstruct
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
     ///    the changesets.
     ///    - In order to have both the old and new values in the changesets, we also access the
     ///      plain state tables.

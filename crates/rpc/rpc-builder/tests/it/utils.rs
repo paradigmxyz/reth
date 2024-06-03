@@ -103,7 +103,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
         .unwrap()
 }
 
-/// Returns an [RpcModuleBuilder] with testing components.
+/// Returns an [`RpcModuleBuilder`] with testing components.
 pub fn test_rpc_builder() -> RpcModuleBuilder<
     NoopProvider,
     TestPool,

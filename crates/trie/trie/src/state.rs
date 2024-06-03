@@ -32,7 +32,7 @@ pub struct HashedPostState {
 }
 
 impl HashedPostState {
-    /// Initialize [HashedPostState] from bundle state.
+    /// Initialize [`HashedPostState`] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
     pub fn from_bundle_state<'a>(
@@ -54,11 +54,11 @@ impl HashedPostState {
         this
     }
 
-    /// Initialize [HashedPostState] from revert range.
+    /// Initialize [`HashedPostState`] from revert range.
     /// Iterate over state reverts in the specified block range and
     /// apply them to hashed state in reverse.
     ///
-    /// NOTE: In order to have the resulting [HashedPostState] be a correct
+    /// NOTE: In order to have the resulting [`HashedPostState`] be a correct
     /// overlay of the plain state, the end of the range must be the current tip.
     pub fn from_revert_range<TX: DbTx>(
         tx: &TX,
@@ -142,7 +142,7 @@ impl HashedPostState {
         }
     }
 
-    /// Converts hashed post state into [HashedPostStateSorted].
+    /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut accounts = Vec::new();
         let mut destroyed_accounts = HashSet::default();
@@ -164,7 +164,7 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, destroyed_accounts, storages }
     }
 
-    /// Construct [TriePrefixSets] from hashed post state.
+    /// Construct [`TriePrefixSets`] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
     pub fn construct_prefix_sets(&self) -> TriePrefixSets {
@@ -198,7 +198,7 @@ impl HashedPostState {
         }
     }
 
-    /// Calculate the state root for this [HashedPostState].
+    /// Calculate the state root for this [`HashedPostState`].
     /// Internally, this method retrieves prefixsets and uses them
     /// to calculate incremental state root.
     ///
@@ -226,7 +226,7 @@ impl HashedPostState {
     ///
     /// # Returns
     ///
-    /// The state root for this [HashedPostState].
+    /// The state root for this [`HashedPostState`].
     pub fn state_root<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let sorted = self.clone().into_sorted();
         let prefix_sets = self.construct_prefix_sets();
@@ -236,8 +236,8 @@ impl HashedPostState {
             .root()
     }
 
-    /// Calculates the state root for this [HashedPostState] and returns it alongside trie updates.
-    /// See [Self::state_root] for more info.
+    /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie
+    /// updates. See [`Self::state_root`] for more info.
     pub fn state_root_with_updates<TX: DbTx>(
         &self,
         tx: &TX,
@@ -261,7 +261,7 @@ pub struct HashedStorage {
 }
 
 impl HashedStorage {
-    /// Create new instance of [HashedStorage].
+    /// Create new instance of [`HashedStorage`].
     pub fn new(wiped: bool) -> Self {
         Self { wiped, storage: HashMap::default() }
     }
@@ -283,7 +283,7 @@ impl HashedStorage {
         }
     }
 
-    /// Converts hashed storage into [HashedStorageSorted].
+    /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut non_zero_valued_slots = Vec::new();
         let mut zero_valued_slots = HashSet::default();

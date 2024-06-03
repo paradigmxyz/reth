@@ -12,7 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// Stage execution input, see [Stage::execute].
+/// Stage execution input, see [`Stage::execute`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
     /// The target block number the stage needs to execute towards.
@@ -121,7 +121,7 @@ impl ExecInput {
     }
 }
 
-/// Stage unwind input, see [Stage::unwind].
+/// Stage unwind input, see [`Stage::unwind`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
     /// The current highest checkpoint of the stage.
@@ -249,7 +249,7 @@ pub trait Stage<DB: Database>: Send + Sync {
 /// [Stage] trait extension.
 pub trait StageExt<DB: Database>: Stage<DB> {
     /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
-    /// with [poll_fn] context. For more information see [Stage::poll_execute_ready].
+    /// with [`poll_fn`] context. For more information see [`Stage::poll_execute_ready`].
     fn execute_ready(
         &mut self,
         input: ExecInput,

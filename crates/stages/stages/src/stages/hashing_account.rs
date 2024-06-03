@@ -43,7 +43,7 @@ pub struct AccountHashingStage {
 }
 
 impl AccountHashingStage {
-    /// Create new instance of [AccountHashingStage].
+    /// Create new instance of [`AccountHashingStage`].
     pub const fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
         Self {
             clean_threshold: config.clean_threshold,
@@ -365,8 +365,8 @@ mod tests {
                 self.commit_threshold = threshold;
             }
 
-            /// Iterates over PlainAccount table and checks that the accounts match the ones
-            /// in the HashedAccounts table
+            /// Iterates over `PlainAccount` table and checks that the accounts match the ones
+            /// in the `HashedAccounts` table
             pub(crate) fn check_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
@@ -384,7 +384,7 @@ mod tests {
                 Ok(())
             }
 
-            /// Same as check_hashed_accounts, only that checks with the old account state,
+            /// Same as `check_hashed_accounts`, only that checks with the old account state,
             /// namely, the same account with nonce - 1 and balance - 1.
             pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {

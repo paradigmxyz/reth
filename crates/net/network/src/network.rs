@@ -120,7 +120,7 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop because new blocks are no longer announced over devp2p.
+    /// Caution: in `PoS` this is a noop because new blocks are no longer announced over devp2p.
     /// Instead they are sent to the node by CL and can be requested over devp2p.
     /// Broadcasting new blocks is considered a protocol violation.
     pub fn announce_block(&self, block: NewBlock, hash: B256) {
@@ -421,7 +421,7 @@ pub trait NetworkEvents: Send + Sync {
 
 /// Provides access to modify the network's additional protocol handlers.
 pub trait NetworkProtocols: Send + Sync {
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
 }
 

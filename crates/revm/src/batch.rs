@@ -93,7 +93,7 @@ impl BlockBatchRecord {
         std::mem::take(&mut self.requests)
     }
 
-    /// Returns the [BundleRetention] for the given block based on the configured prune modes.
+    /// Returns the [`BundleRetention`] for the given block based on the configured prune modes.
     pub fn bundle_retention(&self, block_number: BlockNumber) -> BundleRetention {
         if self.tip.map_or(true, |tip| {
             !self

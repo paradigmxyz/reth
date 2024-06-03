@@ -18,19 +18,19 @@ use std::{
 };
 use tracing::{debug, trace};
 
-/// Result of [StaticFileProducerInner::run] execution.
+/// Result of [`StaticFileProducerInner::run`] execution.
 pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
-/// The [StaticFileProducer] instance itself with the result of [StaticFileProducerInner::run]
+/// The [`StaticFileProducer`] instance itself with the result of [`StaticFileProducerInner::run`]
 pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
 
-/// Static File producer. It's a wrapper around [StaticFileProducer] that allows to share it
+/// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
 /// between threads.
 #[derive(Debug, Clone)]
 pub struct StaticFileProducer<DB>(Arc<Mutex<StaticFileProducerInner<DB>>>);
 
 impl<DB: Database> StaticFileProducer<DB> {
-    /// Creates a new [StaticFileProducer].
+    /// Creates a new [`StaticFileProducer`].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
         static_file_provider: StaticFileProvider,
@@ -52,7 +52,8 @@ impl<DB> Deref for StaticFileProducer<DB> {
     }
 }
 
-/// Static File producer routine. See [StaticFileProducerInner::run] for more detailed description.
+/// Static File producer routine. See [`StaticFileProducerInner::run`] for more detailed
+/// description.
 #[derive(Debug)]
 pub struct StaticFileProducerInner<DB> {
     /// Provider factory
@@ -60,8 +61,8 @@ pub struct StaticFileProducerInner<DB> {
     /// Static File provider
     static_file_provider: StaticFileProvider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
-    /// needed in [StaticFileProducerInner] to prevent attempting to move prunable data to static
-    /// files. See [StaticFileProducerInner::get_static_file_targets].
+    /// needed in [`StaticFileProducerInner`] to prevent attempting to move prunable data to static
+    /// files. See [`StaticFileProducerInner::get_static_file_targets`].
     prune_modes: PruneModes,
     event_sender: EventSender<StaticFileProducerEvent>,
 }
@@ -114,16 +115,16 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         }
     }
 
-    /// Listen for events on the static_file_producer.
+    /// Listen for events on the `static_file_producer`.
     pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
         self.event_sender.new_listener()
     }
 
-    /// Run the static_file_producer.
+    /// Run the `static_file_producer`.
     ///
-    /// For each [Some] target in [StaticFileTargets], initializes a corresponding [Segment] and
-    /// runs it with the provided block range using [StaticFileProvider] and a read-only
-    /// database transaction from [ProviderFactory]. All segments are run in parallel.
+    /// For each [Some] target in [`StaticFileTargets`], initializes a corresponding [Segment] and
+    /// runs it with the provided block range using [`StaticFileProvider`] and a read-only
+    /// database transaction from [`ProviderFactory`]. All segments are run in parallel.
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
@@ -184,8 +185,8 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     }
 
     /// Returns a static file targets at the provided finalized block numbers per segment.
-    /// The target is determined by the check against highest static_files using
-    /// [StaticFileProvider::get_highest_static_files].
+    /// The target is determined by the check against highest `static_files` using
+    /// [`StaticFileProvider::get_highest_static_files`].
     pub fn get_static_file_targets(
         &self,
         finalized_block_numbers: HighestStaticFiles,

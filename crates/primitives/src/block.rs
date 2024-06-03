@@ -85,7 +85,7 @@ impl Block {
         }
     }
 
-    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>> {
         TransactionSigned::recover_signers(&self.body, self.body.len())
     }
@@ -107,7 +107,7 @@ impl Block {
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [TransactionSigned::recover_signer_unchecked]
+    /// See also [`TransactionSigned::recover_signer_unchecked`]
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
@@ -323,7 +323,7 @@ impl SealedBlock {
         (self.header, self.body, self.ommers)
     }
 
-    /// Splits the [BlockBody] and [SealedHeader] into separate components
+    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
     pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
         (
@@ -363,7 +363,7 @@ impl SealedBlock {
         self.blob_versioned_hashes_iter().collect()
     }
 
-    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>> {
         TransactionSigned::recover_signers(&self.body, self.body.len())
     }
@@ -392,7 +392,7 @@ impl SealedBlock {
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [SealedBlock].
+    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
     #[inline]
     pub fn size(&self) -> usize {
         self.header.size() +
@@ -438,7 +438,7 @@ impl SealedBlock {
         Ok(())
     }
 
-    /// Returns a vector of transactions RLP encoded with [TransactionSigned::encode_enveloped].
+    /// Returns a vector of transactions RLP encoded with [`TransactionSigned::encode_enveloped`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
         self.body.iter().map(|tx| tx.envelope_encoded()).collect()
     }
@@ -485,7 +485,7 @@ impl SealedBlockWithSenders {
         (self.block, self.senders)
     }
 
-    /// Returns the unsealed [BlockWithSenders]
+    /// Returns the unsealed [`BlockWithSenders`]
     #[inline]
     pub fn unseal(self) -> BlockWithSenders {
         let Self { block, senders } = self;
@@ -600,7 +600,7 @@ impl BlockBody {
         self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
     }
 
-    /// Calculates a heuristic for the in-memory size of the [BlockBody].
+    /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     pub fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +

@@ -20,7 +20,7 @@ pub struct RpcService {
     cfg: RpcServiceCfg,
 }
 
-/// Configuration of the RpcService.
+/// Configuration of the `RpcService`.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) enum RpcServiceCfg {

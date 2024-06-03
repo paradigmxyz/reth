@@ -32,7 +32,7 @@ pub fn revm_spec_by_timestamp_after_merge(
     }
 }
 
-/// return revm_spec from spec configuration.
+/// return `revm_spec` from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {

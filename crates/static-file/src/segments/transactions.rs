@@ -14,7 +14,7 @@ use reth_provider::{
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::RangeInclusive, path::Path};
 
-/// Static File segment responsible for [StaticFileSegment::Transactions] part of data.
+/// Static File segment responsible for [`StaticFileSegment::Transactions`] part of data.
 #[derive(Debug, Default)]
 pub struct Transactions;
 
@@ -23,8 +23,8 @@ impl<DB: Database> Segment<DB> for Transactions {
         StaticFileSegment::Transactions
     }
 
-    /// Write transactions from database table [tables::Transactions] to static files with segment
-    /// [StaticFileSegment::Transactions] for the provided block range.
+    /// Write transactions from database table [`tables::Transactions`] to static files with segment
+    /// [`StaticFileSegment::Transactions`] for the provided block range.
     fn copy_to_static_files(
         &self,
         provider: DatabaseProviderRO<DB>,

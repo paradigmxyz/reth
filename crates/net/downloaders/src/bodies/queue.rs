@@ -14,7 +14,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// The wrapper around [FuturesUnordered] that keeps information
+/// The wrapper around [`FuturesUnordered`] that keeps information
 /// about the blocks currently being requested.
 #[derive(Debug)]
 pub(crate) struct BodiesRequestQueue<B: BodiesClient> {

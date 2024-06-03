@@ -17,7 +17,7 @@ pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
 const RETH_LOG_FILE_NAME: &str = "reth.log";
 
-/// Default [directives](Directive) for [EnvFilter] which disables high-frequency debug logs from
+/// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
 /// `hyper`, `trust-dns` and `discv5`.
 const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 4] =
     ["hyper::proto::h1=off", "trust_dns_proto=off", "trust_dns_resolver=off", "discv5=off"];

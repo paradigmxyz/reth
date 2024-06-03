@@ -678,7 +678,7 @@ mod tests {
             )
         }
 
-        /// A helper struct for running the [BodyStage].
+        /// A helper struct for running the [`BodyStage`].
         pub(crate) struct BodyTestRunner {
             responses: HashMap<B256, BlockBody>,
             db: TestStageDB,
@@ -892,7 +892,7 @@ mod tests {
             }
         }
 
-        /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
+        /// A [`BodyDownloader`] that is backed by an internal [`HashMap`] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
             provider_factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,

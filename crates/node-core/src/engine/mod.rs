@@ -19,7 +19,7 @@ use skip_new_payload::EngineSkipNewPayload;
 pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     Stream<Item = BeaconEngineMessage<Engine>>
 {
-    /// Skips the specified number of [BeaconEngineMessage::ForkchoiceUpdated] messages from the
+    /// Skips the specified number of [`BeaconEngineMessage::ForkchoiceUpdated`] messages from the
     /// engine message stream.
     fn skip_fcu(self, count: usize) -> EngineSkipFcu<Self>
     where
@@ -29,7 +29,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     }
 
     /// If the count is [Some], returns the stream that skips the specified number of
-    /// [BeaconEngineMessage::ForkchoiceUpdated] messages. Otherwise, returns `Self`.
+    /// [`BeaconEngineMessage::ForkchoiceUpdated`] messages. Otherwise, returns `Self`.
     fn maybe_skip_fcu(self, maybe_count: Option<usize>) -> Either<EngineSkipFcu<Self>, Self>
     where
         Self: Sized,
@@ -41,7 +41,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
         }
     }
 
-    /// Skips the specified number of [BeaconEngineMessage::NewPayload] messages from the
+    /// Skips the specified number of [`BeaconEngineMessage::NewPayload`] messages from the
     /// engine message stream.
     fn skip_new_payload(self, count: usize) -> EngineSkipNewPayload<Self>
     where
@@ -51,7 +51,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     }
 
     /// If the count is [Some], returns the stream that skips the specified number of
-    /// [BeaconEngineMessage::NewPayload] messages. Otherwise, returns `Self`.
+    /// [`BeaconEngineMessage::NewPayload`] messages. Otherwise, returns `Self`.
     fn maybe_skip_new_payload(
         self,
         maybe_count: Option<usize>,

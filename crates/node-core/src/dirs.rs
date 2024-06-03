@@ -16,35 +16,35 @@ pub fn config_path_prefix(chain: Chain) -> String {
 
 /// Returns the path to the reth data directory.
 ///
-/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::data_dir`] for cross-platform behavior.
 pub fn data_dir() -> Option<PathBuf> {
     dirs_next::data_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth database.
 ///
-/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::data_dir`] for cross-platform behavior.
 pub fn database_path() -> Option<PathBuf> {
     data_dir().map(|root| root.join("db"))
 }
 
 /// Returns the path to the reth configuration directory.
 ///
-/// Refer to [dirs_next::config_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::config_dir`] for cross-platform behavior.
 pub fn config_dir() -> Option<PathBuf> {
     dirs_next::config_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth cache directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 pub fn cache_dir() -> Option<PathBuf> {
     dirs_next::cache_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth logs directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 pub fn logs_dir() -> Option<PathBuf> {
     cache_dir().map(|root| root.join("logs"))
 }
@@ -65,7 +65,7 @@ impl XdgPath for DataDirPath {
 
 /// Returns the path to the reth logs directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 #[derive(Clone, Copy, Debug, Default)]
 #[non_exhaustive]
 pub struct LogsDir;
@@ -86,7 +86,7 @@ pub trait XdgPath {
 /// A wrapper type that either parses a user-given path or defaults to an
 /// OS-specific path.
 ///
-/// The [FromStr] implementation supports shell expansions and common patterns such as `~` for the
+/// The [`FromStr`] implementation supports shell expansions and common patterns such as `~` for the
 /// home directory.
 ///
 /// # Example
@@ -171,7 +171,7 @@ impl<D> PlatformPath<D> {
     }
 }
 
-/// An Optional wrapper type around [PlatformPath].
+/// An Optional wrapper type around [`PlatformPath`].
 ///
 /// This is useful for when a path is optional, such as the `--data-dir` flag.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -250,7 +250,7 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
     }
 }
 
-/// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
+/// Wrapper type around `PlatformPath` that includes a `Chain`, used for separating reth data for
 /// different networks.
 ///
 /// If the chain is either mainnet, goerli, or sepolia, then the path will be:
@@ -283,7 +283,7 @@ impl<D> ChainPath<D> {
         self.data_dir().join("db")
     }
 
-    /// Returns the path to the static_files directory for this chain.
+    /// Returns the path to the `static_files` directory for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/static_files`
     pub fn static_files(&self) -> PathBuf {

@@ -7,17 +7,16 @@ $ reth db --help
 Usage: reth db [OPTIONS] <COMMAND>
 
 Commands:
-  stats                Lists all the tables, their entry count and their size
-  list                 Lists the contents of a table
-  checksum             Calculates the content checksum of a table
-  diff                 Create a diff between two database tables or two entire databases
-  get                  Gets the content of a table for the given key
-  drop                 Deletes all database entries
-  clear                Deletes all table entries
-  create-static-files  Creates static files from database tables
-  version              Lists current and local database versions
-  path                 Returns the full database path
-  help                 Print this message or the help of the given subcommand(s)
+  stats     Lists all the tables, their entry count and their size
+  list      Lists the contents of a table
+  checksum  Calculates the content checksum of a table
+  diff      Create a diff between two database tables or two entire databases
+  get       Gets the content of a table for the given key
+  drop      Deletes all database entries
+  clear     Deletes all table entries
+  version   Lists current and local database versions
+  path      Returns the full database path
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --datadir <DATA_DIR>
@@ -47,7 +46,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
 
           [default: 1]
 

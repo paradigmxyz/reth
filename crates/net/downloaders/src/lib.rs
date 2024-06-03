@@ -23,13 +23,13 @@ pub mod metrics;
 
 /// Module managing file-based data retrieval and buffering.
 ///
-/// Contains [FileClient](file_client::FileClient) to read block data from files,
+/// Contains [`FileClient`](file_client::FileClient) to read block data from files,
 /// efficiently buffering headers and bodies for retrieval.
 pub mod file_client;
 
 /// Module managing file-based data retrieval and buffering of receipts.
 ///
-/// Contains [ReceiptFileClient](receipt_file_client::ReceiptFileClient) to read receipt data from
+/// Contains [`ReceiptFileClient`](receipt_file_client::ReceiptFileClient) to read receipt data from
 /// files, efficiently buffering receipts for retrieval.
 ///
 /// Currently configured to use codec [`HackReceipt`](file_codec_ovm_receipt::HackReceipt) based on

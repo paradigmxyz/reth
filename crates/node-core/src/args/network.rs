@@ -34,6 +34,7 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
+    #[allow(clippy::doc_markdown)]
     /// Comma separated enode URLs of trusted peers for P2P connections.
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
@@ -99,8 +100,8 @@ pub struct NetworkArgs {
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions to
     /// request in one request.
     ///
-    /// Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
-    /// transaction announcement (see RLPx specs). This allows a node to request a specific size
+    /// Since `RLPx` protocol version 68, the byte size of a transaction is shared as metadata in a
+    /// transaction announcement (see `RLPx` specs). This allows a node to request a specific size
     /// response.
     ///
     /// By default, nodes request only 128 KiB worth of transactions, but should a peer request
@@ -266,12 +267,12 @@ pub struct DiscoveryArgs {
     #[arg(id = "discovery.port", long = "discovery.port", value_name = "DISCOVERY_PORT", default_value_t = DEFAULT_DISCOVERY_PORT)]
     pub port: u16,
 
-    /// The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx
+    /// The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by `RLPx`
     /// address, if it's also IPv4.
     #[arg(id = "discovery.v5.addr", long = "discovery.v5.addr", value_name = "DISCOVERY_V5_ADDR", default_value = None)]
     pub discv5_addr: Option<Ipv4Addr>,
 
-    /// The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx
+    /// The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx`
     /// address, if it's also IPv6.
     #[arg(id = "discovery.v5.addr.ipv6", long = "discovery.v5.addr.ipv6", value_name = "DISCOVERY_V5_ADDR_IPV6", default_value = None)]
     pub discv5_addr_ipv6: Option<Ipv6Addr>,
@@ -306,7 +307,7 @@ pub struct DiscoveryArgs {
 }
 
 impl DiscoveryArgs {
-    /// Apply the discovery settings to the given [NetworkConfigBuilder]
+    /// Apply the discovery settings to the given [`NetworkConfigBuilder`]
     pub fn apply_to_builder(
         &self,
         mut network_config_builder: NetworkConfigBuilder,

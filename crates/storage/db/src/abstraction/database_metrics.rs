@@ -49,7 +49,7 @@ pub struct DatabaseMetadataValue {
 }
 
 impl DatabaseMetadataValue {
-    /// Creates a new [DatabaseMetadataValue] with the given freelist size.
+    /// Creates a new [`DatabaseMetadataValue`] with the given freelist size.
     pub const fn new(freelist_size: Option<usize>) -> Self {
         Self { freelist_size }
     }
@@ -60,10 +60,10 @@ impl DatabaseMetadataValue {
     }
 }
 
-/// Includes a method to return a [DatabaseMetadataValue] type, which can be used to dynamically
+/// Includes a method to return a [`DatabaseMetadataValue`] type, which can be used to dynamically
 /// retrieve information about the database.
 pub trait DatabaseMetadata {
-    /// Returns a metadata type, [DatabaseMetadataValue] for the database.
+    /// Returns a metadata type, [`DatabaseMetadataValue`] for the database.
     fn metadata(&self) -> DatabaseMetadataValue;
 }
 
