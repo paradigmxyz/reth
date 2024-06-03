@@ -948,7 +948,7 @@ impl Discv4Service {
     ///
     /// See [`Self::add_node`]
     pub fn add_all_nodes(&mut self, records: impl IntoIterator<Item = NodeRecord>) {
-        for record in records.into_iter() {
+        for record in records {
             self.add_node(record);
         }
     }

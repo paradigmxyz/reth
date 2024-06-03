@@ -67,7 +67,7 @@ fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
 
     let mut bundle_builder = BundleBuilder::default();
 
-    for (address, storage) in state.into_iter() {
+    for (address, storage) in state {
         bundle_builder = bundle_builder.state_storage(address, storage);
     }
 

@@ -851,7 +851,7 @@ impl PendingTransactionHashListener {
     ///
     /// Returns false if the channel is closed (receiver dropped)
     fn send_all(&self, hashes: impl IntoIterator<Item = TxHash>) -> bool {
-        for tx_hash in hashes.into_iter() {
+        for tx_hash in hashes {
             match self.sender.try_send(tx_hash) {
                 Ok(()) => {}
                 Err(err) => {
@@ -892,7 +892,7 @@ impl<T: PoolTransaction> TransactionListener<T> {
     ///
     /// Returns false if the channel is closed (receiver dropped)
     fn send_all(&self, events: impl IntoIterator<Item = NewTransactionEvent<T>>) -> bool {
-        for event in events.into_iter() {
+        for event in events {
             match self.sender.try_send(event) {
                 Ok(()) => {}
                 Err(err) => {
