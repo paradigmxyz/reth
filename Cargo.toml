@@ -163,6 +163,8 @@ string_lit_as_bytes = "warn"
 explicit_into_iter_loop = "warn"
 explicit_iter_loop = "warn"
 type_repetition_in_bounds = "warn"
+flat_map_option = "warn"
+manual_assert = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
