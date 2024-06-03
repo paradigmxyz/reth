@@ -631,8 +631,8 @@ mod tests {
                             .or_default()
                             .insert(keccak256(entry.key), entry.value);
                     }
-                    for (hashed_address, storage) in tree.into_iter() {
-                        for (hashed_slot, value) in storage.into_iter() {
+                    for (hashed_address, storage) in tree {
+                        for (hashed_slot, value) in storage {
                             let storage_entry = storage_cursor
                                 .seek_by_key_subkey(hashed_address, hashed_slot)
                                 .unwrap();

@@ -165,7 +165,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    for (address, account) in chunk.into_iter() {
+                    for (address, account) in chunk {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));
                     }

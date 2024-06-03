@@ -91,7 +91,7 @@ impl Discv4Config {
         &mut self,
         pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
     ) -> &mut Self {
-        for (k, v) in pairs.into_iter() {
+        for (k, v) in pairs {
             self.add_eip868_rlp_pair(k, v);
         }
         self
@@ -252,7 +252,7 @@ impl Discv4ConfigBuilder {
         &mut self,
         pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
     ) -> &mut Self {
-        for (k, v) in pairs.into_iter() {
+        for (k, v) in pairs {
             self.add_eip868_rlp_pair(k, v);
         }
         self

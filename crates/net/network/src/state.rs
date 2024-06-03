@@ -175,7 +175,7 @@ where
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
         peers.shuffle(&mut rand::thread_rng());
 
-        for (peer_id, peer) in peers.into_iter() {
+        for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
