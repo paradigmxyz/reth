@@ -1,4 +1,5 @@
-//! A task that maintains the blockchain tree.
+//! The [`ChainOrchestrator`] contains the state of the chain and orchestrates the components
+//! responsible for advancing the chain.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -8,64 +9,94 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use futures::{stream::FuturesUnordered, Stream};
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
-use futures::Stream;
-use futures::stream::FuturesUnordered;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Re-export of the blockchain tree API.
 pub use reth_blockchain_tree_api::*;
+use reth_primitives::B256;
 
-/// The type that drives the chain forward
+/// The type that drives the chain forward.
 ///
 /// A state machine that orchestrates the components responsible for advancing the chain
 // Reacts to custom requests
-struct EngineOrchestrator {
+pub struct ChainOrchestrator<T>
+where
+    T: ChainHandler,
+{
+    /// The handler responsible for advancing the chain.
+    handler: T, /* pipeline */
 
-    // consensus actions (Egnine messages)
+                /* pruning */
 
-    // tree handler
-
-    // pipeline
-
-    // pruning
-
-    // live sync
-
+                /* live sync */
 }
 
-impl EngineOrchestrator {
+impl<T> ChainOrchestrator<T>
+where
+    T: ChainHandler,
+{
+    /// Returns the handler
+    pub const fn handler(&self) -> &T {
+        &self.handler
+    }
 
-    fn handle_incoming_request(&mut self) {
-        // TODO
+    /// Returns a mutable reference to the handler
+    pub fn handler_mut(&mut self) -> &mut T {
+        &mut self.handler
     }
 }
 
-impl Stream for EngineOrchestrator {
-    type Item = ();
+impl<T> Stream for ChainOrchestrator<T>
+where
+    T: ChainHandler,
+{
+    type Item = ChainEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         todo!()
     }
 }
 
-///
-pub enum EngineEvent {
+/// Event emitted by the [`ChainOrchestrator`]
+pub enum ChainEvent {
+    /// Synced new head.
+    Synced(B256),
 
+    SyncPipeline(B256),
 
+    NetworkSync(B256),
 }
 
+/// Internal events issued by the [`ChainOrchestrator`].
+pub enum FromOrchestrator {
+    /// Started syncing or pruning which requires mutable access to the db.
+    Pausing,
+    /// Finished syncing or pruning
+    Active,
+}
 
-/// A trait that manages the tree.
+/// A trait that advances the chain by handling actions.
 ///
-// TODO this is effectively a tower layer?
-// TODO move to tree-api
-pub trait EngineBehaviour: Send + Sync {
+/// This is intended to be implement the chain consensus logic, for example `engine` API.
+pub trait ChainHandler: Send + Sync {
+    /// Informs the handler about an event from the [`ChainOrchestrator`].
+    fn on_event(&mut self, event: FromOrchestrator);
+
+    /// Polls for actions that [`ChainOrchestrator`] should handle.
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<ChainEvent> {
+        todo!()
+    }
+}
+
+/// A trait that manages the tree by handling actions.
+pub trait TreeHandler: Send + Sync {
     /// The action this type handles
     type Action;
     /// The outcome
@@ -83,11 +114,10 @@ pub trait EngineBehaviour: Send + Sync {
 /// Provides access to [TreeEngineService]
 ///
 /// This is the frontend for the tree service task.
-///
 // TODO do we want request response or send + poll?
 #[derive(Debug, Clone)]
 pub struct TreeEngine {
-    to_service: UnboundedSender<EngineAction>,
+    to_service: UnboundedSender<TreeAction>,
 }
 
 /// A generic task that manages the state of the blockchain tree by handling incoming actions that
@@ -98,23 +128,23 @@ pub struct TreeEngine {
 #[must_use = "Future does nothing unless polled"]
 pub struct TreeEngineService<T>
 where
-    T: EngineBehaviour,
+    T: TreeHandler,
 {
     /// Keeps track of the state the service is in
     state: (),
     /// Manages the tree.
     handler: T,
     /// Actions that are currently in progress.
-    pending: FuturesUnordered<Pin<Box< dyn Future< Output = Result<T::ActionOutcome, T::Error>>>>>,
+    pending: FuturesUnordered<Pin<Box<dyn Future<Output = Result<T::ActionOutcome, T::Error>>>>>,
     /// Sender half of the action channel.
-    action_tx: UnboundedSender<EngineAction>,
+    action_tx: UnboundedSender<TreeAction>,
     /// Receiver half of the action channel.
-    action_rx: UnboundedReceiverStream<EngineAction>,
+    action_rx: UnboundedReceiverStream<TreeAction>,
 }
 
 impl<T> Future for TreeEngineService<T>
 where
-    T: EngineBehaviour,
+    T: TreeHandler,
 {
     type Output = ();
 
@@ -123,11 +153,8 @@ where
     }
 }
 
-
-
 /// Incoming actions the tree task can handle
 #[derive(Debug, Clone)]
-pub enum EngineAction {
+pub enum TreeAction {
     // TODO FCU + Payload this must be generic over engine types
-
 }

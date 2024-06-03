@@ -6670,6 +6670,7 @@ dependencies = [
  "metrics",
  "reth-blockchain-tree-api",
  "reth-metrics",
+ "reth-primitives",
  "tokio",
  "tokio-stream",
 ]
