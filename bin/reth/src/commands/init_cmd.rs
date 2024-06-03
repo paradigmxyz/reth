@@ -1,33 +1,20 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+use crate::args::{
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs, DatadirArgs,
 };
 use clap::Parser;
 use reth_db::init_db;
 use reth_db_common::init::init_genesis;
 use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::sync::Arc;
 use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct InitCommand {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -41,6 +28,9 @@ pub struct InitCommand {
     chain: Arc<ChainSpec>,
 
     #[command(flatten)]
+    datadir: DatadirArgs,
+
+    #[command(flatten)]
     db: DatabaseArgs,
 }
 
@@ -50,13 +40,17 @@ impl InitCommand {
         info!(target: "reth::cli", "reth init starting");
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
+        info!(target: "reth::cl", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
 
-        let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db,
+            self.chain,
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         info!(target: "reth::cli", "Writing genesis block");
 

@@ -28,7 +28,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Returns the [PeersConfig] for the node.
+    /// Returns the [`PeersConfig`] for the node.
     ///
     /// If a peers file is provided, the basic nodes from the file are added to the configuration.
     pub fn peers_config_with_basic_nodes_from_file(
@@ -142,7 +142,7 @@ pub struct BodiesConfig {
     pub downloader_request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     ///
-    /// Default: 1_000
+    /// Default: `1_000`
     pub downloader_stream_batch_size: usize,
     /// The size of the internal block buffer in bytes.
     ///
@@ -324,6 +324,13 @@ pub struct PruneConfig {
 impl Default for PruneConfig {
     fn default() -> Self {
         Self { block_interval: 5, segments: PruneModes::none() }
+    }
+}
+
+impl PruneConfig {
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 }
 

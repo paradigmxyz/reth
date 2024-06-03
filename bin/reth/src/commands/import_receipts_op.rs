@@ -12,35 +12,25 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
 };
-use reth_node_core::version::SHORT_VERSION;
+use reth_node_core::{args::DatadirArgs, version::SHORT_VERSION};
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, Receipts, StaticFileSegment};
 use reth_provider::{
-    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    providers::StaticFileProvider, BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use tracing::{debug, error, info, trace};
 
-use crate::{
-    args::{
-        utils::{genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+use crate::args::{
+    utils::{genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs,
 };
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct ImportReceiptsOpCommand {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -70,15 +60,18 @@ impl ImportReceiptsOpCommand {
         let chain_spec = genesis_value_parser(SUPPORTED_CHAINS[0])?;
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(chain_spec.chain);
+        let data_dir = self.datadir.resolve_datadir(chain_spec.chain);
 
         let db_path = data_dir.db();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
 
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), chain_spec.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            chain_spec.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         import_receipts_from_file(
             provider_factory,

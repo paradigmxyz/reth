@@ -3,9 +3,8 @@
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
+        DatabaseArgs, DatadirArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     macros::block_executor,
 };
 use alloy_rlp::Decodable;
@@ -35,8 +34,9 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
-    BundleStateWithReceipts, ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockHashReader, BlockReader, BlockWriter, BundleStateWithReceipts, ProviderFactory,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
@@ -52,16 +52,6 @@ use tracing::*;
 /// The script will then parse the block and attempt to build a similar one.
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -73,6 +63,9 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     /// Database arguments.
     #[command(flatten)]
@@ -109,12 +102,10 @@ impl Command {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block(&self, db: Arc<DatabaseEnv>) -> RethResult<Arc<SealedBlock>> {
-        let factory = ProviderFactory::new(
-            db,
-            self.chain.clone(),
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-        )?;
+    fn lookup_best_block(
+        &self,
+        factory: ProviderFactory<Arc<DatabaseEnv>>,
+    ) -> RethResult<Arc<SealedBlock>> {
         let provider = factory.provider()?;
 
         let best_number =
@@ -146,7 +137,7 @@ impl Command {
     /// Execute `debug in-memory-merkle` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
 
@@ -155,8 +146,8 @@ impl Command {
         let provider_factory = ProviderFactory::new(
             Arc::clone(&db),
             Arc::clone(&self.chain),
-            data_dir.static_files(),
-        )?;
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
@@ -170,8 +161,9 @@ impl Command {
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
-        let best_block =
-            self.lookup_best_block(Arc::clone(&db)).wrap_err("the head block is missing")?;
+        let best_block = self
+            .lookup_best_block(provider_factory.clone())
+            .wrap_err("the head block is missing")?;
 
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;

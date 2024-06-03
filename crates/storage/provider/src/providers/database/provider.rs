@@ -374,10 +374,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///
     /// If UNWIND is false we will just read the state/blocks and return them.
     ///
-    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all the
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
     ///    transaction ids.
-    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table and the
-    ///    [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to    reconstruct
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
     ///    the changesets.
     ///    - In order to have both the old and new values in the changesets, we also access the
     ///      plain state tables.
@@ -1641,8 +1641,7 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
     }
 }
 
-/// Calculates the hash of the given transaction
-
+// Calculates the hash of the given transaction
 impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)

@@ -79,13 +79,13 @@ impl CanonicalError {
     }
 
     /// Returns `true` if the underlying error matches
-    /// [BlockchainTreeError::BlockHashNotFoundInChain].
+    /// [`BlockchainTreeError::BlockHashNotFoundInChain`].
     pub const fn is_block_hash_not_found(&self) -> bool {
         matches!(self, Self::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain { .. }))
     }
 
     /// Returns `Some(BlockNumber)` if the underlying error matches
-    /// [CanonicalError::OptimisticTargetRevert].
+    /// [`CanonicalError::OptimisticTargetRevert`].
     pub const fn optimistic_revert_block_number(&self) -> Option<BlockNumber> {
         match self {
             Self::OptimisticTargetRevert(block_number) => Some(*block_number),
@@ -104,27 +104,27 @@ pub struct InsertBlockError {
 // === impl InsertBlockError ===
 
 impl InsertBlockError {
-    /// Create a new InsertInvalidBlockError
+    /// Create a new `InsertInvalidBlockError`
     pub fn new(block: SealedBlock, kind: InsertBlockErrorKind) -> Self {
         Self { inner: InsertBlockErrorData::boxed(block, kind) }
     }
 
-    /// Create a new InsertInvalidBlockError from a tree error
+    /// Create a new `InsertInvalidBlockError` from a tree error
     pub fn tree_error(error: BlockchainTreeError, block: SealedBlock) -> Self {
         Self::new(block, InsertBlockErrorKind::Tree(error))
     }
 
-    /// Create a new InsertInvalidBlockError from a consensus error
+    /// Create a new `InsertInvalidBlockError` from a consensus error
     pub fn consensus_error(error: ConsensusError, block: SealedBlock) -> Self {
         Self::new(block, InsertBlockErrorKind::Consensus(error))
     }
 
-    /// Create a new InsertInvalidBlockError from a consensus error
+    /// Create a new `InsertInvalidBlockError` from a consensus error
     pub fn sender_recovery_error(block: SealedBlock) -> Self {
         Self::new(block, InsertBlockErrorKind::SenderRecovery)
     }
 
-    /// Create a new InsertInvalidBlockError from an execution error
+    /// Create a new `InsertInvalidBlockError` from an execution error
     pub fn execution_error(error: BlockExecutionError, block: SealedBlock) -> Self {
         Self::new(block, InsertBlockErrorKind::Execution(error))
     }
@@ -231,7 +231,7 @@ pub enum InsertBlockErrorKind {
     /// Canonical error.
     #[error(transparent)]
     Canonical(#[from] CanonicalError),
-    /// BlockchainTree error.
+    /// `BlockchainTree` error.
     #[error(transparent)]
     BlockchainTree(BlockchainTreeError),
 }
@@ -296,7 +296,6 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::CanonicalRevert { .. } |
                     BlockExecutionError::CanonicalCommit { .. } |
                     BlockExecutionError::AppendChainDoesntConnect { .. } |
-                    BlockExecutionError::UnavailableForTest => false,
                     BlockExecutionError::Other(_) => false,
                 }
             }

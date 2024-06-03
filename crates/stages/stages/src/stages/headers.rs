@@ -55,9 +55,9 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     consensus: Arc<dyn Consensus>,
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap>,
-    /// ETL collector with HeaderHash -> BlockNumber
+    /// ETL collector with `HeaderHash` -> `BlockNumber`
     hash_collector: Collector<BlockHash, BlockNumber>,
-    /// ETL collector with BlockNumber -> SealedHeader
+    /// ETL collector with `BlockNumber` -> `SealedHeader`
     header_collector: Collector<BlockNumber, SealedHeader>,
     /// Returns true if the ETL collector has all necessary headers to fill the gap.
     is_etl_ready: bool,

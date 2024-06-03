@@ -43,7 +43,8 @@ impl Command {
             start_key: self.start_key,
             end_key: self.end_key,
             limit: self.limit,
-        })
+        })?;
+        Ok(())
     }
 }
 
@@ -58,8 +59,12 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
     pub(crate) const fn new(tool: &'_ DbTool<DB>) -> ChecksumViewer<'_, DB> {
         ChecksumViewer { tool, start_key: None, end_key: None, limit: None }
     }
+}
 
-    pub(crate) fn get_checksum<T: Table>(&self) -> Result<(u64, Duration), eyre::Report> {
+impl<DB: Database> TableViewer<(u64, Duration)> for ChecksumViewer<'_, DB> {
+    type Error = eyre::Report;
+
+    fn view<T: Table>(&self) -> Result<(u64, Duration), Self::Error> {
         let provider =
             self.tool.provider_factory.provider()?.disable_long_read_transaction_safety();
         let tx = provider.tx_ref();
@@ -124,17 +129,8 @@ impl<DB: Database> ChecksumViewer<'_, DB> {
         let checksum = hasher.finish();
         let elapsed = start_time.elapsed();
 
-        Ok((checksum, elapsed))
-    }
-}
-
-impl<DB: Database> TableViewer<()> for ChecksumViewer<'_, DB> {
-    type Error = eyre::Report;
-
-    fn view<T: Table>(&self) -> Result<(), Self::Error> {
-        let (checksum, elapsed) = self.get_checksum::<T>()?;
         info!("Checksum for table `{}`: {:#x} (elapsed: {:?})", T::NAME, checksum, elapsed);
 
-        Ok(())
+        Ok((checksum, elapsed))
     }
 }

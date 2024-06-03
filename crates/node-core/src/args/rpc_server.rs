@@ -79,7 +79,7 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port", default_value_t = constants::DEFAULT_WS_RPC_PORT)]
     pub ws_port: u16,
 
-    /// Origins from which to accept WebSocket requests
+    /// Origins from which to accept `WebSocket` requests
     #[arg(id = "ws.origins", long = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
@@ -438,7 +438,7 @@ impl Default for RpcServerArgs {
     }
 }
 
-/// clap value parser for [RpcModuleSelection].
+/// clap value parser for [`RpcModuleSelection`].
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 struct RpcModuleSelectionValueParser;

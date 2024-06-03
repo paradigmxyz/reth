@@ -31,7 +31,7 @@ pub struct FeeHistoryCache {
 }
 
 impl FeeHistoryCache {
-    /// Creates new FeeHistoryCache instance, initialize it with the more recent data, set bounds
+    /// Creates new `FeeHistoryCache` instance, initialize it with the more recent data, set bounds
     pub fn new(eth_cache: EthStateCache, config: FeeHistoryCacheConfig) -> Self {
         let inner = FeeHistoryCacheInner {
             lower_bound: Default::default(),
@@ -55,7 +55,8 @@ impl FeeHistoryCache {
         self.config().resolution
     }
 
-    /// Returns all blocks that are missing in the cache in the [lower_bound, upper_bound] range.
+    /// Returns all blocks that are missing in the cache in the [`lower_bound`, `upper_bound`]
+    /// range.
     ///
     /// This function is used to populate the cache with missing blocks, which can happen if the
     /// node switched to stage sync node.
@@ -113,12 +114,12 @@ impl FeeHistoryCache {
         self.inner.lower_bound.store(lower_bound, SeqCst);
     }
 
-    /// Get UpperBound value for FeeHistoryCache
+    /// Get `UpperBound` value for `FeeHistoryCache`
     pub fn upper_bound(&self) -> u64 {
         self.inner.upper_bound.load(SeqCst)
     }
 
-    /// Get LowerBound value for FeeHistoryCache
+    /// Get `LowerBound` value for `FeeHistoryCache`
     pub fn lower_bound(&self) -> u64 {
         self.inner.lower_bound.load(SeqCst)
     }
@@ -126,7 +127,7 @@ impl FeeHistoryCache {
     /// Collect fee history for given range.
     ///
     /// This function retrieves fee history entries from the cache for the specified range.
-    /// If the requested range (start_block to end_block) is within the cache bounds,
+    /// If the requested range (`start_block` to `end_block`) is within the cache bounds,
     /// it returns the corresponding entries.
     /// Otherwise it returns None.
     pub async fn get_history(
@@ -162,14 +163,14 @@ impl FeeHistoryCache {
     }
 }
 
-/// Settings for the [FeeHistoryCache].
+/// Settings for the [`FeeHistoryCache`].
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeeHistoryCacheConfig {
     /// Max number of blocks in cache.
     ///
-    /// Default is [MAX_HEADER_HISTORY] plus some change to also serve slightly older blocks from
-    /// cache, since fee_history supports the entire range
+    /// Default is [`MAX_HEADER_HISTORY`] plus some change to also serve slightly older blocks from
+    /// cache, since `fee_history` supports the entire range
     pub max_blocks: u64,
     /// Percentile approximation resolution
     ///
@@ -183,14 +184,14 @@ impl Default for FeeHistoryCacheConfig {
     }
 }
 
-/// Container type for shared state in [FeeHistoryCache]
+/// Container type for shared state in [`FeeHistoryCache`]
 #[derive(Debug)]
 struct FeeHistoryCacheInner {
     /// Stores the lower bound of the cache
     lower_bound: AtomicU64,
     /// Stores the upper bound of the cache
     upper_bound: AtomicU64,
-    /// Config for FeeHistoryCache, consists of resolution for percentile approximation
+    /// Config for `FeeHistoryCache`, consists of resolution for percentile approximation
     /// and max number of blocks
     config: FeeHistoryCacheConfig,
     /// Stores the entries of the cache
@@ -383,7 +384,7 @@ impl FeeHistoryEntry {
     ///
     /// Returns `None` if `excess_blob_gas` is None.
     ///
-    /// See also [Self::next_block_excess_blob_gas]
+    /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
         self.next_block_excess_blob_gas().map(calc_blob_gasprice)
     }

@@ -5,7 +5,6 @@ use crate::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     utils::DbTool,
 };
 use clap::{Parser, Subcommand};
@@ -13,8 +12,9 @@ use reth_db::{
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
 };
+use reth_node_core::args::DatadirArgs;
 use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -25,7 +25,6 @@ mod clear;
 mod diff;
 mod get;
 mod list;
-mod static_files;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -33,16 +32,6 @@ mod tui;
 /// `reth db` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t, global = true)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -55,6 +44,9 @@ pub struct Command {
         global = true,
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     db: DatabaseArgs,
@@ -84,19 +76,18 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
-    /// Creates static files from database tables
-    CreateStaticFiles(static_files::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
     Path,
 }
 
-/// db_ro_exec opens a database in read-only mode, and then execute with the provided command
+/// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
     ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
         let db = open_db_read_only($db_path, $db_args)?;
-        let provider_factory = ProviderFactory::new(db, $chain.clone(), $sfp)?;
+        let provider_factory =
+            ProviderFactory::new(db, $chain.clone(), StaticFileProvider::read_only($sfp)?);
 
         let $tool = DbTool::new(provider_factory, $chain.clone())?;
         $command;
@@ -107,7 +98,7 @@ impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         let db_args = self.db.database_args();
         let static_files_path = data_dir.static_files();
@@ -156,21 +147,24 @@ impl Command {
                 }
 
                 let db = open_db(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
+                let provider_factory = ProviderFactory::new(
+                    db,
+                    self.chain.clone(),
+                    StaticFileProvider::read_write(&static_files_path)?,
+                );
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
                 let db = open_db(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
+                let provider_factory = ProviderFactory::new(
+                    db,
+                    self.chain.clone(),
+                    StaticFileProvider::read_write(static_files_path)?,
+                );
 
                 command.execute(provider_factory)?;
-            }
-            Subcommands::CreateStaticFiles(command) => {
-                command.execute(data_dir, self.db.database_args(), self.chain.clone())?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
@@ -204,7 +198,7 @@ mod tests {
     #[test]
     fn parse_stats_globals() {
         let path = format!("../{}", SUPPORTED_CHAINS[0]);
-        let cmd = Command::try_parse_from(["reth", "stats", "--datadir", &path]).unwrap();
-        assert_eq!(cmd.datadir.as_ref(), Some(Path::new(&path)));
+        let cmd = Command::try_parse_from(["reth", "--datadir", &path, "stats"]).unwrap();
+        assert_eq!(cmd.datadir.resolve_datadir(cmd.chain.chain).as_ref(), Path::new(&path));
     }
 }

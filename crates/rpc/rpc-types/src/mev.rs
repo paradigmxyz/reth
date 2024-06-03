@@ -153,41 +153,41 @@ pub struct PrivacyHint {
 }
 
 impl PrivacyHint {
-    /// Sets the flag indicating inclusion of calldata and returns the modified PrivacyHint
+    /// Sets the flag indicating inclusion of calldata and returns the modified `PrivacyHint`
     /// instance.
     pub const fn with_calldata(mut self) -> Self {
         self.calldata = true;
         self
     }
 
-    /// Sets the flag indicating inclusion of contract address and returns the modified PrivacyHint
-    /// instance.
+    /// Sets the flag indicating inclusion of contract address and returns the modified
+    /// `PrivacyHint` instance.
     pub const fn with_contract_address(mut self) -> Self {
         self.contract_address = true;
         self
     }
 
-    /// Sets the flag indicating inclusion of logs and returns the modified PrivacyHint instance.
+    /// Sets the flag indicating inclusion of logs and returns the modified `PrivacyHint` instance.
     pub const fn with_logs(mut self) -> Self {
         self.logs = true;
         self
     }
 
-    /// Sets the flag indicating inclusion of function selector and returns the modified PrivacyHint
-    /// instance.
+    /// Sets the flag indicating inclusion of function selector and returns the modified
+    /// `PrivacyHint` instance.
     pub const fn with_function_selector(mut self) -> Self {
         self.function_selector = true;
         self
     }
 
-    /// Sets the flag indicating inclusion of hash and returns the modified PrivacyHint instance.
+    /// Sets the flag indicating inclusion of hash and returns the modified `PrivacyHint` instance.
     pub const fn with_hash(mut self) -> Self {
         self.hash = true;
         self
     }
 
-    /// Sets the flag indicating inclusion of transaction hash and returns the modified PrivacyHint
-    /// instance.
+    /// Sets the flag indicating inclusion of transaction hash and returns the modified
+    /// `PrivacyHint` instance.
     pub const fn with_tx_hash(mut self) -> Self {
         self.tx_hash = true;
         self
@@ -223,7 +223,7 @@ impl PrivacyHint {
         self.tx_hash
     }
 
-    /// Calculates the number of hints set within the PrivacyHint instance.
+    /// Calculates the number of hints set within the `PrivacyHint` instance.
     const fn num_hints(&self) -> usize {
         let mut num_hints = 0;
         if self.calldata {
@@ -381,12 +381,12 @@ pub struct SimBundleResponse {
     /// The gas used by the simulated block.
     #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
     pub gas_used: u64,
-    /// Logs returned by mev_simBundle.
+    /// Logs returned by `mev_simBundle`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logs: Option<Vec<SimBundleLogs>>,
 }
 
-/// Logs returned by mev_simBundle.
+/// Logs returned by `mev_simBundle`.
 #[derive(Deserialize, Debug, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SimBundleLogs {

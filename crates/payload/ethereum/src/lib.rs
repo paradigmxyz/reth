@@ -10,24 +10,24 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use reth_basic_payload_builder::{
-    commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
-    BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
+    commit_withdrawals, is_better_payload, post_block_withdrawal_requests_contract_call,
+    pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
+    PayloadConfig, WithdrawalsOutcome,
 };
+use reth_errors::RethError;
 use reth_evm::ConfigureEvm;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
 use reth_primitives::{
     constants::{
-        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH,
-        EMPTY_TRANSACTIONS,
+        eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
-    proofs,
+    proofs::{self, calculate_requests_root},
     revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, Requests, EMPTY_OMMER_ROOT_HASH,
-    U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
@@ -47,7 +47,7 @@ pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
 }
 
 impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
-    /// EthereumPayloadBuilder constructor.
+    /// `EthereumPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { evm_config }
     }
@@ -154,14 +154,6 @@ where
             err
         })?;
 
-        // Calculate the requests and the requests root.
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-            } else {
-                (None, None)
-            };
-
         // merge all transitions into bundle state, this would apply the withdrawal balance
         // changes and 4788 contract call
         db.merge_transitions(BundleRetention::PlainState);
@@ -193,6 +185,24 @@ where
 
             blob_gas_used = Some(0);
         }
+
+        // Calculate the requests and the requests root.
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                // We do not calculate the EIP-6110 deposit requests because there are no
+                // transactions in an empty payload.
+                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )?;
+
+                let requests = withdrawal_requests;
+                let requests_root = calculate_requests_root(&requests);
+                (Some(requests.into()), Some(requests_root))
+            } else {
+                (None, None)
+            };
 
         let header = Header {
             parent_hash: parent_block.hash(),
@@ -407,6 +417,25 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
+    // calculate the requests and the requests root
+    let (requests, requests_root) = if chain_spec
+        .is_prague_active_at_timestamp(attributes.timestamp)
+    {
+        let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
+            .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
+        let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+        )?;
+
+        let requests = [deposit_requests, withdrawal_requests].concat();
+        let requests_root = calculate_requests_root(&requests);
+        (Some(requests.into()), Some(requests_root))
+    } else {
+        (None, None)
+    };
+
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
@@ -455,14 +484,6 @@ where
 
         blob_gas_used = Some(sum_blob_gas_used);
     }
-
-    // todo: compute requests and requests root
-    let (requests, requests_root) =
-        if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-            (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-        } else {
-            (None, None)
-        };
 
     let header = Header {
         parent_hash: parent_block.hash(),

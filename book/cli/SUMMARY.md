@@ -16,7 +16,6 @@
     - [`reth db clear`](./reth/db/clear.md)
       - [`reth db clear mdbx`](./reth/db/clear/mdbx.md)
       - [`reth db clear static-file`](./reth/db/clear/static-file.md)
-    - [`reth db create-static-files`](./reth/db/create-static-files.md)
     - [`reth db version`](./reth/db/version.md)
     - [`reth db path`](./reth/db/path.md)
   - [`reth stage`](./reth/stage.md)

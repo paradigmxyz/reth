@@ -24,14 +24,14 @@ use tracing::*;
 pub enum StoredEngineApiMessage<Attributes> {
     /// The on-disk representation of an `engine_forkchoiceUpdated` method call.
     ForkchoiceUpdated {
-        /// The [ForkchoiceState] sent in the persisted call.
+        /// The [`ForkchoiceState`] sent in the persisted call.
         state: ForkchoiceState,
         /// The payload attributes sent in the persisted call, if any.
         payload_attrs: Option<Attributes>,
     },
     /// The on-disk representation of an `engine_newPayload` method call.
     NewPayload {
-        /// The [ExecutionPayload] sent in the persisted call.
+        /// The [`ExecutionPayload`] sent in the persisted call.
         payload: ExecutionPayload,
         /// The Cancun-specific fields sent in the persisted call, if any.
         cancun_fields: Option<CancunPayloadFields>,
@@ -46,14 +46,14 @@ pub struct EngineMessageStore {
 }
 
 impl EngineMessageStore {
-    /// Creates a new [EngineMessageStore] at the given path.
+    /// Creates a new [`EngineMessageStore`] at the given path.
     ///
     /// The path is expected to be a directory, where individual message JSON files will be stored.
     pub const fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
-    /// Stores the received [BeaconEngineMessage] to disk, appending the `received_at` time to the
+    /// Stores the received [`BeaconEngineMessage`] to disk, appending the `received_at` time to the
     /// path.
     pub fn on_message<Engine>(
         &self,

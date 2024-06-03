@@ -5,13 +5,8 @@ use crate::{
 };
 use clap::Parser;
 use reth_db::{
-    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers, BlockRequests,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccounts, HashedStorages,
-    HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
-    PruneCheckpoints, Receipts, StageCheckpointProgresses, StageCheckpoints, StorageChangeSets,
-    StoragesHistory, StoragesTrie, Tables, TransactionBlocks, TransactionHashNumbers,
-    TransactionSenders, Transactions, VersionHistory,
+    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, tables_to_generic,
+    transaction::DbTx, DatabaseEnv, Tables,
 };
 use std::{
     collections::HashMap,
@@ -78,86 +73,11 @@ impl Command {
             secondary_tx.disable_long_read_transaction_safety();
 
             let output_dir = self.output.clone();
-            match table {
-                Tables::CanonicalHeaders => {
-                    find_diffs::<CanonicalHeaders>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HeaderTerminalDifficulties => {
-                    find_diffs::<HeaderTerminalDifficulties>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HeaderNumbers => {
-                    find_diffs::<HeaderNumbers>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Headers => find_diffs::<Headers>(primary_tx, secondary_tx, output_dir)?,
-                Tables::BlockBodyIndices => {
-                    find_diffs::<BlockBodyIndices>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::BlockOmmers => {
-                    find_diffs::<BlockOmmers>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::BlockWithdrawals => {
-                    find_diffs::<BlockWithdrawals>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::BlockRequests => {
-                    find_diffs::<BlockRequests>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::TransactionBlocks => {
-                    find_diffs::<TransactionBlocks>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Transactions => {
-                    find_diffs::<Transactions>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::TransactionHashNumbers => {
-                    find_diffs::<TransactionHashNumbers>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Receipts => find_diffs::<Receipts>(primary_tx, secondary_tx, output_dir)?,
-                Tables::PlainAccountState => {
-                    find_diffs::<PlainAccountState>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::PlainStorageState => {
-                    find_diffs::<PlainStorageState>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Bytecodes => find_diffs::<Bytecodes>(primary_tx, secondary_tx, output_dir)?,
-                Tables::AccountsHistory => {
-                    find_diffs::<AccountsHistory>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StoragesHistory => {
-                    find_diffs::<StoragesHistory>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::AccountChangeSets => {
-                    find_diffs::<AccountChangeSets>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StorageChangeSets => {
-                    find_diffs::<StorageChangeSets>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HashedAccounts => {
-                    find_diffs::<HashedAccounts>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HashedStorages => {
-                    find_diffs::<HashedStorages>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::AccountsTrie => {
-                    find_diffs::<AccountsTrie>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StoragesTrie => {
-                    find_diffs::<StoragesTrie>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::TransactionSenders => {
-                    find_diffs::<TransactionSenders>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StageCheckpoints => {
-                    find_diffs::<StageCheckpoints>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StageCheckpointProgresses => {
-                    find_diffs::<StageCheckpointProgresses>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::PruneCheckpoints => {
-                    find_diffs::<PruneCheckpoints>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::VersionHistory => {
-                    find_diffs::<VersionHistory>(primary_tx, secondary_tx, output_dir)?
-                }
-            };
+            tables_to_generic!(table, |Table| find_diffs::<Table>(
+                primary_tx,
+                secondary_tx,
+                output_dir
+            ))?;
         }
 
         Ok(())

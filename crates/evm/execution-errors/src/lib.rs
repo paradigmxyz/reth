@@ -77,12 +77,27 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
-    /// Provider error during the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) block hash account loading.
+    /// Provider error during the [EIP-2935] block hash account loading.
+    ///
+    /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
     #[error(transparent)]
     BlockHashAccountLoadingFailed(#[from] ProviderError),
+    /// EVM error during withdrawal requests contract call [EIP-7002]
+    ///
+    /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002
+    #[error("failed to apply withdrawal requests contract call: {message}")]
+    WithdrawalRequestsContractCall {
+        /// The error message.
+        message: String,
+    },
+    /// Error when decoding deposit requests from receipts [EIP-6110]
+    ///
+    /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
+    #[error("failed to decode deposit requests from receipts: {0}")]
+    DepositRequestDecode(String),
 }
 
-/// BlockExecutor Errors
+/// `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
@@ -116,11 +131,6 @@ pub enum BlockExecutionError {
         /// The fork on the other chain
         other_chain_fork: Box<BlockNumHash>,
     },
-    /// Only used for TestExecutor
-    ///
-    /// Note: this is not feature gated for convenience.
-    #[error("execution unavailable for tests")]
-    UnavailableForTest,
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
@@ -138,7 +148,7 @@ impl BlockExecutionError {
         Self::Other(Box::new(error))
     }
 
-    /// Create a new [BlockExecutionError::Other] from a given message.
+    /// Create a new [`BlockExecutionError::Other`] from a given message.
     pub fn msg(msg: impl Display) -> Self {
         Self::Other(msg.to_string().into())
     }

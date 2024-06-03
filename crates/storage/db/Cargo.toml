@@ -42,6 +42,7 @@ derive_more.workspace = true
 eyre.workspace = true
 paste.workspace = true
 rustc-hash.workspace = true
+sysinfo = "0.30"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }

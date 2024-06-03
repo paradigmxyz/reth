@@ -29,10 +29,10 @@ use crate::metrics::ParallelStateRootMetrics;
 /// accounts in parallel. Once that's done, it proceeds to walking the state
 /// trie retrieving the pre-computed storage roots when needed.
 ///
-/// Internally, the calculator uses [ConsistentDbView] since
+/// Internally, the calculator uses [`ConsistentDbView`] since
 /// it needs to rely on database state saying the same until
 /// the last transaction is open.
-/// See docs of using [ConsistentDbView] for caveats.
+/// See docs of using [`ConsistentDbView`] for caveats.
 ///
 /// If possible, use more optimized `AsyncStateRoot` instead.
 #[derive(Debug)]

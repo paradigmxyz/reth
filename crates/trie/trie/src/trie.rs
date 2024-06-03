@@ -23,7 +23,7 @@ use tracing::{debug, trace};
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
 
-/// StateRoot is used to compute the root node of a state trie.
+/// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
 pub struct StateRoot<T, H> {
     /// The factory for trie cursors.
@@ -94,7 +94,7 @@ impl<T, H> StateRoot<T, H> {
 }
 
 impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
-    /// Create a new [StateRoot] instance.
+    /// Create a new [`StateRoot`] instance.
     pub fn from_tx(tx: &'a TX) -> Self {
         Self {
             trie_cursor_factory: tx,
@@ -341,7 +341,7 @@ where
     }
 }
 
-/// StorageRoot is used to compute the root node of an account storage trie.
+/// `StorageRoot` is used to compute the root node of an account storage trie.
 #[derive(Debug)]
 pub struct StorageRoot<T, H> {
     /// A reference to the database transaction.

@@ -90,6 +90,11 @@ pub trait TableViewer<R> {
     /// The error type returned by the viewer.
     type Error;
 
+    /// Calls `view` with the correct table type.
+    fn view_rt(&self, table: Tables) -> Result<R, Self::Error> {
+        table.view(self)
+    }
+
     /// Operate on the table in a generic way.
     fn view<T: Table>(&self) -> Result<R, Self::Error>;
 
@@ -101,8 +106,8 @@ pub trait TableViewer<R> {
     }
 }
 
-#[macro_export]
 /// Defines all the tables in the database.
+#[macro_export]
 macro_rules! tables {
     (@bool) => { false };
     (@bool $($t:tt)+) => { true };
@@ -196,7 +201,7 @@ macro_rules! tables {
             /// Allows to operate on specific table type
             pub fn view<T, R>(&self, visitor: &T) -> Result<R, T::Error>
             where
-                T: TableViewer<R>,
+                T: ?Sized + TableViewer<R>,
             {
                 match self {
                     $(
@@ -239,6 +244,33 @@ macro_rules! tables {
             $(
                 pub(super) const $name: &'static str = stringify!($name);
             )*
+        }
+
+        /// Maps a run-time [`Tables`] enum value to its corresponding compile-time [`Table`] type.
+        ///
+        /// This is a simpler alternative to [`TableViewer`].
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use reth_db::{Table, Tables, tables_to_generic};
+        ///
+        /// let table = Tables::Headers;
+        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::TABLE);
+        /// assert_eq!(result, table);
+        /// ```
+        #[macro_export]
+        macro_rules! tables_to_generic {
+            ($table:expr, |$generic_name:ident| $e:expr) => {
+                match $table {
+                    $(
+                        Tables::$name => {
+                            use $crate::tables::$name as $generic_name;
+                            $e
+                        },
+                    )*
+                }
+            };
         }
     };
 }

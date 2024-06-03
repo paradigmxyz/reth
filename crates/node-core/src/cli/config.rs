@@ -14,7 +14,7 @@ use std::{borrow::Cow, path::PathBuf, time::Duration};
 /// A trait that provides a configured RPC server.
 ///
 /// This provides all basic config values for the RPC server and is implemented by the
-/// [RpcServerArgs](crate::args::RpcServerArgs) type.
+/// [`RpcServerArgs`](crate::args::RpcServerArgs) type.
 pub trait RethRpcConfig {
     /// Returns whether ipc is enabled.
     fn is_ipc_enabled(&self) -> bool;
@@ -37,10 +37,10 @@ pub trait RethRpcConfig {
     /// Extracts the gas price oracle config from the args.
     fn gas_price_oracle_config(&self) -> GasPriceOracleConfig;
 
-    /// Creates the [TransportRpcModuleConfig] from cli args.
+    /// Creates the [`TransportRpcModuleConfig`] from cli args.
     ///
     /// This sets all the api modules, and configures additional settings like gas price oracle
-    /// settings in the [TransportRpcModuleConfig].
+    /// settings in the [`TransportRpcModuleConfig`].
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig;
 
     /// Returns the default server builder for http/ws
@@ -49,10 +49,10 @@ pub trait RethRpcConfig {
     /// Returns the default ipc server builder
     fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
 
-    /// Creates the [RpcServerConfig] from cli args.
+    /// Creates the [`RpcServerConfig`] from cli args.
     fn rpc_server_config(&self) -> RpcServerConfig;
 
-    /// Creates the [AuthServerConfig] from cli args.
+    /// Creates the [`AuthServerConfig`] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError>;
 
     /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
@@ -79,7 +79,7 @@ pub trait RethRpcConfig {
 /// A trait that provides payload builder settings.
 ///
 /// This provides all basic payload builder settings and is implemented by the
-/// [PayloadBuilderArgs](crate::args::PayloadBuilderArgs) type.
+/// [`PayloadBuilderArgs`](crate::args::PayloadBuilderArgs) type.
 pub trait PayloadBuilderConfig {
     /// Block extra data set by the payload builder.
     fn extradata(&self) -> Cow<'_, str>;
@@ -105,13 +105,13 @@ pub trait PayloadBuilderConfig {
 /// A trait that represents the configured network and can be used to apply additional configuration
 /// to the network.
 pub trait RethNetworkConfig {
-    /// Adds a new additional protocol to the RLPx sub-protocol list.
+    /// Adds a new additional protocol to the `RLPx` sub-protocol list.
     ///
-    /// These additional protocols are negotiated during the RLPx handshake.
+    /// These additional protocols are negotiated during the `RLPx` handshake.
     /// If both peers share the same protocol, the corresponding handler will be included alongside
     /// the `eth` protocol.
     ///
-    /// See also [ProtocolHandler](reth_network::protocol::ProtocolHandler)
+    /// See also [`ProtocolHandler`](reth_network::protocol::ProtocolHandler)
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol);
 
     /// Returns the secret key used for authenticating sessions.
@@ -131,7 +131,7 @@ impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
 }
 
 /// A trait that provides all basic config values for the transaction pool and is implemented by the
-/// [TxPoolArgs](crate::args::TxPoolArgs) type.
+/// [`TxPoolArgs`](crate::args::TxPoolArgs) type.
 pub trait RethTransactionPoolConfig {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig;

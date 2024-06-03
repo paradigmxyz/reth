@@ -1,12 +1,9 @@
 //! Main node command for launching a node
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
-        DatabaseArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-        RpcServerArgs, TxPoolArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+use crate::args::{
+    utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
+    DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
+    RpcServerArgs, TxPoolArgs,
 };
 use clap::{value_parser, Args, Parser};
 use reth_cli_runner::CliContext;
@@ -19,16 +16,6 @@ use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sy
 /// Start the node
 #[derive(Debug, Parser)]
 pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    pub datadir: MaybePlatformPath<DataDirPath>,
-
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
@@ -62,10 +49,10 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// port numbers that conflict with each other.
     ///
     /// Changes to the following port numbers:
-    /// - DISCOVERY_PORT: default + `instance` - 1
-    /// - AUTH_PORT: default + `instance` * 100 - 100
-    /// - HTTP_RPC_PORT: default - `instance` + 1
-    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    /// - `DISCOVERY_PORT`: default + `instance` - 1
+    /// - `AUTH_PORT`: default + `instance` * 100 - 100
+    /// - `HTTP_RPC_PORT`: default - `instance` + 1
+    /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     pub instance: u16,
 
@@ -75,6 +62,10 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Mutually exclusive with `--instance`.
     #[arg(long, conflicts_with = "instance", global = true)]
     pub with_unused_ports: bool,
+
+    /// All datadir related arguments
+    #[command(flatten)]
+    pub datadir: DatadirArgs,
 
     /// All networking related arguments
     #[command(flatten)]
@@ -119,7 +110,7 @@ impl NodeCommand {
         Self::parse()
     }
 
-    /// Parsers only the default [NodeCommand] arguments from the given iterator
+    /// Parsers only the default [`NodeCommand`] arguments from the given iterator
     pub fn try_parse_args_from<I, T>(itr: I) -> Result<Self, clap::error::Error>
     where
         I: IntoIterator<Item = T>,
@@ -161,6 +152,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
 
         // set up node config
         let mut node_config = NodeConfig {
+            datadir,
             config,
             chain,
             metrics,
@@ -179,7 +171,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         // because database init needs it to register metrics.
         let _ = node_config.install_prometheus_recorder()?;
 
-        let data_dir = datadir.unwrap_or_chain_default(node_config.chain.chain);
+        let data_dir = node_config.datadir();
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
@@ -279,30 +271,32 @@ mod tests {
         let cmd =
             NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
         // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
         let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
         assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
         let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
         // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
         let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config());
-        let end = format!("reth/{}/reth.toml", SUPPORTED_CHAINS[0]);
+        let end = format!("{}/reth.toml", SUPPORTED_CHAINS[0]);
         assert!(config_path.ends_with(end), "{:?}", cmd.config);
     }
 
     #[test]
     fn parse_db_path() {
         let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+
         let db_path = data_dir.db();
         let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
         assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
         let cmd =
             NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
-        let data_dir = cmd.datadir.unwrap_or_chain_default(cmd.chain.chain);
+        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+
         let db_path = data_dir.db();
         assert_eq!(db_path, Path::new("my/custom/path/db"));
     }

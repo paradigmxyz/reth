@@ -42,7 +42,7 @@ pub struct EthConfig {
     pub max_logs_per_response: usize,
     /// Gas limit for `eth_call` and call tracing RPC methods.
     ///
-    /// Defaults to [RPC_DEFAULT_GAS_CAP]
+    /// Defaults to [`RPC_DEFAULT_GAS_CAP`]
     pub rpc_gas_cap: u64,
     ///
     /// Sets TTL for stale filters

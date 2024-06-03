@@ -7,15 +7,15 @@ pub trait DatabaseMetrics {
     /// Reports metrics for the database.
     fn report_metrics(&self) {
         for (name, value, labels) in self.gauge_metrics() {
-            gauge!(name, value, labels);
+            gauge!(name, labels).set(value);
         }
 
         for (name, value, labels) in self.counter_metrics() {
-            counter!(name, value, labels);
+            counter!(name, labels).increment(value);
         }
 
         for (name, value, labels) in self.histogram_metrics() {
-            histogram!(name, value, labels);
+            histogram!(name, labels).record(value);
         }
     }
 
@@ -49,7 +49,7 @@ pub struct DatabaseMetadataValue {
 }
 
 impl DatabaseMetadataValue {
-    /// Creates a new [DatabaseMetadataValue] with the given freelist size.
+    /// Creates a new [`DatabaseMetadataValue`] with the given freelist size.
     pub const fn new(freelist_size: Option<usize>) -> Self {
         Self { freelist_size }
     }
@@ -60,10 +60,10 @@ impl DatabaseMetadataValue {
     }
 }
 
-/// Includes a method to return a [DatabaseMetadataValue] type, which can be used to dynamically
+/// Includes a method to return a [`DatabaseMetadataValue`] type, which can be used to dynamically
 /// retrieve information about the database.
 pub trait DatabaseMetadata {
-    /// Returns a metadata type, [DatabaseMetadataValue] for the database.
+    /// Returns a metadata type, [`DatabaseMetadataValue`] for the database.
     fn metadata(&self) -> DatabaseMetadataValue;
 }
 

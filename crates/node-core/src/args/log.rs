@@ -72,7 +72,7 @@ pub struct LogArgs {
 }
 
 impl LogArgs {
-    /// Creates a [LayerInfo] instance.
+    /// Creates a [`LayerInfo`] instance.
     fn layer(&self, format: LogFormat, filter: String, use_color: bool) -> LayerInfo {
         LayerInfo::new(
             format,

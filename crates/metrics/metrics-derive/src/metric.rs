@@ -27,9 +27,9 @@ impl<'a> Metric<'a> {
         if let Type::Path(ref path_ty) = self.field.ty {
             if let Some(last) = path_ty.path.segments.last() {
                 let registrar = match last.ident.to_string().as_str() {
-                    COUNTER_TY => quote! { metrics::register_counter! },
-                    HISTOGRAM_TY => quote! { metrics::register_histogram! },
-                    GAUGE_TY => quote! { metrics::register_gauge! },
+                    COUNTER_TY => quote! { metrics::counter! },
+                    HISTOGRAM_TY => quote! { metrics::histogram! },
+                    GAUGE_TY => quote! { metrics::gauge! },
                     _ => return Err(Error::new_spanned(path_ty, "Unsupported metric type")),
                 };
 
