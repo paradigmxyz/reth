@@ -1,6 +1,6 @@
-# Benchmarking reth live sync with `reth bench`
+# Benchmarking reth live sync with `reth-bench`
 
-The binary contained in this directory, `reth bench`, is a tool that can be used to benchmark the performance of the reth live sync. `reth-bench` is a general tool, and can be used for benchmarking node performance, as long as the node supports the engine API.
+The binary contained in this directory, `reth-bench`, is a tool that can be used to benchmark the performance of the reth live sync. `reth-bench` is a general tool, and can be used for benchmarking node performance, as long as the node supports the engine API.
 
 ### A recap on node synchronization
 Reth uses two primary methods for synchronizing the chain:
@@ -15,8 +15,8 @@ However, reth's historical sync applies optimizations that are not always possib
 Live sync, on the other hand, is a more complex process that is harder to benchmark. It is also more sensitive to network conditions of the CL.
 In order to benchmark live sync, we need to simulate a CL in a controlled manner, so reth can use the same code paths it would when syncing new blocks.
 
-### The `reth bench` tool
-The `reth bench` tool simulates a CL using an external RPC API for data, replaying historical blocks as if they were new blocks over the node's engine API endpoint.
+### The `reth-bench` tool
+The `reth-bench` tool simulates a CL using an external RPC API for data, replaying historical blocks as if they were new blocks over the node's engine API endpoint.
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ Otherwise, running `make maxperf` at the root of the repo should be sufficient f
 
 ## Command Usage
 
-`reth bench` contains different commands to initiate benchmarks tailored to different patterns of engine API calls.
+`reth-bench` contains different commands to initiate benchmarks tailored to different patterns of engine API calls.
 The most representative of ethereum mainnet live sync is is `new-payload-fcu`, which alternates between sending `engine_newPayload` calls and `engine_forkchoiceUpdated` calls.
 
 Below is an overview of how to execute a benchmark:
@@ -41,7 +41,7 @@ Below is an overview of how to execute a benchmark:
     Replace `<rpc-url>`, `<start_block>`, `<end_block>`, and `<jwt_file_path>` with the appropriate values for your testing environment.
     Note that this assumes that the benchmark node's engine API is running on `http://127.0.0.1:8545`, which is set as a default value in `reth-bench`. To configure this value, use the `--engine-rpc-url` flag.
  
- 3. **Observe Outputs**: Upon running the command, `reth bench` will output benchmark results, showing processing speeds and gas usage, which are crucial for analyzing the node's performance.
+ 3. **Observe Outputs**: Upon running the command, `reth-bench` will output benchmark results, showing processing speeds and gas usage, which are crucial for analyzing the node's performance.
  
     Example output:
     ```
@@ -58,6 +58,6 @@ Below is an overview of how to execute a benchmark:
 - **RPC Configuration**: The RPC endpoints should be accessible and configured correctly, specifically the RPC endpoint must support `eth_getBlockByNumber` and support fetching full transactions. The benchmark will make one RPC query per block as fast as possible, so ensure the RPC endpoint does not rate limit or block requests after a certain volume.
 - **Reproducibility**: Ensure that the node is at the same state before attempting to retry a benchmark. The `new-payload-fcu` command specifically will commit to the database, so the node must be rolled back using `reth stage unwind` to reproducibly retry benchmarks.
 - **Profiling tools**: If you are collecting CPU profiles, tools like [`samply`](https://github.com/mstange/samply) and [`perf`](https://perf.wiki.kernel.org/index.php/Main_Page) can be useful for analyzing node performance.
-- **Benchmark Data**: `reth bench` additionally contains a `--benchmark.output` flag, which will output gas used benchmarks across the benchmark range in CSV format. This may be useful for further data analysis.
+- **Benchmark Data**: `reth-bench` additionally contains a `--benchmark.output` flag, which will output gas used benchmarks across the benchmark range in CSV format. This may be useful for further data analysis.
 - **Platform Information**: To ensure accurate and reproducible benchmarking, document the platform details, including hardware specifications, OS version, and any other relevant information before publishing any benchmarks.
 
