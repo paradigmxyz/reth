@@ -21,7 +21,7 @@ use reth_provider::{
 use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;
 use std::{path::Path, rc::Rc, sync::Arc};
-use tracing::info;
+use tracing::{info, warn};
 
 /// Exposing `open_db_read_only` function
 pub mod db {
@@ -204,7 +204,8 @@ impl ListFilter {
 /// Returns a [ProviderFactory] after executing consistency checks.
 ///
 /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
-/// pipeline unwind). Otherwise it will thrown an error.
+/// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the node
+/// to heal.
 pub fn create_provider_factory(
     config: &Config,
     chain_spec: Arc<ChainSpec>,
@@ -226,7 +227,8 @@ pub fn create_provider_factory(
         .check_consistency(&factory.provider()?, has_receipt_pruning)?
     {
         if factory.db_ref().is_read_only() || factory.static_file_provider().is_read_only() {
-            return Err(eyre::eyre!("Inconsistent storage. Restart node to heal: {unwind_target}"));
+            warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
+            return Ok(factory)
         }
 
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
