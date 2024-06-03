@@ -23,7 +23,6 @@ pub use reth_blockchain_tree_api::*;
 /// The type that drives the chain forward
 ///
 /// A state machine that orchestrates the components responsible for advancing the chain
-// TODO this is similar to libp2p swarm
 // Reacts to custom requests
 struct EngineOrchestrator {
 
@@ -45,6 +44,8 @@ impl EngineOrchestrator {
         // TODO
     }
 }
+
+pub enum Engine
 
 
 /// A trait that manages the tree.
