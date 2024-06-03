@@ -25,7 +25,7 @@ mod masks;
 type SortedStaticFiles =
     HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;
 
-/// Given the static_files directory path, it returns a list over the existing static_files
+/// Given the `static_files` directory path, it returns a list over the existing `static_files`
 /// organized by [`StaticFileSegment`]. Each segment has a sorted list of block ranges and
 /// transaction ranges as presented in the file configuration.
 pub fn iter_static_files(path: impl AsRef<Path>) -> Result<SortedStaticFiles, NippyJarError> {

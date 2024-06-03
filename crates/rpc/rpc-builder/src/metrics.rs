@@ -78,7 +78,7 @@ struct RpcServerMetricsInner {
     call_metrics: HashMap<&'static str, RpcServerCallMetrics>,
 }
 
-/// A [RpcServiceT] middleware that captures RPC metrics for the server.
+/// A [`RpcServiceT`] middleware that captures RPC metrics for the server.
 ///
 /// This is created per connection and captures metrics for each request.
 #[derive(Clone)]

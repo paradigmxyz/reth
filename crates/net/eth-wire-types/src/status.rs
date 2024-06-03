@@ -65,7 +65,7 @@ impl Status {
         Default::default()
     }
 
-    /// Sets the [EthVersion] for the status.
+    /// Sets the [`EthVersion`] for the status.
     pub fn set_eth_version(&mut self, version: EthVersion) {
         self.version = version as u8;
     }

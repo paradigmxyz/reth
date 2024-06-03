@@ -23,7 +23,7 @@ impl From<PlainStateReverts> for StateReverts {
 impl StateReverts {
     /// Write reverts to database.
     ///
-    /// Note:: Reverts will delete all wiped storage from plain state.
+    /// `Note::` Reverts will delete all wiped storage from plain state.
     pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
@@ -93,7 +93,7 @@ impl StateReverts {
 }
 
 /// Iterator over storage reverts.
-/// See [StorageRevertsIter::next] for more details.
+/// See [`StorageRevertsIter::next`] for more details.
 #[allow(missing_debug_implementations)]
 pub struct StorageRevertsIter<R: Iterator, W: Iterator> {
     reverts: Peekable<R>,

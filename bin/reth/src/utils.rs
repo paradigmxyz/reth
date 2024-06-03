@@ -29,7 +29,7 @@ pub use reth_node_core::utils::*;
 pub struct DbTool<DB: Database> {
     /// The provider factory that the db tool will use.
     pub provider_factory: ProviderFactory<DB>,
-    /// The [ChainSpec] that the db tool will use.
+    /// The [`ChainSpec`] that the db tool will use.
     pub chain: Arc<ChainSpec>,
 }
 
@@ -126,7 +126,7 @@ impl<DB: Database> DbTool<DB> {
         self.provider_factory.db_ref().view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 
-    /// Grabs the content of the DupSort table for the given key and subkey
+    /// Grabs the content of the `DupSort` table for the given key and subkey
     pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
         self.provider_factory
             .db_ref()

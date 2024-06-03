@@ -60,7 +60,7 @@ fn create_transactions_for_sender(
 /// Because this uses [Arbitrary], the number of transactions per sender needs to be bounded. This
 /// is done by using the `max_depth` parameter.
 ///
-/// This uses [create_transactions_for_sender] to generate the transactions.
+/// This uses [`create_transactions_for_sender`] to generate the transactions.
 fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTransaction> {
     let config = ProptestConfig::default();
     let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);

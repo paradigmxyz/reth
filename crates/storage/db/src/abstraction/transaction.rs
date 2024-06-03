@@ -8,7 +8,7 @@ use crate::{
 pub trait DbTx: Send + Sync {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
-    /// DupCursor type for this read-only transaction
+    /// `DupCursor` type for this read-only transaction
     type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
 
     /// Get value
@@ -32,7 +32,7 @@ pub trait DbTx: Send + Sync {
 pub trait DbTxMut: Send + Sync {
     /// Read-Write Cursor type
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
-    /// Read-Write DupCursor type
+    /// Read-Write `DupCursor` type
     type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
         + DbCursorRW<T>
         + DbDupCursorRO<T>
@@ -49,6 +49,6 @@ pub trait DbTxMut: Send + Sync {
     fn clear<T: Table>(&self) -> Result<(), DatabaseError>;
     /// Cursor mut
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError>;
-    /// DupCursor mut.
+    /// `DupCursor` mut.
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
 }

@@ -154,7 +154,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
 
     /// Returns the pending block header if available
     ///
-    /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
+    /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn pending_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Pending.into())
@@ -162,7 +162,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
 
     /// Returns the latest block header if available
     ///
-    /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
+    /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn latest_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Latest.into())
@@ -170,7 +170,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
 
     /// Returns the safe block header if available
     ///
-    /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
+    /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn safe_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Safe.into())
@@ -178,7 +178,7 @@ pub trait BlockReaderIdExt: BlockReader + BlockIdReader + ReceiptProviderIdExt {
 
     /// Returns the finalized block header if available
     ///
-    /// Note: This returns a [SealedHeader] because it's expected that this is sealed by the
+    /// Note: This returns a [`SealedHeader`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
     fn finalized_header(&self) -> ProviderResult<Option<SealedHeader>> {
         self.sealed_header_by_id(BlockNumberOrTag::Finalized.into())

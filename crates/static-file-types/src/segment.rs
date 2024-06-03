@@ -103,8 +103,8 @@ impl StaticFileSegment {
     /// Parses a filename into a `StaticFileSegment` and its expected block range.
     ///
     /// The filename is expected to follow the format:
-    /// "static_file_{segment}_{block_start}_{block_end}". This function checks
-    /// for the correct prefix ("static_file"), and then parses the segment and the inclusive
+    /// "`static_file`_{segment}_{`block_start`}_{`block_end`}". This function checks
+    /// for the correct prefix ("`static_file`"), and then parses the segment and the inclusive
     /// ranges for blocks. It ensures that the start of each range is less than or equal to the
     /// end.
     ///
@@ -277,7 +277,7 @@ impl SegmentHeader {
         };
     }
 
-    /// Sets a new block_range.
+    /// Sets a new `block_range`.
     pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
         if let Some(block_range) = &mut self.block_range {
             block_range.start = block_start;
@@ -287,7 +287,7 @@ impl SegmentHeader {
         }
     }
 
-    /// Sets a new tx_range.
+    /// Sets a new `tx_range`.
     pub fn set_tx_range(&mut self, tx_start: TxNumber, tx_end: TxNumber) {
         if let Some(tx_range) = &mut self.tx_range {
             tx_range.start = tx_start;

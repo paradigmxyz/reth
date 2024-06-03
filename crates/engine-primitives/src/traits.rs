@@ -10,7 +10,7 @@ use reth_rpc_types::{
     Withdrawal,
 };
 
-/// Represents a built payload type that contains a built [SealedBlock] and can be converted into
+/// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
 /// engine API execution payloads.
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
     /// Returns the built block (sealed)
@@ -26,14 +26,14 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 /// receives, into a type that the payload builder can use.
 pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// The payload attributes that can be used to construct this type. Used as the argument in
-    /// [PayloadBuilderAttributes::try_new].
+    /// [`PayloadBuilderAttributes::try_new`].
     type RpcPayloadAttributes;
-    /// The error type used in [PayloadBuilderAttributes::try_new].
+    /// The error type used in [`PayloadBuilderAttributes::try_new`].
     type Error: std::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
-    /// Derives the unique [PayloadId] for the given parent and attributes
+    /// Derives the unique [`PayloadId`] for the given parent and attributes
     fn try_new(
         parent: B256,
         rpc_payload_attributes: Self::RpcPayloadAttributes,
@@ -41,7 +41,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     where
         Self: Sized;
 
-    /// Returns the [PayloadId] for the running payload job.
+    /// Returns the [`PayloadId`] for the running payload job.
     fn payload_id(&self) -> PayloadId;
 
     /// Returns the parent block hash for the running payload job.
@@ -62,8 +62,8 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// Returns the withdrawals for the running payload job.
     fn withdrawals(&self) -> &Withdrawals;
 
-    /// Returns the configured [CfgEnvWithHandlerCfg] and [BlockEnv] for the targeted payload (that
-    /// has the `parent` as its parent).
+    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
     ///
     /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
     /// based on its timestamp.
@@ -94,8 +94,8 @@ pub trait PayloadAttributes:
     /// Return the parent beacon block root for the payload attributes.
     fn parent_beacon_block_root(&self) -> Option<B256>;
 
-    /// Ensures that the payload attributes are valid for the given [ChainSpec] and
-    /// [EngineApiMessageVersion].
+    /// Ensures that the payload attributes are valid for the given [`ChainSpec`] and
+    /// [`EngineApiMessageVersion`].
     fn ensure_well_formed_attributes(
         &self,
         chain_spec: &ChainSpec,

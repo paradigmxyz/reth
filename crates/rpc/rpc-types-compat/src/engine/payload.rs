@@ -12,7 +12,7 @@ use reth_rpc_types::engine::{
     ExecutionPayloadV4, PayloadError,
 };
 
-/// Converts [ExecutionPayloadV1] to [Block]
+/// Converts [`ExecutionPayloadV1`] to [Block]
 pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, PayloadError> {
     if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
         return Err(PayloadError::ExtraData(payload.extra_data))
@@ -72,7 +72,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
     })
 }
 
-/// Converts [ExecutionPayloadV2] to [Block]
+/// Converts [`ExecutionPayloadV2`] to [Block]
 pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, PayloadError> {
     // this performs the same conversion as the underlying V1 payload, but calculates the
     // withdrawals root and adds withdrawals
@@ -83,7 +83,7 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
     Ok(base_sealed_block)
 }
 
-/// Converts [ExecutionPayloadV3] to [Block]
+/// Converts [`ExecutionPayloadV3`] to [Block]
 pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, PayloadError> {
     // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
     // used and excess blob gas
@@ -95,7 +95,7 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
     Ok(base_block)
 }
 
-/// Converts [ExecutionPayloadV4] to [Block]
+/// Converts [`ExecutionPayloadV4`] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
     let ExecutionPayloadV4 { payload_inner, deposit_requests, withdrawal_requests } = payload;
     let mut block = try_payload_v3_to_block(payload_inner)?;
@@ -114,7 +114,7 @@ pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, Pay
     Ok(block)
 }
 
-/// Converts [SealedBlock] to [ExecutionPayload]
+/// Converts [`SealedBlock`] to [`ExecutionPayload`]
 pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) {
     if value.header.requests_root.is_some() {
         (ExecutionPayload::V4(block_to_payload_v4(value)), None)
@@ -131,7 +131,7 @@ pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) 
     }
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadV1]
+/// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
 pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
     let transactions = value.raw_transactions();
     ExecutionPayloadV1 {
@@ -152,7 +152,7 @@ pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
     }
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadV2]
+/// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
 pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
     let transactions = value.raw_transactions();
 
@@ -177,7 +177,7 @@ pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
     }
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadV3], and returns the parent beacon block root.
+/// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
 pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B256>) {
     let transactions = value.raw_transactions();
 
@@ -209,7 +209,7 @@ pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B2
     (payload, parent_beacon_block_root)
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadV4]
+/// Converts [`SealedBlock`] to [`ExecutionPayloadV4`]
 pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
     let (deposit_requests, withdrawal_requests) =
         value.requests.take().unwrap_or_default().into_iter().fold(
@@ -236,7 +236,7 @@ pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
     }
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadFieldV2]
+/// Converts [`SealedBlock`] to [`ExecutionPayloadFieldV2`]
 pub fn convert_block_to_payload_field_v2(value: SealedBlock) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
     if value.withdrawals.is_some() {
@@ -246,7 +246,7 @@ pub fn convert_block_to_payload_field_v2(value: SealedBlock) -> ExecutionPayload
     }
 }
 
-/// Converts [ExecutionPayloadFieldV2] to [ExecutionPayload]
+/// Converts [`ExecutionPayloadFieldV2`] to [`ExecutionPayload`]
 pub fn convert_payload_field_v2_to_payload(value: ExecutionPayloadFieldV2) -> ExecutionPayload {
     match value {
         ExecutionPayloadFieldV2::V1(payload) => ExecutionPayload::V1(payload),
@@ -254,7 +254,7 @@ pub fn convert_payload_field_v2_to_payload(value: ExecutionPayloadFieldV2) -> Ex
     }
 }
 
-/// Converts [ExecutionPayloadInputV2] to [ExecutionPayload]
+/// Converts [`ExecutionPayloadInputV2`] to [`ExecutionPayload`]
 pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> ExecutionPayload {
     match value.withdrawals {
         Some(withdrawals) => ExecutionPayload::V2(ExecutionPayloadV2 {
@@ -265,7 +265,7 @@ pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> Ex
     }
 }
 
-/// Converts [SealedBlock] to [ExecutionPayloadInputV2]
+/// Converts [`SealedBlock`] to [`ExecutionPayloadInputV2`]
 pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayloadInputV2 {
     ExecutionPayloadInputV2 {
         withdrawals: value.withdrawals.clone().map(Withdrawals::into_inner),
@@ -301,11 +301,11 @@ pub fn try_into_block(
 /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
 /// comparing the value with `payload.block_hash`.
 ///
-/// Uses [try_into_block] to convert from the [ExecutionPayload] to [Block] and seals the block
+/// Uses [`try_into_block`] to convert from the [`ExecutionPayload`] to [Block] and seals the block
 /// with its hash.
 ///
-/// Uses [validate_block_hash] to validate the payload block hash and ultimately return the
-/// [SealedBlock].
+/// Uses [`validate_block_hash`] to validate the payload block hash and ultimately return the
+/// [`SealedBlock`].
 pub fn try_into_sealed_block(
     payload: ExecutionPayload,
     parent_beacon_block_root: Option<B256>,
@@ -318,10 +318,10 @@ pub fn try_into_sealed_block(
 }
 
 /// Takes the expected block hash and [Block], validating the block and converting it into a
-/// [SealedBlock].
+/// [`SealedBlock`].
 ///
 /// If the provided block hash does not match the block hash computed from the provided block, this
-/// returns [PayloadError::BlockHash].
+/// returns [`PayloadError::BlockHash`].
 #[inline]
 pub fn validate_block_hash(
     expected_block_hash: B256,
@@ -338,7 +338,7 @@ pub fn validate_block_hash(
     Ok(sealed_block)
 }
 
-/// Converts [Block] to [ExecutionPayloadBodyV1]
+/// Converts [Block] to [`ExecutionPayloadBodyV1`]
 pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     let transactions = value.body.into_iter().map(|tx| {
         let mut out = Vec::new();
@@ -351,7 +351,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
     }
 }
 
-/// Transforms a [SealedBlock] into a [ExecutionPayloadV1]
+/// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
 pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
     let transactions = value.raw_transactions();
     ExecutionPayloadV1 {

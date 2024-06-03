@@ -38,11 +38,11 @@ pub enum NatResolver {
     /// Resolve with any available resolver.
     #[default]
     Any,
-    /// Resolve external IP via UPnP.
+    /// Resolve external IP via `UPnP`.
     Upnp,
     /// Resolve external IP via a network request.
     PublicIp,
-    /// Use the given [IpAddr]
+    /// Use the given [`IpAddr`]
     ExternalIp(IpAddr),
     /// Resolve nothing
     None,
@@ -67,7 +67,7 @@ impl fmt::Display for NatResolver {
     }
 }
 
-/// Error when parsing a [NatResolver]
+/// Error when parsing a [`NatResolver`]
 #[derive(Debug, thiserror::Error)]
 pub enum ParseNatResolverError {
     /// Failed to parse provided IP
@@ -123,16 +123,16 @@ impl ResolveNatInterval {
         Self { resolver, future: None, interval }
     }
 
-    /// Creates a new [ResolveNatInterval] that attempts to resolve the public IP with interval of
-    /// period. See also [tokio::time::interval]
+    /// Creates a new [`ResolveNatInterval`] that attempts to resolve the public IP with interval of
+    /// period. See also [`tokio::time::interval`]
     #[track_caller]
     pub fn interval(resolver: NatResolver, period: Duration) -> Self {
         let interval = tokio::time::interval(period);
         Self::with_interval(resolver, interval)
     }
 
-    /// Creates a new [ResolveNatInterval] that attempts to resolve the public IP with interval of
-    /// period with the first attempt starting at `start`. See also [tokio::time::interval_at]
+    /// Creates a new [`ResolveNatInterval`] that attempts to resolve the public IP with interval of
+    /// period with the first attempt starting at `start`. See also [`tokio::time::interval_at`]
     #[track_caller]
     pub fn interval_at(
         resolver: NatResolver,
@@ -143,18 +143,18 @@ impl ResolveNatInterval {
         Self::with_interval(resolver, interval)
     }
 
-    /// Completes when the next [IpAddr] in the interval has been reached.
+    /// Completes when the next [`IpAddr`] in the interval has been reached.
     pub async fn tick(&mut self) -> Option<IpAddr> {
         poll_fn(|cx| self.poll_tick(cx)).await
     }
 
-    /// Polls for the next resolved [IpAddr] in the interval to be reached.
+    /// Polls for the next resolved [`IpAddr`] in the interval to be reached.
     ///
     /// This method can return the following values:
     ///
-    ///  * `Poll::Pending` if the next [IpAddr] has not yet been resolved.
-    ///  * `Poll::Ready(Option<IpAddr>)` if the next [IpAddr] has been resolved. This returns `None`
-    ///    if the attempt was unsuccessful.
+    ///  * `Poll::Pending` if the next [`IpAddr`] has not yet been resolved.
+    ///  * `Poll::Ready(Option<IpAddr>)` if the next [`IpAddr`] has been resolved. This returns
+    ///    `None` if the attempt was unsuccessful.
     pub fn poll_tick(&mut self, cx: &mut Context<'_>) -> Poll<Option<IpAddr>> {
         if self.interval.poll_tick(cx).is_ready() {
             self.future = Some(Box::pin(self.resolver.external_addr()));

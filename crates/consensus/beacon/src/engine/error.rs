@@ -7,7 +7,7 @@ use reth_stages_api::PipelineError;
 pub type BeaconEngineResult<Ok> = Result<Ok, BeaconConsensusEngineError>;
 
 /// The error type for the beacon consensus engine service
-/// [BeaconConsensusEngine](crate::BeaconConsensusEngine)
+/// [`BeaconConsensusEngine`](crate::BeaconConsensusEngine)
 ///
 /// Represents all possible error cases for the beacon consensus engine.
 #[derive(Debug, thiserror::Error)]
@@ -24,7 +24,7 @@ pub enum BeaconConsensusEngineError {
     /// Hook error.
     #[error(transparent)]
     Hook(#[from] EngineHookError),
-    /// Common error. Wrapper around [RethError].
+    /// Common error. Wrapper around [`RethError`].
     #[error(transparent)]
     Common(#[from] RethError),
 }

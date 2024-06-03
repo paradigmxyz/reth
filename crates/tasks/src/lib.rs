@@ -47,13 +47,13 @@ pub mod pool;
 
 /// A type that can spawn tasks.
 ///
-/// The main purpose of this type is to abstract over [TaskExecutor] so it's more convenient to
+/// The main purpose of this type is to abstract over [`TaskExecutor`] so it's more convenient to
 /// provide default impls for testing.
 ///
 ///
 /// # Examples
 ///
-/// Use the [TokioTaskExecutor] that spawns with [tokio::task::spawn]
+/// Use the [`TokioTaskExecutor`] that spawns with [`tokio::task::spawn`]
 ///
 /// ```
 /// # async fn t() {
@@ -67,7 +67,7 @@ pub mod pool;
 /// # }
 /// ```
 ///
-/// Use the [TaskExecutor] that spawns task directly onto the tokio runtime via the [Handle].
+/// Use the [`TaskExecutor`] that spawns task directly onto the tokio runtime via the [Handle].
 ///
 /// ```
 /// # use reth_tasks::TaskManager;
@@ -83,7 +83,7 @@ pub mod pool;
 /// # }
 /// ```
 ///
-/// The [TaskSpawner] trait is [DynClone] so `Box<dyn TaskSpawner>` are also `Clone`.
+/// The [`TaskSpawner`] trait is [`DynClone`] so `Box<dyn TaskSpawner>` are also `Clone`.
 pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     /// Spawns the task onto the runtime.
     /// See also [`Handle::spawn`].
@@ -105,7 +105,7 @@ pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
 
 dyn_clone::clone_trait_object!(TaskSpawner);
 
-/// An [TaskSpawner] that uses [tokio::task::spawn] to execute tasks
+/// An [`TaskSpawner`] that uses [`tokio::task::spawn`] to execute tasks
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct TokioTaskExecutor;
@@ -161,14 +161,14 @@ pub struct TaskManager {
     signal: Option<Signal>,
     /// Receiver of the shutdown signal.
     on_shutdown: Shutdown,
-    /// How many [GracefulShutdown] tasks are currently active
+    /// How many [`GracefulShutdown`] tasks are currently active
     graceful_tasks: Arc<AtomicUsize>,
 }
 
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a a [TaskManager] over the currently running Runtime.
+    /// Returns a a [`TaskManager`] over the currently running Runtime.
     ///
     /// # Panics
     ///
@@ -289,7 +289,7 @@ pub struct TaskExecutor {
     panicked_tasks_tx: UnboundedSender<PanickedTaskError>,
     // Task Executor Metrics
     metrics: TaskExecutorMetrics,
-    /// How many [GracefulShutdown] tasks are currently active
+    /// How many [`GracefulShutdown`] tasks are currently active
     graceful_tasks: Arc<AtomicUsize>,
 }
 
@@ -306,7 +306,7 @@ impl TaskExecutor {
         &self.on_shutdown
     }
 
-    /// Spawns a future on the tokio runtime depending on the [TaskKind]
+    /// Spawns a future on the tokio runtime depending on the [`TaskKind`]
     fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
@@ -320,7 +320,7 @@ impl TaskExecutor {
         }
     }
 
-    /// Spawns a regular task depending on the given [TaskKind]
+    /// Spawns a regular task depending on the given [`TaskKind`]
     fn spawn_task_as<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
@@ -383,7 +383,7 @@ impl TaskExecutor {
         self.handle.spawn(task)
     }
 
-    /// Spawns a critical task depending on the given [TaskKind]
+    /// Spawns a critical task depending on the given [`TaskKind`]
     fn spawn_critical_as<F>(
         &self,
         name: &'static str,
@@ -472,8 +472,8 @@ impl TaskExecutor {
 
     /// This spawns a critical task onto the runtime.
     ///
-    /// If this task panics, the [TaskManager] is notified.
-    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    /// If this task panics, the [`TaskManager`] is notified.
+    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
     ///
     /// # Example
     ///
@@ -521,7 +521,7 @@ impl TaskExecutor {
 
     /// This spawns a regular task onto the runtime.
     ///
-    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
     ///
     /// # Example
     ///
@@ -579,12 +579,12 @@ impl TaskSpawner for TaskExecutor {
     }
 }
 
-/// TaskSpawner with extended behaviour
+/// `TaskSpawner` with extended behaviour
 pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     /// This spawns a critical task onto the runtime.
     ///
-    /// If this task panics, the [TaskManager] is notified.
-    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    /// If this task panics, the [`TaskManager`] is notified.
+    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
     fn spawn_critical_with_graceful_shutdown_signal<F>(
         &self,
         name: &'static str,
@@ -595,7 +595,7 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
 
     /// This spawns a regular task onto the runtime.
     ///
-    /// The [TaskManager] will wait until the given future has completed before shutting down.
+    /// The [`TaskManager`] will wait until the given future has completed before shutting down.
     fn spawn_with_graceful_shutdown_signal<F>(
         &self,
         f: impl FnOnce(GracefulShutdown) -> F,
@@ -629,9 +629,9 @@ impl TaskSpawnerExt for TaskExecutor {
 
 /// Determines how a task is spawned
 enum TaskKind {
-    /// Spawn the task to the default executor [Handle::spawn]
+    /// Spawn the task to the default executor [`Handle::spawn`]
     Default,
-    /// Spawn the task to the blocking executor [Handle::spawn_blocking]
+    /// Spawn the task to the blocking executor [`Handle::spawn_blocking`]
     Blocking,
 }
 

@@ -70,9 +70,9 @@ pub struct Command {
 pub enum Stages {
     /// Execution stage.
     Execution(StageCommand),
-    /// StorageHashing stage.
+    /// `StorageHashing` stage.
     StorageHashing(StageCommand),
-    /// AccountHashing stage.
+    /// `AccountHashing` stage.
     AccountHashing(StageCommand),
     /// Merkle stage.
     Merkle(StageCommand),

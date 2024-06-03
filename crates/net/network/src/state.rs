@@ -63,8 +63,9 @@ pub struct NetworkState<C> {
     discovery: Discovery,
     /// The type that handles requests.
     ///
-    /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
-    /// then queue in the request and notify the fetcher once the result has been received.
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
+    /// will then queue in the request and notify the fetcher once the result has been
+    /// received.
     state_fetcher: StateFetcher,
 }
 
@@ -379,7 +380,7 @@ where
     /// Invoked when received a response from a connected peer.
     ///
     /// Delegates the response result to the fetcher which may return an outcome specific
-    /// instruction that needs to be handled in [Self::on_block_response_outcome]. This could be
+    /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
     fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
@@ -518,7 +519,7 @@ pub(crate) enum StateAction {
         /// The reported [`ForkId`] by this peer.
         fork_id: ForkId,
     },
-    /// A new node was found through the discovery, possibly with a ForkId
+    /// A new node was found through the discovery, possibly with a `ForkId`
     DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
@@ -547,7 +548,7 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-    /// Returns a testing instance of the [NetworkState].
+    /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState<NoopProvider> {
         let peers = PeersManager::default();
         let handle = peers.handle();

@@ -90,7 +90,7 @@ pub(crate) struct ActiveSession {
     pub(crate) internal_request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
     pub(crate) internal_request_timeout_interval: Interval,
-    /// If an [ActiveSession] does not receive a response at all within this duration then it is
+    /// If an [`ActiveSession`] does not receive a response at all within this duration then it is
     /// considered a protocol violation and the session will initiate a drop.
     pub(crate) protocol_breach_request_timeout: Duration,
     /// Used to reserve a slot to guarantee that the termination message is delivered

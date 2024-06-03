@@ -39,7 +39,7 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
-    /// OptimismPayloadBuilder constructor.
+    /// `OptimismPayloadBuilder` constructor.
     pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, chain_spec, evm_config }
     }
@@ -67,7 +67,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     }
 }
 
-/// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
+/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,

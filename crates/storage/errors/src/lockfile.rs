@@ -12,7 +12,7 @@ pub enum StorageLockError {
     Other(String),
 }
 
-/// TODO: turn into variant once ProviderError
+/// TODO: turn into variant once `ProviderError`
 impl From<FsPathError> for StorageLockError {
     fn from(source: FsPathError) -> Self {
         Self::Other(source.to_string())

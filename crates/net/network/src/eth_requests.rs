@@ -38,7 +38,7 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// Maximum number of block headers to serve.
 ///
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
-/// SOFT_RESPONSE_LIMIT.
+/// `SOFT_RESPONSE_LIMIT`.
 const MAX_BODIES_SERVE: usize = 1024;
 
 /// Maximum size of replies to data retrievals.
@@ -56,7 +56,7 @@ pub struct EthRequestHandler<C> {
     // TODO use to report spammers
     #[allow(dead_code)]
     peers: PeersHandle,
-    /// Incoming request from the [NetworkManager](crate::NetworkManager).
+    /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest>,
     /// Metrics for the eth request handler.
     metrics: EthRequestHandlerMetrics,

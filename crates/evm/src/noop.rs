@@ -12,7 +12,7 @@ use crate::execute::{
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 
-/// A [BlockExecutorProvider] implementation that does nothing.
+/// A [`BlockExecutorProvider`] implementation that does nothing.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct NoopBlockExecutorProvider;

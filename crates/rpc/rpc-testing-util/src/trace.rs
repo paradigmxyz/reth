@@ -53,7 +53,7 @@ pub trait TraceApiExt {
 
     /// Returns a new stream that yields the traces for the given blocks.
     ///
-    /// See also [StreamExt::buffered].
+    /// See also [`StreamExt::buffered`].
     fn trace_block_buffered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>
     where
         I: IntoIterator<Item = B>,
@@ -61,7 +61,7 @@ pub trait TraceApiExt {
 
     /// Returns a new stream that yields the traces for the given blocks.
     ///
-    /// See also [StreamExt::buffer_unordered].
+    /// See also [`StreamExt::buffer_unordered`].
     fn trace_block_buffered_unordered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>
     where
         I: IntoIterator<Item = B>,
