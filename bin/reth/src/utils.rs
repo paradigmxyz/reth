@@ -225,7 +225,7 @@ pub fn create_provider_factory(
         .static_file_provider()
         .check_consistency(&factory.provider()?, has_receipt_pruning)?
     {
-        if factory.db_ref().is_read_only() {
+        if factory.db_ref().is_read_only() || factory.static_file_provider().is_read_only() {
             return Err(eyre::eyre!("Inconsistent storage. Restart node to heal: {unwind_target}"));
         }
 
