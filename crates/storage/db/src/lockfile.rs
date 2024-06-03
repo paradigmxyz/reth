@@ -1,9 +1,8 @@
 //! Storage lock utils.
 
 use reth_storage_errors::lockfile::StorageLockError;
+use reth_tracing::tracing::error;
 use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Write},
     path::{Path, PathBuf},
     process,
     sync::Arc,
@@ -40,9 +39,12 @@ impl StorageLock {
 
 impl Drop for StorageLock {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.0) == 1 {
-            if let Err(e) = std::fs::remove_file(&self.0.path) {
-                eprintln!("Failed to delete lock file: {}", e);
+        if Arc::strong_count(&self.0) == 1 && self.0.file_path.exists() {
+            // TODO: should only happen during tests that the file does not exist: tempdir is
+            // getting dropped first. However, tempdir shouldn't be dropped
+            // before any of the storage providers.
+            if let Err(err) = reth_fs_util::remove_file(&self.0.file_path) {
+                error!(%err, "Failed to delete lock file");
             }
         }
     }
@@ -50,25 +52,27 @@ impl Drop for StorageLock {
 
 #[derive(Debug)]
 struct StorageLockInner {
-    path: PathBuf,
+    file_path: PathBuf,
 }
 
 impl StorageLockInner {
     /// Creates lock file and writes this process PID into it.
-    fn new(file_path: impl AsRef<Path>) -> Result<Self, StorageLockError> {
-        let path = file_path.as_ref().to_path_buf();
-        let mut file = OpenOptions::new().create(true).truncate(true).write(true).open(&path)?;
-        write!(file, "{}", process::id() as usize)?;
-        Ok(Self { path })
+    fn new(file_path: PathBuf) -> Result<Self, StorageLockError> {
+        // Create the directory if it doesn't exist
+        if let Some(parent) = file_path.parent() {
+            reth_fs_util::create_dir_all(parent)?;
+        }
+
+        reth_fs_util::write(&file_path, format!("{}", process::id()))?;
+
+        Ok(Self { file_path })
     }
 }
 
 /// Parses the PID from the lock file if it exists.
-fn parse_lock_file_pid(path: impl AsRef<Path>) -> Result<Option<usize>, StorageLockError> {
-    if path.as_ref().exists() {
-        let mut file = File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
+fn parse_lock_file_pid(path: &Path) -> Result<Option<usize>, StorageLockError> {
+    if path.exists() {
+        let contents = reth_fs_util::read_to_string(path)?;
         return Ok(contents.trim().parse().ok())
     }
     Ok(None)
