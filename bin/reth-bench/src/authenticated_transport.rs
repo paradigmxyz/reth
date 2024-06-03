@@ -20,20 +20,20 @@ use tokio::sync::RwLock;
 use tower::Service;
 
 /// An enum representing the different transports that can be used to connect to a runtime.
-/// Only meant to be used internally by [AuthenticatedTransport].
+/// Only meant to be used internally by [`AuthenticatedTransport`].
 #[derive(Clone, Debug)]
 pub enum InnerTransport {
     /// HTTP transport
     Http(ReqwestTransport),
-    /// WebSocket transport
+    /// `WebSocket` transport
     Ws(PubSubFrontend),
     /// IPC transport
     Ipc(PubSubFrontend),
 }
 
 impl InnerTransport {
-    /// Connects to a transport based on the given URL and JWT. Returns an [InnerTransport] and the
-    /// [Claims] generated from the jwt.
+    /// Connects to a transport based on the given URL and JWT. Returns an [`InnerTransport`] and
+    /// the [`Claims`] generated from the jwt.
     async fn connect(
         url: Url,
         jwt: JwtSecret,
@@ -46,8 +46,8 @@ impl InnerTransport {
         }
     }
 
-    /// Connects to an HTTP [alloy_transport_http::Http] transport. Returns an [InnerTransport] and
-    /// the [Claims] generated from the jwt.
+    /// Connects to an HTTP [`alloy_transport_http::Http`] transport. Returns an [`InnerTransport`]
+    /// and the [Claims] generated from the jwt.
     async fn connect_http(
         url: Url,
         jwt: JwtSecret,
@@ -74,8 +74,8 @@ impl InnerTransport {
         Ok((inner, claims))
     }
 
-    /// Connects to a WebSocket [alloy_transport_ws::WsConnect] transport. Returns an
-    /// [InnerTransport] and the [Claims] generated from the jwt.
+    /// Connects to a `WebSocket` [`alloy_transport_ws::WsConnect`] transport. Returns an
+    /// [`InnerTransport`] and the [`Claims`] generated from the jwt.
     async fn connect_ws(
         url: Url,
         jwt: JwtSecret,
@@ -93,8 +93,8 @@ impl InnerTransport {
         Ok((inner, claims))
     }
 
-    /// Connects to an IPC [alloy_transport_ipc::IpcConnect] transport. Returns an [InnerTransport].
-    /// Does not return any [Claims] because IPC does not require them.
+    /// Connects to an IPC [`alloy_transport_ipc::IpcConnect`] transport. Returns an
+    /// [`InnerTransport`]. Does not return any [`Claims`] because IPC does not require them.
     async fn connect_ipc(url: Url) -> Result<Self, AuthenticatedTransportError> {
         // IPC, even for engine, typically does not require auth because it's local
         IpcConnect::new(url.to_string())
@@ -152,7 +152,7 @@ impl AuthenticatedTransport {
     /// Sends a request using the underlying transport.
     ///
     /// For sending the actual request, this action is delegated down to the underlying transport
-    /// through Tower's [tower::Service::call]. See tower's [tower::Service] trait for more
+    /// through Tower's [`tower::Service::call`]. See tower's [`tower::Service`] trait for more
     /// information.
     fn request(&self, req: RequestPacket) -> TransportFut<'static> {
         let this = self.clone();
