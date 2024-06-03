@@ -16,7 +16,7 @@ use tokio_retry::{strategy::FixedInterval, Retry};
 use url::Host;
 
 /// Represents the node record of a trusted peer. The only difference between this and a
-/// [NodeRecord] is that this does not contain the IP address of the peer, but rather a domain
+/// [`NodeRecord`] is that this does not contain the IP address of the peer, but rather a domain
 /// __or__ IP address.
 ///
 /// This is useful when specifying nodes which are in internal infrastructure and may only be
@@ -64,7 +64,7 @@ impl TrustedPeer {
         Self { host, tcp_port: port, udp_port: port, id }
     }
 
-    /// Resolves the host in a [TrustedPeer] to an IP address, returning a [NodeRecord].
+    /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
     pub async fn resolve(
         &self,
         retry_strategy: Option<RetryStrategy>,
