@@ -1,4 +1,4 @@
-//! Runs the `reth benchmark` command, calling first newPayload for each block, then calling
+//! Runs the `reth bench` command, calling first newPayload for each block, then calling
 //! forkchoiceUpdated.
 
 use crate::{
@@ -11,6 +11,7 @@ use alloy_provider::{network::AnyNetwork, Provider, ProviderBuilder, RootProvide
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::{ForkchoiceState, JwtSecret};
 use clap::Parser;
+use csv::Writer;
 use reqwest::Url;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
@@ -205,6 +206,17 @@ impl Command {
             // record the current result
             let row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push(row);
+        }
+
+        // write the output to a file
+        if let Some(path) = self.benchmark.output {
+            info!("Writing benchmark output to file: {:?}", path);
+            let mut writer = Writer::from_path(path.clone())?;
+            for row in &results {
+                writer.serialize(row)?;
+            }
+            writer.flush()?;
+            info!("Finished writing benchmark to {:?}.", path);
         }
 
         // accumulate the results and calculate the overall Ggas/s

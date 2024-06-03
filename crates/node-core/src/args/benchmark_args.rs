@@ -1,7 +1,6 @@
 //! clap [Args](clap::Args) for benchmark configuration
 
 use clap::Args;
-use humantime::{parse_duration, Duration};
 use std::path::PathBuf;
 
 /// Parameters for benchmark configuration
@@ -24,22 +23,6 @@ pub struct BenchmarkArgs {
     #[arg(long = "benchmark.to", verbatim_doc_comment, conflicts_with = "continuous")]
     pub to: Option<u64>,
 
-    /// Interval between blocks.
-    ///
-    /// Parses strings using [humantime::parse_duration]
-    /// --benchmark.block-time 12s
-    #[arg(
-        long = "benchmark.block-time",
-        value_parser = parse_duration,
-        verbatim_doc_comment
-    )]
-    pub block_time: Option<Duration>,
-
-    /// Whether or not to use getPayload for payload construction instead of directly converting
-    /// blocks into payloads.
-    #[arg(long = "benchmark.build_blocks", verbatim_doc_comment)]
-    pub build_block: bool,
-
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
     ///
     /// This will perform JWT authentication for all requests to the other EL.
@@ -57,6 +40,10 @@ pub struct BenchmarkArgs {
         default_value = "http://localhost:8551"
     )]
     pub engine_rpc_url: String,
+
+    /// The path to the output file for granular benchmark results.
+    #[arg(long, short, value_name = "BENCHMARK_OUTPUT", verbatim_doc_comment)]
+    pub output: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -77,7 +64,7 @@ mod tests {
             engine_rpc_url: "http://localhost:8551".to_string(),
             ..Default::default()
         };
-        let args = CommandParser::<BenchmarkArgs>::parse_from(["reth"]).args;
+        let args = CommandParser::<BenchmarkArgs>::parse_from(["reth-bench"]).args;
         assert_eq!(args, default_args);
     }
 }

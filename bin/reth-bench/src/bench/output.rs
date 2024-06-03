@@ -5,6 +5,8 @@
 
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 /// Represents one Kilogas, or `1_000` gas.
 const KILOGAS: u64 = 1_000;
 
@@ -52,7 +54,7 @@ pub(crate) struct CombinedResult {
     pub(crate) new_payload_result: NewPayloadResult,
     /// The latency of the `forkchoiceUpdated` call.
     pub(crate) fcu_latency: Duration,
-    /// The latency of both calls.
+    /// The latency of both calls combined.
     pub(crate) total_latency: Duration,
 }
 
@@ -78,7 +80,7 @@ impl std::fmt::Display for CombinedResult {
 }
 
 /// This represents a row of total gas data in the benchmark.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct TotalGasRow {
     /// The block number of the block being processed.
     #[allow(dead_code)]
