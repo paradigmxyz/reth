@@ -7,20 +7,6 @@ $ reth db diff --help
 Usage: reth db diff [OPTIONS] --secondary-datadir <SECONDARY_DATADIR> --output <OUTPUT>
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
-      --secondary-datadir <SECONDARY_DATADIR>
-          The path to the data dir for all reth files and subdirectories.
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -29,6 +15,9 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
 
           [default: mainnet]
+
+      --secondary-datadir <SECONDARY_DATADIR>
+          The path to the data dir for all reth files and subdirectories.
 
       --instance <INSTANCE>
           Add a new instance of a node.
