@@ -40,7 +40,7 @@ impl<DB: Database> DbTool<DB> {
         Ok(Self { provider_factory })
     }
 
-    /// Get an [Arc] to the [ChainSpec].
+    /// Get an [`Arc`] to the [`ChainSpec`].
     pub fn chain(&self) -> Arc<ChainSpec> {
         self.provider_factory.chain_spec()
     }
