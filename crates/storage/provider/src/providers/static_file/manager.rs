@@ -117,7 +117,7 @@ pub struct StaticFileProviderInner {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
-    /// Write lock for when access is [StaticFileAccess::RW].
+    /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
 }
 
