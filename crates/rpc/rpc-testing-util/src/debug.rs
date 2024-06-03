@@ -74,9 +74,9 @@ pub trait DebugApiExt {
     ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 }
 
-impl<T: DebugApiClient + Sync> DebugApiExt for T
+impl<T> DebugApiExt for T
 where
-    T: EthApiClient,
+    T: EthApiClient + DebugApiClient + Sync,
 {
     type Provider = T;
 

@@ -174,7 +174,7 @@ non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
-type_repetition_in_bounds = "allow"
+type_repetition_in_bounds = "warn"
 
 [workspace.package]
 version = "0.2.0-beta.7"
