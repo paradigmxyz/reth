@@ -18,3 +18,6 @@ pub mod payload;
 pub use payload::{
     OptimismBuiltPayload, OptimismPayloadAttributes, OptimismPayloadBuilderAttributes,
 };
+
+/// Re-export for use in downstream arguments.
+pub use reth_rpc_types::engine::OptimismPayloadAttributes;
