@@ -5,7 +5,6 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
 
-mod building;
 mod new_payload_fcu;
 mod new_payload_only;
 
@@ -27,9 +26,6 @@ pub enum Subcommands {
 
     /// Benchmark which only calls subsequent `newPayload` calls.
     NewPayloadOnly(new_payload_only::Command),
-
-    /// Benchmark which calls `forkchoiceUpdated`, then `getPayload`, then `newPayload`.
-    Building(building::Command),
 }
 
 impl BenchmarkCommand {
@@ -41,7 +37,6 @@ impl BenchmarkCommand {
         match self.command {
             Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
-            Subcommands::Building(command) => command.execute(ctx).await,
         }
     }
 
