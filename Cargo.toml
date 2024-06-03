@@ -159,6 +159,7 @@ iter_on_single_items = "warn"
 doc_markdown = "warn"
 unnecessary_struct_initialization = "warn"
 string_lit_as_bytes = "warn"
+bool_to_int_with_if = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.

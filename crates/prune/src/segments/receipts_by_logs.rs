@@ -172,7 +172,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
                     // If there's more receipts to prune, set the checkpoint block number to
                     // previous, so we could finish pruning its receipts on the
                     // next run.
-                    .saturating_sub(if done { 0 } else { 1 }),
+                    .saturating_sub(u64::from(!done)),
             );
 
             if limiter.is_limit_reached() {

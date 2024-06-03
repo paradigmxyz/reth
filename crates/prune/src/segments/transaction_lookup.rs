@@ -85,7 +85,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             // If there's more transaction lookup entries to prune, set the checkpoint block number
             // to previous, so we could finish pruning its transaction lookup entries on the next
             // run.
-            .checked_sub(if done { 0 } else { 1 });
+            .checked_sub(u64::from(!done));
 
         let progress = PruneProgress::new(done, &limiter);
 
@@ -211,8 +211,8 @@ mod tests {
                 .unwrap();
             provider.commit().expect("commit");
 
-            let last_pruned_block_number = last_pruned_block_number
-                .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
+            let last_pruned_block_number =
+                last_pruned_block_number.checked_sub(u64::from(!result.progress.is_finished()));
 
             assert_eq!(
                 db.table::<tables::TransactionHashNumbers>().unwrap().len(),
