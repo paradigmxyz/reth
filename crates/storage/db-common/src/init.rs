@@ -582,7 +582,7 @@ mod tests {
         let genesis_hash = init_genesis(ProviderFactory::new(
             factory.into_db(),
             MAINNET.clone(),
-            StaticFileProvider::read_write(static_file_provider.path()).unwrap(),
+            static_file_provider,
         ));
 
         assert_eq!(

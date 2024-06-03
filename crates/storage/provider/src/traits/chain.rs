@@ -12,10 +12,10 @@ use tokio::sync::broadcast;
 use tokio_stream::{wrappers::BroadcastStream, Stream};
 use tracing::debug;
 
-/// Type alias for a receiver that receives [CanonStateNotification]
+/// Type alias for a receiver that receives [`CanonStateNotification`]
 pub type CanonStateNotifications = broadcast::Receiver<CanonStateNotification>;
 
-/// Type alias for a sender that sends [CanonStateNotification]
+/// Type alias for a sender that sends [`CanonStateNotification`]
 pub type CanonStateNotificationSender = broadcast::Sender<CanonStateNotification>;
 
 /// A type that allows to register chain related event subscriptions.
@@ -104,7 +104,7 @@ impl CanonStateNotification {
 
     /// Get the new chain if any.
     ///
-    /// Returns the new committed [Chain] for [Self::Reorg] and [Self::Commit] variants.
+    /// Returns the new committed [Chain] for [`Self::Reorg`] and [`Self::Commit`] variants.
     pub fn committed(&self) -> Arc<Chain> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.clone(),
@@ -113,8 +113,8 @@ impl CanonStateNotification {
 
     /// Returns the new tip of the chain.
     ///
-    /// Returns the new tip for [Self::Reorg] and [Self::Commit] variants which commit at least 1
-    /// new block.
+    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
+    /// 1 new block.
     pub fn tip(&self) -> &SealedBlockWithSenders {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),

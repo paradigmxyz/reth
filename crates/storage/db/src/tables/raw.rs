@@ -21,7 +21,7 @@ impl<T: Table> Table for RawTable<T> {
     type Value = RawValue<T::Value>;
 }
 
-/// Raw DupSort table that can be used to access any table and its data in raw mode.
+/// Raw `DupSort` table that can be used to access any table and its data in raw mode.
 /// This is useful for delayed decoding/encoding of data.
 #[derive(Default, Copy, Clone, Debug)]
 pub struct RawDupSort<T: DupSort> {

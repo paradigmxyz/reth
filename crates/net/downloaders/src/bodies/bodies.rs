@@ -282,7 +282,7 @@ where
     Provider: HeaderProvider + Unpin + 'static,
     Self: BodyDownloader + 'static,
 {
-    /// Spawns the downloader task via [tokio::task::spawn]
+    /// Spawns the downloader task via [`tokio::task::spawn`]
     pub fn into_task(self) -> TaskDownloader {
         self.into_task_with(&TokioTaskExecutor::default())
     }
@@ -461,7 +461,7 @@ impl OrderedBodiesResponse {
 
     /// Returns the size of the response in bytes
     ///
-    /// See [BlockResponse::size]
+    /// See [`BlockResponse::size`]
     #[inline]
     const fn size(&self) -> usize {
         self.size
@@ -488,7 +488,7 @@ impl Ord for OrderedBodiesResponse {
     }
 }
 
-/// Builder for [BodiesDownloader].
+/// Builder for [`BodiesDownloader`].
 #[derive(Debug, Clone)]
 pub struct BodiesDownloaderBuilder {
     /// The batch size of non-empty blocks per one request
@@ -502,8 +502,8 @@ pub struct BodiesDownloaderBuilder {
 }
 
 impl BodiesDownloaderBuilder {
-    /// Creates a new [BodiesDownloaderBuilder] with configurations based on the provided
-    /// [BodiesConfig].
+    /// Creates a new [`BodiesDownloaderBuilder`] with configurations based on the provided
+    /// [`BodiesConfig`].
     pub fn new(config: BodiesConfig) -> Self {
         Self::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)

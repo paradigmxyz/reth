@@ -48,7 +48,7 @@ pub use common::LaunchContext;
 ///
 /// This is essentially the launch logic for a node.
 ///
-/// See also [DefaultNodeLauncher] and [NodeBuilderWithComponents::launch_with]
+/// See also [`DefaultNodeLauncher`] and [`NodeBuilderWithComponents::launch_with`]
 pub trait LaunchNode<Target> {
     /// The node type that is created.
     type Node;
@@ -166,7 +166,6 @@ where
             // once the Blockchain provider no longer depends on an instance of the tree
             .with_canon_state_notification_sender(canon_state_notification_sender);
 
-        let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Replace the tree component with the actual tree
@@ -301,7 +300,6 @@ where
                 blockchain_db.clone(),
                 node_adapter.components.pool().clone(),
                 consensus_engine_tx.clone(),
-                canon_state_notification_sender,
                 mining_mode,
                 node_adapter.components.block_executor().clone(),
             )

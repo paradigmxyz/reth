@@ -5,7 +5,7 @@ use revm::L1BlockInfo;
 /// Optimism Transaction Metadata
 ///
 /// Includes the L1 fee and data gas for the tx along with the L1
-/// block info. In order to pass the [OptimismTxMeta] into the
+/// block info. In order to pass the [`OptimismTxMeta`] into the
 /// async colored `build_transaction_receipt_with_block_receipts`
 /// function, a reference counter for the L1 block info is
 /// used so the L1 block info can be shared between receipts.
@@ -20,7 +20,7 @@ pub(crate) struct OptimismTxMeta {
 }
 
 impl OptimismTxMeta {
-    /// Creates a new [OptimismTxMeta].
+    /// Creates a new [`OptimismTxMeta`].
     pub(crate) const fn new(
         l1_block_info: Option<L1BlockInfo>,
         l1_fee: Option<u128>,

@@ -1,4 +1,4 @@
-//! A generic [NodeComponentsBuilder]
+//! A generic [`NodeComponentsBuilder`]
 
 use crate::{
     components::{
@@ -115,7 +115,7 @@ where
 {
     /// Configures the pool builder.
     ///
-    /// This accepts a [PoolBuilder] instance that will be used to create the node's transaction
+    /// This accepts a [`PoolBuilder`] instance that will be used to create the node's transaction
     /// pool.
     pub fn pool<PB>(
         self,
@@ -149,7 +149,7 @@ where
 {
     /// Configures the network builder.
     ///
-    /// This accepts a [NetworkBuilder] instance that will be used to create the node's network
+    /// This accepts a [`NetworkBuilder`] instance that will be used to create the node's network
     /// stack.
     pub fn network<NB>(
         self,
@@ -176,7 +176,7 @@ where
 
     /// Configures the payload builder.
     ///
-    /// This accepts a [PayloadServiceBuilder] instance that will be used to create the node's
+    /// This accepts a [`PayloadServiceBuilder`] instance that will be used to create the node's
     /// payload builder service.
     pub fn payload<PB>(
         self,
@@ -203,8 +203,8 @@ where
 
     /// Configures the executor builder.
     ///
-    /// This accepts a [ExecutorBuilder] instance that will be used to create the node's components
-    /// for execution.
+    /// This accepts a [`ExecutorBuilder`] instance that will be used to create the node's
+    /// components for execution.
     pub fn executor<EB>(
         self,
         executor_builder: EB,
@@ -271,9 +271,9 @@ impl Default for ComponentsBuilder<(), (), (), (), ()> {
 /// A type that configures all the customizable components of the node and knows how to build them.
 ///
 /// Implementers of this trait are responsible for building all the components of the node: See
-/// [NodeComponents].
+/// [`NodeComponents`].
 ///
-/// The [ComponentsBuilder] is a generic, general purpose implementation of this trait that can be
+/// The [`ComponentsBuilder`] is a generic, general purpose implementation of this trait that can be
 /// used to customize certain components of the node using the builder pattern and defaults, e.g.
 /// Ethereum and Optimism.
 /// A type that's responsible for building the components of the node.

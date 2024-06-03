@@ -131,7 +131,7 @@ where
     /// # Note
     ///
     /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
-    /// [EthBlockExecutor::post_execution].
+    /// [`EthBlockExecutor::post_execution`].
     fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,

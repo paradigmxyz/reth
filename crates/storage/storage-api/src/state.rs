@@ -7,7 +7,7 @@ use reth_primitives::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
-/// Type alias of boxed [StateProvider].
+/// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
 
 /// An abstraction for a type that provides state data.

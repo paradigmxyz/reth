@@ -58,8 +58,8 @@ const GRACE_PERIOD: Duration = Duration::from_secs(2);
 /// [`MAX_P2P_CAPACITY`] is the maximum number of messages that can be buffered to be sent in the
 /// `p2p` stream.
 ///
-/// Note: this default is rather low because it is expected that the [P2PStream] wraps an
-/// [ECIESStream](reth_ecies::stream::ECIESStream) which internally already buffers a few MB of
+/// Note: this default is rather low because it is expected that the [`P2PStream`] wraps an
+/// [`ECIESStream`](reth_ecies::stream::ECIESStream) which internally already buffers a few MB of
 /// encoded data.
 const MAX_P2P_CAPACITY: usize = 2;
 
@@ -249,7 +249,7 @@ pub struct P2PStream<S> {
     outgoing_messages: VecDeque<Bytes>,
 
     /// Maximum number of messages that we can buffer here before the [Sink] impl returns
-    /// [Poll::Pending].
+    /// [`Poll::Pending`].
     outgoing_message_buffer_capacity: usize,
 
     /// Whether this stream is currently in the process of disconnecting by sending a disconnect

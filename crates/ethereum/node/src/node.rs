@@ -25,7 +25,7 @@ use reth_transaction_pool::{
 pub struct EthereumNode;
 
 impl EthereumNode {
-    /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
+    /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
     pub fn components<Node>() -> ComponentsBuilder<
         Node,
         EthereumPoolBuilder,

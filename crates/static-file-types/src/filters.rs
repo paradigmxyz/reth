@@ -3,7 +3,7 @@ use strum::AsRefStr;
 #[derive(Debug, Copy, Clone)]
 /// Static File filters.
 pub enum Filters {
-    /// Static File uses filters with [InclusionFilter] and [PerfectHashingFunction].
+    /// Static File uses filters with [`InclusionFilter`] and [`PerfectHashingFunction`].
     WithFilters(InclusionFilter, PerfectHashingFunction),
     /// Static File doesn't use any filters.
     WithoutFilters,

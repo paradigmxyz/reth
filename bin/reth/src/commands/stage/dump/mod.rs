@@ -1,19 +1,16 @@
 //! Database debugging tool
 
-use crate::{
-    dirs::{DataDirPath, MaybePlatformPath},
-    utils::DbTool,
-};
+use crate::{dirs::DataDirPath, utils::DbTool};
 
 use crate::args::{
     utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    DatabaseArgs,
+    DatabaseArgs, DatadirArgs,
 };
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, init_db, mdbx::DatabaseArguments,
-    models::client_version::ClientVersion, table::TableImporter, tables, transaction::DbTx,
-    DatabaseEnv,
+    models::client_version::ClientVersion, open_db_read_only, table::TableImporter, tables,
+    transaction::DbTx, DatabaseEnv,
 };
 use reth_node_core::dirs::PlatformPath;
 use reth_primitives::ChainSpec;
@@ -36,16 +33,6 @@ use merkle::dump_merkle_stage;
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -59,6 +46,9 @@ pub struct Command {
     chain: Arc<ChainSpec>,
 
     #[command(flatten)]
+    datadir: DatadirArgs,
+
+    #[command(flatten)]
     db: DatabaseArgs,
 
     #[command(subcommand)]
@@ -70,9 +60,9 @@ pub struct Command {
 pub enum Stages {
     /// Execution stage.
     Execution(StageCommand),
-    /// StorageHashing stage.
+    /// `StorageHashing` stage.
     StorageHashing(StageCommand),
-    /// AccountHashing stage.
+    /// `AccountHashing` stage.
     AccountHashing(StageCommand),
     /// Merkle stage.
     Merkle(StageCommand),
@@ -101,14 +91,14 @@ impl Command {
     /// Execute `dump-stage` command
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
+        let db = Arc::new(open_db_read_only(&db_path, self.db.database_args())?);
         let provider_factory = ProviderFactory::new(
             db,
             self.chain.clone(),
-            StaticFileProvider::read_write(data_dir.static_files())?,
+            StaticFileProvider::read_only(data_dir.static_files())?,
         );
 
         info!(target: "reth::cli", "Database opened");
@@ -121,7 +111,7 @@ impl Command {
                     &tool,
                     *from,
                     *to,
-                    output_datadir.with_chain(self.chain.chain),
+                    output_datadir.with_chain(self.chain.chain, self.datadir.clone()),
                     *dry_run,
                 )
                 .await?
@@ -131,7 +121,7 @@ impl Command {
                     &tool,
                     *from,
                     *to,
-                    output_datadir.with_chain(self.chain.chain),
+                    output_datadir.with_chain(self.chain.chain, self.datadir.clone()),
                     *dry_run,
                 )
                 .await?
@@ -141,7 +131,7 @@ impl Command {
                     &tool,
                     *from,
                     *to,
-                    output_datadir.with_chain(self.chain.chain),
+                    output_datadir.with_chain(self.chain.chain, self.datadir.clone()),
                     *dry_run,
                 )
                 .await?
@@ -151,7 +141,7 @@ impl Command {
                     &tool,
                     *from,
                     *to,
-                    output_datadir.with_chain(self.chain.chain),
+                    output_datadir.with_chain(self.chain.chain, self.datadir.clone()),
                     *dry_run,
                 )
                 .await?

@@ -27,12 +27,12 @@ impl RateLimit {
         Self { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
     }
 
-    /// Returns the configured limit of the [RateLimit]
+    /// Returns the configured limit of the [`RateLimit`]
     pub const fn limit(&self) -> u64 {
         self.rate.limit()
     }
 
-    /// Checks if the [RateLimit] is ready to handle a new call
+    /// Checks if the [`RateLimit`] is ready to handle a new call
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         match self.state {
             State::Ready { .. } => return Poll::Ready(()),
@@ -51,16 +51,16 @@ impl RateLimit {
         Poll::Ready(())
     }
 
-    /// Wait until the [RateLimit] is ready.
+    /// Wait until the [`RateLimit`] is ready.
     pub async fn wait(&mut self) {
         poll_fn(|cx| self.poll_ready(cx)).await
     }
 
-    /// Updates the [RateLimit] when a new call was triggered
+    /// Updates the [`RateLimit`] when a new call was triggered
     ///
     /// # Panics
     ///
-    /// Panics if [RateLimit::poll_ready] returned [Poll::Pending]
+    /// Panics if [`RateLimit::poll_ready`] returned [`Poll::Pending`]
     pub fn tick(&mut self) {
         match self.state {
             State::Ready { mut until, remaining: mut rem } => {
@@ -86,7 +86,7 @@ impl RateLimit {
     }
 }
 
-/// Tracks the state of the [RateLimit]
+/// Tracks the state of the [`RateLimit`]
 #[derive(Debug)]
 enum State {
     /// Currently limited

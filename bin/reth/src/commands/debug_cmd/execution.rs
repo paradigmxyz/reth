@@ -4,9 +4,8 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
+        DatabaseArgs, DatadirArgs, NetworkArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     macros::block_executor,
     utils::get_single_header,
 };
@@ -48,16 +47,6 @@ use tracing::*;
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -69,6 +58,9 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -151,14 +143,11 @@ impl Command {
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
         let secret_key = get_secret_key(&network_secret_path)?;
-        let static_files = StaticFileProvider::read_only(
-            self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-        )?;
         let network = self
             .network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
@@ -168,7 +157,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             ))
-            .build(ProviderFactory::new(db, self.chain.clone(), static_files))
+            .build(provider_factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -199,7 +188,7 @@ impl Command {
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         let mut config = Config::default();
 
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
@@ -228,7 +217,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )

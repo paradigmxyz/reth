@@ -71,7 +71,7 @@
 //!
 //! Blob transaction can be quite large hence they are stored in a separate blobstore. The pool is
 //! responsible for inserting blob data for new transactions into the blobstore.
-//! See also [ValidTransaction](validate::ValidTransaction)
+//! See also [`ValidTransaction`](validate::ValidTransaction)
 //!
 //!
 //! ## Examples
@@ -279,8 +279,8 @@ where
     Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
-    /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when
-    /// validating [EthPooledTransaction]s and ords via [CoinbaseTipOrdering]
+    /// Returns a new [Pool] that uses the default [`TransactionValidationTaskExecutor`] when
+    /// validating [`EthPooledTransaction`]s and ords via [`CoinbaseTipOrdering`]
     ///
     /// # Example
     ///

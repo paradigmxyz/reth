@@ -26,7 +26,7 @@ criterion_main!(benches);
 /// * `put_sorted`: Table is preloaded with rows (same as batch size). Sorts during benchmark.
 /// * `put_unsorted`: Table is preloaded with rows (same as batch size).
 ///
-/// It does the above steps with different batches of rows. 10_000, 100_000, 1_000_000. In the
+/// It does the above steps with different batches of rows. `10_000`, `100_000`, `1_000_000`. In the
 /// end, the table statistics are shown (eg. number of pages, table size...)
 pub fn hash_keys(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash-Keys Table Insertion");

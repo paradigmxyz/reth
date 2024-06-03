@@ -28,7 +28,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
             ProviderFactory::new(
                 output_db,
                 db_tool.chain.clone(),
-                StaticFileProvider::read_only(output_datadir.static_files())?,
+                StaticFileProvider::read_write(output_datadir.static_files())?,
             ),
             to,
             from,
@@ -117,8 +117,8 @@ fn import_tables_with_range<DB: Database>(
     Ok(())
 }
 
-/// Dry-run an unwind to FROM block, so we can get the PlainStorageState and
-/// PlainAccountState safely. There might be some state dependency from an address
+/// Dry-run an unwind to FROM block, so we can get the `PlainStorageState` and
+/// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
 async fn unwind_and_copy<DB: Database>(
     db_tool: &DbTool<DB>,

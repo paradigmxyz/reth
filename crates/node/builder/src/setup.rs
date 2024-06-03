@@ -74,7 +74,7 @@ where
     Ok(pipeline)
 }
 
-/// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
+/// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_pipeline<DB, H, B, Executor>(
     node_config: &NodeConfig,

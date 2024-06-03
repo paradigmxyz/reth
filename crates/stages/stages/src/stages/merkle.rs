@@ -84,17 +84,17 @@ pub enum MerkleStage {
 }
 
 impl MerkleStage {
-    /// Stage default for the [MerkleStage::Execution].
+    /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
         Self::Execution { clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD }
     }
 
-    /// Stage default for the [MerkleStage::Unwind].
+    /// Stage default for the [`MerkleStage::Unwind`].
     pub const fn default_unwind() -> Self {
         Self::Unwind
     }
 
-    /// Create new instance of [MerkleStage::Execution].
+    /// Create new instance of [`MerkleStage::Execution`].
     pub const fn new_execution(clean_threshold: u64) -> Self {
         Self::Execution { clean_threshold }
     }

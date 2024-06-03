@@ -125,7 +125,7 @@ pub enum EthApiError {
 }
 
 impl EthApiError {
-    /// crates a new [EthApiError::Other] variant.
+    /// crates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -637,7 +637,7 @@ pub enum SignError {
     /// Signer for requested account not found.
     #[error("unknown account")]
     NoAccount,
-    /// TypedData has invalid format.
+    /// `TypedData` has invalid format.
     #[error("given typed data is not valid")]
     InvalidTypedData,
     /// Invalid transaction request in `sign_transaction`.
@@ -648,8 +648,8 @@ pub enum SignError {
     NoChainId,
 }
 
-/// Converts the evm [ExecutionResult] into a result where `Ok` variant is the output bytes if it is
-/// [ExecutionResult::Success].
+/// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if it
+/// is [`ExecutionResult::Success`].
 pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
     match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),

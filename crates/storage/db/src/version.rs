@@ -7,11 +7,11 @@ use std::{
 
 /// The name of the file that contains the version of the database.
 pub const DB_VERSION_FILE_NAME: &str = "database.version";
-/// The version of the database stored in the [DB_VERSION_FILE_NAME] file in the same directory as
+/// The version of the database stored in the [`DB_VERSION_FILE_NAME`] file in the same directory as
 /// database.
 pub const DB_VERSION: u64 = 2;
 
-/// Error when checking a database version using [check_db_version_file]
+/// Error when checking a database version using [`check_db_version_file`]
 #[derive(thiserror::Error, Debug)]
 pub enum DatabaseVersionError {
     /// Unable to determine the version of the database; the file is missing.
@@ -41,10 +41,10 @@ pub enum DatabaseVersionError {
     },
 }
 
-/// Checks the database version file with [DB_VERSION_FILE_NAME] name.
+/// Checks the database version file with [`DB_VERSION_FILE_NAME`] name.
 ///
-/// Returns [Ok] if file is found and has one line which equals to [DB_VERSION].
-/// Otherwise, returns different [DatabaseVersionError] error variants.
+/// Returns [Ok] if file is found and has one line which equals to [`DB_VERSION`].
+/// Otherwise, returns different [`DatabaseVersionError`] error variants.
 pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseVersionError> {
     let version = get_db_version(db_path)?;
     if version != DB_VERSION {
@@ -54,10 +54,10 @@ pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseV
     Ok(())
 }
 
-/// Returns the database version from file with [DB_VERSION_FILE_NAME] name.
+/// Returns the database version from file with [`DB_VERSION_FILE_NAME`] name.
 ///
 /// Returns [Ok] if file is found and contains a valid version.
-/// Otherwise, returns different [DatabaseVersionError] error variants.
+/// Otherwise, returns different [`DatabaseVersionError`] error variants.
 pub fn get_db_version<P: AsRef<Path>>(db_path: P) -> Result<u64, DatabaseVersionError> {
     let version_file_path = db_version_file_path(db_path);
     match fs::read_to_string(&version_file_path) {
@@ -69,7 +69,8 @@ pub fn get_db_version<P: AsRef<Path>>(db_path: P) -> Result<u64, DatabaseVersion
     }
 }
 
-/// Creates a database version file with [DB_VERSION_FILE_NAME] name containing [DB_VERSION] string.
+/// Creates a database version file with [`DB_VERSION_FILE_NAME`] name containing [`DB_VERSION`]
+/// string.
 ///
 /// This function will create a file if it does not exist,
 /// and will entirely replace its contents if it does.

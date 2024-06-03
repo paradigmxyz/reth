@@ -66,7 +66,7 @@ pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = 0;
 pub struct Discv5 {
     /// sigp/discv5 node.
     discv5: Arc<discv5::Discv5>,
-    /// [`IpMode`] of the the RLPx network.
+    /// [`IpMode`] of the the `RLPx` network.
     rlpx_ip_mode: IpMode,
     /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
     fork_key: Option<&'static [u8]>,
@@ -331,7 +331,7 @@ impl Discv5 {
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local RLPx [`IpMode`]. Uses source socket as udp socket.
+    /// w.r.t. local `RLPx` [`IpMode`]. Uses source socket as udp socket.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
@@ -390,7 +390,7 @@ impl Discv5 {
     // Complementary
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
-    /// Returns the RLPx [`IpMode`] of the local node.
+    /// Returns the `RLPx` [`IpMode`] of the local node.
     pub const fn ip_mode(&self) -> IpMode {
         self.rlpx_ip_mode
     }

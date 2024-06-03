@@ -48,7 +48,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
             ProviderFactory::new(
                 output_db,
                 db_tool.chain.clone(),
-                StaticFileProvider::read_only(output_datadir.static_files())?,
+                StaticFileProvider::read_write(output_datadir.static_files())?,
             ),
             to,
             from,
