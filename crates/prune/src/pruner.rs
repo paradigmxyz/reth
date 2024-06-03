@@ -335,14 +335,17 @@ mod tests {
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::{FinishedExExHeight, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
-            .expect("create provide factory with static_files");
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
 
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);

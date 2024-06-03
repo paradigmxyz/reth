@@ -16,7 +16,7 @@ use reth_primitives::{
     },
     BlockNumber, ChainSpec, StaticFileSegment,
 };
-use reth_provider::{BlockNumReader, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, BlockNumReader, ProviderFactory};
 use reth_static_file::{segments as static_file_segments, segments::Segment};
 use std::{
     path::{Path, PathBuf},
@@ -99,7 +99,11 @@ impl Command {
             data_dir.db().as_path(),
             db_args.with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )?;
-        let provider_factory = Arc::new(ProviderFactory::new(db, chain, data_dir.static_files())?);
+        let provider_factory = Arc::new(ProviderFactory::new(
+            db,
+            chain,
+            StaticFileProvider::read_only(data_dir.static_files())?,
+        ));
 
         {
             if !self.only_bench {

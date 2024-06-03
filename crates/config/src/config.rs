@@ -327,6 +327,13 @@ impl Default for PruneConfig {
     }
 }
 
+impl PruneConfig {
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
+    }
+}
+
 /// Helper type to support older versions of Duration deserialization.
 fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
 where
