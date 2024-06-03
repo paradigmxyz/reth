@@ -57,9 +57,7 @@ impl StaticFileSegment {
         };
 
         match self {
-            Self::Headers => default_config,
-            Self::Transactions => default_config,
-            Self::Receipts => default_config,
+            Self::Headers | Self::Transactions | Self::Receipts => default_config,
         }
     }
 
@@ -67,8 +65,7 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions => 1,
-            Self::Receipts => 1,
+            Self::Transactions | Self::Receipts => 1,
         }
     }
 

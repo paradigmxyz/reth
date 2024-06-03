@@ -23,8 +23,7 @@ impl<'a> StructHandler<'a> {
     pub fn generate_to(mut self) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
-                FieldTypes::EnumVariant(_) => unreachable!(),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
+                FieldTypes::EnumVariant(_) | FieldTypes::EnumUnnamedField(_) => unreachable!(),
                 FieldTypes::StructField(field_descriptor) => self.to(field_descriptor),
             }
         }
@@ -34,8 +33,7 @@ impl<'a> StructHandler<'a> {
     pub fn generate_from(&mut self, known_types: &[&str]) -> Vec<TokenStream2> {
         while let Some(field) = self.next_field() {
             match field {
-                FieldTypes::EnumVariant(_) => unreachable!(),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
+                FieldTypes::EnumVariant(_) | FieldTypes::EnumUnnamedField(_) => unreachable!(),
                 FieldTypes::StructField(field_descriptor) => {
                     self.from(field_descriptor, known_types)
                 }

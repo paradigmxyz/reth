@@ -703,8 +703,7 @@ impl Encodable for P2PMessage {
             Self::Hello(msg) => msg.length(),
             Self::Disconnect(msg) => msg.length(),
             // id + snappy encoded payload
-            Self::Ping => 3, // len([0x01, 0x00, 0xc0]) = 3
-            Self::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
+            Self::Ping | Self::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
         };
         payload_len + 1 // (1 for length of p2p message id)
     }

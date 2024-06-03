@@ -191,10 +191,10 @@ impl Error {
             Self::WannaRecovery => ffi::MDBX_WANNA_RECOVERY,
             Self::KeyMismatch => ffi::MDBX_EKEYMISMATCH,
             Self::DecodeErrorLenDiff | Self::DecodeError => ffi::MDBX_EINVAL,
-            Self::Access => ffi::MDBX_EACCESS,
             Self::TooLarge => ffi::MDBX_TOO_LARGE,
             Self::BadSignature => ffi::MDBX_EBADSIGN,
-            Self::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
+            Self::Access |
+            Self::WriteTransactionUnsupportedInReadOnlyMode |
             Self::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Self::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
             Self::Other(err_code) => *err_code,

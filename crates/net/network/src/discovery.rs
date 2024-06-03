@@ -215,7 +215,7 @@ impl Discovery {
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
-            DiscoveryUpdate::Added(record) => {
+            DiscoveryUpdate::Added(record) | DiscoveryUpdate::DiscoveredAtCapacity(record) => {
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
@@ -228,9 +228,6 @@ impl Discovery {
                 for update in updates {
                     self.on_discv4_update(update);
                 }
-            }
-            DiscoveryUpdate::DiscoveredAtCapacity(record) => {
-                self.on_node_record_update(record, None);
             }
         }
     }

@@ -222,6 +222,7 @@ impl Discv5 {
 
     /// Process an event from the underlying [`discv5::Discv5`] node.
     pub fn on_discv5_update(&self, update: discv5::Event) -> Option<DiscoveredPeer> {
+        #[allow(clippy::match_same_arms)]
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
