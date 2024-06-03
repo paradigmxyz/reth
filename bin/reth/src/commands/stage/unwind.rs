@@ -24,7 +24,7 @@ use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
-    commands::common::{AccessRights, Environment},
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
 };
 
@@ -32,7 +32,7 @@ use crate::{
 #[derive(Debug, Parser)]
 pub struct Command {
     #[command(flatten)]
-    env: Environment,
+    env: EnvironmentArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -44,7 +44,7 @@ pub struct Command {
 impl Command {
     /// Execute `db stage unwind` command
     pub async fn execute(self) -> eyre::Result<()> {
-        let (config, provider_factory) = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config } = self.env.init(AccessRights::RW)?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {

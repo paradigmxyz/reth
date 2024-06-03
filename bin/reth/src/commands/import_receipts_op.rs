@@ -1,7 +1,7 @@
 //! Command that imports OP mainnet receipts from Bedrock datadir, exported via
 //! <https://github.com/testinprod-io/op-geth/pull/1>.
 
-use crate::commands::common::{AccessRights, Environment};
+use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_downloaders::{
@@ -22,7 +22,7 @@ use tracing::{debug, error, info, trace};
 #[derive(Debug, Parser)]
 pub struct ImportReceiptsOpCommand {
     #[command(flatten)]
-    env: Environment,
+    env: EnvironmentArgs,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -46,7 +46,7 @@ impl ImportReceiptsOpCommand {
             "Chunking receipts import"
         );
 
-        let (_, provider_factory) = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
         import_receipts_from_file(
             provider_factory,

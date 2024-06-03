@@ -3,7 +3,7 @@
 
 use crate::{
     commands::{
-        common::{AccessRights, Environment},
+        common::{AccessRights, Environment, EnvironmentArgs},
         import::build_import_pipeline,
     },
     version::SHORT_VERSION,
@@ -25,7 +25,7 @@ use tracing::{debug, error, info};
 #[derive(Debug, Parser)]
 pub struct ImportOpCommand {
     #[command(flatten)]
-    env: Environment,
+    env: EnvironmentArgs,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
@@ -53,7 +53,7 @@ impl ImportOpCommand {
             "Chunking chain import"
         );
 
-        let (config, provider_factory) = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config } = self.env.init(AccessRights::RW)?;
 
         // we use noop here because we expect the inputs to be valid
         let consensus = Arc::new(NoopConsensus::default());

@@ -18,7 +18,7 @@ use tracing::{debug, info};
 
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
-pub struct Environment {
+pub struct EnvironmentArgs {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
@@ -50,13 +50,10 @@ pub struct Environment {
     pub db: DatabaseArgs,
 }
 
-impl Environment {
+impl EnvironmentArgs {
     /// Initializes environment according to [AccessRights] and returns a tuple of [Config] &
     /// [ProviderFactory].
-    pub fn init(
-        &self,
-        access: AccessRights,
-    ) -> eyre::Result<(Config, ProviderFactory<Arc<DatabaseEnv>>)> {
+    pub fn init(&self, access: AccessRights) -> eyre::Result<Environment> {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
@@ -86,14 +83,23 @@ impl Environment {
             ),
         };
 
-        let factory = ProviderFactory::new(db, self.chain.clone(), sfp);
+        let provider_factory = ProviderFactory::new(db, self.chain.clone(), sfp);
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-            init_genesis(factory.clone())?;
+            init_genesis(provider_factory.clone())?;
         }
 
-        Ok((config, factory))
+        Ok(Environment { config, provider_factory })
     }
+}
+
+/// Environment built from [EnvironmentArgs].
+#[derive(Debug)]
+pub struct Environment {
+    /// Configuration for reth node
+    pub config: Config,
+    /// Provider factory.
+    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
 }
 
 /// Environment access rights.
