@@ -6,8 +6,8 @@ use reth_trie::{HashedPostState, HashedStorage};
 use revm::db::{states::BundleBuilder, BundleAccount};
 use std::collections::HashMap;
 
-pub fn calculate_post_state(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Calculate Post State");
+pub fn hash_post_state(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Hash Post State");
     group.sample_size(20);
 
     for size in [100, 1_000, 3_000, 5_000, 10_000] {
@@ -76,5 +76,5 @@ fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
     bundle_state.state
 }
 
-criterion_group!(post_state, calculate_post_state);
+criterion_group!(post_state, hash_post_state);
 criterion_main!(post_state);

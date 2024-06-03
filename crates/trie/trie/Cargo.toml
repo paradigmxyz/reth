@@ -65,5 +65,5 @@ name = "prefix_set"
 harness = false
 
 [[bench]]
-name = "post_state"
+name = "hash_post_state"
 harness = false
