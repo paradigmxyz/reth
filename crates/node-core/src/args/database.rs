@@ -50,7 +50,7 @@ impl TypedValueParser for LogLevelValueParser {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = LogLevel::value_variants()
                 .iter()
-                .map(|v| format!("{:?}", v))
+                .map(|v| format!("\"{}\"", v.help_message()))
                 .collect::<Vec<_>>()
                 .join(", ");
             let msg = format!(
