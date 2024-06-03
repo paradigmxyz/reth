@@ -89,7 +89,7 @@ macro_rules! db_ro_exec {
         let provider_factory =
             ProviderFactory::new(db, $chain.clone(), StaticFileProvider::read_only($sfp)?);
 
-        let $tool = DbTool::new(provider_factory, $chain.clone())?;
+        let $tool = DbTool::new(provider_factory)?;
         $command;
     };
 }
@@ -153,7 +153,7 @@ impl Command {
                     StaticFileProvider::read_write(&static_files_path)?,
                 );
 
-                let tool = DbTool::new(provider_factory, self.chain.clone())?;
+                let tool = DbTool::new(provider_factory)?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
