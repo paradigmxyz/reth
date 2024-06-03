@@ -11,20 +11,6 @@ Arguments:
           The table name
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
-      --start-key <START_KEY>
-          The start of the range to checksum
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -33,6 +19,9 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
 
           [default: mainnet]
+
+      --start-key <START_KEY>
+          The start of the range to checksum
 
       --end-key <END_KEY>
           The end of the range to checksum
