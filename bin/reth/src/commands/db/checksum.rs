@@ -10,6 +10,7 @@ use reth_db::{
 };
 use std::{
     hash::{BuildHasher, Hasher},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -36,7 +37,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db checksum` command
-    pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
         self.table.view(&ChecksumViewer {
             tool,

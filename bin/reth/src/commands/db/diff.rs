@@ -15,6 +15,7 @@ use std::{
     hash::Hash,
     io::Write,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tracing::{info, warn};
 
@@ -52,7 +53,7 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();

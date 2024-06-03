@@ -6,9 +6,10 @@ use crate::{
         DatabaseArgs,
     },
     dirs::{DataDirPath, MaybePlatformPath},
-    utils::DbTool,
+    utils::{create_provider_factory, DbTool},
 };
 use clap::{Parser, Subcommand};
+use reth_config::Config;
 use reth_db::{
     open_db, open_db_read_only,
     version::{get_db_version, DatabaseVersionError, DB_VERSION},
@@ -94,10 +95,14 @@ pub enum Subcommands {
 
 /// db_ro_exec opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
-    ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
+    ($config:expr, $chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
         let db = open_db_read_only($db_path, $db_args)?;
-        let provider_factory =
-            ProviderFactory::new(db, $chain.clone(), StaticFileProvider::read_only($sfp)?);
+        let provider_factory = create_provider_factory(
+            &$config,
+            $chain.clone(),
+            Arc::new(db),
+            StaticFileProvider::read_only($sfp)?,
+        )?;
 
         let $tool = DbTool::new(provider_factory, $chain.clone())?;
         $command;
@@ -109,6 +114,8 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         // add network name to data dir
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let config_path = data_dir.config();
+        let config: Config = confy::load_path(config_path).unwrap_or_default();
         let db_path = data_dir.db();
         let db_args = self.db.database_args();
         let static_files_path = data_dir.static_files();
@@ -116,27 +123,27 @@ impl Command {
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
-                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                db_ro_exec!(config, self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(data_dir, &tool)?;
                 });
             }
             Subcommands::List(command) => {
-                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                db_ro_exec!(config, self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Checksum(command) => {
-                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                db_ro_exec!(config, self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Diff(command) => {
-                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                db_ro_exec!(config, self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(&tool)?;
                 });
             }
             Subcommands::Get(command) => {
-                db_ro_exec!(self.chain, &db_path, db_args, static_files_path, tool, {
+                db_ro_exec!(config, self.chain, &db_path, db_args, static_files_path, tool, {
                     command.execute(&tool)?;
                 });
             }
