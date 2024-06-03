@@ -50,11 +50,11 @@ impl TypedValueParser for LogLevelValueParser {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = LogLevel::value_variants()
                 .iter()
-                .map(|v| format!("\"{}\"", v.help_message()))
+                .map(|v| format!("- {}: {}", v, v.help_message()))
                 .collect::<Vec<_>>()
-                .join(", ");
+                .join("\n");
             let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
+                "Invalid value '{val}' for {arg}: {err}.\n    Possible values:\n{possible_values}"
             );
             clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
         })
