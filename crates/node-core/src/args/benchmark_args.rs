@@ -7,10 +7,6 @@ use std::path::PathBuf;
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
 #[command(next_help_heading = "Benchmark")]
 pub struct BenchmarkArgs {
-    /// Run the benchmark as a continuous stream of payloads, until the benchmark is interrupted.
-    #[arg(long, verbatim_doc_comment)]
-    pub continuous: bool,
-
     /// Run the benchmark from a specific block.
     ///
     /// If the `from` block is not provided, the benchmark will start from the latest block.
@@ -20,7 +16,7 @@ pub struct BenchmarkArgs {
     /// Run the benchmark to a specific block.
     ///
     /// This is mutually exclusive with `continuous`.
-    #[arg(long = "benchmark.to", verbatim_doc_comment, conflicts_with = "continuous")]
+    #[arg(long = "benchmark.to", verbatim_doc_comment)]
     pub to: Option<u64>,
 
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
