@@ -65,6 +65,10 @@ impl TrustedPeer {
     }
 
     /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
+    ///
+    /// This takes as input a [`RetryStrategy`] which specifies how to handle DNS lookup failures.
+    ///
+    /// Using a retry strategy of `None` will not retry the lookup if a lookup is made and it fails.
     pub async fn resolve(
         &self,
         retry_strategy: Option<RetryStrategy>,
