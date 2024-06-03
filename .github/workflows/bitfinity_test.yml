@@ -13,6 +13,7 @@ env:
 
 jobs:
   build-test:
+    runs-on: ubuntu-latest
     name: Build and Test
     steps:
       - uses: actions/checkout@v4
