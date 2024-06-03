@@ -1,4 +1,9 @@
-use std::fmt::Display;
+use clap::{
+    builder::{PossibleValue, TypedValueParser},
+    error::ErrorKind,
+    Arg, Command, Error,
+};
+use std::{fmt::Display, str::FromStr};
 use thiserror::Error;
 
 /// Database error type.
@@ -103,7 +108,6 @@ pub enum DatabaseWriteOperation {
 
 /// Database log level.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum LogLevel {
     /// Enables logging for critical conditions, i.e. assertion failures.
     Fatal,
@@ -121,4 +125,89 @@ pub enum LogLevel {
     Trace,
     /// Enables logging for extra debug-level messages.
     Extra,
+}
+
+impl LogLevel {
+    /// All possible variants of the `LogLevel` enum
+    pub const fn value_variants() -> &'static [Self] {
+        &[
+            Self::Fatal,
+            Self::Error,
+            Self::Warn,
+            Self::Notice,
+            Self::Verbose,
+            Self::Debug,
+            Self::Trace,
+            Self::Extra,
+        ]
+    }
+
+    /// Returns all variants descriptions
+    pub const fn help_message(&self) -> &'static str {
+        match self {
+            Self::Fatal => "Enables logging for critical conditions, i.e. assertion failures",
+            Self::Error => "Enables logging for error conditions",
+            Self::Warn => "Enables logging for warning conditions",
+            Self::Notice => "Enables logging for normal but significant conditions",
+            Self::Verbose => "Enables logging for verbose informational",
+            Self::Debug => "Enables logging for debug-level messages",
+            Self::Trace => "Enables logging for trace debug-level messages",
+            Self::Extra => "Enables logging for extra debug-level messages",
+        }
+    }
+}
+
+impl FromStr for LogLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "fatal" => Ok(Self::Fatal),
+            "error" => Ok(Self::Error),
+            "warn" => Ok(Self::Warn),
+            "notice" => Ok(Self::Notice),
+            "verbose" => Ok(Self::Verbose),
+            "debug" => Ok(Self::Debug),
+            "trace" => Ok(Self::Trace),
+            "extra" => Ok(Self::Extra),
+            _ => Err(format!("Invalid log level: {}", s)),
+        }
+    }
+}
+
+/// clap value parser for [`LogLevel`].
+#[derive(Clone, Debug, Default)]
+pub struct LogLevelValueParser;
+
+impl TypedValueParser for LogLevelValueParser {
+    type Value = LogLevel;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        arg: Option<&Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, Error> {
+        let val =
+            value.to_str().ok_or_else(|| Error::raw(ErrorKind::InvalidUtf8, "Invalid UTF-8"))?;
+
+        val.parse::<LogLevel>().map_err(|err| {
+            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let possible_values = LogLevel::value_variants()
+                .iter()
+                .map(|v| format!("{:?}", v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let msg = format!(
+                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
+            );
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+        })
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values =
+            LogLevel::value_variants().iter().map(|v| PossibleValue::new(v.help_message()));
+        Some(Box::new(values))
+    }
 }
