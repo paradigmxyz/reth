@@ -64,7 +64,7 @@ impl<T: Table> Entries<T> {
     }
 
     /// Sets the internal entries [Vec], converting the [`Table::Value`] into
-    /// [`RawValue`<Table::Value>] if needed.
+    /// [`RawValue<Table::Value>`] if needed.
     fn set(&mut self, new_entries: Vec<TableRow<T>>) {
         match self {
             Self::RawValues(old_entries) => {
