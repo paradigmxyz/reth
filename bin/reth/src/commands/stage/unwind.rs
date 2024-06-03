@@ -4,14 +4,14 @@ use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db::{database::Database, open_db};
+use reth_db::database::Database;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::args::NetworkArgs;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
+use reth_primitives::{BlockHashOrNumber, PruneModes, B256};
 use reth_provider::{
-    providers::StaticFileProvider, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
-    HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -24,42 +24,15 @@ use tokio::sync::watch;
 use tracing::info;
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+    commands::common::{AccessRights, Environment},
     macros::block_executor,
 };
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t, global = true)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser,
-        global = true
-    )]
-    chain: Arc<ChainSpec>,
-
     #[command(flatten)]
-    db: DatabaseArgs,
+    env: Environment,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -71,21 +44,7 @@ pub struct Command {
 impl Command {
     /// Execute `db stage unwind` command
     pub async fn execute(self) -> eyre::Result<()> {
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db();
-        if !db_path.exists() {
-            eyre::bail!("Database {db_path:?} does not exist.")
-        }
-        let config_path = data_dir.config();
-        let config: Config = confy::load_path(config_path).unwrap_or_default();
-
-        let db = Arc::new(open_db(db_path.as_ref(), self.db.database_args())?);
-        let provider_factory = ProviderFactory::new(
-            db,
-            self.chain.clone(),
-            StaticFileProvider::read_write(data_dir.static_files())?,
-        );
+        let (config, provider_factory) = self.env.init(AccessRights::RW)?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {
