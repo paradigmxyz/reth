@@ -113,10 +113,14 @@ impl HttpJsonRpcSync {
         }
     }
 
-    pub fn query_validators(&self, contract_address: String) -> Result<Vec<Vec<u8>>, ClRpcError> {
+    pub fn query_validators(
+        &self,
+        contract_address: String,
+        block_number: u64,
+    ) -> Result<Vec<Vec<u8>>, ClRpcError> {
         use ethers_contract::BaseContract;
         let abi = match ethers_core::abi::parse_abi(&[
-            "function allValidators() public view returns (bytes32[] memory)",
+            "function allValidators(uint block_number) public view returns (bytes32[] memory)",
         ]) {
             Ok(c) => c,
             Err(e) => {
@@ -125,7 +129,7 @@ impl HttpJsonRpcSync {
         };
 
         let abi = BaseContract::from(abi);
-        let method_bytes = match abi.encode("allValidators", ()) {
+        let method_bytes = match abi.encode("allValidators", (block_number,)) {
             Ok(v) => v,
             Err(e) => {
                 return Err(ClRpcError::RequestFailed(format!(

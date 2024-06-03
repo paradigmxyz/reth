@@ -2,9 +2,10 @@ use super::pbft_error::PbftError;
 use alloy_rlp::{Decodable, Encodable};
 use reth_eth_wire::{
     ClayerBlock, ClayerConsensusMessage, ClayerConsensusMessageHeader, PbftMessage,
-    PbftMessageInfo, PbftMessageType, PbftNewView, PbftSeal, PbftSignedVote,
+    PbftMessageInfo, PbftMessageType, PbftNewValidator, PbftNewView, PbftSeal, PbftSignedVote,
 };
 use reth_primitives::{Bytes, Signature, B256};
+use reth_rpc_types::PeerId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PbftMessageWrapper {
@@ -12,6 +13,7 @@ pub enum PbftMessageWrapper {
     NewView(PbftNewView),
     Seal(PbftSeal),
     BlockNew(ClayerBlock),
+    NewValidator(PbftNewValidator),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -33,6 +35,7 @@ impl std::hash::Hash for ParsedMessage {
             PbftMessageWrapper::NewView(m) => m.hash(state),
             PbftMessageWrapper::Seal(m) => m.hash(state),
             PbftMessageWrapper::BlockNew(m) => m.hash(state),
+            PbftMessageWrapper::NewValidator(m) => m.hash(state),
         }
     }
 }
@@ -82,6 +85,20 @@ impl ParsedMessage {
                         }
                     };
                 PbftMessageWrapper::BlockNew(block)
+            }
+            PbftMessageType::NewValidator => {
+                let new_validator = match PbftNewValidator::decode(
+                    &mut message.message_bytes.to_vec().as_slice(),
+                ) {
+                    Ok(new_validator) => new_validator,
+                    Err(err) => {
+                        return Err(PbftError::SerializationError(
+                            "parsing PbftNewView".into(),
+                            err.to_string(),
+                        ));
+                    }
+                };
+                PbftMessageWrapper::NewValidator(new_validator)
             }
             _ => {
                 let message: PbftMessage =
@@ -143,22 +160,31 @@ impl ParsedMessage {
         })
     }
 
-    pub fn from_block_new_message(message: ClayerBlock) -> Result<Self, PbftError> {
-        Ok(Self {
+    pub fn from_block_new_message(message: ClayerBlock) -> Self {
+        Self {
             from_self: true,
             header_bytes: Bytes::new(),
             header_signature: Signature::default(),
             message: PbftMessageWrapper::BlockNew(message),
-        })
+        }
     }
 
-    pub fn from_new_view_message(message: PbftNewView) -> Result<Self, PbftError> {
-        Ok(Self {
+    pub fn from_new_view_message(message: PbftNewView) -> Self {
+        Self {
             from_self: true,
             header_bytes: Bytes::new(),
             header_signature: Signature::default(),
             message: PbftMessageWrapper::NewView(message),
-        })
+        }
+    }
+
+    pub fn from_new_validator_message(message: PbftNewValidator) -> Self {
+        Self {
+            from_self: true,
+            header_bytes: Bytes::new(),
+            header_signature: Signature::default(),
+            message: PbftMessageWrapper::NewValidator(message),
+        }
     }
 
     pub fn from_signed_vote(vote: &PbftSignedVote) -> Result<Self, PbftError> {
@@ -186,6 +212,7 @@ impl ParsedMessage {
             PbftMessageWrapper::NewView(message) => &message.info,
             PbftMessageWrapper::Seal(message) => &message.info,
             PbftMessageWrapper::BlockNew(message) => &message.info,
+            PbftMessageWrapper::NewValidator(message) => &message.info,
         }
     }
 
@@ -200,6 +227,9 @@ impl ParsedMessage {
             }
             PbftMessageWrapper::BlockNew(_) => {
                 panic!("ParsedPeerMessage.get_block_id found a blocknew message!")
+            }
+            PbftMessageWrapper::NewValidator(_) => {
+                panic!("ParsedPeerMessage.get_block_id found a newvalidator message!")
             }
         }
     }
@@ -216,6 +246,9 @@ impl ParsedMessage {
             PbftMessageWrapper::BlockNew(_) => {
                 panic!("ParsedPeerMessage.get_view_change_message found a blocknew message!")
             }
+            PbftMessageWrapper::NewValidator(_) => {
+                panic!("ParsedPeerMessage.get_view_change_message found a newvalidator message!")
+            }
         }
     }
 
@@ -230,6 +263,9 @@ impl ParsedMessage {
             }
             PbftMessageWrapper::BlockNew(_) => {
                 panic!("ParsedPeerMessage.get_view_change_message found a blocknew message!")
+            }
+            PbftMessageWrapper::NewValidator(_) => {
+                panic!("ParsedPeerMessage.get_view_change_message found a newvalidator message!")
             }
         }
     }
@@ -246,6 +282,9 @@ impl ParsedMessage {
                 panic!("ParsedPeerMessage.get_seal found a block new message!")
             }
             PbftMessageWrapper::Seal(s) => s,
+            PbftMessageWrapper::NewValidator(_) => {
+                panic!("ParsedPeerMessage.get_view_change_message found a newvalidator message!")
+            }
         }
     }
 
@@ -261,6 +300,27 @@ impl ParsedMessage {
                 panic!("ParsedPeerMessage.get_seal found a seal message!")
             }
             PbftMessageWrapper::BlockNew(b) => b,
+            PbftMessageWrapper::NewValidator(_) => {
+                panic!("ParsedPeerMessage.get_view_change_message found a newvalidator message!")
+            }
+        }
+    }
+
+    pub fn get_new_validator(&self) -> PeerId {
+        match &self.message {
+            PbftMessageWrapper::Message(_) => {
+                panic!("ParsedPeerMessage.new_validator found a pbft message!")
+            }
+            PbftMessageWrapper::NewView(_) => {
+                panic!("ParsedPeerMessage.new_validator found a new view message!")
+            }
+            PbftMessageWrapper::Seal(_) => {
+                panic!("ParsedPeerMessage.new_validator found a seal message!")
+            }
+            PbftMessageWrapper::BlockNew(_) => {
+                panic!("ParsedPeerMessage.new_validator found a blocknew message!")
+            }
+            PbftMessageWrapper::NewValidator(p) => p.peerid.clone(),
         }
     }
 
@@ -271,6 +331,7 @@ impl ParsedMessage {
             PbftMessageWrapper::NewView(m) => m.encode(&mut msg_out),
             PbftMessageWrapper::Seal(m) => m.encode(&mut msg_out),
             PbftMessageWrapper::BlockNew(m) => m.encode(&mut msg_out),
+            PbftMessageWrapper::NewValidator(m) => m.encode(&mut msg_out),
         }
 
         Bytes::copy_from_slice(msg_out.as_slice())

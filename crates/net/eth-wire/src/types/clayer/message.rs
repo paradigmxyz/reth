@@ -121,6 +121,17 @@ pub struct PbftNewView {
     pub view_changes: Vec<PbftSignedVote>,
 }
 
+/// Consensus message new view
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PbftNewValidator {
+    /// pbft info
+    pub info: PbftMessageInfo,
+    /// peer id
+    pub peerid: PeerId,
+}
+
 /// Messages types related to PBFT consensus
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
@@ -131,7 +142,7 @@ pub enum PbftMessageType {
     PrePrepare = 0x01,
     /// Pbft Prepare
     Prepare = 0x02,
-    ///
+    /// Pbft Commit
     Commit = 0x03,
     /// Pbft NewView
     NewView = 0x04,
@@ -145,6 +156,8 @@ pub enum PbftMessageType {
     BlockNew = 0x08,
     /// Pbft AnnounceBlock
     AnnounceBlock = 0x09,
+    /// Pbft New Validator
+    NewValidator = 0x0a,
 }
 
 impl std::fmt::Display for PbftMessageType {
@@ -160,6 +173,7 @@ impl std::fmt::Display for PbftMessageType {
             PbftMessageType::Seal => "Seal",
             PbftMessageType::BlockNew => "BlockNew",
             PbftMessageType::AnnounceBlock => "AnnounceBlock",
+            PbftMessageType::NewValidator => "NewValidator",
         };
         write!(f, "{}", txt)
     }
@@ -177,6 +191,7 @@ impl From<u8> for PbftMessageType {
             0x07 => PbftMessageType::Seal,
             0x08 => PbftMessageType::BlockNew,
             0x09 => PbftMessageType::AnnounceBlock,
+            0x0a => PbftMessageType::NewValidator,
             _ => PbftMessageType::Unset,
         }
     }

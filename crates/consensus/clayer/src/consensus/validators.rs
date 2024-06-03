@@ -53,6 +53,26 @@ impl Validators {
     pub fn member_ids(&self) -> &Vec<PeerId> {
         &self.validators
     }
+
+    pub fn compare(&self, new_members: &Vec<PeerId>) -> (i8, PeerId) {
+        if self.validators.len() > new_members.len() {
+            for p in self.validators.iter() {
+                if !new_members.contains(p) {
+                    return (-1, p.clone());
+                }
+            }
+        }
+
+        if self.validators.len() < new_members.len() {
+            for p in new_members.iter() {
+                if !self.validators.contains(p) {
+                    return (1, p.clone());
+                }
+            }
+        }
+
+        (0, PeerId::default())
+    }
 }
 
 impl fmt::Display for Validators {

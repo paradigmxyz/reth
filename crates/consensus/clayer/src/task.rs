@@ -114,7 +114,7 @@ where
                 api.get_block_by_number("latest".to_string()).expect("get latest block error");
             info!(target: "consensus::cl","latest block: {:?}", execution_block);
             let validator_datas = api
-                .query_validators(ELECT_VOTING_ADDRESS.to_string())
+                .query_validators(ELECT_VOTING_ADDRESS.to_string(), startup_latest_header.number)
                 .expect("query validators failed");
             let peers = assemble_peer_id(validator_datas).expect("parse peer id failed");
 
@@ -145,23 +145,23 @@ where
                     panic!("Failed to load seal");
                 }
             };
+
             let block = if startup_latest_header.number == 0 {
+                // genesis block
                 clayer_block_from_header(&startup_latest_header)
             } else {
-                if let Some(seal) = seal {
-                    clayer_block_from_seal(&startup_latest_header, seal)
-                } else {
-                    if state.is_validator() {
-                        error!(target: "consensus::cl","block {} no seal",startup_latest_header.number);
-                        panic!("block {} no seal", startup_latest_header.number);
-                    } else {
-                        //todo for sync node
+                match seal {
+                    Some(seal) => clayer_block_from_seal(&startup_latest_header, seal),
+                    None => {
+                        if state.is_validator() {
+                            //no seal,so need to sync seal
+                            state.becoming_validator = true;
+                        }
                         clayer_block_from_header(&startup_latest_header)
                     }
                 }
             };
             consensus_engine.initialize(block, &pbft_config, state);
-
             consensus_engine.start_idle_timeout(state);
 
             loop {

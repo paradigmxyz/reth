@@ -495,8 +495,9 @@ impl ApiService {
     pub fn query_validators(
         &mut self,
         contract_address: String,
+        block_number: u64,
     ) -> Result<Vec<Vec<u8>>, ApiServiceError> {
-        let validator_datas = match self.api.query_validators(contract_address) {
+        let validator_datas = match self.api.query_validators(contract_address, block_number) {
             Ok(x) => x,
             Err(e) => {
                 return Err(ApiServiceError::ApiError(format!("query_validators: {:?}", e)));

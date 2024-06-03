@@ -55,7 +55,7 @@ impl Default for PbftConfig {
             idle_timeout: Duration::from_millis(30000),
             commit_timeout: Duration::from_millis(10000),
             view_change_duration: Duration::from_millis(5000),
-            forced_view_change_interval: 100,
+            forced_view_change_interval: 20,
             max_log_size: 10000,
         }
     }

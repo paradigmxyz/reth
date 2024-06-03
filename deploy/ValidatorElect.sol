@@ -21,7 +21,9 @@ contract ValidatorElect is VotingEvents {
     uint128 constant VOTES_THRESHOLD = TOTAL_SUPPLY / 2;
 
     PeerKey[] mValidators; // slot 0
-    Proposal[PROPOSALS_THRESHOLD] public mProposals;
+    mapping(uint => PeerKey[]) mValidatorsHistory;
+    uint256[] mValidatorsHistoryKeys;
+    Proposal[] public mProposals;
 
     struct PeerKey {
         bytes32 Half1;
@@ -98,26 +100,45 @@ contract ValidatorElect is VotingEvents {
                 Half2: 0x50d5ad437b3552f8f11144f9a2029736e46d63a2d3551b156aac9bff9a6e22bd
             })
         );
-        // mValidators.push(
-        //     PeerKey({
-        //         Half1: 0x75b4f60228da49149a793f3e0cca2a280159c59d8ac0c5a4c55a73f9cea225e5,
-        //         Half2: 0xfc72166353550424a778bb9e15c47ed89a825e0ea61867ccecffbbf5ed963260
-        //     })
-        // );
     }
 
-    function allValidators() public view returns (bytes32[] memory) {
-        uint arrayLength = mValidators.length;
-        bytes32[] memory ret = new bytes32[](arrayLength * 2);
-        for (uint i = 0; i < arrayLength; i++) {
-            ret[i * 2] = mValidators[i].Half1;
-            ret[i * 2 + 1] = mValidators[i].Half2;
+    function allValidators(
+        uint block_number
+    ) public view returns (bytes32[] memory) {
+        uint klen = mValidatorsHistoryKeys.length;
+        if (klen == 0) {
+            uint arrayLength = mValidators.length;
+            bytes32[] memory ret = new bytes32[](arrayLength * 2);
+            for (uint i = 0; i < arrayLength; i++) {
+                ret[i * 2] = mValidators[i].Half1;
+                ret[i * 2 + 1] = mValidators[i].Half2;
+            }
+            return ret;
         }
-        return ret;
+
+        uint latest_number = 0;
+        for (latest_number = 0; latest_number < klen; latest_number++) {
+            if (block_number >= mValidatorsHistoryKeys[latest_number]) {
+                break;
+            }
+        }
+        uint arrayLen = mValidatorsHistory[latest_number].length;
+        bytes32[] memory retdata = new bytes32[](arrayLen * 2);
+        for (uint i = 0; i < arrayLen; i++) {
+            retdata[i * 2] = mValidatorsHistory[latest_number][i].Half1;
+            retdata[i * 2 + 1] = mValidatorsHistory[latest_number][i].Half2;
+        }
+        return retdata;
     }
 
     function _addValidator(PeerKey memory p) private {
-        mValidators.push(PeerKey({Half1: p.Half1, Half2: p.Half2}));
+        uint arrayLength = mValidators.length;
+        mValidators[arrayLength] = PeerKey({Half1: p.Half1, Half2: p.Half2});
+
+        mValidatorsHistoryKeys.push(block.number);
+        for (uint i = 0; i < arrayLength + 1; i++) {
+            mValidatorsHistory[block.number].push(mValidators[i]);
+        }
     }
 
     function _delValidator(PeerKey memory p) private {
@@ -134,6 +155,11 @@ contract ValidatorElect is VotingEvents {
             }
         }
         mValidators.pop();
+
+        mValidatorsHistoryKeys.push(block.number);
+        for (uint i = 0; i < arrayLength; i++) {
+            mValidatorsHistory[block.number].push(mValidators[i]);
+        }
     }
 
     function _comparePeer(
@@ -258,9 +284,11 @@ contract ValidatorElect is VotingEvents {
     function _checkTTL(
         Proposal storage proposal
     ) private _IsIndefinite(proposal) {
-        if (_TTLExceeded(proposal)) {
-            proposal.status = ProposalStatus.Discarded;
-            emit ProposalDiscarded(proposal.name);
+        unchecked {
+            if (_TTLExceeded(proposal)) {
+                proposal.status = ProposalStatus.Discarded;
+                emit ProposalDiscarded(proposal.name);
+            }
         }
     }
 
@@ -343,7 +371,7 @@ contract ValidatorElect is VotingEvents {
             noCount: 0,
             status: ProposalStatus.Indefinite,
             candidate: peer,
-            action: vaction
+            action: ValidatorAction(action)
         });
         emit NewProposal(_name, lastBlocks);
     }
