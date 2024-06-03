@@ -883,10 +883,8 @@ impl PeersManager {
                 for peer_id in unbanned_peers {
                     if let Some(peer) = self.peers.get_mut(&peer_id) {
                         peer.unban();
-                    } else {
-                        continue
+                        self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                     }
-                    self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                 }
 
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
