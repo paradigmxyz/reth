@@ -431,6 +431,10 @@ where
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
         let best_number = chain_info.best_number;
 
+        if to_block < from_block {
+            return Err(FilterError::InvalidBlockRangeParams)
+        }
+
         if to_block - from_block > self.max_blocks_per_filter {
             return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
         }
@@ -682,6 +686,8 @@ enum FilterKind {
 pub enum FilterError {
     #[error("filter not found")]
     FilterNotFound(FilterId),
+    #[error("invalid block range params")]
+    InvalidBlockRangeParams,
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
     #[error("query exceeds max results {0}")]
@@ -705,6 +711,9 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             FilterError::EthAPIError(err) => err.into(),
+            err @ FilterError::InvalidBlockRangeParams => {
+                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
+            }
             err @ FilterError::QueryExceedsMaxBlocks(_) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
