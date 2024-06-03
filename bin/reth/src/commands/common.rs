@@ -51,7 +51,8 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Initializes environment according to [AccessRights] and returns a tuple of [Config] & [ProviderFactory].
+    /// Initializes environment according to [AccessRights] and returns a tuple of [Config] &
+    /// [ProviderFactory].
     pub fn init(
         &self,
         access: AccessRights,
