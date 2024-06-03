@@ -22,7 +22,7 @@ use reth_rpc_types_compat::engine::payload::{
 use revm::primitives::HandlerCfg;
 use std::sync::Arc;
 
-/// Re-export [OptimsimPayloadAttributes] for argument use.
+/// Re-export for use in downstream arguments.
 pub use reth_rpc_types::engine::OptimismPayloadAttributes;
 
 /// Optimism Payload Builder Attributes
