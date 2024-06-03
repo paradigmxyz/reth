@@ -12,7 +12,7 @@ use futures::Future;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    test_utils::{create_test_rw_db, TempDatabase},
+    test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
 };
 use reth_exex::ExExContext;
@@ -30,7 +30,7 @@ use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 pub use states::*;
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 mod states;
 
@@ -174,11 +174,11 @@ impl<DB> NodeBuilder<DB> {
         self,
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
-        let db = create_test_rw_db();
-        let db_path_str = db.path().to_str().expect("Path is not valid unicode");
-        let path =
-            MaybePlatformPath::<DataDirPath>::from_str(db_path_str).expect("Path is not valid");
-        let data_dir = path.unwrap_or_chain_default(self.config.chain.chain);
+        let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
+        let data_dir =
+            path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
+
+        let db = create_test_rw_db_with_path(data_dir.db());
 
         WithLaunchContext { builder: self.with_database(db), task_executor, data_dir }
     }
