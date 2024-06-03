@@ -14,7 +14,6 @@ Commands:
   get                  Gets the content of a table for the given key
   drop                 Deletes all database entries
   clear                Deletes all table entries
-  create-static-files  Creates static files from database tables
   version              Lists current and local database versions
   path                 Returns the full database path
   help                 Print this message or the help of the given subcommand(s)
