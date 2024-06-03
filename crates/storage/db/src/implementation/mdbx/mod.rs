@@ -4,6 +4,7 @@ use crate::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
     models::client_version::ClientVersion,
     tables::{self, TableType, Tables},
@@ -134,6 +135,8 @@ pub struct DatabaseEnv {
     inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Write lock for when dealing with a read-write environment.
+    _lock_file: Option<StorageLock>,
 }
 
 impl Database for DatabaseEnv {
@@ -251,6 +254,15 @@ impl DatabaseEnv {
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
     ) -> Result<Self, DatabaseError> {
+        let _lock_file = if kind.is_rw() {
+            Some(
+                StorageLock::try_acquire(path)
+                    .map_err(|err| DatabaseError::Other(err.to_string()))?,
+            )
+        } else {
+            None
+        };
+
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -382,6 +394,7 @@ impl DatabaseEnv {
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
+            _lock_file,
         };
 
         Ok(env)
