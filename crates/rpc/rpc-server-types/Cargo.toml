@@ -12,5 +12,5 @@ description = "RPC server types and constants"
 workspace = true
 
 [dependencies]
-# reth
-reth-primitives.workspace = true
+# ethereum
+alloy-primitives.workspace = true

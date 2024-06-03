@@ -44,7 +44,7 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 
 /// GPO specific constants
 pub mod gas_oracle {
-    use reth_primitives::U256;
+    use alloy_primitives::U256;
 
     /// The number of transactions sampled in a block
     pub const SAMPLE_NUMBER: usize = 3_usize;
