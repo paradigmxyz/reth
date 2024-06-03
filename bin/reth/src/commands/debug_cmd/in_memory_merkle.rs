@@ -13,16 +13,17 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
-use reth_db::{database::Database, init_db};
+use reth_db::{init_db, DatabaseEnv};
+use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_interfaces::executor::BlockValidationError;
+use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageId, BlockHashOrNumber, ChainSpec, Receipts};
+use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Receipts};
 use reth_provider::{
-    AccountExtReader, BundleStateWithReceipts, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StorageReader,
+    providers::StaticFileProvider, AccountExtReader, BundleStateWithReceipts, HashingWriter,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::TaskExecutor;
@@ -67,11 +68,11 @@ pub struct Command {
 }
 
 impl Command {
-    async fn build_network<DB: Database + 'static>(
+    async fn build_network(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -104,7 +105,9 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
+        let static_file_provider = StaticFileProvider::read_write(data_dir.static_files())?;
+        let factory =
+            ProviderFactory::new(db.clone(), self.chain.clone(), static_file_provider.clone());
         let provider = factory.provider()?;
 
         // Look up merkle checkpoint

@@ -131,7 +131,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
         }
     }
 
-    /// Checks for new transactions that have come into the PendingPool after this iterator was
+    /// Checks for new transactions that have come into the `PendingPool` after this iterator was
     /// created and inserts them
     fn add_new_transactions(&mut self) {
         while let Some(pending_tx) = self.try_recv() {
@@ -148,7 +148,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
     fn mark_invalid(&mut self, tx: &Self::Item) {
-        BestTransactions::mark_invalid(self, tx)
+        Self::mark_invalid(self, tx)
     }
 
     fn no_updates(&mut self) {
@@ -204,7 +204,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 /// transactions of iter with predicate.
 ///
 /// Filter out transactions are marked as invalid:
-/// [BestTransactions::mark_invalid](crate::traits::BestTransactions::mark_invalid).
+/// [`BestTransactions::mark_invalid`](crate::traits::BestTransactions::mark_invalid).
 pub struct BestTransactionFilter<I, P> {
     pub(crate) best: I,
     pub(crate) predicate: P,

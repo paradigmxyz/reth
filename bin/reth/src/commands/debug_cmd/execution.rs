@@ -15,22 +15,23 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
-use reth_db::{database::Database, init_db};
+use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_db_common::init::init_genesis;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_fs_util as fs;
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_core::init::init_genesis;
+use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_primitives::{
-    fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
+    stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
 };
 use reth_provider::{
-    BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockExecutionWriter, HeaderSyncMode, ProviderFactory,
+    StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -138,11 +139,11 @@ impl Command {
         Ok(pipeline)
     }
 
-    async fn build_network<DB: Database + 'static>(
+    async fn build_network(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -197,8 +198,11 @@ impl Command {
 
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(provider_factory.clone())?;

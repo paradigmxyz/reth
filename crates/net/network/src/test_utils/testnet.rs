@@ -20,6 +20,7 @@ use reth_provider::{
     test_utils::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
 use reth_tasks::TokioTaskExecutor;
+use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore,
     test_utils::{TestPool, TestPoolBuilder},
@@ -40,7 +41,6 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A test network consisting of multiple peers.
 pub struct Testnet<C, Pool> {
@@ -227,7 +227,7 @@ impl Testnet<NoopProvider, TestPool> {
 
     /// Creates a new [`Testnet`] with the given number of peers
     pub async fn try_create(num_peers: usize) -> Result<Self, NetworkError> {
-        let mut this = Testnet::default();
+        let mut this = Self::default();
 
         this.extend_peer_with_config((0..num_peers).map(|_| Default::default())).await?;
         Ok(this)
@@ -364,11 +364,11 @@ where
     }
 
     /// The address that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.network.local_addr()
     }
 
-    /// The [PeerId] of this peer.
+    /// The [`PeerId`] of this peer.
     pub fn peer_id(&self) -> PeerId {
         *self.network.peer_id()
     }
@@ -384,7 +384,7 @@ where
     }
 
     /// Returns the [`TestPool`] of this peer.
-    pub fn pool(&self) -> Option<&Pool> {
+    pub const fn pool(&self) -> Option<&Pool> {
         self.pool.as_ref()
     }
 
@@ -440,7 +440,7 @@ impl<C> Peer<C>
 where
     C: BlockReader + HeaderProvider + Clone,
 {
-    /// Installs a new [TestPool]
+    /// Installs a new [`TestPool`]
     pub fn install_test_pool(&mut self) {
         self.install_transactions_manager(TestPoolBuilder::default().into())
     }
@@ -503,22 +503,22 @@ impl<Pool> PeerHandle<Pool> {
     }
 
     /// Creates a new [`NetworkEvent`] listener channel.
-    pub fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
+    pub fn event_listener(&self) -> EventStream<NetworkEvent> {
         self.network.event_listener()
     }
 
     /// Returns the [`TransactionsHandle`] of this peer.
-    pub fn transactions(&self) -> Option<&TransactionsHandle> {
+    pub const fn transactions(&self) -> Option<&TransactionsHandle> {
         self.transactions.as_ref()
     }
 
     /// Returns the [`TestPool`] of this peer.
-    pub fn pool(&self) -> Option<&Pool> {
+    pub const fn pool(&self) -> Option<&Pool> {
         self.pool.as_ref()
     }
 
     /// Returns the [`NetworkHandle`] of this peer.
-    pub fn network(&self) -> &NetworkHandle {
+    pub const fn network(&self) -> &NetworkHandle {
         &self.network
     }
 }
@@ -531,7 +531,7 @@ where
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
-        let PeerConfig { config, client, secret_key } = self;
+        let Self { config, client, secret_key } = self;
         let network = NetworkManager::new(config).await?;
         let peer = Peer {
             network,
@@ -591,14 +591,14 @@ impl Default for PeerConfig {
 /// This makes it easier to await established connections
 #[derive(Debug)]
 pub struct NetworkEventStream {
-    inner: UnboundedReceiverStream<NetworkEvent>,
+    inner: EventStream<NetworkEvent>,
 }
 
 // === impl NetworkEventStream ===
 
 impl NetworkEventStream {
     /// Create a new [`NetworkEventStream`] from the given network event receiver stream.
-    pub fn new(inner: UnboundedReceiverStream<NetworkEvent>) -> Self {
+    pub const fn new(inner: EventStream<NetworkEvent>) -> Self {
         Self { inner }
     }
 

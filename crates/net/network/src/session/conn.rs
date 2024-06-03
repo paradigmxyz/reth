@@ -31,21 +31,21 @@ pub type EthSatelliteConnection =
 pub enum EthRlpxConnection {
     /// A That only supports the ETH protocol.
     EthOnly(Box<EthPeerConnection>),
-    /// A connection that supports the ETH protocol and __at least one other__ RLPx protocol.
+    /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
     Satellite(Box<EthSatelliteConnection>),
 }
 
 impl EthRlpxConnection {
     /// Returns the negotiated ETH version.
     #[inline]
-    pub(crate) fn version(&self) -> EthVersion {
+    pub(crate) const fn version(&self) -> EthVersion {
         match self {
             Self::EthOnly(conn) => conn.version(),
             Self::Satellite(conn) => conn.primary().version(),
         }
     }
 
-    /// Consumes this type and returns the wrapped [P2PStream].
+    /// Consumes this type and returns the wrapped [`P2PStream`].
     #[inline]
     pub(crate) fn into_inner(self) -> P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
         match self {
@@ -65,7 +65,7 @@ impl EthRlpxConnection {
 
     /// Returns  access to the underlying stream.
     #[inline]
-    pub(crate) fn inner(&self) -> &P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
+    pub(crate) const fn inner(&self) -> &P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
         match self {
             Self::EthOnly(conn) => conn.inner(),
             Self::Satellite(conn) => conn.inner(),
@@ -142,14 +142,14 @@ impl Sink<EthMessage> for EthRlpxConnection {
 mod tests {
     use super::*;
 
-    fn assert_eth_stream<St>()
+    const fn assert_eth_stream<St>()
     where
         St: Stream<Item = Result<EthMessage, EthStreamError>> + Sink<EthMessage>,
     {
     }
 
     #[test]
-    fn test_eth_stream_variants() {
+    const fn test_eth_stream_variants() {
         assert_eth_stream::<EthSatelliteConnection>();
         assert_eth_stream::<EthRlpxConnection>();
     }

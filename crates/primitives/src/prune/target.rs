@@ -40,7 +40,7 @@ pub struct PruneModes {
     /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
     /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
     ///
-    /// The [BlockNumber](`crate::BlockNumber`) represents the starting block from which point
+    /// The [`BlockNumber`](`crate::BlockNumber`) represents the starting block from which point
     /// onwards the receipts are preserved.
     pub receipts_log_filter: ReceiptsLogPruneConfig,
 }
@@ -48,7 +48,7 @@ pub struct PruneModes {
 impl PruneModes {
     /// Sets pruning to no target.
     pub fn none() -> Self {
-        PruneModes::default()
+        Self::default()
     }
 
     /// Sets pruning to all targets.
@@ -68,10 +68,10 @@ impl PruneModes {
 /// generic parameter `MIN_BLOCKS`. This parameter represents the number of blocks that needs to be
 /// left in database after the pruning.
 ///
-/// 1. For [PruneMode::Full], it fails if `MIN_BLOCKS > 0`.
-/// 2. For [PruneMode::Distance(distance)], it fails if `distance < MIN_BLOCKS + 1`. `+ 1` is needed
-/// because `PruneMode::Distance(0)` means that we leave zero blocks from the latest, meaning we
-/// have one block in the database.
+/// 1. For [`PruneMode::Full`], it fails if `MIN_BLOCKS > 0`.
+/// 2. For [`PruneMode::Distance(distance`)], it fails if `distance < MIN_BLOCKS + 1`. `+ 1` is
+///    needed because `PruneMode::Distance(0)` means that we leave zero blocks from the latest,
+///    meaning we have one block in the database.
 fn deserialize_opt_prune_mode_with_min_blocks<'de, const MIN_BLOCKS: u64, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<PruneMode>, D::Error> {

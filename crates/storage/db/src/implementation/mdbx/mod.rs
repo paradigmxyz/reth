@@ -4,6 +4,7 @@ use crate::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
     models::client_version::ClientVersion,
     tables::{self, TableType, Tables},
@@ -13,11 +14,11 @@ use crate::{
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use reth_interfaces::db::LogLevel;
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
 };
+use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
     ops::Deref,
@@ -37,7 +38,7 @@ const TERABYTE: usize = GIGABYTE * 1024;
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
-/// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
+/// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 #[cfg(not(windows))]
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
@@ -52,7 +53,7 @@ pub enum DatabaseEnvKind {
 
 impl DatabaseEnvKind {
     /// Returns `true` if the environment is read-write.
-    pub fn is_rw(&self) -> bool {
+    pub const fn is_rw(&self) -> bool {
         matches!(self, Self::RW)
     }
 }
@@ -91,7 +92,7 @@ pub struct DatabaseArguments {
 
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub fn new(client_version: ClientVersion) -> Self {
+    pub const fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
             log_level: None,
@@ -101,13 +102,13 @@ impl DatabaseArguments {
     }
 
     /// Set the log level.
-    pub fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+    pub const fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
         self.log_level = log_level;
         self
     }
 
     /// Set the maximum duration of a read transaction.
-    pub fn with_max_read_transaction_duration(
+    pub const fn with_max_read_transaction_duration(
         mut self,
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
@@ -116,13 +117,13 @@ impl DatabaseArguments {
     }
 
     /// Set the mdbx exclusive flag.
-    pub fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
+    pub const fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
         self.exclusive = exclusive;
         self
     }
 
     /// Returns the client version if any.
-    pub fn client_version(&self) -> &ClientVersion {
+    pub const fn client_version(&self) -> &ClientVersion {
         &self.client_version
     }
 }
@@ -134,6 +135,8 @@ pub struct DatabaseEnv {
     inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Write lock for when dealing with a read-write environment.
+    _lock_file: Option<StorageLock>,
 }
 
 impl Database for DatabaseEnv {
@@ -160,7 +163,7 @@ impl Database for DatabaseEnv {
 impl DatabaseMetrics for DatabaseEnv {
     fn report_metrics(&self) {
         for (name, value, labels) in self.gauge_metrics() {
-            gauge!(name, value, labels);
+            gauge!(name, labels).set(value);
         }
     }
 
@@ -250,7 +253,16 @@ impl DatabaseEnv {
         path: &Path,
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
-    ) -> Result<DatabaseEnv, DatabaseError> {
+    ) -> Result<Self, DatabaseError> {
+        let _lock_file = if kind.is_rw() {
+            Some(
+                StorageLock::try_acquire(path)
+                    .map_err(|err| DatabaseError::Other(err.to_string()))?,
+            )
+        } else {
+            None
+        };
+
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -272,7 +284,7 @@ impl DatabaseEnv {
             // We grow the database in increments of 4 gigabytes
             growth_step: Some(4 * GIGABYTE as isize),
             // The database never shrinks
-            shrink_threshold: None,
+            shrink_threshold: Some(0),
             page_size: Some(PageSize::Set(default_page_size())),
         });
         #[cfg(not(windows))]
@@ -379,9 +391,10 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
-        let env = DatabaseEnv {
+        let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
+            _lock_file,
         };
 
         Ok(env)
@@ -455,9 +468,9 @@ mod tests {
         test_utils::*,
         AccountChangeSets,
     };
-    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
+    use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
 

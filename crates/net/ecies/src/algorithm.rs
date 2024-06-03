@@ -45,8 +45,8 @@ fn ecdh_x(public_key: &PublicKey, secret_key: &SecretKey) -> B256 {
 /// # Panics
 /// * If the `dest` is empty
 /// * If the `dest` len is greater than or equal to the hash output len * the max counter value. In
-/// this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
-/// cannot have a len greater than 32 * 2^32 - 1.
+///   this case, the hash output len is 32 bytes, and the max counter value is 2^32 - 1. So the dest
+///   cannot have a len greater than 32 * 2^32 - 1.
 fn kdf(secret: B256, s1: &[u8], dest: &mut [u8]) {
     concat_kdf::derive_key_into::<Sha256>(secret.as_slice(), s1, dest).unwrap();
 }
@@ -90,7 +90,7 @@ fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), EC
     Ok(arr.split_at_mut(idx))
 }
 
-/// A parsed RLPx encrypted message
+/// A parsed `RLPx` encrypted message
 ///
 /// From the devp2p spec, this should help perform the following operations:
 ///
@@ -103,9 +103,9 @@ fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), EC
 pub struct EncryptedMessage<'a> {
     /// The auth data, used when checking the `tag` with HMAC-SHA256.
     ///
-    /// This is not mentioned in the RLPx spec, but included in implementations.
+    /// This is not mentioned in the `RLPx` spec, but included in implementations.
     ///
-    /// See source comments of [Self::check_integrity] for more information.
+    /// See source comments of [`Self::check_integrity`] for more information.
     auth_data: [u8; 2],
     /// The remote secp256k1 public key
     public_key: PublicKey,
@@ -118,7 +118,7 @@ pub struct EncryptedMessage<'a> {
 }
 
 impl<'a> EncryptedMessage<'a> {
-    /// Parse the given `data` into an [EncryptedMessage].
+    /// Parse the given `data` into an [`EncryptedMessage`].
     ///
     /// If the data is not long enough to contain the expected fields, this returns an error.
     pub fn parse(data: &mut [u8]) -> Result<EncryptedMessage<'_>, ECIESError> {
@@ -491,7 +491,7 @@ impl ECIES {
         self.parse_auth_unencrypted(unencrypted)
     }
 
-    /// Create an `ack` message using the internal nonce, local ephemeral public key, and RLPx
+    /// Create an `ack` message using the internal nonce, local ephemeral public key, and `RLPx`
     /// ECIES protocol version.
     fn create_ack_unencrypted(&self) -> impl AsRef<[u8]> {
         #[derive(RlpEncodable, RlpMaxEncodedLen)]
@@ -631,7 +631,7 @@ impl ECIES {
         self.egress_mac.as_mut().unwrap().update_header(&header);
         let tag = self.egress_mac.as_mut().unwrap().digest();
 
-        out.reserve(ECIES::header_len());
+        out.reserve(Self::header_len());
         out.extend_from_slice(&header[..]);
         out.extend_from_slice(tag.as_slice());
     }
@@ -850,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    /// Test vectors from https://eips.ethereum.org/EIPS/eip-8
+    /// Test vectors from <https://eips.ethereum.org/EIPS/eip-8>
     fn eip8_test() {
         // EIP-8 format with version 4 and no additional list elements
         let auth2 = hex!(

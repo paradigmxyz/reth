@@ -38,14 +38,14 @@ where
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
-    /// If this is [BlockNumberOrTag::Pending] then this will look up the highest transaction in
+    /// If this is [`BlockNumberOrTag::Pending`] then this will look up the highest transaction in
     /// pool and return the next nonce (highest + 1).
     pub(crate) fn get_transaction_count(
         &self,
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
-        if block_id == Some(BlockId::Number(BlockNumberOrTag::Pending)) {
+        if block_id == Some(BlockId::pending()) {
             let address_txs = self.pool().get_transactions_by_sender(address);
             if let Some(highest_nonce) =
                 address_txs.iter().map(|item| item.transaction.nonce()).max()

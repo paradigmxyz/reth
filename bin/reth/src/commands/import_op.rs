@@ -10,21 +10,22 @@ use crate::{
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
-
+use reth_consensus::noop::NoopConsensus;
 use reth_db::{init_db, tables, transaction::DbTx};
+use reth_db_common::init::init_genesis;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
-
-use reth_node_core::{args::DatadirArgs, init::init_genesis};
-
-use reth_primitives::{hex, stage::StageId, PruneModes, TxHash};
-use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
+use reth_node_core::args::DatadirArgs;
+use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_primitives::{stage::StageId, PruneModes};
+use reth_provider::{
+    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory,
+};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
-
 use tracing::{debug, error, info};
 
 /// Syncs RLP encoded blocks from a file.
@@ -34,7 +35,7 @@ pub struct ImportOpCommand {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
 
-    /// Chunk byte length.
+    /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
 
@@ -86,15 +87,18 @@ impl ImportOpCommand {
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
 
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), chain_spec.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            chain_spec.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         debug!(target: "reth::cli", chain=%chain_spec.chain, genesis=?chain_spec.genesis_hash(), "Initializing genesis");
 
         init_genesis(provider_factory.clone())?;
 
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
-        info!(target: "reth::cli", "Consensus engine initialized");
+        // we use noop here because we expect the inputs to be valid
+        let consensus = Arc::new(NoopConsensus::default());
 
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
@@ -113,11 +117,11 @@ impl ImportOpCommand {
             info!(target: "reth::cli", "Chain file chunk read");
 
             total_decoded_blocks += file_client.headers_len();
-            total_decoded_txns += file_client.bodies_len();
+            total_decoded_txns += file_client.total_transactions();
 
             for (block_number, body) in file_client.bodies_iter_mut() {
-                body.transactions.retain(|tx| {
-                    if is_duplicate(tx.hash, *block_number) {
+                body.transactions.retain(|_| {
+                    if is_dup_tx(block_number) {
                         total_filtered_out_dup_txns += 1;
                         return false
                     }
@@ -135,7 +139,7 @@ impl ImportOpCommand {
                     provider_factory.static_file_provider(),
                     PruneModes::default(),
                 ),
-                false,
+                true,
             )
             .await?;
 
@@ -164,16 +168,17 @@ impl ImportOpCommand {
 
         let provider = provider_factory.provider()?;
 
-        let total_imported_blocks = provider.tx_ref().entries::<tables::Headers>()?;
+        let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
         let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
         if total_decoded_blocks != total_imported_blocks ||
-            total_decoded_txns != total_imported_txns
+            total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns
         {
             error!(target: "reth::cli",
                 total_decoded_blocks,
                 total_imported_blocks,
                 total_decoded_txns,
+                total_filtered_out_dup_txns,
                 total_imported_txns,
                 "Chain was partially imported"
             );
@@ -182,61 +187,12 @@ impl ImportOpCommand {
         info!(target: "reth::cli",
             total_imported_blocks,
             total_imported_txns,
+            total_decoded_blocks,
+            total_decoded_txns,
+            total_filtered_out_dup_txns,
             "Chain file imported"
         );
 
         Ok(())
     }
-}
-
-/// A transaction that has been replayed in chain below Bedrock.
-#[derive(Debug)]
-pub struct ReplayedTx {
-    tx_hash: TxHash,
-    original_block: u64,
-}
-
-impl ReplayedTx {
-    /// Returns a new instance.
-    pub const fn new(tx_hash: TxHash, original_block: u64) -> Self {
-        Self { tx_hash, original_block }
-    }
-}
-
-/// Transaction 0x9ed8..9cb9, first seen in block 985.
-pub const TX_BLOCK_985: ReplayedTx = ReplayedTx::new(
-    TxHash::new(hex!("9ed8f713b2cc6439657db52dcd2fdb9cc944915428f3c6e2a7703e242b259cb9")),
-    985,
-);
-
-/// Transaction 0x86f8..76e5, first seen in block 123 322.
-pub const TX_BLOCK_123_322: ReplayedTx = ReplayedTx::new(
-    TxHash::new(hex!("c033250c5a45f9d104fc28640071a776d146d48403cf5e95ed0015c712e26cb6")),
-    123_322,
-);
-
-/// Transaction 0x86f8..76e5, first seen in block 1 133 328.
-pub const TX_BLOCK_1_133_328: ReplayedTx = ReplayedTx::new(
-    TxHash::new(hex!("86f8c77cfa2b439e9b4e92a10f6c17b99fce1220edf4001e4158b57f41c576e5")),
-    1_133_328,
-);
-
-/// Transaction 0x3cc2..cd4e, first seen in block 1 244 152.
-pub const TX_BLOCK_1_244_152: ReplayedTx = ReplayedTx::new(
-    TxHash::new(hex!("3cc27e7cc8b7a9380b2b2f6c224ea5ef06ade62a6af564a9dd0bcca92131cd4e")),
-    1_244_152,
-);
-
-/// List of original occurrences of all duplicate transactions below Bedrock.
-pub const TX_DUP_ORIGINALS: [ReplayedTx; 4] =
-    [TX_BLOCK_985, TX_BLOCK_123_322, TX_BLOCK_1_133_328, TX_BLOCK_1_244_152];
-
-/// Returns `true` if transaction is the second or third appearance of the transaction.
-pub fn is_duplicate(tx_hash: TxHash, block_number: u64) -> bool {
-    for ReplayedTx { tx_hash: dup_tx_hash, original_block } in TX_DUP_ORIGINALS {
-        if tx_hash == dup_tx_hash && block_number != original_block {
-            return true
-        }
-    }
-    false
 }

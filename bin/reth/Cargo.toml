@@ -16,13 +16,14 @@ workspace = true
 # reth
 reth-config.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
+reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-exex.workspace = true
 reth-provider = { workspace = true }
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
-reth-interfaces = { workspace = true, features = ["clap"] }
+reth-errors.workspace = true
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-cli-runner.workspace = true
@@ -34,6 +35,7 @@ reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
+reth-network-p2p.workspace = true
 reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
@@ -43,6 +45,7 @@ reth-payload-builder.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
+reth-discv5.workspace = true
 reth-static-file = { workspace = true }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
@@ -52,9 +55,11 @@ reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
 ] }
 reth-node-core.workspace = true
+reth-db-common.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
+reth-optimism-primitives.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -70,7 +75,7 @@ confy.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # metrics
-metrics-process = "=1.0.14"
+metrics-process.workspace = true
 
 # test vectors generation
 proptest.workspace = true
@@ -132,7 +137,6 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
     "reth-primitives/optimism",
-    "reth-interfaces/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",

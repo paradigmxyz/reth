@@ -9,8 +9,8 @@ use crate::{
     DatabaseError,
 };
 use once_cell::sync::OnceCell;
-use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
+use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
@@ -32,7 +32,7 @@ pub struct Tx<K: TransactionKind> {
     pub inner: Transaction<K>,
 
     /// Handler for metrics with its own [Drop] implementation for cases when the transaction isn't
-    /// closed by [Tx::commit] or [Tx::abort], but we still need to report it in the metrics.
+    /// closed by [`Tx::commit`] or [`Tx::abort`], but we still need to report it in the metrics.
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
@@ -45,14 +45,14 @@ pub struct Tx<K: TransactionKind> {
 impl<K: TransactionKind> Tx<K> {
     /// Creates new `Tx` object with a `RO` or `RW` transaction.
     #[inline]
-    pub fn new(inner: Transaction<K>) -> Self {
+    pub const fn new(inner: Transaction<K>) -> Self {
         Self::new_inner(inner, None)
     }
 
     /// Creates new `Tx` object with a `RO` or `RW` transaction and optionally enables metrics.
     #[inline]
     #[track_caller]
-    pub fn new_with_metrics(
+    pub(crate) fn new_with_metrics(
         inner: Transaction<K>,
         env_metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> reth_libmdbx::Result<Self> {
@@ -68,7 +68,7 @@ impl<K: TransactionKind> Tx<K> {
     }
 
     #[inline]
-    fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
+    const fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
         // NOTE: These constants are needed to initialize `OnceCell` at compile-time, as array
         // initialization is not allowed with non-Copy types, and `const { }` blocks are not stable
         // yet.
@@ -186,13 +186,13 @@ struct MetricsHandler<K: TransactionKind> {
     /// Duration after which we emit the log about long-lived database transactions.
     long_transaction_duration: Duration,
     /// If `true`, the metric about transaction closing has already been recorded and we don't need
-    /// to do anything on [Drop::drop].
+    /// to do anything on [`Drop::drop`].
     close_recorded: bool,
     /// If `true`, the backtrace of transaction will be recorded and logged.
-    /// See [MetricsHandler::log_backtrace_on_long_read_transaction].
+    /// See [`MetricsHandler::log_backtrace_on_long_read_transaction`].
     record_backtrace: bool,
     /// If `true`, the backtrace of transaction has already been recorded and logged.
-    /// See [MetricsHandler::log_backtrace_on_long_read_transaction].
+    /// See [`MetricsHandler::log_backtrace_on_long_read_transaction`].
     backtrace_recorded: AtomicBool,
     env_metrics: Arc<DatabaseEnvMetrics>,
     _marker: PhantomData<K>,
@@ -233,11 +233,11 @@ impl<K: TransactionKind> MetricsHandler<K> {
     }
 
     /// Logs the backtrace of current call if the duration that the read transaction has been open
-    /// is more than [LONG_TRANSACTION_DURATION] and `record_backtrace == true`.
+    /// is more than [`LONG_TRANSACTION_DURATION`] and `record_backtrace == true`.
     /// The backtrace is recorded and logged just once, guaranteed by `backtrace_recorded` atomic.
     ///
-    /// NOTE: Backtrace is recorded using [Backtrace::force_capture], so `RUST_BACKTRACE` env var is
-    /// not needed.
+    /// NOTE: Backtrace is recorded using [`Backtrace::force_capture`], so `RUST_BACKTRACE` env var
+    /// is not needed.
     fn log_backtrace_on_long_read_transaction(&self) {
         if self.record_backtrace &&
             !self.backtrace_recorded.load(Ordering::Relaxed) &&
@@ -395,8 +395,8 @@ mod tests {
         database::Database, mdbx::DatabaseArguments, models::client_version::ClientVersion, tables,
         transaction::DbTx, DatabaseEnv, DatabaseEnvKind,
     };
-    use reth_interfaces::db::DatabaseError;
     use reth_libmdbx::MaxReadTransactionDuration;
+    use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};
     use tempfile::tempdir;
 

@@ -37,7 +37,7 @@ const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
-    /// See [EventHandler::poll].
+    /// See [`EventHandler::poll`].
     db: DB,
     /// Connection to the network.
     network: Option<NetworkHandle>,
@@ -56,7 +56,11 @@ struct NodeState<DB> {
 }
 
 impl<DB> NodeState<DB> {
-    fn new(db: DB, network: Option<NetworkHandle>, latest_block: Option<BlockNumber>) -> Self {
+    const fn new(
+        db: DB,
+        network: Option<NetworkHandle>,
+        latest_block: Option<BlockNumber>,
+    ) -> Self {
         Self {
             db,
             network,
@@ -315,7 +319,7 @@ impl<DB> NodeState<DB> {
                     warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. Please fix your beacon client to follow the chain!")
+                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
                 }
             }
         }
@@ -390,43 +394,46 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
-    /// A static_file_producer event
+    /// A `static_file_producer` event
     StaticFileProducer(StaticFileProducerEvent),
+    /// Used to encapsulate various conditions or situations that do not
+    /// naturally fit into the other more specific variants.
+    Other(String),
 }
 
 impl From<NetworkEvent> for NodeEvent {
-    fn from(event: NetworkEvent) -> NodeEvent {
-        NodeEvent::Network(event)
+    fn from(event: NetworkEvent) -> Self {
+        Self::Network(event)
     }
 }
 
 impl From<PipelineEvent> for NodeEvent {
-    fn from(event: PipelineEvent) -> NodeEvent {
-        NodeEvent::Pipeline(event)
+    fn from(event: PipelineEvent) -> Self {
+        Self::Pipeline(event)
     }
 }
 
 impl From<BeaconConsensusEngineEvent> for NodeEvent {
     fn from(event: BeaconConsensusEngineEvent) -> Self {
-        NodeEvent::ConsensusEngine(event)
+        Self::ConsensusEngine(event)
     }
 }
 
 impl From<ConsensusLayerHealthEvent> for NodeEvent {
     fn from(event: ConsensusLayerHealthEvent) -> Self {
-        NodeEvent::ConsensusLayerHealth(event)
+        Self::ConsensusLayerHealth(event)
     }
 }
 
 impl From<PrunerEvent> for NodeEvent {
     fn from(event: PrunerEvent) -> Self {
-        NodeEvent::Pruner(event)
+        Self::Pruner(event)
     }
 }
 
 impl From<StaticFileProducerEvent> for NodeEvent {
     fn from(event: StaticFileProducerEvent) -> Self {
-        NodeEvent::StaticFileProducer(event)
+        Self::StaticFileProducer(event)
     }
 }
 
@@ -575,6 +582,9 @@ where
                 NodeEvent::StaticFileProducer(event) => {
                     this.state.handle_static_file_producer_event(event);
                 }
+                NodeEvent::Other(event_description) => {
+                    warn!("{event_description}");
+                }
             }
         }
 
@@ -633,8 +643,8 @@ impl Eta {
     /// Format ETA for a given stage.
     ///
     /// NOTE: Currently ETA is enabled only for the stages that have predictable progress.
-    /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
-    /// [StageId::Execution] stages.
+    /// It's not the case for network-dependent ([`StageId::Headers`] and [`StageId::Bodies`]) and
+    /// [`StageId::Execution`] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
         if !self.is_available() ||
             matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)

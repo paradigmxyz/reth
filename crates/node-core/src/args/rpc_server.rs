@@ -8,32 +8,20 @@ use crate::{
     cli::config::RethRpcConfig,
     utils::get_or_create_jwt_secret_from_path,
 };
+use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use rand::Rng;
-use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
-use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, HeaderProvider, StateProviderFactory,
-};
 use reth_rpc::eth::{
     cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_builder::{
-    auth::{AuthServerConfig, AuthServerHandle},
-    constants,
-    error::RpcError,
-    EthConfig, Identity, IpcServerBuilder, RethRpcModule, RpcModuleConfig, RpcModuleSelection,
-    RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
+    auth::AuthServerConfig, constants, error::RpcError, EthConfig, Identity, IpcServerBuilder,
+    RethRpcModule, RpcModuleConfig, RpcModuleSelection, RpcServerConfig, ServerBuilder,
+    TransportRpcModuleConfig,
 };
-use reth_rpc_engine_api::EngineApi;
-use reth_rpc_layer::{JwtError, JwtSecret};
-use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -91,7 +79,7 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port", default_value_t = constants::DEFAULT_WS_RPC_PORT)]
     pub ws_port: u16,
 
-    /// Origins from which to accept WebSocket requests
+    /// Origins from which to accept `WebSocket` requests
     #[arg(id = "ws.origins", long = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
@@ -189,19 +177,19 @@ pub struct RpcServerArgs {
 
 impl RpcServerArgs {
     /// Enables the HTTP-RPC server.
-    pub fn with_http(mut self) -> Self {
+    pub const fn with_http(mut self) -> Self {
         self.http = true;
         self
     }
 
     /// Enables the WS-RPC server.
-    pub fn with_ws(mut self) -> Self {
+    pub const fn with_ws(mut self) -> Self {
         self.ws = true;
         self
     }
 
     /// Enables the Auth IPC
-    pub fn with_auth_ipc(mut self) -> Self {
+    pub const fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
         self
     }
@@ -237,21 +225,21 @@ impl RpcServerArgs {
 
     /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_http_unused_port(mut self) -> Self {
+    pub const fn with_http_unused_port(mut self) -> Self {
         self.http_port = 0;
         self
     }
 
     /// Set the ws port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_ws_unused_port(mut self) -> Self {
+    pub const fn with_ws_unused_port(mut self) -> Self {
         self.ws_port = 0;
         self
     }
 
     /// Set the auth port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_auth_unused_port(mut self) -> Self {
+    pub const fn with_auth_unused_port(mut self) -> Self {
         self.auth_port = 0;
         self
     }
@@ -276,88 +264,6 @@ impl RpcServerArgs {
         self = self.with_auth_unused_port();
         self = self.with_ipc_random_path();
         self
-    }
-
-    /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub async fn start_rpc_server<Provider, Pool, Network, Tasks, Events, EvmConfig>(
-        &self,
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        executor: Tasks,
-        events: Events,
-        evm_config: EvmConfig,
-    ) -> Result<RpcServerHandle, RpcError>
-    where
-        Provider: BlockReaderIdExt
-            + AccountReader
-            + HeaderProvider
-            + StateProviderFactory
-            + EvmEnvProvider
-            + ChainSpecProvider
-            + ChangeSetReader
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions + Clone + 'static,
-        EvmConfig: ConfigureEvm + 'static,
-    {
-        reth_rpc_builder::launch(
-            provider,
-            pool,
-            network,
-            self.transport_rpc_module_config(),
-            self.rpc_server_config(),
-            executor,
-            events,
-            evm_config,
-        )
-        .await
-    }
-
-    /// Create Engine API server.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start_auth_server<Provider, Pool, Network, Tasks, EngineT, EvmConfig>(
-        &self,
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        executor: Tasks,
-        engine_api: EngineApi<Provider, EngineT>,
-        jwt_secret: JwtSecret,
-        evm_config: EvmConfig,
-    ) -> Result<AuthServerHandle, RpcError>
-    where
-        Provider: BlockReaderIdExt
-            + ChainSpecProvider
-            + EvmEnvProvider
-            + HeaderProvider
-            + StateProviderFactory
-            + Clone
-            + Unpin
-            + 'static,
-        Pool: TransactionPool + Clone + 'static,
-        Network: NetworkInfo + Peers + Clone + 'static,
-        Tasks: TaskSpawner + Clone + 'static,
-        EngineT: EngineTypes + 'static,
-        EvmConfig: ConfigureEvm + 'static,
-    {
-        let socket_address = SocketAddr::new(self.auth_addr, self.auth_port);
-
-        reth_rpc_builder::auth::launch(
-            provider,
-            pool,
-            network,
-            executor,
-            engine_api,
-            socket_address,
-            jwt_secret,
-            evm_config,
-        )
-        .await
     }
 }
 
@@ -493,7 +399,7 @@ impl RethRpcConfig for RpcServerArgs {
     }
 
     fn rpc_secret_key(&self) -> Option<JwtSecret> {
-        self.rpc_jwtsecret.clone()
+        self.rpc_jwtsecret
     }
 }
 
@@ -532,7 +438,7 @@ impl Default for RpcServerArgs {
     }
 }
 
-/// clap value parser for [RpcModuleSelection].
+/// clap value parser for [`RpcModuleSelection`].
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 struct RpcModuleSelectionValueParser;
@@ -626,7 +532,7 @@ mod tests {
     fn test_rpc_server_args_parser_none() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "none"]).args;
         let apis = args.http_api.unwrap();
-        let expected = Selection(vec![]);
+        let expected = Selection(Default::default());
         assert_eq!(apis, expected);
     }
 
@@ -641,8 +547,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -660,8 +566,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -679,8 +585,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()

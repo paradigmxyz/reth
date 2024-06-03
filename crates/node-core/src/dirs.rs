@@ -16,35 +16,35 @@ pub fn config_path_prefix(chain: Chain) -> String {
 
 /// Returns the path to the reth data directory.
 ///
-/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::data_dir`] for cross-platform behavior.
 pub fn data_dir() -> Option<PathBuf> {
     dirs_next::data_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth database.
 ///
-/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::data_dir`] for cross-platform behavior.
 pub fn database_path() -> Option<PathBuf> {
     data_dir().map(|root| root.join("db"))
 }
 
 /// Returns the path to the reth configuration directory.
 ///
-/// Refer to [dirs_next::config_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::config_dir`] for cross-platform behavior.
 pub fn config_dir() -> Option<PathBuf> {
     dirs_next::config_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth cache directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 pub fn cache_dir() -> Option<PathBuf> {
     dirs_next::cache_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth logs directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 pub fn logs_dir() -> Option<PathBuf> {
     cache_dir().map(|root| root.join("logs"))
 }
@@ -65,7 +65,7 @@ impl XdgPath for DataDirPath {
 
 /// Returns the path to the reth logs directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct LogsDir;
@@ -86,7 +86,7 @@ pub trait XdgPath {
 /// A wrapper type that either parses a user-given path or defaults to an
 /// OS-specific path.
 ///
-/// The [FromStr] implementation supports shell expansions and common patterns such as `~` for the
+/// The [`FromStr`] implementation supports shell expansions and common patterns such as `~` for the
 /// home directory.
 ///
 /// # Example
@@ -148,8 +148,8 @@ impl<D> From<PlatformPath<D>> for PathBuf {
 
 impl<D> PlatformPath<D> {
     /// Returns the path joined with another path
-    pub fn join<P: AsRef<Path>>(&self, path: P) -> PlatformPath<D> {
-        PlatformPath::<D>(self.0.join(path), std::marker::PhantomData)
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
+        Self(self.0.join(path), std::marker::PhantomData)
     }
 }
 
@@ -162,10 +162,10 @@ impl<D> PlatformPath<D> {
         ChainPath::new(platform_path, chain, datadir_args)
     }
 
-    fn platform_path_from_chain(&self, chain: Chain) -> PlatformPath<D> {
+    fn platform_path_from_chain(&self, chain: Chain) -> Self {
         let chain_name = config_path_prefix(chain);
         let path = self.0.join(chain_name);
-        PlatformPath::<D>(path, std::marker::PhantomData)
+        Self(path, std::marker::PhantomData)
     }
 
     /// Map the inner path to a new type `T`.
@@ -174,7 +174,7 @@ impl<D> PlatformPath<D> {
     }
 }
 
-/// An Optional wrapper type around [PlatformPath].
+/// An Optional wrapper type around [`PlatformPath`].
 ///
 /// This is useful for when a path is optional, such as the `--data-dir` flag.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,7 +200,7 @@ impl<D: XdgPath> MaybePlatformPath<D> {
     }
 
     /// Returns true if a custom path is set
-    pub fn is_some(&self) -> bool {
+    pub const fn is_some(&self) -> bool {
         self.0.is_some()
     }
 
@@ -256,13 +256,14 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
     }
 }
 
-/// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
+/// Wrapper type around `PlatformPath` that includes a `Chain`, used for separating reth data for
 /// different networks.
 ///
 /// If the chain is either mainnet, goerli, or sepolia, then the path will be:
 ///  * mainnet: `<DIR>/mainnet`
 ///  * goerli: `<DIR>/goerli`
 ///  * sepolia: `<DIR>/sepolia`
+///
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -270,7 +271,7 @@ pub struct ChainPath<D>(PlatformPath<D>, Chain, DatadirArgs);
 
 impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
-    pub fn new(path: PlatformPath<D>, chain: Chain, datadir_args: DatadirArgs) -> Self {
+    pub const fn new(path: PlatformPath<D>, chain: Chain, datadir_args: DatadirArgs) -> Self {
         Self(path, chain, datadir_args)
     }
 
@@ -288,7 +289,9 @@ impl<D> ChainPath<D> {
         self.data_dir().join("db")
     }
 
-    /// Returns the path to the static_files directory for this chain.
+    /// Returns the path to the static files directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/static_files`
     pub fn static_files(&self) -> PathBuf {
         let datadir_args = &self.2;
         if let Some(static_files_path) = &datadir_args.static_files_path {

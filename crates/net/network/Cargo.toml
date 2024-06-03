@@ -13,10 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
-reth-interfaces.workspace = true
 reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-network-api.workspace = true
+reth-network-p2p.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
@@ -41,7 +41,6 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
-futures-test = "0.3.30"
 
 # io
 serde = { workspace = true, optional = true }
@@ -59,7 +58,6 @@ tracing.workspace = true
 fnv = "1.0"
 thiserror.workspace = true
 parking_lot.workspace = true
-linked_hash_set = "0.1"
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 derive_more.workspace = true
@@ -71,12 +69,12 @@ smallvec.workspace = true
 [dev-dependencies]
 # reth
 reth-discv4 = { workspace = true, features = ["test-utils"] }
-reth-interfaces = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 
 # we need to enable the test-utils feature in our own crate to use utils in
 # integration tests
 reth-network = { workspace = true, features = ["test-utils"] }
+reth-network-p2p = { workspace = true, features = ["test-utils"] }
 
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true

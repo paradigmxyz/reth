@@ -14,7 +14,8 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-interfaces.workspace = true
+reth-fs-util.workspace = true
+reth-storage-errors.workspace = true
 reth-codecs.workspace = true
 reth-libmdbx = { workspace = true, optional = true, features = [
     "return-borrowed",
@@ -41,6 +42,7 @@ derive_more.workspace = true
 eyre.workspace = true
 paste.workspace = true
 rustc-hash.workspace = true
+sysinfo = "0.30"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -53,7 +55,6 @@ once_cell.workspace = true
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-codecs.workspace = true
-reth-interfaces.workspace = true
 
 rand.workspace = true
 serde_json.workspace = true

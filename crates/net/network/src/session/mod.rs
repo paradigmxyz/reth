@@ -66,10 +66,10 @@ pub struct SessionManager {
     next_id: usize,
     /// Keeps track of all sessions
     counter: SessionCounter,
-    ///  The maximum initial time an [ActiveSession] waits for a response from the peer before it
+    ///  The maximum initial time an [`ActiveSession`] waits for a response from the peer before it
     /// responds to an _internal_ request with a `TimeoutError`
     initial_internal_request_timeout: Duration,
-    /// If an [ActiveSession] does not receive a response at all within this duration then it is
+    /// If an [`ActiveSession`] does not receive a response at all within this duration then it is
     /// considered a protocol violation and the session will initiate a drop.
     protocol_breach_request_timeout: Duration,
     /// The timeout after which a pending session attempt is considered failed.
@@ -107,7 +107,7 @@ pub struct SessionManager {
     active_session_tx: MeteredPollSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
-    /// Additional RLPx sub-protocols to be used by the session manager.
+    /// Additional `RLPx` sub-protocols to be used by the session manager.
     extra_protocols: RlpxSubProtocols,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
@@ -172,12 +172,12 @@ impl SessionManager {
     }
 
     /// Returns the current status of the session.
-    pub fn status(&self) -> Status {
+    pub const fn status(&self) -> Status {
         self.status
     }
 
     /// Returns the secret key used for authenticating sessions.
-    pub fn secret_key(&self) -> SecretKey {
+    pub const fn secret_key(&self) -> SecretKey {
         self.secret_key
     }
 
@@ -186,7 +186,7 @@ impl SessionManager {
         self.hello_message.clone()
     }
 
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.extra_protocols.push(protocol)
     }
@@ -208,8 +208,8 @@ impl SessionManager {
 
     /// Invoked on a received status update.
     ///
-    /// If the updated activated another fork, this will return a [ForkTransition] and updates the
-    /// active [ForkId]. See also [ForkFilter::set_head].
+    /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
+    /// active [`ForkId`]. See also [`ForkFilter::set_head`].
     pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
         self.status.blockhash = head.hash;
         self.status.total_difficulty = head.total_difficulty;
@@ -668,7 +668,7 @@ pub enum SessionEvent {
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
     },
-    /// A session received a valid message via RLPx.
+    /// A session received a valid message via `RLPx`.
     ValidMessage {
         /// The remote node's public key
         peer_id: PeerId,
@@ -753,9 +753,9 @@ pub enum PendingSessionHandshakeError {
 
 impl PendingSessionHandshakeError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
-    pub fn as_disconnected(&self) -> Option<DisconnectReason> {
+    pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
         match self {
-            PendingSessionHandshakeError::Eth(eth_err) => eth_err.as_disconnected(),
+            Self::Eth(eth_err) => eth_err.as_disconnected(),
             _ => None,
         }
     }
@@ -936,8 +936,8 @@ async fn authenticate(
     }
 }
 
-/// Returns an [ECIESStream] if it can be built. If not, send a
-/// [PendingSessionEvent::EciesAuthError] and returns `None`
+/// Returns an [`ECIESStream`] if it can be built. If not, send a
+/// [`PendingSessionEvent::EciesAuthError`] and returns `None`
 async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
     stream: Io,
     secret_key: SecretKey,
@@ -955,8 +955,8 @@ async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`].
 ///
-/// If additional [RlpxSubProtocolHandlers] are provided, the hello message will be updated to also
-/// negotiate the additional protocols.
+/// If additional [`RlpxSubProtocolHandlers`] are provided, the hello message will be updated to
+/// also negotiate the additional protocols.
 #[allow(clippy::too_many_arguments)]
 async fn authenticate_stream(
     stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,

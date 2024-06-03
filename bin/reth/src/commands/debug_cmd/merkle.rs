@@ -15,15 +15,17 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db::{cursor::DbCursorRO, database::Database, init_db, tables, transaction::DbTx};
+use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
-use reth_interfaces::p2p::full_block::FullBlockClient;
+use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{fs, stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, PruneModes};
+use reth_network_p2p::full_block::FullBlockClient;
+use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, PruneModes};
 use reth_provider::{
-    BlockNumReader, BlockWriter, BundleStateWithReceipts, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    providers::StaticFileProvider, BlockNumReader, BlockWriter, BundleStateWithReceipts,
+    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory,
+    StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -72,11 +74,11 @@ pub struct Command {
 }
 
 impl Command {
-    async fn build_network<DB: Database + 'static>(
+    async fn build_network(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
@@ -109,7 +111,11 @@ impl Command {
 
         // initialize the database
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
+        let factory = ProviderFactory::new(
+            db.clone(),
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
         let provider_rw = factory.provider_rw()?;
 
         // Configure and build network
@@ -184,8 +190,9 @@ impl Command {
                 )),
                 PruneModes::none(),
             );
-            executor.execute_one((&sealed_block.clone().unseal(), td).into())?;
-            let BatchBlockExecutionOutput { bundle, receipts, first_block } = executor.finalize();
+            executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
+            let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } =
+                executor.finalize();
             BundleStateWithReceipts::new(bundle, receipts, first_block).write_to_storage(
                 provider_rw.tx_ref(),
                 None,

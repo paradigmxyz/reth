@@ -7,9 +7,7 @@ use crate::eth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, BlockId, BlockNumberOrTag, Bytes, SealedHeader, B256, U256,
-};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, SealedHeader, B256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
@@ -50,7 +48,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
         &self.inner.provider
     }
 
-    /// Create a new instance of the [TraceApi]
+    /// Create a new instance of the [`TraceApi`]
     pub fn new(provider: Provider, eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
         let inner = Arc::new(TraceApiInner { provider, eth_api, blocking_task_guard });
         Self { inner }
@@ -133,7 +131,7 @@ where
         calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> EthResult<Vec<TraceResults>> {
-        let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
+        let at = block_id.unwrap_or(BlockId::pending());
         let (cfg, block_env, at) = self.inner.eth_api.evm_env_at(at).await?;
 
         let gas_limit = self.inner.eth_api.call_gas_limit();
@@ -234,7 +232,7 @@ where
 
     /// Returns all transaction traces that match the given filter.
     ///
-    /// This is similar to [Self::trace_block] but only returns traces for transactions that match
+    /// This is similar to [`Self::trace_block`] but only returns traces for transactions that match
     /// the filter.
     pub async fn trace_filter(
         &self,
@@ -449,7 +447,7 @@ where
 
     /// Returns the opcodes of all transactions in the given block.
     ///
-    /// This is the same as [Self::trace_transaction_opcode_gas] but for all transactions in a
+    /// This is the same as [`Self::trace_transaction_opcode_gas`] but for all transactions in a
     /// block.
     pub async fn trace_block_opcode_gas(
         &self,
@@ -503,7 +501,7 @@ where
         let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
-        Ok(TraceApi::trace_call(self, request).await?)
+        Ok(Self::trace_call(self, request).await?)
     }
 
     /// Handler for `trace_callMany`
@@ -513,7 +511,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_call_many(self, calls, block_id).await?)
+        Ok(Self::trace_call_many(self, calls, block_id).await?)
     }
 
     /// Handler for `trace_rawTransaction`
@@ -524,7 +522,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_raw_transaction(self, data, trace_types, block_id).await?)
+        Ok(Self::trace_raw_transaction(self, data, trace_types, block_id).await?)
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -534,7 +532,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::replay_block_transactions(self, block_id, trace_types).await?)
+        Ok(Self::replay_block_transactions(self, block_id, trace_types).await?)
     }
 
     /// Handler for `trace_replayTransaction`
@@ -544,7 +542,7 @@ where
         trace_types: HashSet<TraceType>,
     ) -> Result<TraceResults> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::replay_transaction(self, transaction, trace_types).await?)
+        Ok(Self::replay_transaction(self, transaction, trace_types).await?)
     }
 
     /// Handler for `trace_block`
@@ -553,7 +551,7 @@ where
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_block(self, block_id).await?)
+        Ok(Self::trace_block(self, block_id).await?)
     }
 
     /// Handler for `trace_filter`
@@ -563,7 +561,7 @@ where
     /// # Limitations
     /// This currently requires block filter fields, since reth does not have address indices yet.
     async fn trace_filter(&self, filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
-        Ok(TraceApi::trace_filter(self, filter).await?)
+        Ok(Self::trace_filter(self, filter).await?)
     }
 
     /// Returns transaction trace at given index.
@@ -574,7 +572,7 @@ where
         indices: Vec<Index>,
     ) -> Result<Option<LocalizedTransactionTrace>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_get(self, hash, indices.into_iter().map(Into::into).collect()).await?)
+        Ok(Self::trace_get(self, hash, indices.into_iter().map(Into::into).collect()).await?)
     }
 
     /// Handler for `trace_transaction`
@@ -583,7 +581,7 @@ where
         hash: B256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_transaction(self, hash).await?)
+        Ok(Self::trace_transaction(self, hash).await?)
     }
 
     /// Handler for `trace_transactionOpcodeGas`
@@ -592,13 +590,13 @@ where
         tx_hash: B256,
     ) -> Result<Option<TransactionOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_transaction_opcode_gas(self, tx_hash).await?)
+        Ok(Self::trace_transaction_opcode_gas(self, tx_hash).await?)
     }
 
     /// Handler for `trace_blockOpcodeGas`
     async fn trace_block_opcode_gas(&self, block_id: BlockId) -> Result<Option<BlockOpcodeGas>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(TraceApi::trace_block_opcode_gas(self, block_id).await?)
+        Ok(Self::trace_block_opcode_gas(self, block_id).await?)
     }
 }
 

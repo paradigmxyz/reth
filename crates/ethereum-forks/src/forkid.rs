@@ -21,6 +21,7 @@ use std::{
 use thiserror::Error;
 
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+const TIMESTAMP_BEFORE_ETHEREUM_MAINNET: u64 = 1_300_000_000;
 
 /// `CRC32` hash of all previous forks starting from genesis block.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -86,9 +87,8 @@ impl PartialOrd for ForkFilterKey {
 impl Ord for ForkFilterKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (ForkFilterKey::Block(a), ForkFilterKey::Block(b)) |
-            (ForkFilterKey::Time(a), ForkFilterKey::Time(b)) => a.cmp(b),
-            (ForkFilterKey::Block(_), ForkFilterKey::Time(_)) => Ordering::Less,
+            (Self::Block(a), Self::Block(b)) | (Self::Time(a), Self::Time(b)) => a.cmp(b),
+            (Self::Block(_), Self::Time(_)) => Ordering::Less,
             _ => Ordering::Greater,
         }
     }
@@ -121,7 +121,7 @@ pub struct ForkId {
 /// See:
 /// <https://github.com/ethereum/devp2p/blob/master/enr-entries/eth.md#entry-format>
 ///
-/// for how geth implements ForkId values and forward compatibility.
+/// for how geth implements `ForkId` values and forward compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable)]
 pub struct EnrForkIdEntry {
     /// The inner forkid
@@ -183,7 +183,7 @@ pub enum ValidationError {
     RemoteStale {
         /// locally configured forkId
         local: ForkId,
-        /// ForkId received from remote
+        /// `ForkId` received from remote
         remote: ForkId,
     },
     /// Local node is on an incompatible chain or needs a software update.
@@ -191,7 +191,7 @@ pub enum ValidationError {
     LocalIncompatibleOrStale {
         /// locally configured forkId
         local: ForkId,
-        /// ForkId received from remote
+        /// `ForkId` received from remote
         remote: ForkId,
     },
 }
@@ -297,6 +297,15 @@ impl ForkFilter {
         self.cache.fork_id
     }
 
+    /// Manually set the current fork id.
+    ///
+    /// Caution: this disregards all configured fork filters and is reset on the next head update.
+    /// This is useful for testing or to connect to networks over p2p where only the latest forkid
+    /// is known.
+    pub fn set_current_fork_id(&mut self, fork_id: ForkId) {
+        self.cache.fork_id = fork_id;
+    }
+
     /// Check whether the provided `ForkId` is compatible based on the validation rules in
     /// `EIP-2124`.
     ///
@@ -313,16 +322,25 @@ impl ForkFilter {
                 return Ok(())
             }
 
-            // We check if this fork is time-based or block number-based
-            // NOTE: This is a bit hacky but I'm unsure how else we can figure out when to use
-            // timestamp vs when to use block number..
-            let head_block_or_time = match self.cache.epoch_start {
-                ForkFilterKey::Block(_) => self.head.number,
-                ForkFilterKey::Time(_) => self.head.timestamp,
+            let is_incompatible = if self.head.number < TIMESTAMP_BEFORE_ETHEREUM_MAINNET {
+                // When the block number is less than an old timestamp before Ethereum mainnet,
+                // we check if this fork is time-based or block number-based by estimating that,
+                // if fork_id.next is bigger than the old timestamp, we are dealing with a
+                // timestamp, otherwise with a block.
+                (fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET &&
+                    self.head.timestamp >= fork_id.next) ||
+                    (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET &&
+                        self.head.number >= fork_id.next)
+            } else {
+                // Extra safety check to future-proof for when Ethereum has over a billion blocks.
+                let head_block_or_time = match self.cache.epoch_start {
+                    ForkFilterKey::Block(_) => self.head.number,
+                    ForkFilterKey::Time(_) => self.head.timestamp,
+                };
+                head_block_or_time >= fork_id.next
             };
 
-            //... compare local head to FORK_NEXT.
-            return if head_block_or_time >= fork_id.next {
+            return if is_incompatible {
                 // 1a) A remotely announced but remotely not passed block is already passed locally,
                 // disconnect, since the chains are incompatible.
                 Err(ValidationError::LocalIncompatibleOrStale {
@@ -371,9 +389,9 @@ impl ForkFilter {
 /// See also [`ForkFilter::set_head`]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ForkTransition {
-    /// The new, active ForkId
+    /// The new, active `ForkId`
     pub current: ForkId,
-    /// The previously active ForkId before the transition
+    /// The previously active `ForkId` before the transition
     pub past: ForkId,
 }
 
@@ -588,6 +606,72 @@ mod tests {
             filter.validate(remote),
             Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
         );
+
+        // Block far in the future (block number bigger than TIMESTAMP_BEFORE_ETHEREUM_MAINNET), not
+        // compatible.
+        filter
+            .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 1, ..Default::default() });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 1,
+        };
+        assert_eq!(
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
+        );
+
+        // Block far in the future (block number bigger than TIMESTAMP_BEFORE_ETHEREUM_MAINNET),
+        // compatible.
+        filter
+            .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 1, ..Default::default() });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 2,
+        };
+        assert_eq!(filter.validate(remote), Ok(()));
+
+        // block number smaller than TIMESTAMP_BEFORE_ETHEREUM_MAINNET and
+        // fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.timestamp >= fork_id.next,
+        // not compatible.
+        filter.set_head(Head {
+            number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 1,
+            timestamp: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 2,
+            ..Default::default()
+        });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET + 1,
+        };
+        assert_eq!(
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
+        );
+
+        // block number smaller than TIMESTAMP_BEFORE_ETHEREUM_MAINNET and
+        // fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.number >= fork_id.next,
+        // not compatible.
+        filter
+            .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 1, ..Default::default() });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 2,
+        };
+        assert_eq!(
+            filter.validate(remote),
+            Err(ValidationError::LocalIncompatibleOrStale { local: filter.current(), remote })
+        );
+
+        // block number smaller than TIMESTAMP_BEFORE_ETHEREUM_MAINNET and
+        // !((fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.timestamp >=
+        // fork_id.next) || (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET && self.head.number
+        // >= fork_id.next)), compatible.
+        filter
+            .set_head(Head { number: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 2, ..Default::default() });
+        let remote = ForkId {
+            hash: ForkHash(hex!("668db0af")),
+            next: TIMESTAMP_BEFORE_ETHEREUM_MAINNET - 1,
+        };
+        assert_eq!(filter.validate(remote), Ok(()));
     }
 
     #[test]

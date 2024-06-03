@@ -39,13 +39,15 @@ use discv5::{
 use enr::Enr;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
-use reth_network_types::PeerId;
+use reth_network_types::{pk2id, PeerId};
 use reth_primitives::{bytes::Bytes, hex, ForkId, B256};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
     collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
-    fmt, io,
+    fmt,
+    future::poll_fn,
+    io,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
     rc::Rc,
@@ -155,9 +157,9 @@ type NodeRecordSender = OneshotSender<Vec<NodeRecord>>;
 
 /// The Discv4 frontend
 ///
-/// This communicates with the [Discv4Service] by sending commands over a channel.
+/// This communicates with the [`Discv4Service`] by sending commands over a channel.
 ///
-/// See also [Discv4::spawn]
+/// See also [`Discv4::spawn`]
 #[derive(Debug, Clone)]
 pub struct Discv4 {
     /// The address of the udp socket
@@ -206,7 +208,7 @@ impl Discv4 {
         }
     }
 
-    /// Binds a new UdpSocket and creates the service
+    /// Binds a new `UdpSocket` and creates the service
     ///
     /// ```
     /// # use std::io;
@@ -257,11 +259,11 @@ impl Discv4 {
     }
 
     /// Returns the address of the UDP socket.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
-    /// Returns the [NodeRecord] of the local node.
+    /// Returns the [`NodeRecord`] of the local node.
     ///
     /// This includes the currently tracked external IP address of the node.
     pub fn node_record(&self) -> NodeRecord {
@@ -281,12 +283,12 @@ impl Discv4 {
     /// Starts a `FindNode` recursive lookup that locates the closest nodes to the given node id. See also: <https://github.com/ethereum/devp2p/blob/master/discv4.md#recursive-lookup>
     ///
     /// The lookup initiator starts by picking α closest nodes to the target it knows of. The
-    /// initiator then sends concurrent FindNode packets to those nodes. α is a system-wide
-    /// concurrency parameter, such as 3. In the recursive step, the initiator resends FindNode to
+    /// initiator then sends concurrent `FindNode` packets to those nodes. α is a system-wide
+    /// concurrency parameter, such as 3. In the recursive step, the initiator resends `FindNode` to
     /// nodes it has learned about from previous queries. Of the k nodes the initiator has heard of
-    /// closest to the target, it picks α that it has not yet queried and resends FindNode to them.
-    /// Nodes that fail to respond quickly are removed from consideration until and unless they do
-    /// respond.
+    /// closest to the target, it picks α that it has not yet queried and resends `FindNode` to
+    /// them. Nodes that fail to respond quickly are removed from consideration until and unless
+    /// they do respond.
     //
     // If a round of FindNode queries fails to return a node any closer than the closest already
     // seen, the initiator resends the find node to all of the k closest nodes it has not already
@@ -408,7 +410,7 @@ impl Discv4 {
         Ok(rx.await?)
     }
 
-    /// Terminates the spawned [Discv4Service].
+    /// Terminates the spawned [`Discv4Service`].
     pub fn terminate(&self) {
         self.send_to_service(Discv4Command::Terminated);
     }
@@ -417,7 +419,7 @@ impl Discv4 {
 /// Manages discv4 peer discovery over UDP.
 ///
 /// This is a [Stream] to handles incoming and outgoing discv4 messages and emits updates via:
-/// [Discv4Service::update_stream].
+/// [`Discv4Service::update_stream`].
 #[must_use = "Stream does nothing unless polled"]
 pub struct Discv4Service {
     /// Local address of the UDP socket.
@@ -460,7 +462,7 @@ pub struct Discv4Service {
     /// Entries here means we've proven the peer's endpoint but haven't completed our end of the
     /// endpoint proof
     pending_lookup: HashMap<PeerId, (Instant, LookupContext)>,
-    /// Currently active FindNode requests
+    /// Currently active `FindNode` requests
     pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
     /// Currently active ENR requests
     pending_enr_requests: HashMap<PeerId, EnrRequestState>,
@@ -560,7 +562,7 @@ impl Discv4Service {
 
         let shared_node_record = Arc::new(Mutex::new(local_node_record));
 
-        Discv4Service {
+        Self {
             local_address,
             local_eip_868_enr,
             local_node_record,
@@ -623,7 +625,7 @@ impl Discv4Service {
         }
     }
 
-    /// Returns the [PeerId] that identifies this node
+    /// Returns the [`PeerId`] that identifies this node
     pub const fn local_peer_id(&self) -> &PeerId {
         &self.local_node_record.id
     }
@@ -646,7 +648,7 @@ impl Discv4Service {
         &mut self.local_node_record
     }
 
-    /// Returns true if the given PeerId is currently in the bucket
+    /// Returns true if the given `PeerId` is currently in the bucket
     pub fn contains_node(&self, id: PeerId) -> bool {
         let key = kad_key(id);
         self.kbuckets.get_index(&key).is_some()
@@ -717,9 +719,10 @@ impl Discv4Service {
 
     /// Looks up the given node in the DHT
     ///
-    /// A FindNode packet requests information about nodes close to target. The target is a 64-byte
-    /// secp256k1 public key. When FindNode is received, the recipient should reply with Neighbors
-    /// packets containing the closest 16 nodes to target found in its local table.
+    /// A `FindNode` packet requests information about nodes close to target. The target is a
+    /// 64-byte secp256k1 public key. When `FindNode` is received, the recipient should reply
+    /// with Neighbors packets containing the closest 16 nodes to target found in its local
+    /// table.
     //
     // To guard against traffic amplification attacks, Neighbors replies should only be sent if the
     // sender of FindNode has been verified by the endpoint proof procedure.
@@ -731,7 +734,7 @@ impl Discv4Service {
     ///
     /// At first the `ALPHA` (==3, defined concurrency factor) nodes that are closest to the target
     /// in the underlying DHT are selected to seed the lookup via `FindNode` requests. In the
-    /// recursive step, the initiator resends FindNode to nodes it has learned about from previous
+    /// recursive step, the initiator resends `FindNode` to nodes it has learned about from previous
     /// queries.
     ///
     /// This takes an optional Sender through which all successfully discovered nodes are sent once
@@ -851,8 +854,8 @@ impl Discv4Service {
 
     /// Update the entry on RE-ping
     ///
-    /// On re-ping we check for a changed enr_seq if eip868 is enabled and when it changed we sent a
-    /// followup request to retrieve the updated ENR
+    /// On re-ping we check for a changed `enr_seq` if eip868 is enabled and when it changed we sent
+    /// a followup request to retrieve the updated ENR
     fn update_on_reping(&mut self, record: NodeRecord, mut last_enr_seq: Option<u64>) {
         if record.id == self.local_node_record.id {
             return
@@ -943,7 +946,7 @@ impl Discv4Service {
 
     /// Adds all nodes
     ///
-    /// See [Self::add_node]
+    /// See [`Self::add_node`]
     pub fn add_all_nodes(&mut self, records: impl IntoIterator<Item = NodeRecord>) {
         for record in records.into_iter() {
             self.add_node(record);
@@ -1238,6 +1241,12 @@ impl Discv4Service {
     fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
         trace!(target: "discv4", ?remote_addr, ?msg, "received ENR response");
         if let Some(resp) = self.pending_enr_requests.remove(&id) {
+            // ensure the ENR's public key matches the expected node id
+            let enr_id = pk2id(&msg.enr.public_key());
+            if id != enr_id {
+                return
+            }
+
             if resp.echo_hash == msg.request_hash {
                 let key = kad_key(id);
                 let fork_id = msg.eth_fork_id();
@@ -1447,7 +1456,7 @@ impl Discv4Service {
         self.evict_failed_neighbours(now);
     }
 
-    /// Handles failed responses to FindNode
+    /// Handles failed responses to `FindNode`
     fn evict_failed_neighbours(&mut self, now: Instant) {
         let mut failed_neighbours = Vec::new();
         self.pending_find_nodes.retain(|node_id, find_node_request| {
@@ -1493,7 +1502,7 @@ impl Discv4Service {
         }
     }
 
-    /// Re-pings all nodes which endpoint proofs are considered expired: [``NodeEntry::is_expired]
+    /// Re-pings all nodes which endpoint proofs are considered expired: [`NodeEntry::is_expired`]
     ///
     /// This will send a `Ping` to the nodes, if a node fails to respond with a `Pong` to renew the
     /// endpoint proof it will be removed from the table.
@@ -1523,7 +1532,7 @@ impl Discv4Service {
     /// be an i64.
     ///
     /// Returns an error if:
-    ///  - invalid UNIX timestamp (larger than i64::MAX)
+    ///  - invalid UNIX timestamp (larger than `i64::MAX`)
     ///  - timestamp is expired (lower than current local UNIX timestamp)
     fn ensure_not_expired(&self, timestamp: u64) -> Result<(), ()> {
         // ensure the timestamp is a valid UNIX timestamp
@@ -1790,7 +1799,13 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
     }
 }
 
+/// Rate limits the number of incoming packets from individual IPs to 1 packet/second
+const MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP: usize = 60usize;
+
 /// Continuously awaits new incoming messages and sends them back through the channel.
+///
+/// The receive loop enforce primitive rate limiting for ips to prevent message spams from
+/// individual IPs
 pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
@@ -1802,6 +1817,12 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
         });
     };
 
+    let mut cache = ReceiveCache::default();
+
+    // tick at half the rate of the limit
+    let tick = MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP / 2;
+    let mut interval = tokio::time::interval(Duration::from_secs(tick as u64));
+
     let mut buf = [0; MAX_PACKET_SIZE];
     loop {
         let res = udp.recv_from(&mut buf).await;
@@ -1811,6 +1832,12 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                 send(IngressEvent::RecvError(err)).await;
             }
             Ok((read, remote_addr)) => {
+                // rate limit incoming packets by IP
+                if cache.inc_ip(remote_addr.ip()) > MAX_INCOMING_PACKETS_PER_MINUTE_BY_IP {
+                    trace!(target: "discv4", ?remote_addr, "Too many incoming packets from IP.");
+                    continue
+                }
+
                 let packet = &buf[..read];
                 match Message::decode(packet) {
                     Ok(packet) => {
@@ -1819,6 +1846,13 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                             debug!(target: "discv4", ?remote_addr, "Received own packet.");
                             continue
                         }
+
+                        // skip if we've already received the same packet
+                        if cache.contains_packet(packet.hash) {
+                            debug!(target: "discv4", ?remote_addr, "Received duplicate packet.");
+                            continue
+                        }
+
                         send(IngressEvent::Packet(remote_addr, packet)).await;
                     }
                     Err(err) => {
@@ -1828,10 +1862,71 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
                 }
             }
         }
+
+        // reset the tracked ips if the interval has passed
+        if poll_fn(|cx| match interval.poll_tick(cx) {
+            Poll::Ready(_) => Poll::Ready(true),
+            Poll::Pending => Poll::Ready(false),
+        })
+        .await
+        {
+            cache.tick_ips(tick);
+        }
     }
 }
 
-/// The commands sent from the frontend [Discv4] to the service [Discv4Service].
+/// A cache for received packets and their source address.
+///
+/// This is used to discard duplicated packets and rate limit messages from the same source.
+struct ReceiveCache {
+    /// keeps track of how many messages we've received from a given IP address since the last
+    /// tick.
+    ///
+    /// This is used to count the number of messages received from a given IP address within an
+    /// interval.
+    ip_messages: HashMap<IpAddr, usize>,
+    // keeps track of unique packet hashes
+    unique_packets: schnellru::LruMap<B256, ()>,
+}
+
+impl ReceiveCache {
+    /// Updates the counter for each IP address and removes IPs that have exceeded the limit.
+    ///
+    /// This will decrement the counter for each IP address and remove IPs that have reached 0.
+    fn tick_ips(&mut self, tick: usize) {
+        self.ip_messages.retain(|_, count| {
+            if let Some(reset) = count.checked_sub(tick) {
+                *count = reset;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    /// Increases the counter for the given IP address and returns the new count.
+    fn inc_ip(&mut self, ip: IpAddr) -> usize {
+        let ctn = self.ip_messages.entry(ip).or_default();
+        *ctn = ctn.saturating_add(1);
+        *ctn
+    }
+
+    /// Returns true if we previously received the packet
+    fn contains_packet(&mut self, hash: B256) -> bool {
+        !self.unique_packets.insert(hash, ())
+    }
+}
+
+impl Default for ReceiveCache {
+    fn default() -> Self {
+        Self {
+            ip_messages: Default::default(),
+            unique_packets: schnellru::LruMap::new(schnellru::ByLength::new(32)),
+        }
+    }
+}
+
+/// The commands sent from the frontend [Discv4] to the service [`Discv4Service`].
 enum Discv4Command {
     Add(NodeRecord),
     SetTcpPort(u16),
@@ -1870,7 +1965,7 @@ struct PingRequest {
     reason: PingReason,
 }
 
-/// Rotates the PeerId that is periodically looked up.
+/// Rotates the `PeerId` that is periodically looked up.
 ///
 /// By selecting different targets, the lookups will be seeded with different ALPHA seed nodes.
 #[derive(Debug)]
@@ -1883,7 +1978,7 @@ struct LookupTargetRotator {
 
 impl LookupTargetRotator {
     /// Returns a rotator that always returns the local target.
-    fn local_only() -> Self {
+    const fn local_only() -> Self {
         Self { interval: 1, counter: 0 }
     }
 }
@@ -2092,7 +2187,7 @@ struct NodeEntry {
     last_seen: Instant,
     /// Last enr seq we retrieved via a ENR request.
     last_enr_seq: Option<u64>,
-    /// ForkId if retrieved via ENR requests.
+    /// `ForkId` if retrieved via ENR requests.
     fork_id: Option<ForkId>,
     /// Counter for failed findNode requests.
     find_node_failures: usize,
@@ -2137,7 +2232,7 @@ impl NodeEntry {
         self.update_now(|s| std::mem::replace(&mut s.fork_id, fork_id))
     }
 
-    /// Updates the last_seen timestamp and calls the closure
+    /// Updates the `last_seen` timestamp and calls the closure
     fn update_now<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut Self) -> R,
@@ -2166,7 +2261,7 @@ enum PingReason {
     EstablishBond,
     /// Re-ping a peer.
     RePing,
-    /// Part of a lookup to ensure endpoint is proven before we can send a FindNode request.
+    /// Part of a lookup to ensure endpoint is proven before we can send a `FindNode` request.
     Lookup(NodeRecord, LookupContext),
 }
 

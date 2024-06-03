@@ -3,9 +3,11 @@ use crate::{
     PrunerError,
 };
 use reth_db::{database::Database, tables};
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
-use reth_provider::{DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
+use reth_provider::{
+    errors::provider::ProviderResult, DatabaseProviderRW, PruneCheckpointWriter,
+    TransactionsProvider,
+};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -14,7 +16,7 @@ pub struct Receipts {
 }
 
 impl Receipts {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }
@@ -97,16 +99,16 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_interfaces::test_utils::{
-        generators,
-        generators::{random_block_range, random_receipt},
-    };
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, TxNumber, B256,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block_range, random_receipt},
+    };
     use std::ops::Sub;
 
     #[test]

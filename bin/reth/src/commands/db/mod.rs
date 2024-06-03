@@ -14,7 +14,7 @@ use reth_db::{
 };
 use reth_node_core::args::DatadirArgs;
 use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{
     io::{self, Write},
     sync::Arc,
@@ -25,7 +25,6 @@ mod clear;
 mod diff;
 mod get;
 mod list;
-mod static_files;
 mod stats;
 /// DB List TUI
 mod tui;
@@ -77,19 +76,18 @@ pub enum Subcommands {
     },
     /// Deletes all table entries
     Clear(clear::Command),
-    /// Creates static files from database tables
-    CreateStaticFiles(static_files::Command),
     /// Lists current and local database versions
     Version,
     /// Returns the full database path
     Path,
 }
 
-/// db_ro_exec opens a database in read-only mode, and then execute with the provided command
+/// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
 macro_rules! db_ro_exec {
     ($chain:expr, $db_path:expr, $db_args:ident, $sfp:ident, $tool:ident, $command:block) => {
         let db = open_db_read_only($db_path, $db_args)?;
-        let provider_factory = ProviderFactory::new(db, $chain.clone(), $sfp)?;
+        let provider_factory =
+            ProviderFactory::new(db, $chain.clone(), StaticFileProvider::read_only($sfp)?);
 
         let $tool = DbTool::new(provider_factory, $chain.clone())?;
         $command;
@@ -149,21 +147,24 @@ impl Command {
                 }
 
                 let db = open_db(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path.clone())?;
+                let provider_factory = ProviderFactory::new(
+                    db,
+                    self.chain.clone(),
+                    StaticFileProvider::read_write(&static_files_path)?,
+                );
 
                 let tool = DbTool::new(provider_factory, self.chain.clone())?;
                 tool.drop(db_path, static_files_path)?;
             }
             Subcommands::Clear(command) => {
                 let db = open_db(&db_path, db_args)?;
-                let provider_factory =
-                    ProviderFactory::new(db, self.chain.clone(), static_files_path)?;
+                let provider_factory = ProviderFactory::new(
+                    db,
+                    self.chain.clone(),
+                    StaticFileProvider::read_write(static_files_path)?,
+                );
 
                 command.execute(provider_factory)?;
-            }
-            Subcommands::CreateStaticFiles(command) => {
-                command.execute(data_dir, self.db.database_args(), self.chain.clone())?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

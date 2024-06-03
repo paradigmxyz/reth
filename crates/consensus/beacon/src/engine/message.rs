@@ -1,10 +1,7 @@
-use crate::{
-    engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus},
-    BeaconConsensusEngineEvent,
-};
+use crate::engine::{error::BeaconOnNewPayloadError, forkchoice::ForkchoiceStatus};
 use futures::{future::Either, FutureExt};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::RethResult;
+use reth_errors::RethResult;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkChoiceUpdateResult, ForkchoiceState,
@@ -15,11 +12,11 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::oneshot;
 
 /// Represents the outcome of forkchoice update.
 ///
-/// This is a future that resolves to [ForkChoiceUpdateResult]
+/// This is a future that resolves to [`ForkChoiceUpdateResult`]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
 pub struct OnForkChoiceUpdated {
@@ -35,8 +32,8 @@ pub struct OnForkChoiceUpdated {
 // === impl OnForkChoiceUpdated ===
 
 impl OnForkChoiceUpdated {
-    /// Returns the determined status of the received ForkchoiceState.
-    pub fn forkchoice_status(&self) -> ForkchoiceStatus {
+    /// Returns the determined status of the received `ForkchoiceState`.
+    pub const fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status
     }
 
@@ -162,6 +159,4 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     },
     /// Message with exchanged transition configuration.
     TransitionConfigurationExchanged,
-    /// Add a new listener for [`BeaconEngineMessage`].
-    EventListener(UnboundedSender<BeaconConsensusEngineEvent>),
 }

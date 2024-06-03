@@ -20,7 +20,7 @@ use std::{
 };
 use tracing::error;
 
-/// Available keybindings for the [DbListTUI]
+/// Available keybindings for the [`DbListTUI`]
 static CMDS: [(&str, &str); 6] = [
     ("q", "Quit"),
     ("↑", "Entry above"),
@@ -30,8 +30,8 @@ static CMDS: [(&str, &str); 6] = [
     ("G", "Go to a specific page"),
 ];
 
-/// Modified version of the [ListState] struct that exposes the `offset` field.
-/// Used to make the [DbListTUI] keys clickable.
+/// Modified version of the [`ListState`] struct that exposes the `offset` field.
+/// Used to make the [`DbListTUI`] keys clickable.
 struct ExpListState {
     pub(crate) offset: usize,
 }
@@ -46,16 +46,16 @@ pub(crate) enum ViewMode {
 }
 
 enum Entries<T: Table> {
-    /// Pairs of [Table::Key] and [RawValue<Table::Value>]
+    /// Pairs of [`Table::Key`] and [`RawValue<Table::Value>`]
     RawValues(Vec<(T::Key, RawValue<T::Value>)>),
-    /// Pairs of [Table::Key] and [Table::Value]
+    /// Pairs of [`Table::Key`] and [`Table::Value`]
     Values(Vec<TableRow<T>>),
 }
 
 impl<T: Table> Entries<T> {
-    /// Creates new empty [Entries] as [Entries::RawValues] if `raw_values == true` and as
-    /// [Entries::Values] if `raw == false`.
-    fn new_with_raw_values(raw_values: bool) -> Self {
+    /// Creates new empty [Entries] as [`Entries::RawValues`] if `raw_values == true` and as
+    /// [`Entries::Values`] if `raw == false`.
+    const fn new_with_raw_values(raw_values: bool) -> Self {
         if raw_values {
             Self::RawValues(Vec::new())
         } else {
@@ -63,29 +63,29 @@ impl<T: Table> Entries<T> {
         }
     }
 
-    /// Sets the internal entries [Vec], converting the [Table::Value] into [RawValue<Table::Value>]
-    /// if needed.
+    /// Sets the internal entries [Vec], converting the [`Table::Value`] into
+    /// [`RawValue<Table::Value>`] if needed.
     fn set(&mut self, new_entries: Vec<TableRow<T>>) {
         match self {
-            Entries::RawValues(old_entries) => {
+            Self::RawValues(old_entries) => {
                 *old_entries =
                     new_entries.into_iter().map(|(key, value)| (key, value.into())).collect()
             }
-            Entries::Values(old_entries) => *old_entries = new_entries,
+            Self::Values(old_entries) => *old_entries = new_entries,
         }
     }
 
     /// Returns the length of internal [Vec].
     fn len(&self) -> usize {
         match self {
-            Entries::RawValues(entries) => entries.len(),
-            Entries::Values(entries) => entries.len(),
+            Self::RawValues(entries) => entries.len(),
+            Self::Values(entries) => entries.len(),
         }
     }
 
-    /// Returns an iterator over keys of the internal [Vec]. For both [Entries::RawValues] and
-    /// [Entries::Values], this iterator will yield [Table::Key].
-    fn iter_keys(&self) -> EntriesKeyIter<'_, T> {
+    /// Returns an iterator over keys of the internal [Vec]. For both [`Entries::RawValues`] and
+    /// [`Entries::Values`], this iterator will yield [`Table::Key`].
+    const fn iter_keys(&self) -> EntriesKeyIter<'_, T> {
         EntriesKeyIter { entries: self, index: 0 }
     }
 }
@@ -210,7 +210,7 @@ where
         self.reset();
     }
 
-    /// Show the [DbListTUI] in the terminal.
+    /// Show the [`DbListTUI`] in the terminal.
     pub(crate) fn run(mut self) -> eyre::Result<()> {
         // Setup backend
         enable_raw_mode()?;

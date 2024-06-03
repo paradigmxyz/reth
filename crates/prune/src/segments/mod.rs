@@ -9,35 +9,34 @@ mod storage_history;
 mod transaction_lookup;
 mod transactions;
 
+use crate::PrunerError;
 pub use account_history::AccountHistory;
 pub use headers::Headers;
 pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
-pub use sender_recovery::SenderRecovery;
-pub use set::SegmentSet;
-use std::fmt::Debug;
-pub use storage_history::StorageHistory;
-pub use transaction_lookup::TransactionLookup;
-pub use transactions::Transactions;
-
-use crate::PrunerError;
 use reth_db::database::Database;
-use reth_interfaces::{provider::ProviderResult, RethResult};
 use reth_primitives::{
     BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
     PruneSegment, TxNumber,
 };
-use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter};
-use std::ops::RangeInclusive;
+use reth_provider::{
+    errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+};
+pub use sender_recovery::SenderRecovery;
+pub use set::SegmentSet;
+use std::{fmt::Debug, ops::RangeInclusive};
+pub use storage_history::StorageHistory;
 use tracing::error;
+pub use transaction_lookup::TransactionLookup;
+pub use transactions::Transactions;
 
 /// A segment represents a pruning of some portion of the data.
 ///
 /// Segments are called from [Pruner](crate::Pruner) with the following lifecycle:
-/// 1. Call [Segment::prune] with `delete_limit` of [PruneInput].
-/// 2. If [Segment::prune] returned a [Some] in `checkpoint` of [PruneOutput], call
-///    [Segment::save_checkpoint].
-/// 3. Subtract `pruned` of [PruneOutput] from `delete_limit` of next [PruneInput].
+/// 1. Call [`Segment::prune`] with `delete_limit` of [`PruneInput`].
+/// 2. If [`Segment::prune`] returned a [Some] in `checkpoint` of [`PruneOutput`], call
+///    [`Segment::save_checkpoint`].
+/// 3. Subtract `pruned` of [`PruneOutput`] from `delete_limit` of next [`PruneInput`].
 pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Segment of data that's pruned.
     fn segment(&self) -> PruneSegment;
@@ -45,14 +44,14 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Prune mode with which the segment was initialized
     fn mode(&self) -> Option<PruneMode>;
 
-    /// Prune data for [Self::segment] using the provided input.
+    /// Prune data for [`Self::segment`] using the provided input.
     fn prune(
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
-    /// Save checkpoint for [Self::segment] to the database.
+    /// Save checkpoint for [`Self::segment`] to the database.
     fn save_checkpoint(
         &self,
         provider: &DatabaseProviderRW<DB>,
@@ -62,7 +61,7 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     }
 }
 
-/// Segment pruning input, see [Segment::prune].
+/// Segment pruning input, see [`Segment::prune`].
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub struct PruneInput {
@@ -85,7 +84,7 @@ impl PruneInput {
     pub(crate) fn get_next_tx_num_range<DB: Database>(
         &self,
         provider: &DatabaseProviderRW<DB>,
-    ) -> RethResult<Option<RangeInclusive<TxNumber>>> {
+    ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one
             .and_then(|checkpoint| match checkpoint.tx_number {
@@ -103,7 +102,7 @@ impl PruneInput {
                 let last_tx = body.last_tx_num();
                 if last_tx + body.tx_count() == 0 {
                     // Prevents a scenario where the pruner correctly starts at a finalized block,
-                    // but the first transaction (tx_num = 0) only appears on an unfinalized one.
+                    // but the first transaction (tx_num = 0) only appears on an non-finalized one.
                     // Should only happen on a test/hive scenario.
                     return Ok(None)
                 }
@@ -152,7 +151,7 @@ impl PruneInput {
     }
 }
 
-/// Segment pruning output, see [Segment::prune].
+/// Segment pruning output, see [`Segment::prune`].
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct PruneOutput {
     pub(crate) progress: PruneProgress,
@@ -163,13 +162,13 @@ pub struct PruneOutput {
 }
 
 impl PruneOutput {
-    /// Returns a [PruneOutput] with `done = true`, `pruned = 0` and `checkpoint = None`.
+    /// Returns a [`PruneOutput`] with `done = true`, `pruned = 0` and `checkpoint = None`.
     /// Use when no pruning is needed.
     pub(crate) const fn done() -> Self {
         Self { progress: PruneProgress::Finished, pruned: 0, checkpoint: None }
     }
 
-    /// Returns a [PruneOutput] with `done = false`, `pruned = 0` and `checkpoint = None`.
+    /// Returns a [`PruneOutput`] with `done = false`, `pruned = 0` and `checkpoint = None`.
     /// Use when pruning is needed but cannot be done.
     pub(crate) const fn not_done(
         reason: PruneInterruptReason,
@@ -188,8 +187,8 @@ pub(crate) struct PruneOutputCheckpoint {
 }
 
 impl PruneOutputCheckpoint {
-    /// Converts [PruneOutputCheckpoint] to [PruneCheckpoint] with the provided [PruneMode]
-    pub(crate) fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
+    /// Converts [`PruneOutputCheckpoint`] to [`PruneCheckpoint`] with the provided [`PruneMode`]
+    pub(crate) const fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
         PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
     }
 }

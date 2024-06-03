@@ -32,15 +32,15 @@ pub use node_record::{NodeRecord, NodeRecordParseError};
 /// See: <https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211>
 const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 
-/// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
-/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [PeerId].
+/// Converts a [`secp256k1::PublicKey`] to a [`PeerId`] by stripping the
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [`PeerId`].
 #[inline]
 pub fn pk2id(pk: &PublicKey) -> PeerId {
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
-/// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
-/// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
+/// Converts a [`PeerId`] to a [`secp256k1::PublicKey`] by prepending the [`PeerId`] bytes with the
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag.
 #[inline]
 pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId because 512 bits is enough to represent an uncompressed
@@ -51,7 +51,7 @@ pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     PublicKey::from_slice(&s)
 }
 
-/// A peer that can come in ENR or [NodeRecord] form.
+/// A peer that can come in ENR or [`NodeRecord`] form.
 #[derive(
     Debug, Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
@@ -68,17 +68,17 @@ impl AnyNode {
     /// Returns the peer id of the node.
     pub fn peer_id(&self) -> PeerId {
         match self {
-            AnyNode::NodeRecord(record) => record.id,
-            AnyNode::Enr(enr) => pk2id(&enr.public_key()),
-            AnyNode::PeerId(peer_id) => *peer_id,
+            Self::NodeRecord(record) => record.id,
+            Self::Enr(enr) => pk2id(&enr.public_key()),
+            Self::PeerId(peer_id) => *peer_id,
         }
     }
 
     /// Returns the full node record if available.
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
-            AnyNode::NodeRecord(record) => Some(*record),
-            AnyNode::Enr(enr) => {
+            Self::NodeRecord(record) => Some(*record),
+            Self::Enr(enr) => {
                 let node_record = NodeRecord {
                     address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
@@ -111,11 +111,11 @@ impl FromStr for AnyNode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(rem) = s.strip_prefix("enode://") {
             if let Ok(record) = NodeRecord::from_str(s) {
-                return Ok(AnyNode::NodeRecord(record))
+                return Ok(Self::NodeRecord(record))
             }
             // incomplete enode
             if let Ok(peer_id) = PeerId::from_str(rem) {
-                return Ok(AnyNode::PeerId(peer_id))
+                return Ok(Self::PeerId(peer_id))
             }
             return Err(format!("invalid public key: {rem}"))
         }
@@ -129,9 +129,9 @@ impl FromStr for AnyNode {
 impl std::fmt::Display for AnyNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AnyNode::NodeRecord(record) => write!(f, "{record}"),
-            AnyNode::Enr(enr) => write!(f, "{enr}"),
-            AnyNode::PeerId(peer_id) => {
+            Self::NodeRecord(record) => write!(f, "{record}"),
+            Self::Enr(enr) => write!(f, "{enr}"),
+            Self::PeerId(peer_id) => {
                 write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
             }
         }
@@ -150,17 +150,17 @@ impl<T> From<(PeerId, T)> for WithPeerId<T> {
 
 impl<T> WithPeerId<T> {
     /// Wraps the value with the peerid.
-    pub fn new(peer: PeerId, value: T) -> Self {
+    pub const fn new(peer: PeerId, value: T) -> Self {
         Self(peer, value)
     }
 
     /// Get the peer id
-    pub fn peer_id(&self) -> PeerId {
+    pub const fn peer_id(&self) -> PeerId {
         self.0
     }
 
     /// Get the underlying data
-    pub fn data(&self) -> &T {
+    pub const fn data(&self) -> &T {
         &self.1
     }
 
@@ -174,7 +174,7 @@ impl<T> WithPeerId<T> {
         WithPeerId(self.0, self.1.into())
     }
 
-    /// Split the wrapper into [PeerId] and data tuple
+    /// Split the wrapper into [`PeerId`] and data tuple
     pub fn split(self) -> (PeerId, T) {
         (self.0, self.1)
     }

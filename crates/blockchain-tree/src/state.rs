@@ -26,7 +26,7 @@ impl TreeState {
     pub(crate) fn new(
         last_finalized_block_number: BlockNumber,
         last_canonical_hashes: impl IntoIterator<Item = (BlockNumber, BlockHash)>,
-        buffer_limit: usize,
+        buffer_limit: u32,
     ) -> Self {
         Self {
             block_chain_id_generator: 0,
@@ -47,9 +47,9 @@ impl TreeState {
         BlockchainId(id)
     }
 
-    /// Expose internal indices of the BlockchainTree.
+    /// Expose internal indices of the `BlockchainTree`.
     #[inline]
-    pub(crate) fn block_indices(&self) -> &BlockIndices {
+    pub(crate) const fn block_indices(&self) -> &BlockIndices {
         &self.block_indices
     }
 
@@ -68,7 +68,7 @@ impl TreeState {
         &self,
         block_hash: BlockHash,
     ) -> Option<&SealedBlockWithSenders> {
-        let id = self.block_indices.get_blocks_chain_id(&block_hash)?;
+        let id = self.block_indices.get_block_chain_id(&block_hash)?;
         let chain = self.chains.get(&id)?;
         chain.block_with_senders(block_hash)
     }
@@ -77,7 +77,7 @@ impl TreeState {
     ///
     /// Caution: This will not return blocks from the canonical chain.
     pub(crate) fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
-        let id = self.block_indices.get_blocks_chain_id(&block_hash)?;
+        let id = self.block_indices.get_block_chain_id(&block_hash)?;
         let chain = self.chains.get(&id)?;
         chain.receipts_by_block_hash(block_hash)
     }
@@ -124,6 +124,6 @@ impl From<BlockchainId> for u64 {
 #[cfg(test)]
 impl From<u64> for BlockchainId {
     fn from(value: u64) -> Self {
-        BlockchainId(value)
+        Self(value)
     }
 }

@@ -71,7 +71,7 @@
 //!
 //! Blob transaction can be quite large hence they are stored in a separate blobstore. The pool is
 //! responsible for inserting blob data for new transactions into the blobstore.
-//! See also [ValidTransaction](validate::ValidTransaction)
+//! See also [`ValidTransaction`](validate::ValidTransaction)
 //!
 //!
 //! ## Examples
@@ -147,11 +147,12 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![warn(clippy::missing_const_for_fn)]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
-use reth_eth_wire::HandleMempoolData;
+use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
@@ -187,7 +188,7 @@ pub mod validate;
 
 pub mod blobstore;
 mod config;
-mod identifier;
+pub mod identifier;
 mod ordering;
 mod traits;
 
@@ -278,8 +279,8 @@ where
     Client: StateProviderFactory + reth_provider::BlockReaderIdExt + Clone + 'static,
     S: BlobStore,
 {
-    /// Returns a new [Pool] that uses the default [TransactionValidationTaskExecutor] when
-    /// validating [EthPooledTransaction]s and ords via [CoinbaseTipOrdering]
+    /// Returns a new [Pool] that uses the default [`TransactionValidationTaskExecutor`] when
+    /// validating [`EthPooledTransaction`]s and ords via [`CoinbaseTipOrdering`]
     ///
     /// # Example
     ///

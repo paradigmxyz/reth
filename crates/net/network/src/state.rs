@@ -24,7 +24,6 @@ use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
@@ -35,7 +34,7 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace};
 
 /// Cache limit of blocks to keep track of for a single peer.
-const PEER_BLOCK_CACHE_LIMIT: usize = 512;
+const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
@@ -64,8 +63,9 @@ pub struct NetworkState<C> {
     discovery: Discovery,
     /// The type that handles requests.
     ///
-    /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
-    /// then queue in the request and notify the fetcher once the result has been received.
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
+    /// will then queue in the request and notify the fetcher once the result has been
+    /// received.
     state_fetcher: StateFetcher,
 }
 
@@ -102,7 +102,7 @@ where
     }
 
     /// Returns access to the [`PeersManager`]
-    pub(crate) fn peers(&self) -> &PeersManager {
+    pub(crate) const fn peers(&self) -> &PeersManager {
         &self.peers_manager
     }
 
@@ -142,7 +142,7 @@ where
                 capabilities,
                 request_tx,
                 pending_response: None,
-                blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
+                blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
             },
         );
     }
@@ -380,7 +380,7 @@ where
     /// Invoked when received a response from a connected peer.
     ///
     /// Delegates the response result to the fetcher which may return an outcome specific
-    /// instruction that needs to be handled in [Self::on_block_response_outcome]. This could be
+    /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
     fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
@@ -519,7 +519,7 @@ pub(crate) enum StateAction {
         /// The reported [`ForkId`] by this peer.
         fork_id: ForkId,
     },
-    /// A new node was found through the discovery, possibly with a ForkId
+    /// A new node was found through the discovery, possibly with a `ForkId`
     DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
@@ -537,7 +537,7 @@ mod tests {
         capability::{Capabilities, Capability},
         BlockBodies, EthVersion,
     };
-    use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_network_types::PeerId;
     use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;
@@ -548,7 +548,7 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-    /// Returns a testing instance of the [NetworkState].
+    /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState<NoopProvider> {
         let peers = PeersManager::default();
         let handle = peers.handle();

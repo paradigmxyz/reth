@@ -21,7 +21,7 @@ impl<T: Table> Table for RawTable<T> {
     type Value = RawValue<T::Value>;
 }
 
-/// Raw DupSort table that can be used to access any table and its data in raw mode.
+/// Raw `DupSort` table that can be used to access any table and its data in raw mode.
 /// This is useful for delayed decoding/encoding of data.
 #[derive(Default, Copy, Clone, Debug)]
 pub struct RawDupSort<T: DupSort> {
@@ -65,7 +65,7 @@ impl<K: Key> RawKey<K> {
     }
 
     /// Returns the raw key as seen on the database.
-    pub fn raw_key(&self) -> &Vec<u8> {
+    pub const fn raw_key(&self) -> &Vec<u8> {
         &self.key
     }
 
@@ -77,7 +77,7 @@ impl<K: Key> RawKey<K> {
 
 impl<K: Key> From<K> for RawKey<K> {
     fn from(key: K) -> Self {
-        RawKey::new(key)
+        Self::new(key)
     }
 }
 
@@ -142,7 +142,7 @@ impl<V: Value> RawValue<V> {
 
 impl<V: Value> From<V> for RawValue<V> {
     fn from(value: V) -> Self {
-        RawValue::new(value)
+        Self::new(value)
     }
 }
 

@@ -12,20 +12,20 @@ use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_interfaces::RethResult;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
 };
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, ChainSpec, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, Bytes, ChainSpec, Request, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
 use reth_revm::state_change::{
-    apply_beacon_root_contract_call, post_block_withdrawals_balance_increments,
+    apply_beacon_root_contract_call, apply_withdrawal_requests_contract_call,
+    post_block_withdrawals_balance_increments,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -66,16 +66,17 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
     chain_spec: Arc<ChainSpec>,
     /// The type responsible for building payloads.
     ///
-    /// See [PayloadBuilder]
+    /// See [`PayloadBuilder`]
     builder: Builder,
-    /// Stored cached_reads for new payload jobs.
+    /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
 }
 
 // === impl BasicPayloadJobGenerator ===
 
 impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
-    /// Creates a new [BasicPayloadJobGenerator] with the given config and custom [PayloadBuilder]
+    /// Creates a new [`BasicPayloadJobGenerator`] with the given config and custom
+    /// [`PayloadBuilder`]
     pub fn with_builder(
         client: Client,
         pool: Pool,
@@ -121,7 +122,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     }
 
     /// Returns a reference to the tasks type
-    pub fn tasks(&self) -> &Tasks {
+    pub const fn tasks(&self) -> &Tasks {
         &self.executor
     }
 
@@ -214,9 +215,9 @@ where
     }
 }
 
-/// Pre-filled [CachedReads] for a specific block.
+/// Pre-filled [`CachedReads`] for a specific block.
 ///
-/// This is extracted from the [CanonStateNotification] for the tip block.
+/// This is extracted from the [`CanonStateNotification`] for the tip block.
 #[derive(Debug, Clone)]
 pub struct PrecachedState {
     /// The block for which the state is pre-cached.
@@ -246,7 +247,7 @@ impl PayloadTaskGuard {
     }
 }
 
-/// Settings for the [BasicPayloadJobGenerator].
+/// Settings for the [`BasicPayloadJobGenerator`].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
@@ -255,7 +256,7 @@ pub struct BasicPayloadJobGeneratorConfig {
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
     ///
-    /// By default this is [SLOT_DURATION]: 12s
+    /// By default this is [`SLOT_DURATION`]: 12s
     deadline: Duration,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
@@ -265,13 +266,13 @@ pub struct BasicPayloadJobGeneratorConfig {
 
 impl BasicPayloadJobGeneratorConfig {
     /// Sets the interval at which the job should build a new payload after the last.
-    pub fn interval(mut self, interval: Duration) -> Self {
+    pub const fn interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
     }
 
     /// Sets the deadline when this job should resolve.
-    pub fn deadline(mut self, deadline: Duration) -> Self {
+    pub const fn deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
         self
     }
@@ -341,7 +342,7 @@ where
     metrics: PayloadBuilderMetrics,
     /// The type responsible for building payloads.
     ///
-    /// See [PayloadBuilder]
+    /// See [`PayloadBuilder`]
     builder: Builder,
 }
 
@@ -644,7 +645,7 @@ pub struct PayloadConfig<Attributes> {
 }
 
 impl<Attributes> PayloadConfig<Attributes> {
-    /// Returns an owned instance of the [PayloadConfig]'s extra_data bytes.
+    /// Returns an owned instance of the [`PayloadConfig`]'s `extra_data` bytes.
     pub fn extra_data(&self) -> Bytes {
         self.extra_data.clone()
     }
@@ -800,7 +801,7 @@ pub struct WithdrawalsOutcome {
 
 impl WithdrawalsOutcome {
     /// No withdrawals pre shanghai
-    pub fn pre_shanghai() -> Self {
+    pub const fn pre_shanghai() -> Self {
         Self { withdrawals: None, withdrawals_root: None }
     }
 
@@ -813,7 +814,7 @@ impl WithdrawalsOutcome {
     }
 }
 
-/// Executes the withdrawals and commits them to the _runtime_ Database and BundleState.
+/// Executes the withdrawals and commits them to the _runtime_ Database and `BundleState`.
 ///
 /// Returns the withdrawals root.
 ///
@@ -823,7 +824,7 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     chain_spec: &ChainSpec,
     timestamp: u64,
     withdrawals: Withdrawals,
-) -> RethResult<WithdrawalsOutcome> {
+) -> Result<WithdrawalsOutcome, DB::Error> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         return Ok(WithdrawalsOutcome::pre_shanghai())
     }
@@ -849,12 +850,12 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
 /// This constructs a new [Evm] with the given DB, and environment
-/// ([CfgEnvWithHandlerCfg] and [BlockEnv]) to execute the pre block contract call.
+/// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the pre block contract call.
 ///
 /// The parent beacon block root used for the call is gathered from the given
-/// [PayloadBuilderAttributes].
+/// [`PayloadBuilderAttributes`].
 ///
-/// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
+/// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
 pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit, Attributes>(
     db: &mut DB,
@@ -887,6 +888,36 @@ where
         &mut evm_pre_block,
     )
     .map_err(|err| PayloadBuilderError::Internal(err.into()))
+}
+
+/// Apply the [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) post block contract call.
+///
+/// This constructs a new [Evm] with the given DB, and environment
+/// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the post block contract call.
+///
+/// This uses [`apply_withdrawal_requests_contract_call`] to ultimately calculate the
+/// [requests](Request).
+pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit>(
+    db: &mut DB,
+    initialized_cfg: &CfgEnvWithHandlerCfg,
+    initialized_block_env: &BlockEnv,
+) -> Result<Vec<Request>, PayloadBuilderError>
+where
+    DB::Error: std::fmt::Display,
+{
+    // apply post-block EIP-7002 contract call
+    let mut evm_post_block = Evm::builder()
+        .with_db(db)
+        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            Default::default(),
+        ))
+        .build();
+
+    // initialize a block from the env, because the post block call needs the block itself
+    apply_withdrawal_requests_contract_call(&mut evm_post_block)
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
 /// Checks if the new payload is better than the current best.

@@ -50,8 +50,8 @@ pub struct PendingPool<T: TransactionOrdering> {
     ///
     /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
-    /// Used to broadcast new transactions that have been added to the PendingPool to existing
-    /// static_files of this pool.
+    /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
+    /// `static_files` of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
 }
 
@@ -90,9 +90,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns an iterator over all transactions that are _currently_ ready.
     ///
     /// 1. The iterator _always_ returns transaction in order: It never returns a transaction with
-    /// an unsatisfied dependency and only returns them if dependency transaction were yielded
-    /// previously. In other words: The nonces of transactions with the same sender will _always_
-    /// increase by exactly 1.
+    ///    an unsatisfied dependency and only returns them if dependency transaction were yielded
+    ///    previously. In other words: The nonces of transactions with the same sender will _always_
+    ///    increase by exactly 1.
     ///
     /// The order of transactions which satisfy (1.) is determent by their computed priority: A
     /// transaction with a higher priority is returned before a transaction with a lower priority.
@@ -126,7 +126,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Same as `best` but also includes the given unlocked transactions.
     ///
-    /// This mimics the [Self::add_transaction] method, but does not insert the transactions into
+    /// This mimics the [`Self::add_transaction`] method, but does not insert the transactions into
     /// pool but only into the returned iterator.
     ///
     /// Note: this does not insert the unlocked transactions into the pool.
@@ -443,12 +443,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
     }
 
-    /// Truncates the pool to the given [SubPoolLimit], removing transactions until the subpool
+    /// Truncates the pool to the given [`SubPoolLimit`], removing transactions until the subpool
     /// limits are met.
     ///
     /// This attempts to remove transactions by roughly the same amount for each sender. For more
     /// information on this exact process see docs for
-    /// [remove_to_limit](PendingPool::remove_to_limit).
+    /// [`remove_to_limit`](PendingPool::remove_to_limit).
     ///
     /// This first truncates all of the non-local transactions in the pool. If the subpool is still
     /// not under the limit, this truncates the entire pool, including non-local transactions. The

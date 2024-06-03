@@ -1,9 +1,7 @@
 //! Configuration files.
 
-use reth_discv4::Discv4Config;
-use reth_network::{NetworkConfigBuilder, PeersConfig, SessionsConfig};
+use reth_network::{PeersConfig, SessionsConfig};
 use reth_primitives::PruneModes;
-use secp256k1::SecretKey;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     ffi::OsStr,
@@ -30,25 +28,17 @@ pub struct Config {
 }
 
 impl Config {
-    /// Initializes network config from read data
-    pub fn network_config(
+    /// Returns the [`PeersConfig`] for the node.
+    ///
+    /// If a peers file is provided, the basic nodes from the file are added to the configuration.
+    pub fn peers_config_with_basic_nodes_from_file(
         &self,
-        nat_resolution_method: reth_net_nat::NatResolver,
-        peers_file: Option<PathBuf>,
-        secret_key: SecretKey,
-    ) -> NetworkConfigBuilder {
-        let peer_config = self
-            .peers
+        peers_file: Option<&Path>,
+    ) -> PeersConfig {
+        self.peers
             .clone()
             .with_basic_nodes_from_file(peers_file)
-            .unwrap_or_else(|_| self.peers.clone());
-
-        let discv4 =
-            Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(secret_key)
-            .sessions_config(self.sessions.clone())
-            .peer_config(peer_config)
-            .discovery(discv4)
+            .unwrap_or_else(|_| self.peers.clone())
     }
 
     /// Save the configuration to toml file.
@@ -152,7 +142,7 @@ pub struct BodiesConfig {
     pub downloader_request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     ///
-    /// Default: 1_000
+    /// Default: `1_000`
     pub downloader_stream_batch_size: usize,
     /// The size of the internal block buffer in bytes.
     ///
@@ -290,7 +280,7 @@ impl Default for EtlConfig {
 
 impl EtlConfig {
     /// Creates an ETL configuration
-    pub fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
+    pub const fn new(dir: Option<PathBuf>, file_size: usize) -> Self {
         Self { dir, file_size }
     }
 
@@ -334,6 +324,13 @@ pub struct PruneConfig {
 impl Default for PruneConfig {
     fn default() -> Self {
         Self { block_interval: 5, segments: PruneModes::none() }
+    }
+}
+
+impl PruneConfig {
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 }
 

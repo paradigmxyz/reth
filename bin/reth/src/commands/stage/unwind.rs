@@ -10,8 +10,8 @@ use reth_exex::ExExManagerHandle;
 use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
+    HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -73,8 +73,11 @@ impl Command {
         let config: Config = confy::load_path(config_path).unwrap_or_default();
 
         let db = Arc::new(open_db(db_path.as_ref(), self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db,
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {
@@ -189,13 +192,13 @@ impl Subcommands {
         let provider = factory.provider()?;
         let last = provider.last_block_number()?;
         let target = match self {
-            Subcommands::ToBlock { target } => match target {
+            Self::ToBlock { target } => match target {
                 BlockHashOrNumber::Hash(hash) => provider
                     .block_number(*hash)?
                     .ok_or_else(|| eyre::eyre!("Block hash not found in database: {hash:?}"))?,
                 BlockHashOrNumber::Number(num) => *num,
             },
-            Subcommands::NumBlocks { amount } => last.saturating_sub(*amount),
+            Self::NumBlocks { amount } => last.saturating_sub(*amount),
         } + 1;
         if target > last {
             eyre::bail!("Target block number is higher than the latest block number")

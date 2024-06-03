@@ -1,4 +1,4 @@
-//! StaticFile segment implementations and utilities.
+//! `StaticFile` segment implementations and utilities.
 
 mod transactions;
 pub use transactions::Transactions;
@@ -12,7 +12,6 @@ pub use receipts::Receipts;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, RawKey, RawTable,
 };
-use reth_interfaces::provider::ProviderResult;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     static_file::{
@@ -24,6 +23,7 @@ use reth_primitives::{
 use reth_provider::{
     providers::StaticFileProvider, DatabaseProviderRO, ProviderError, TransactionsProviderExt,
 };
+use reth_storage_errors::provider::ProviderResult;
 use std::{ops::RangeInclusive, path::Path};
 
 pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
@@ -33,8 +33,8 @@ pub trait Segment<DB: Database>: Send + Sync {
     /// Returns the [`StaticFileSegment`].
     fn segment(&self) -> StaticFileSegment;
 
-    /// Move data to static files for the provided block range. [StaticFileProvider] will handle the
-    /// management of and writing to files.
+    /// Move data to static files for the provided block range. [`StaticFileProvider`] will handle
+    /// the management of and writing to files.
     fn copy_to_static_files(
         &self,
         provider: DatabaseProviderRO<DB>,

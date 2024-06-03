@@ -1,0 +1,46 @@
+[package]
+name = "reth-stages-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-db.workspace = true
+reth-static-file.workspace = true
+reth-network-p2p.workspace = true
+reth-tokio-util.workspace = true
+reth-consensus.workspace = true
+reth-prune.workspace = true
+reth-errors.workspace = true
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
+# async
+tokio = { workspace = true, features = ["sync"] }
+futures-util.workspace = true
+
+# misc
+aquamarine.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+auto_impl.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+tokio-stream.workspace = true
+reth-testing-utils.workspace = true
+
+[features]
+test-utils = []

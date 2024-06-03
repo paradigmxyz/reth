@@ -10,9 +10,13 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use reth_basic_payload_builder::{
-    commit_withdrawals, is_better_payload, pre_block_beacon_root_contract_call, BuildArguments,
-    BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
+    commit_withdrawals, is_better_payload, post_block_withdrawal_requests_contract_call,
+    pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
+    PayloadConfig, WithdrawalsOutcome,
 };
+use reth_errors::RethError;
+use reth_evm::ConfigureEvm;
+use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
@@ -21,12 +25,12 @@ use reth_primitives::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
     },
     eip4844::calculate_excess_blob_gas,
-    proofs,
+    proofs::{self, calculate_requests_root},
     revm::env::tx_env_with_recovered,
     Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
     db::states::bundle_state::BundleRetention,
@@ -36,13 +40,29 @@ use revm::{
 use tracing::{debug, trace, warn};
 
 /// Ethereum payload builder
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct EthereumPayloadBuilder;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
+    /// The type responsible for creating the evm.
+    evm_config: EvmConfig,
+}
+
+impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
+    /// `EthereumPayloadBuilder` constructor.
+    pub const fn new(evm_config: EvmConfig) -> Self {
+        Self { evm_config }
+    }
+}
+
+impl Default for EthereumPayloadBuilder {
+    fn default() -> Self {
+        Self::new(EthEvmConfig::default())
+    }
+}
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder
+impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
+    EvmConfig: ConfigureEvm,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -53,7 +73,7 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        default_ethereum_payload_builder(args)
+        default_ethereum_payload_builder(self.evm_config.clone(), args)
     }
 
     fn build_empty_payload(
@@ -107,6 +127,18 @@ where
             err
         })?;
 
+        // apply eip-2935 blockhashes update
+        apply_blockhashes_update(
+            &mut db,
+            &chain_spec,
+            initialized_block_env.timestamp.to::<u64>(),
+            block_number,
+            parent_block.hash(),
+        ).map_err(|err| {
+            warn!(target: "payload_builder", parent_hash=%parent_block.hash(), %err, "failed to update blockhashes for empty payload");
+            PayloadBuilderError::Internal(err.into())
+        })?;
+
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
             &mut db,
             &chain_spec,
@@ -154,6 +186,24 @@ where
             blob_gas_used = Some(0);
         }
 
+        // Calculate the requests and the requests root.
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                // We do not calculate the EIP-6110 deposit requests because there are no
+                // transactions in an empty payload.
+                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )?;
+
+                let requests = withdrawal_requests;
+                let requests_root = calculate_requests_root(&requests);
+                (Some(requests.into()), Some(requests_root))
+            } else {
+                (None, None)
+            };
+
         let header = Header {
             parent_hash: parent_block.hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -175,9 +225,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            requests_root,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests };
         let sealed_block = block.seal_slow();
 
         Ok(EthBuiltPayload::new(attributes.payload_id(), sealed_block, U256::ZERO))
@@ -190,10 +241,12 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload_builder<Pool, Client>(
+pub fn default_ethereum_payload_builder<EvmConfig, Pool, Client>(
+    evm_config: EvmConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
+    EvmConfig: ConfigureEvm,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -240,6 +293,16 @@ where
         &attributes,
     )?;
 
+    // apply eip-2935 blockhashes update
+    apply_blockhashes_update(
+        &mut db,
+        &chain_spec,
+        initialized_block_env.timestamp.to::<u64>(),
+        block_number,
+        parent_block.hash(),
+    )
+    .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -274,15 +337,14 @@ where
             }
         }
 
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            initialized_cfg.clone(),
+            initialized_block_env.clone(),
+            tx_env_with_recovered(&tx),
+        );
+
         // Configure the environment for the block.
-        let mut evm = revm::Evm::builder()
-            .with_db(&mut db)
-            .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-                initialized_cfg.clone(),
-                initialized_block_env.clone(),
-                tx_env_with_recovered(&tx),
-            ))
-            .build();
+        let mut evm = evm_config.evm_with_env(&mut db, env);
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -355,6 +417,25 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
+    // calculate the requests and the requests root
+    let (requests, requests_root) = if chain_spec
+        .is_prague_active_at_timestamp(attributes.timestamp)
+    {
+        let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
+            .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
+        let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+            &mut db,
+            &initialized_cfg,
+            &initialized_block_env,
+        )?;
+
+        let requests = [deposit_requests, withdrawal_requests].concat();
+        let requests_root = calculate_requests_root(&requests);
+        (Some(requests.into()), Some(requests_root))
+    } else {
+        (None, None)
+    };
+
     let WithdrawalsOutcome { withdrawals_root, withdrawals } =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, attributes.withdrawals)?;
 
@@ -425,10 +506,11 @@ where
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

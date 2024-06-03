@@ -1,9 +1,10 @@
 //! Helper for handling execution of multiple blocks.
 
 use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
-use reth_interfaces::executor::BlockExecutionError;
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
-    PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, MINIMUM_PRUNING_DISTANCE,
+    PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, Request, Requests,
+    MINIMUM_PRUNING_DISTANCE,
 };
 use revm::db::states::bundle_state::BundleRetention;
 use std::time::Duration;
@@ -23,6 +24,13 @@ pub struct BlockBatchRecord {
     ///
     /// If receipt is None it means it is pruned.
     receipts: Receipts,
+    /// The collection of EIP-7685 requests.
+    /// Outer vector stores requests for each block sequentially.
+    /// The inner vector stores requests ordered by transaction number.
+    ///
+    /// A transaction may have zero or more requests, so the length of the inner vector is not
+    /// guaranteed to be the same as the number of transactions.
+    requests: Vec<Requests>,
     /// Memoized address pruning filter.
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
@@ -66,7 +74,7 @@ impl BlockBatchRecord {
     }
 
     /// Returns the recorded receipts.
-    pub fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts {
         &self.receipts
     }
 
@@ -75,7 +83,17 @@ impl BlockBatchRecord {
         std::mem::take(&mut self.receipts)
     }
 
-    /// Returns the [BundleRetention] for the given block based on the configured prune modes.
+    /// Returns the recorded requests.
+    pub fn requests(&self) -> &[Requests] {
+        &self.requests
+    }
+
+    /// Returns all recorded requests.
+    pub fn take_requests(&mut self) -> Vec<Requests> {
+        std::mem::take(&mut self.requests)
+    }
+
+    /// Returns the [`BundleRetention`] for the given block based on the configured prune modes.
     pub fn bundle_retention(&self, block_number: BlockNumber) -> BundleRetention {
         if self.tip.map_or(true, |tip| {
             !self
@@ -154,6 +172,11 @@ impl BlockBatchRecord {
         }
 
         Ok(())
+    }
+
+    /// Save EIP-7685 requests to the executor.
+    pub fn save_requests(&mut self, requests: Vec<Request>) {
+        self.requests.push(requests.into());
     }
 }
 

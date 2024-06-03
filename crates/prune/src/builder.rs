@@ -21,7 +21,7 @@ pub struct PrunerBuilder {
     prune_delete_limit: usize,
     /// Time a pruner job can run before timing out.
     timeout: Option<Duration>,
-    /// The finished height of all ExEx's.
+    /// The finished height of all `ExEx`'s.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
 }
 
@@ -29,15 +29,15 @@ impl PrunerBuilder {
     /// Default timeout for a prune run.
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
 
-    /// Creates a new [PrunerBuilder] from the given [PruneConfig].
+    /// Creates a new [`PrunerBuilder`] from the given [`PruneConfig`].
     pub fn new(pruner_config: PruneConfig) -> Self {
-        PrunerBuilder::default()
+        Self::default()
             .block_interval(pruner_config.block_interval)
             .segments(pruner_config.segments)
     }
 
     /// Sets the minimum pruning interval measured in blocks.
-    pub fn block_interval(mut self, block_interval: usize) -> Self {
+    pub const fn block_interval(mut self, block_interval: usize) -> Self {
         self.block_interval = block_interval;
         self
     }
@@ -49,13 +49,13 @@ impl PrunerBuilder {
     }
 
     /// Sets the number of blocks that can be re-orged.
-    pub fn max_reorg_depth(mut self, max_reorg_depth: usize) -> Self {
+    pub const fn max_reorg_depth(mut self, max_reorg_depth: usize) -> Self {
         self.max_reorg_depth = max_reorg_depth;
         self
     }
 
     /// Sets the delete limit for pruner, per block.
-    pub fn prune_delete_limit(mut self, prune_delete_limit: usize) -> Self {
+    pub const fn prune_delete_limit(mut self, prune_delete_limit: usize) -> Self {
         self.prune_delete_limit = prune_delete_limit;
         self
     }
@@ -64,12 +64,12 @@ impl PrunerBuilder {
     ///
     /// CAUTION: Account and Storage History prune segments treat this timeout as a soft limit,
     /// meaning they can go beyond it.
-    pub fn timeout(mut self, timeout: Duration) -> Self {
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
-    /// Sets the receiver for the finished height of all ExEx's.
+    /// Sets the receiver for the finished height of all `ExEx`'s.
     pub fn finished_exex_height(
         mut self,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,

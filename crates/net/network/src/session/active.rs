@@ -18,8 +18,8 @@ use reth_eth_wire::{
     message::{EthBroadcastMessage, RequestPair},
     DisconnectP2P, DisconnectReason, EthMessage,
 };
-use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
+use reth_network_p2p::error::RequestError;
 use reth_network_types::PeerId;
 use std::{
     collections::VecDeque,
@@ -90,7 +90,7 @@ pub(crate) struct ActiveSession {
     pub(crate) internal_request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
     pub(crate) internal_request_timeout_interval: Interval,
-    /// If an [ActiveSession] does not receive a response at all within this duration then it is
+    /// If an [`ActiveSession`] does not receive a response at all within this duration then it is
     /// considered a protocol violation and the session will initiate a drop.
     pub(crate) protocol_breach_request_timeout: Duration,
     /// Used to reserve a slot to guarantee that the termination message is delivered
@@ -685,7 +685,7 @@ impl InflightRequest {
 
     /// Returns true if we're still waiting for a response
     #[inline]
-    fn is_waiting(&self) -> bool {
+    const fn is_waiting(&self) -> bool {
         matches!(self.request, RequestState::Waiting(_))
     }
 
@@ -713,8 +713,8 @@ enum OnIncomingMessageOutcome {
 impl From<Result<(), ActiveSessionMessage>> for OnIncomingMessageOutcome {
     fn from(res: Result<(), ActiveSessionMessage>) -> Self {
         match res {
-            Ok(_) => OnIncomingMessageOutcome::Ok,
-            Err(msg) => OnIncomingMessageOutcome::NoCapacity(msg),
+            Ok(_) => Self::Ok,
+            Err(msg) => Self::NoCapacity(msg),
         }
     }
 }
@@ -736,13 +736,13 @@ pub(crate) enum OutgoingMessage {
 
 impl From<EthMessage> for OutgoingMessage {
     fn from(value: EthMessage) -> Self {
-        OutgoingMessage::Eth(value)
+        Self::Eth(value)
     }
 }
 
 impl From<EthBroadcastMessage> for OutgoingMessage {
     fn from(value: EthBroadcastMessage) -> Self {
-        OutgoingMessage::Broadcast(value)
+        Self::Broadcast(value)
     }
 }
 

@@ -26,21 +26,21 @@ pub struct ShardedKey<T> {
     pub highest_block_number: BlockNumber,
 }
 
-impl<T> AsRef<ShardedKey<T>> for ShardedKey<T> {
-    fn as_ref(&self) -> &ShardedKey<T> {
+impl<T> AsRef<Self> for ShardedKey<T> {
+    fn as_ref(&self) -> &Self {
         self
     }
 }
 
 impl<T> ShardedKey<T> {
     /// Creates a new `ShardedKey<T>`.
-    pub fn new(key: T, highest_block_number: BlockNumber) -> Self {
-        ShardedKey { key, highest_block_number }
+    pub const fn new(key: T, highest_block_number: BlockNumber) -> Self {
+        Self { key, highest_block_number }
     }
 
     /// Creates a new key with the highest block number set to maximum.
     /// This is useful when we want to search the last value for a given key.
-    pub fn last(key: T) -> Self {
+    pub const fn last(key: T) -> Self {
         Self { key, highest_block_number: u64::MAX }
     }
 }
@@ -73,7 +73,7 @@ where
         );
         let key = T::decode(&value[..tx_num_index])?;
 
-        Ok(ShardedKey::new(key, highest_tx_number))
+        Ok(Self::new(key, highest_tx_number))
     }
 }
 

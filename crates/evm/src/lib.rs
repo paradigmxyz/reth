@@ -16,6 +16,8 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId,
 
 pub mod either;
 pub mod execute;
+pub mod noop;
+pub mod provider;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
@@ -28,7 +30,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
     /// Returns new EVM with the given database
     ///
-    /// This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is up to
+    /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
     fn evm<'a, DB: Database + 'a>(
@@ -75,8 +77,8 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
     /// Returns a new EVM with the given inspector.
     ///
-    /// Caution: This does not automatically configure the EVM with [ConfigureEvmEnv] methods. It is
-    /// up to the caller to call an appropriate method to fill the transaction and block
+    /// Caution: This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It
+    /// is up to the caller to call an appropriate method to fill the transaction and block
     /// environment before executing any transactions using the provided EVM.
     fn evm_with_inspector<'a, DB, I>(&'a self, db: DB, inspector: I) -> Evm<'a, I, DB>
     where
@@ -94,10 +96,10 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
-    /// Fill transaction environment from a [TransactionSigned] and the given sender address.
+    /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
     fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
 
-    /// Fill [CfgEnvWithHandlerCfg] fields according to the chain spec and given header
+    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
     fn fill_cfg_env(
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
@@ -105,8 +107,8 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         total_difficulty: U256,
     );
 
-    /// Convenience function to call both [fill_cfg_env](ConfigureEvmEnv::fill_cfg_env) and
-    /// [fill_block_env].
+    /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
+    /// [`fill_block_env`].
     fn fill_cfg_and_block_env(
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,

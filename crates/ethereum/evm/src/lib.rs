@@ -15,11 +15,14 @@ use reth_primitives::{
     Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{Database, EvmBuilder};
+
 pub mod execute;
-pub mod verify;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;
+
+/// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
+pub mod eip6110;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]

@@ -63,7 +63,7 @@ pub struct TxEip1559 {
 
 impl TxEip1559 {
     /// Returns the effective gas price for the given `base_fee`.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+    pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match base_fee {
             None => self.max_fee_per_gas,
             Some(base_fee) => {
@@ -80,7 +80,7 @@ impl TxEip1559 {
         }
     }
 
-    /// Decodes the inner [TxEip1559] fields from RLP bytes.
+    /// Decodes the inner [`TxEip1559`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:
@@ -175,11 +175,11 @@ impl TxEip1559 {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Eip1559
     }
 
-    /// Calculates a heuristic for the in-memory size of the [TxEip1559] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxEip1559`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id

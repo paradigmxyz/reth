@@ -4,20 +4,20 @@ use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
-/// Identifier for legacy transaction, however [TxLegacy](crate::TxLegacy) this is technically not
+/// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
 /// typed.
 pub const LEGACY_TX_TYPE_ID: u8 = 0;
 
-/// Identifier for [TxEip2930](crate::TxEip2930) transaction.
+/// Identifier for [`TxEip2930`](crate::TxEip2930) transaction.
 pub const EIP2930_TX_TYPE_ID: u8 = 1;
 
-/// Identifier for [TxEip1559](crate::TxEip1559) transaction.
+/// Identifier for [`TxEip1559`](crate::TxEip1559) transaction.
 pub const EIP1559_TX_TYPE_ID: u8 = 2;
 
-/// Identifier for [TxEip4844](crate::TxEip4844) transaction.
+/// Identifier for [`TxEip4844`](crate::TxEip4844) transaction.
 pub const EIP4844_TX_TYPE_ID: u8 = 3;
 
-/// Identifier for [TxDeposit](crate::TxDeposit) transaction.
+/// Identifier for [`TxDeposit`](crate::TxDeposit) transaction.
 #[cfg(feature = "optimism")]
 pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 
@@ -49,15 +49,15 @@ pub enum TxType {
 
 impl TxType {
     /// The max type reserved by an EIP.
-    pub const MAX_RESERVED_EIP: TxType = Self::Eip4844;
+    pub const MAX_RESERVED_EIP: Self = Self::Eip4844;
 
     /// Check if the transaction type has an access list.
     pub const fn has_access_list(&self) -> bool {
         match self {
-            TxType::Legacy => false,
-            TxType::Eip2930 | TxType::Eip1559 | TxType::Eip4844 => true,
+            Self::Legacy => false,
+            Self::Eip2930 | Self::Eip1559 | Self::Eip4844 => true,
             #[cfg(feature = "optimism")]
-            TxType::Deposit => false,
+            Self::Deposit => false,
         }
     }
 }
@@ -77,7 +77,7 @@ impl From<TxType> for u8 {
 
 impl From<TxType> for U8 {
     fn from(value: TxType) -> Self {
-        U8::from(u8::from(value))
+        Self::from(u8::from(value))
     }
 }
 
@@ -86,18 +86,18 @@ impl TryFrom<u8> for TxType {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         #[cfg(feature = "optimism")]
-        if value == TxType::Deposit {
-            return Ok(TxType::Deposit)
+        if value == Self::Deposit {
+            return Ok(Self::Deposit)
         }
 
-        if value == TxType::Legacy {
-            return Ok(TxType::Legacy)
-        } else if value == TxType::Eip2930 {
-            return Ok(TxType::Eip2930)
-        } else if value == TxType::Eip1559 {
-            return Ok(TxType::Eip1559)
-        } else if value == TxType::Eip4844 {
-            return Ok(TxType::Eip4844)
+        if value == Self::Legacy {
+            return Ok(Self::Legacy)
+        } else if value == Self::Eip2930 {
+            return Ok(Self::Eip2930)
+        } else if value == Self::Eip1559 {
+            return Ok(Self::Eip1559)
+        } else if value == Self::Eip4844 {
+            return Ok(Self::Eip4844)
         }
 
         Err("invalid tx type")
@@ -127,10 +127,10 @@ impl Compact for TxType {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         match self {
-            TxType::Legacy => 0,
-            TxType::Eip2930 => 1,
-            TxType::Eip1559 => 2,
-            TxType::Eip4844 => {
+            Self::Legacy => 0,
+            Self::Eip2930 => 1,
+            Self::Eip1559 => 2,
+            Self::Eip4844 => {
                 // Write the full transaction type to the buffer when encoding > 3.
                 // This allows compat decoding the [TyType] from a single byte as
                 // opposed to 2 bits for the backwards-compatible encoding.
@@ -138,7 +138,7 @@ impl Compact for TxType {
                 3
             }
             #[cfg(feature = "optimism")]
-            TxType::Deposit => {
+            Self::Deposit => {
                 buf.put_u8(self as u8);
                 3
             }
@@ -151,15 +151,15 @@ impl Compact for TxType {
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         (
             match identifier {
-                0 => TxType::Legacy,
-                1 => TxType::Eip2930,
-                2 => TxType::Eip1559,
+                0 => Self::Legacy,
+                1 => Self::Eip2930,
+                2 => Self::Eip1559,
                 3 => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
-                        EIP4844_TX_TYPE_ID => TxType::Eip4844,
+                        EIP4844_TX_TYPE_ID => Self::Eip4844,
                         #[cfg(feature = "optimism")]
-                        DEPOSIT_TX_TYPE_ID => TxType::Deposit,
+                        DEPOSIT_TX_TYPE_ID => Self::Deposit,
                         _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
                     }
                 }
@@ -178,7 +178,7 @@ impl PartialEq<u8> for TxType {
 
 impl PartialEq<TxType> for u8 {
     fn eq(&self, other: &TxType) -> bool {
-        *self == *other as u8
+        *self == *other as Self
     }
 }
 
@@ -196,7 +196,7 @@ impl Decodable for TxType {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let ty = u8::decode(buf)?;
 
-        TxType::try_from(ty).map_err(alloy_rlp::Error::Custom)
+        Self::try_from(ty).map_err(alloy_rlp::Error::Custom)
     }
 }
 

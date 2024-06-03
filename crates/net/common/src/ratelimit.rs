@@ -24,15 +24,15 @@ impl RateLimit {
         let until = tokio::time::Instant::now();
         let state = State::Ready { until, remaining: rate.limit() };
 
-        RateLimit { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
+        Self { rate, state, sleep: Box::pin(tokio::time::sleep_until(until)) }
     }
 
-    /// Returns the configured limit of the [RateLimit]
-    pub fn limit(&self) -> u64 {
+    /// Returns the configured limit of the [`RateLimit`]
+    pub const fn limit(&self) -> u64 {
         self.rate.limit()
     }
 
-    /// Checks if the [RateLimit] is ready to handle a new call
+    /// Checks if the [`RateLimit`] is ready to handle a new call
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         match self.state {
             State::Ready { .. } => return Poll::Ready(()),
@@ -51,16 +51,16 @@ impl RateLimit {
         Poll::Ready(())
     }
 
-    /// Wait until the [RateLimit] is ready.
+    /// Wait until the [`RateLimit`] is ready.
     pub async fn wait(&mut self) {
         poll_fn(|cx| self.poll_ready(cx)).await
     }
 
-    /// Updates the [RateLimit] when a new call was triggered
+    /// Updates the [`RateLimit`] when a new call was triggered
     ///
     /// # Panics
     ///
-    /// Panics if [RateLimit::poll_ready] returned [Poll::Pending]
+    /// Panics if [`RateLimit::poll_ready`] returned [`Poll::Pending`]
     pub fn tick(&mut self) {
         match self.state {
             State::Ready { mut until, remaining: mut rem } => {
@@ -86,7 +86,7 @@ impl RateLimit {
     }
 }
 
-/// Tracks the state of the [RateLimit]
+/// Tracks the state of the [`RateLimit`]
 #[derive(Debug)]
 enum State {
     /// Currently limited
@@ -106,15 +106,15 @@ pub struct Rate {
 
 impl Rate {
     /// Create a new [Rate] with the given `limit/duration` ratio.
-    pub fn new(limit: u64, duration: Duration) -> Self {
-        Rate { limit, duration }
+    pub const fn new(limit: u64, duration: Duration) -> Self {
+        Self { limit, duration }
     }
 
-    fn limit(&self) -> u64 {
+    const fn limit(&self) -> u64 {
         self.limit
     }
 
-    fn duration(&self) -> Duration {
+    const fn duration(&self) -> Duration {
         self.duration
     }
 }

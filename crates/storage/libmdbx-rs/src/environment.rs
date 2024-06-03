@@ -70,13 +70,13 @@ impl Environment {
         self.inner.env_kind
     }
 
-    /// Returns true if the environment was opened in [crate::Mode::ReadWrite] mode.
+    /// Returns true if the environment was opened in [`crate::Mode::ReadWrite`] mode.
     #[inline]
     pub fn is_read_write(&self) -> bool {
         self.inner.env_kind.is_write_map()
     }
 
-    /// Returns true if the environment was opened in [crate::Mode::ReadOnly] mode.
+    /// Returns true if the environment was opened in [`crate::Mode::ReadOnly`] mode.
     #[inline]
     pub fn is_read_only(&self) -> bool {
         !self.inner.env_kind.is_write_map()
@@ -184,7 +184,7 @@ impl Environment {
 
     /// Retrieves the total number of pages on the freelist.
     ///
-    /// Along with [Environment::info()], this can be used to calculate the exact number
+    /// Along with [`Environment::info()`], this can be used to calculate the exact number
     /// of used pages as well as free pages in this environment.
     ///
     /// ```
@@ -230,7 +230,7 @@ impl Environment {
 /// Container type for Environment internals.
 ///
 /// This holds the raw pointer to the MDBX environment and the transaction manager.
-/// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
+/// The env is opened via [`mdbx_env_create`](ffi::mdbx_env_create) and closed when this type drops.
 struct EnvironmentInner {
     /// The raw pointer to the MDBX environment.
     ///
@@ -265,10 +265,10 @@ pub enum EnvironmentKind {
     #[default]
     Default,
     /// Open the environment as mdbx-WRITEMAP.
-    /// Use a writeable memory map unless the environment is opened as MDBX_RDONLY
-    /// ([crate::Mode::ReadOnly]).
+    /// Use a writeable memory map unless the environment is opened as `MDBX_RDONLY`
+    /// ([`crate::Mode::ReadOnly`]).
     ///
-    /// All data will be mapped into memory in the read-write mode [crate::Mode::ReadWrite]. This
+    /// All data will be mapped into memory in the read-write mode [`crate::Mode::ReadWrite`]. This
     /// offers a significant performance benefit, since the data will be modified directly in
     /// mapped memory and then flushed to disk by single system call, without any memory
     /// management nor copying.
@@ -281,14 +281,14 @@ impl EnvironmentKind {
     /// Returns true if the environment was opened as WRITEMAP.
     #[inline]
     pub const fn is_write_map(&self) -> bool {
-        matches!(self, EnvironmentKind::WriteMap)
+        matches!(self, Self::WriteMap)
     }
 
     /// Additional flags required when opening the environment.
-    pub(crate) fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
+    pub(crate) const fn extra_flags(&self) -> ffi::MDBX_env_flags_t {
         match self {
-            EnvironmentKind::Default => ffi::MDBX_ENV_DEFAULTS,
-            EnvironmentKind::WriteMap => ffi::MDBX_WRITEMAP,
+            Self::Default => ffi::MDBX_ENV_DEFAULTS,
+            Self::WriteMap => ffi::MDBX_WRITEMAP,
         }
     }
 }
@@ -307,8 +307,8 @@ pub struct Stat(ffi::MDBX_stat);
 
 impl Stat {
     /// Create a new Stat with zero'd inner struct `ffi::MDB_stat`.
-    pub(crate) fn new() -> Stat {
-        unsafe { Stat(mem::zeroed()) }
+    pub(crate) const fn new() -> Self {
+        unsafe { Self(mem::zeroed()) }
     }
 
     /// Returns a mut pointer to `ffi::MDB_stat`.
@@ -320,37 +320,37 @@ impl Stat {
 impl Stat {
     /// Size of a database page. This is the same for all databases in the environment.
     #[inline]
-    pub fn page_size(&self) -> u32 {
+    pub const fn page_size(&self) -> u32 {
         self.0.ms_psize
     }
 
     /// Depth (height) of the B-tree.
     #[inline]
-    pub fn depth(&self) -> u32 {
+    pub const fn depth(&self) -> u32 {
         self.0.ms_depth
     }
 
     /// Number of internal (non-leaf) pages.
     #[inline]
-    pub fn branch_pages(&self) -> usize {
+    pub const fn branch_pages(&self) -> usize {
         self.0.ms_branch_pages as usize
     }
 
     /// Number of leaf pages.
     #[inline]
-    pub fn leaf_pages(&self) -> usize {
+    pub const fn leaf_pages(&self) -> usize {
         self.0.ms_leaf_pages as usize
     }
 
     /// Number of overflow pages.
     #[inline]
-    pub fn overflow_pages(&self) -> usize {
+    pub const fn overflow_pages(&self) -> usize {
         self.0.ms_overflow_pages as usize
     }
 
     /// Number of data items.
     #[inline]
-    pub fn entries(&self) -> usize {
+    pub const fn entries(&self) -> usize {
         self.0.ms_entries as usize
     }
 }
@@ -360,7 +360,7 @@ impl Stat {
 pub struct GeometryInfo(ffi::MDBX_envinfo__bindgen_ty_1);
 
 impl GeometryInfo {
-    pub fn min(&self) -> u64 {
+    pub const fn min(&self) -> u64 {
         self.0.lower
     }
 }
@@ -373,43 +373,43 @@ impl GeometryInfo {
 pub struct Info(ffi::MDBX_envinfo);
 
 impl Info {
-    pub fn geometry(&self) -> GeometryInfo {
+    pub const fn geometry(&self) -> GeometryInfo {
         GeometryInfo(self.0.mi_geo)
     }
 
     /// Size of memory map.
     #[inline]
-    pub fn map_size(&self) -> usize {
+    pub const fn map_size(&self) -> usize {
         self.0.mi_mapsize as usize
     }
 
     /// Last used page number
     #[inline]
-    pub fn last_pgno(&self) -> usize {
+    pub const fn last_pgno(&self) -> usize {
         self.0.mi_last_pgno as usize
     }
 
     /// Last transaction ID
     #[inline]
-    pub fn last_txnid(&self) -> usize {
+    pub const fn last_txnid(&self) -> usize {
         self.0.mi_recent_txnid as usize
     }
 
     /// Max reader slots in the environment
     #[inline]
-    pub fn max_readers(&self) -> usize {
+    pub const fn max_readers(&self) -> usize {
         self.0.mi_maxreaders as usize
     }
 
     /// Max reader slots used in the environment
     #[inline]
-    pub fn num_readers(&self) -> usize {
+    pub const fn num_readers(&self) -> usize {
         self.0.mi_numreaders as usize
     }
 
     /// Return the internal page ops metrics
     #[inline]
-    pub fn page_ops(&self) -> PageOps {
+    pub const fn page_ops(&self) -> PageOps {
         PageOps {
             newly: self.0.mi_pgop_stat.newly,
             cow: self.0.mi_pgop_stat.cow,
@@ -468,7 +468,7 @@ pub struct PageOps {
     pub fsync: u64,
     /// Number of prefault write operations
     pub prefault: u64,
-    /// Number of mincore() calls
+    /// Number of `mincore()` calls
     pub mincore: u64,
 }
 
@@ -589,7 +589,7 @@ pub struct EnvironmentBuilder {
     handle_slow_readers: Option<HandleSlowReadersCallback>,
     #[cfg(feature = "read-tx-timeouts")]
     /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
-    /// enabled, the default value of [DEFAULT_MAX_READ_TRANSACTION_DURATION] is used.
+    /// enabled, the default value of [`DEFAULT_MAX_READ_TRANSACTION_DURATION`] is used.
     max_read_transaction_duration: Option<read_transactions::MaxReadTransactionDuration>,
 }
 
@@ -744,7 +744,7 @@ impl EnvironmentBuilder {
 
     /// Opens the environment with mdbx WRITEMAP
     ///
-    /// See also [EnvironmentKind]
+    /// See also [`EnvironmentKind`]
     pub fn write_map(&mut self) -> &mut Self {
         self.set_kind(EnvironmentKind::WriteMap)
     }
@@ -772,7 +772,7 @@ impl EnvironmentBuilder {
     /// unnamed database can ignore this option.
     ///
     /// Currently a moderate number of slots are cheap but a huge number gets
-    /// expensive: 7-120 words per transaction, and every [Transaction::open_db()]
+    /// expensive: 7-120 words per transaction, and every [`Transaction::open_db()`]
     /// does a linear search of the opened slots.
     pub fn set_max_dbs(&mut self, v: usize) -> &mut Self {
         self.max_dbs = Some(v as u64);
@@ -832,7 +832,8 @@ impl EnvironmentBuilder {
         self
     }
 
-    /// Set the Handle-Slow-Readers callback. See [HandleSlowReadersCallback] for more information.
+    /// Set the Handle-Slow-Readers callback. See [`HandleSlowReadersCallback`] for more
+    /// information.
     #[cfg(not(windows))]
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);
@@ -857,10 +858,10 @@ pub(crate) mod read_transactions {
 
     #[cfg(feature = "read-tx-timeouts")]
     impl MaxReadTransactionDuration {
-        pub fn as_duration(&self) -> Option<Duration> {
+        pub const fn as_duration(&self) -> Option<Duration> {
             match self {
-                MaxReadTransactionDuration::Unbounded => None,
-                MaxReadTransactionDuration::Set(duration) => Some(*duration),
+                Self::Unbounded => None,
+                Self::Set(duration) => Some(*duration),
             }
         }
     }

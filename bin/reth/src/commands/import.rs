@@ -15,21 +15,22 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_consensus::Consensus;
 use reth_db::{database::Database, init_db, tables, transaction::DbTx};
+use reth_db_common::init::init_genesis;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_core::init::init_genesis;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
-    ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockNumReader, ChainSpecProvider, HeaderProvider,
+    HeaderSyncMode, ProviderError, ProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory,
 };
 use reth_stages::{prelude::*, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -60,7 +61,7 @@ pub struct ImportCommand {
     #[arg(long, verbatim_doc_comment)]
     no_state: bool,
 
-    /// Chunk byte length.
+    /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
 
@@ -109,8 +110,11 @@ impl ImportCommand {
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -211,7 +215,7 @@ pub async fn build_import_pipeline<DB, C>(
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
     static_file_producer: StaticFileProducer<DB>,
-    should_exec: bool,
+    disable_exec: bool,
 ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
 where
     DB: Database + Clone + Unpin + 'static,
@@ -249,7 +253,7 @@ where
 
     let max_block = file_client.max_block().unwrap_or(0);
 
-    let mut pipeline = Pipeline::builder()
+    let pipeline = Pipeline::builder()
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)
@@ -265,7 +269,7 @@ where
                 PruneModes::default(),
             )
             .builder()
-            .disable_all_if(&StageId::STATE_REQUIRED, || should_exec),
+            .disable_all_if(&StageId::STATE_REQUIRED, || disable_exec),
         )
         .build(provider_factory, static_file_producer);
 

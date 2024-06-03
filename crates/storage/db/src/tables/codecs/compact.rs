@@ -51,6 +51,7 @@ impl_compression_for_compact!(
     StageCheckpoint,
     PruneCheckpoint,
     ClientVersion,
+    Requests,
     // Non-DB
     GenesisAccount
 );
@@ -86,7 +87,7 @@ macro_rules! impl_compression_fixed_compact {
 
 impl_compression_fixed_compact!(B256, Address);
 
-/// Adds wrapper structs for some primitive types so they can use StructFlags from Compact, when
+/// Adds wrapper structs for some primitive types so they can use `StructFlags` from Compact, when
 /// used as pure table values.
 macro_rules! add_wrapper_struct {
     ($(($name:tt, $wrapper:tt)),+) => {

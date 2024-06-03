@@ -6,12 +6,12 @@ use reth_db::{
     init_db, tables,
     transaction::DbTx,
 };
-use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs},
-    init::init_genesis,
-};
+use reth_db_common::init::init_genesis;
+use reth_node_core::args::{DatabaseArgs, DatadirArgs};
 use reth_primitives::ChainSpec;
-use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
+use reth_provider::{
+    providers::StaticFileProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
+};
 use reth_trie::StateRoot;
 use std::{fs, sync::Arc};
 use tracing::*;
@@ -47,7 +47,11 @@ impl Command {
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
 
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
+        let factory = ProviderFactory::new(
+            &db,
+            self.chain.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
         init_genesis(factory.clone())?;

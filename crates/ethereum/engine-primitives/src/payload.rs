@@ -7,11 +7,12 @@ use reth_primitives::{
     BlobTransactionSidecar, ChainSpec, Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadV1, PayloadAttributes,
-    PayloadId,
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadV1, PayloadAttributes, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
+    block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
+    convert_block_to_payload_field_v2,
 };
 use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::convert::Infallible;
@@ -43,17 +44,17 @@ impl EthBuiltPayload {
     }
 
     /// Returns the identifier of the payload.
-    pub fn id(&self) -> PayloadId {
+    pub const fn id(&self) -> PayloadId {
         self.id
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlock {
+    pub const fn block(&self) -> &SealedBlock {
         &self.block
     }
 
     /// Fees of the block
-    pub fn fees(&self) -> U256 {
+    pub const fn fees(&self) -> U256 {
         self.fees
     }
 
@@ -100,10 +101,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, .. } = value;
 
-        ExecutionPayloadEnvelopeV2 {
-            block_value: fees,
-            execution_payload: convert_block_to_payload_field_v2(block),
-        }
+        Self { block_value: fees, execution_payload: convert_block_to_payload_field_v2(block) }
     }
 }
 
@@ -111,8 +109,29 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
     fn from(value: EthBuiltPayload) -> Self {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
-        ExecutionPayloadEnvelopeV3 {
-            execution_payload: block_to_payload_v3(block),
+        Self {
+            execution_payload: block_to_payload_v3(block).0,
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+        }
+    }
+}
+
+impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
+    fn from(value: EthBuiltPayload) -> Self {
+        let EthBuiltPayload { block, fees, sidecars, .. } = value;
+
+        Self {
+            execution_payload: block_to_payload_v4(block),
             block_value: fees,
             // From the engine API spec:
             //
@@ -153,13 +172,13 @@ pub struct EthPayloadBuilderAttributes {
 
 impl EthPayloadBuilderAttributes {
     /// Returns the identifier of the payload.
-    pub fn payload_id(&self) -> PayloadId {
+    pub const fn payload_id(&self) -> PayloadId {
         self.id
     }
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
-    /// Derives the unique [PayloadId] for the given parent and attributes
+    /// Derives the unique [`PayloadId`] for the given parent and attributes
     pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
@@ -181,7 +200,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
-    /// Derives the unique [PayloadId] for the given parent and attributes
+    /// Derives the unique [`PayloadId`] for the given parent and attributes
     fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, Infallible> {
         Ok(Self::new(parent, attributes))
     }
@@ -220,8 +239,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
         parent: &Header,
     ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
         // configure evm env based on parent block
-        let mut cfg = CfgEnv::default();
-        cfg.chain_id = chain_spec.chain().id();
+        let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
 
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
@@ -275,7 +293,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     }
 }
 
-/// Generates the payload id for the configured payload from the [PayloadAttributes].
+/// Generates the payload id for the configured payload from the [`PayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
 pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {

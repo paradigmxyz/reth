@@ -50,7 +50,7 @@ where
         Self::connect_with_timeout(transport, secret_key, remote_id, HANDSHAKE_TIMEOUT).await
     }
 
-    /// Wrapper around connect_no_timeout which enforces a timeout.
+    /// Wrapper around `connect_no_timeout` which enforces a timeout.
     pub async fn connect_with_timeout(
         transport: Io,
         secret_key: SecretKey,
@@ -125,7 +125,7 @@ where
     }
 
     /// Get the remote id
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id
     }
 }

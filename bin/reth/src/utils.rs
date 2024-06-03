@@ -9,7 +9,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DatabaseError, RawTable, TableRawRow,
 };
-use reth_primitives::{fs, ChainSpec};
+use reth_fs_util as fs;
+use reth_primitives::ChainSpec;
 use reth_provider::ProviderFactory;
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
@@ -28,13 +29,16 @@ pub use reth_node_core::utils::*;
 pub struct DbTool<DB: Database> {
     /// The provider factory that the db tool will use.
     pub provider_factory: ProviderFactory<DB>,
-    /// The [ChainSpec] that the db tool will use.
+    /// The [`ChainSpec`] that the db tool will use.
     pub chain: Arc<ChainSpec>,
 }
 
 impl<DB: Database> DbTool<DB> {
     /// Takes a DB where the tables have already been created.
     pub fn new(provider_factory: ProviderFactory<DB>, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
+        // Disable timeout because we are entering a TUI which might read for a long time. We
+        // disable on the [`DbTool`] level since it's only used in the CLI.
+        provider_factory.provider()?.disable_long_read_transaction_safety();
         Ok(Self { provider_factory, chain })
     }
 
@@ -122,7 +126,7 @@ impl<DB: Database> DbTool<DB> {
         self.provider_factory.db_ref().view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 
-    /// Grabs the content of the DupSort table for the given key and subkey
+    /// Grabs the content of the `DupSort` table for the given key and subkey
     pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
         self.provider_factory
             .db_ref()

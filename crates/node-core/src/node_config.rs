@@ -14,8 +14,8 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_config::{config::PruneConfig, Config};
 use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_interfaces::{p2p::headers::client::HeadersClient, RethResult};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
+use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
     BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
@@ -24,10 +24,11 @@ use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, BlockNumReader, HeaderProvider,
     ProviderFactory, StageCheckpointReader,
 };
+use reth_storage_errors::provider::ProviderResult;
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
     path::PathBuf,
     sync::Arc,
 };
@@ -67,7 +68,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```
 ///
 /// This can also be used to launch a node with a temporary test database. This can be done with
-/// the [NodeConfig::test] method.
+/// the [`NodeConfig::test`] method.
 ///
 /// # Example
 /// ```rust
@@ -120,11 +121,11 @@ pub struct NodeConfig {
     /// port numbers that conflict with each other.
     ///
     /// Changes to the following port numbers:
-    /// - DISCOVERY_PORT: default + `instance` - 1
-    /// - DISCOVERY_V5_PORT: default + `instance` - 1
-    /// - AUTH_PORT: default + `instance` * 100 - 100
-    /// - HTTP_RPC_PORT: default - `instance` + 1
-    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    /// - `DISCOVERY_PORT`: default + `instance` - 1
+    /// - `DISCOVERY_V5_PORT`: default + `instance` - 1
+    /// - `AUTH_PORT`: default + `instance` * 100 - 100
+    /// - `HTTP_RPC_PORT`: default - `instance` + 1
+    /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     pub instance: u16,
 
     /// All networking related arguments
@@ -153,7 +154,7 @@ pub struct NodeConfig {
 }
 
 impl NodeConfig {
-    /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
+    /// Creates a testing [`NodeConfig`], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self::default()
             // set all ports to zero by default for test instances
@@ -178,20 +179,20 @@ impl NodeConfig {
         self
     }
 
-    /// Set the [ChainSpec] for the node
+    /// Set the [`ChainSpec`] for the node
     pub fn with_chain(mut self, chain: impl Into<Arc<ChainSpec>>) -> Self {
         self.chain = chain.into();
         self
     }
 
     /// Set the metrics address for the node
-    pub fn with_metrics(mut self, metrics: SocketAddr) -> Self {
+    pub const fn with_metrics(mut self, metrics: SocketAddr) -> Self {
         self.metrics = Some(metrics);
         self
     }
 
     /// Set the instance for the node
-    pub fn with_instance(mut self, instance: u16) -> Self {
+    pub const fn with_instance(mut self, instance: u16) -> Self {
         self.instance = instance;
         self
     }
@@ -227,19 +228,19 @@ impl NodeConfig {
     }
 
     /// Set the database args for the node
-    pub fn with_db(mut self, db: DatabaseArgs) -> Self {
+    pub const fn with_db(mut self, db: DatabaseArgs) -> Self {
         self.db = db;
         self
     }
 
     /// Set the dev args for the node
-    pub fn with_dev(mut self, dev: DevArgs) -> Self {
+    pub const fn with_dev(mut self, dev: DevArgs) -> Self {
         self.dev = dev;
         self
     }
 
     /// Set the pruning args for the node
-    pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
+    pub const fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
         self
     }
@@ -301,7 +302,7 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Create the [NetworkConfig] for the node
+    /// Create the [`NetworkConfig`] for the node
     pub fn network_config<C>(
         &self,
         config: &Config,
@@ -316,7 +317,7 @@ impl NodeConfig {
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
-    /// Create the [NetworkBuilder].
+    /// Create the [`NetworkBuilder`].
     ///
     /// This only configures it and does not spawn it.
     pub async fn build_network<C>(
@@ -335,7 +336,7 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
+    /// Loads '`MAINNET_KZG_TRUSTED_SETUP`'
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
         Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
@@ -375,7 +376,7 @@ impl NodeConfig {
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    pub fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> RethResult<Head> {
+    pub fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> ProviderResult<Head> {
         let provider = factory.provider()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
@@ -410,7 +411,7 @@ impl NodeConfig {
         provider: Provider,
         client: Client,
         tip: B256,
-    ) -> RethResult<u64>
+    ) -> ProviderResult<u64>
     where
         Provider: HeaderProvider,
         Client: HeadersClient,
@@ -423,7 +424,7 @@ impl NodeConfig {
             return Ok(header.number)
         }
 
-        Ok(self.fetch_tip_from_network(client, tip.into()).await?.number)
+        Ok(self.fetch_tip_from_network(client, tip.into()).await.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -433,7 +434,7 @@ impl NodeConfig {
         &self,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> RethResult<SealedHeader>
+    ) -> SealedHeader
     where
         Client: HeadersClient,
     {
@@ -443,7 +444,7 @@ impl NodeConfig {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return tip_header
                 }
                 Err(error) => {
                     fetch_failures += 1;
@@ -455,7 +456,7 @@ impl NodeConfig {
         }
     }
 
-    /// Builds the [NetworkConfig] with the given [ProviderFactory].
+    /// Builds the [`NetworkConfig`] with the given [`ProviderFactory`].
     pub fn load_network_config<C>(
         &self,
         config: &Config,
@@ -465,8 +466,7 @@ impl NodeConfig {
         secret_key: SecretKey,
         default_peers_path: PathBuf,
     ) -> NetworkConfig<C> {
-        let cfg_builder = self
-            .network
+        self.network
             .network_config(config, self.chain.clone(), secret_key, default_peers_path)
             .with_task_executor(Box::new(executor))
             .set_head(head)
@@ -480,39 +480,30 @@ impl NodeConfig {
                 self.network.discovery.addr,
                 // set discovery port based on instance number
                 self.network.discovery.port + self.instance - 1,
-            ));
+            ))
+            .map_discv5_config_builder(|builder| {
+                let DiscoveryArgs {
+                    discv5_addr,
+                    discv5_addr_ipv6,
+                    discv5_port,
+                    discv5_port_ipv6,
+                    ..
+                } = self.network.discovery;
 
-        let config = cfg_builder.build(client);
+                // Use rlpx address if none given
+                let discv5_addr_ipv4 = discv5_addr.or(match self.network.addr {
+                    IpAddr::V4(ip) => Some(ip),
+                    IpAddr::V6(_) => None,
+                });
+                let discv5_addr_ipv6 = discv5_addr_ipv6.or(match self.network.addr {
+                    IpAddr::V4(_) => None,
+                    IpAddr::V6(ip) => Some(ip),
+                });
 
-        if self.network.discovery.disable_discovery ||
-            !self.network.discovery.enable_discv5_discovery &&
-                !config.chain_spec.chain.is_optimism()
-        {
-            return config
-        }
+                let discv5_port_ipv4 = discv5_port + self.instance - 1;
+                let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
 
-        let rlpx_addr = config.listener_addr().ip();
-        // work around since discv5 config builder can't be integrated into network config builder
-        // due to unsatisfied trait bounds
-        config.discovery_v5_with_config_builder(|builder| {
-            let DiscoveryArgs {
-                discv5_addr,
-                discv5_addr_ipv6,
-                discv5_port,
-                discv5_port_ipv6,
-                discv5_lookup_interval,
-                discv5_bootstrap_lookup_interval,
-                discv5_bootstrap_lookup_countdown,
-                ..
-            } = self.network.discovery;
-
-            let discv5_addr_ipv4 = discv5_addr.or_else(|| ipv4(rlpx_addr));
-            let discv5_addr_ipv6 = discv5_addr_ipv6.or_else(|| ipv6(rlpx_addr));
-            let discv5_port_ipv4 = discv5_port + self.instance - 1;
-            let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
-
-            builder
-                .discv5_config(
+                builder.discv5_config(
                     discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
                         discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
                         discv5_addr_ipv6
@@ -520,15 +511,12 @@ impl NodeConfig {
                     ))
                     .build(),
                 )
-                .lookup_interval(discv5_lookup_interval)
-                .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
-                .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
-                .build()
-        })
+            })
+            .build(client)
     }
 
     /// Change rpc port numbers based on the instance number, using the inner
-    /// [RpcServerArgs::adjust_instance_ports] method.
+    /// [`RpcServerArgs::adjust_instance_ports`] method.
     pub fn adjust_instance_ports(&mut self) {
         self.rpc.adjust_instance_ports(self.instance);
     }
@@ -564,21 +552,5 @@ impl Default for NodeConfig {
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
         }
-    }
-}
-
-/// Returns the address if this is an [`Ipv4Addr`].
-pub fn ipv4(ip: IpAddr) -> Option<Ipv4Addr> {
-    match ip {
-        IpAddr::V4(ip) => Some(ip),
-        IpAddr::V6(_) => None,
-    }
-}
-
-/// Returns the address if this is an [`Ipv6Addr`].
-pub fn ipv6(ip: IpAddr) -> Option<Ipv6Addr> {
-    match ip {
-        IpAddr::V4(_) => None,
-        IpAddr::V6(ip) => Some(ip),
     }
 }

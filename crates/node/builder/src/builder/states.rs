@@ -63,7 +63,7 @@ pub(crate) struct NodeTypesAdapter<T: FullNodeTypes> {
 
 impl<T: FullNodeTypes> NodeTypesAdapter<T> {
     /// Create a new adapter from the given node types.
-    pub(crate) fn new(database: T::DB) -> Self {
+    pub(crate) const fn new(database: T::DB) -> Self {
         Self { database }
     }
 }
@@ -197,11 +197,11 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
         self
     }
 
-    /// Installs an ExEx (Execution Extension) in the node.
+    /// Installs an `ExEx` (Execution Extension) in the node.
     ///
     /// # Note
     ///
-    /// The ExEx ID must be unique.
+    /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
@@ -223,17 +223,17 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     /// Check that the builder can be launched
     ///
     /// This is useful when writing tests to ensure that the builder is configured correctly.
-    pub fn check_launch(self) -> Self {
+    pub const fn check_launch(self) -> Self {
         self
     }
 }
 
 /// Additional node extensions.
 pub(crate) struct NodeAddOns<Node: FullNodeComponents> {
-    /// Additional NodeHooks that are called at specific points in the node's launch lifecycle.
+    /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
     pub(crate) hooks: NodeHooks<Node>,
     /// Additional RPC hooks.
     pub(crate) rpc: RpcHooks<Node>,
-    /// The ExExs (execution extensions) of the node.
+    /// The `ExExs` (execution extensions) of the node.
     pub(crate) exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
 }

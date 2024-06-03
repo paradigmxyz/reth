@@ -145,8 +145,16 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                 if let (Some(path), 1) =
                     (arg_path.path.segments.first(), arg_path.path.segments.len())
                 {
-                    if ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash"]
-                        .contains(&path.ident.to_string().as_str())
+                    if [
+                        "B256",
+                        "Address",
+                        "Address",
+                        "Bloom",
+                        "TxHash",
+                        "BlockHash",
+                        "CompactPlaceholder",
+                    ]
+                    .contains(&path.ident.to_string().as_str())
                     {
                         return true
                     }
@@ -171,7 +179,7 @@ pub fn get_bit_size(ftype: &str) -> u8 {
 }
 
 /// Given the field type in a string format, checks if its type should be added to the
-/// StructFlags.
+/// `StructFlags`.
 pub fn is_flag_type(ftype: &str) -> bool {
     get_bit_size(ftype) > 0
 }

@@ -7,7 +7,8 @@ use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilder
 use reth_primitives::{ChainSpec, Hardfork};
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadEnvelopeV2, OptimismExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
+        ExecutionPayloadEnvelopeV2, OptimismExecutionPayloadEnvelopeV3,
+        OptimismExecutionPayloadEnvelopeV4, OptimismPayloadAttributes,
     },
     ExecutionPayloadV1,
 };
@@ -24,6 +25,7 @@ impl EngineTypes for OptimismEngineTypes {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,

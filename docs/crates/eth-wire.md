@@ -1,7 +1,7 @@
 # eth-wire
 
-The `eth-wire` crate provides abstractions over the [RLPx](https://github.com/ethereum/devp2p/blob/master/rlpx.md) and 
-[Eth wire](https://github.com/ethereum/devp2p/blob/master/caps/eth.md) protocols. 
+The `eth-wire` crate provides abstractions over the [``RLPx``](https://github.com/ethereum/devp2p/blob/master/rlpx.md) and
+[Eth wire](https://github.com/ethereum/devp2p/blob/master/caps/eth.md) protocols.
 
 This crate can be thought of as having 2 components:
 
@@ -47,7 +47,7 @@ pub enum EthMessageID {
 }
 
 ```
-Messages can either be broadcast to the network, or can be a request/response message to a single peer. This 2nd type of message is 
+Messages can either be broadcast to the network, or can be a request/response message to a single peer. This 2nd type of message is
 described using a `RequestPair` struct, which is simply a concatenation of the underlying message with a request id.
 
 [File: crates/net/eth-wire/src/types/message.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/types/message.rs)
@@ -85,8 +85,8 @@ Let's understand how an `EthMessage` is implemented by taking a look at the `Tra
 Transactions (0x02)
 [tx₁, tx₂, ...]
 
-Specify transactions that the peer should make sure is included on its transaction queue. 
-The items in the list are transactions in the format described in the main Ethereum specification. 
+Specify transactions that the peer should make sure is included on its transaction queue.
+The items in the list are transactions in the format described in the main Ethereum specification.
 ...
 
 ```
@@ -140,11 +140,11 @@ The lowest level stream to communicate with other peers is the P2P stream. It ta
 
 - Tracks and Manages Ping and pong messages and sends them when needed.
 - Keeps track of the SharedCapabilities between the reth node and its peers.
-- Receives bytes from peers, decompresses and forwards them to its parent stream. 
+- Receives bytes from peers, decompresses and forwards them to its parent stream.
 - Receives bytes from its parent stream, compresses them and sends it to peers.
 
-Decompression/Compression of bytes is done with snappy algorithm ([EIP 706](https://eips.ethereum.org/EIPS/eip-706)) 
-using the external `snap` crate. 
+Decompression/Compression of bytes is done with snappy algorithm ([EIP 706](https://eips.ethereum.org/EIPS/eip-706))
+using the external `snap` crate.
 
 [File: crates/net/eth-wire/src/p2pstream.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/p2pstream.rs)
 ```rust,ignore
@@ -220,7 +220,7 @@ pub(crate) fn poll_ping(
 ### Sending and receiving data
 To send and receive data, the P2PStream itself is a future which implements the `Stream` and `Sink` traits from the `futures` crate.
 
-For the `Stream` trait, the `inner` stream is polled, decompressed and returned. Most of the code is just 
+For the `Stream` trait, the `inner` stream is polled, decompressed and returned. Most of the code is just
 error handling and is omitted here for clarity.
 
 [File: crates/net/eth-wire/src/p2pstream.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/p2pstream.rs)
@@ -296,7 +296,7 @@ pub struct EthStream<S> {
 }
 ```
 EthStream's only job is to perform the RLP decoding/encoding, using the `ProtocolMessage::decode()` and `ProtocolMessage::encode()`
-functions we looked at earlier. 
+functions we looked at earlier.
 
 [File: crates/net/eth-wire/src/ethstream.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/ethstream.rs)
 ```rust,ignore
@@ -334,8 +334,8 @@ impl<S, E> Sink<EthMessage> for EthStream<S> {
 }
 ```
 ## Unauthed streams
-For a session to be established, peers in the Ethereum network must first exchange a `Hello` message in the RLPx layer and then a
-`Status` message in the eth-wire layer. 
+For a session to be established, peers in the Ethereum network must first exchange a `Hello` message in the ``RLPx`` layer and then a
+`Status` message in the eth-wire layer.
 
 To perform these, reth has special `Unauthed` versions of streams described above.
 
@@ -368,5 +368,3 @@ impl<S> UnauthedP2PStream<S> {
 
 ```
 Similarly, UnauthedEthStream does the `Status` handshake and returns an `EthStream`. The code is [here](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/ethstream.rs)
-
-

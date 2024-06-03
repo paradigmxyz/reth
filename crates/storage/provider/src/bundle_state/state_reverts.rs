@@ -5,8 +5,8 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
+use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
 
@@ -23,7 +23,7 @@ impl From<PlainStateReverts> for StateReverts {
 impl StateReverts {
     /// Write reverts to database.
     ///
-    /// Note:: Reverts will delete all wiped storage from plain state.
+    /// `Note::` Reverts will delete all wiped storage from plain state.
     pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
@@ -93,7 +93,7 @@ impl StateReverts {
 }
 
 /// Iterator over storage reverts.
-/// See [StorageRevertsIter::next] for more details.
+/// See [`StorageRevertsIter::next`] for more details.
 #[allow(missing_debug_implementations)]
 pub struct StorageRevertsIter<R: Iterator, W: Iterator> {
     reverts: Peekable<R>,

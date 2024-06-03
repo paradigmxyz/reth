@@ -53,7 +53,7 @@ where
 {
     /// Validates a single transaction.
     ///
-    /// See also [TransactionValidator::validate_transaction]
+    /// See also [`TransactionValidator::validate_transaction`]
     pub fn validate_one(
         &self,
         origin: TransactionOrigin,
@@ -66,7 +66,7 @@ where
     ///
     /// Returns all outcomes for the given transactions in the same order.
     ///
-    /// See also [Self::validate_one]
+    /// See also [`Self::validate_one`]
     pub fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
@@ -102,7 +102,7 @@ where
     }
 }
 
-/// A [TransactionValidator] implementation that validates ethereum transaction.
+/// A [`TransactionValidator`] implementation that validates ethereum transaction.
 #[derive(Debug)]
 pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Spec of the chain
@@ -125,7 +125,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
-    /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
+    /// How to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// Maximum size in bytes a single transaction can have in order to be accepted into the pool.
     max_tx_input_bytes: usize,
@@ -410,7 +410,7 @@ where
     }
 }
 
-/// A builder for [TransactionValidationTaskExecutor]
+/// A builder for [`TransactionValidationTaskExecutor`]
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidatorBuilder {
     chain_spec: Arc<ChainSpec>,
@@ -435,14 +435,14 @@ pub struct EthTransactionValidatorBuilder {
 
     /// Stores the setup and parameters needed for validating KZG proofs.
     kzg_settings: Arc<KzgSettings>,
-    /// How to handle [TransactionOrigin::Local](TransactionOrigin) transactions.
+    /// How to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// Max size in bytes of a single transaction allowed
     max_tx_input_bytes: usize,
 }
 
 impl EthTransactionValidatorBuilder {
-    /// Creates a new builder for the given [ChainSpec]
+    /// Creates a new builder for the given [`ChainSpec`]
     ///
     /// By default this assumes the network is on the `Cancun` hardfork and the following
     /// transactions are allowed:
@@ -479,7 +479,7 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Whether to allow exemptions for local transaction exemptions.
-    pub fn set_local_transactions_config(
+    pub fn with_local_transactions_config(
         mut self,
         local_transactions_config: LocalTransactionConfig,
     ) -> Self {
@@ -537,7 +537,7 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Sets the [KzgSettings] to use for validating KZG proofs.
+    /// Sets the [`KzgSettings`] to use for validating KZG proofs.
     pub fn kzg_settings(mut self, kzg_settings: Arc<KzgSettings>) -> Self {
         self.kzg_settings = kzg_settings;
         self
@@ -570,7 +570,7 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Builds a the [EthTransactionValidator] without spawning validator tasks.
+    /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Client, Tx, S>(
         self,
         client: Client,
@@ -616,8 +616,8 @@ impl EthTransactionValidatorBuilder {
         EthTransactionValidator { inner: Arc::new(inner) }
     }
 
-    /// Builds a the [EthTransactionValidator] and spawns validation tasks via the
-    /// [TransactionValidationTaskExecutor]
+    /// Builds a the [`EthTransactionValidator`] and spawns validation tasks via the
+    /// [`TransactionValidationTaskExecutor`]
     ///
     /// The validator will spawn `additional_tasks` additional tasks for validation.
     ///
@@ -699,7 +699,7 @@ pub fn ensure_max_init_code_size<T: PoolTransaction>(
 
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
 ///
-/// See also [calculate_intrinsic_gas_after_merge]
+/// See also [`calculate_intrinsic_gas_after_merge`]
 pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     transaction: &T,
     is_shanghai: bool,
@@ -708,7 +708,7 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     if transaction.gas_limit() <
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
-            transaction.kind(),
+            &transaction.kind(),
             &access_list,
             is_shanghai,
         )

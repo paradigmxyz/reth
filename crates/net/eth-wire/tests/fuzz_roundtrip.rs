@@ -21,8 +21,8 @@ where
     assert_eq!(thing, decoded, "expected: {thing:?}, got: {decoded:?}");
 }
 
-/// This method delegates to roundtrip_encoding, but is used to enforce that each type input to the
-/// macro has a proper Default, Clone, and Serialize impl. These trait implementations are
+/// This method delegates to `roundtrip_encoding`, but is used to enforce that each type input to
+/// the macro has a proper Default, Clone, and Serialize impl. These trait implementations are
 /// necessary for test-fuzz to autogenerate a corpus.
 ///
 /// If it makes sense to remove a Default impl from a type that we fuzz, this should prevent the
@@ -96,7 +96,7 @@ pub mod fuzz_rlp {
 
     impl Default for HelloMessageWrapper {
         fn default() -> Self {
-            HelloMessageWrapper(HelloMessage {
+            Self(HelloMessage {
                 client_version: Default::default(),
                 capabilities: Default::default(),
                 protocol_version: Default::default(),
@@ -138,7 +138,7 @@ pub mod fuzz_rlp {
 
     impl Default for GetBlockHeadersWrapper {
         fn default() -> Self {
-            GetBlockHeadersWrapper(GetBlockHeaders {
+            Self(GetBlockHeaders {
                 start_block: BlockHashOrNumber::Number(0),
                 limit: Default::default(),
                 skip: Default::default(),

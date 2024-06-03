@@ -47,38 +47,38 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// ## Order
 ///
 /// Configuring a node starts out with a [`NodeConfig`] (this can be obtained from cli arguments for
-/// example) and then proceeds to configure the core static types of the node: [NodeTypes], these
+/// example) and then proceeds to configure the core static types of the node: [`NodeTypes`], these
 /// include the node's primitive types and the node's engine types.
 ///
 /// Next all stateful components of the node are configured, these include all the
 /// components of the node that are downstream of those types, these include:
 ///
-///  - The EVM and Executor configuration: [ExecutorBuilder](crate::components::ExecutorBuilder)
-///  - The transaction pool: [PoolBuilder]
-///  - The network: [NetworkBuilder](crate::components::NetworkBuilder)
-///  - The payload builder: [PayloadBuilder](crate::components::PayloadServiceBuilder)
+///  - The EVM and Executor configuration: [`ExecutorBuilder`](crate::components::ExecutorBuilder)
+///  - The transaction pool: [`PoolBuilder`]
+///  - The network: [`NetworkBuilder`](crate::components::NetworkBuilder)
+///  - The payload builder: [`PayloadBuilder`](crate::components::PayloadServiceBuilder)
 ///
 /// Once all the components are configured, the node is ready to be launched.
 ///
-/// On launch the builder returns a fully type aware [NodeHandle] that has access to all the
+/// On launch the builder returns a fully type aware [`NodeHandle`] that has access to all the
 /// configured components and can interact with the node.
 ///
 /// There are convenience functions for networks that come with a preset of types and components via
 /// the [Node] trait, see `reth_node_ethereum::EthereumNode` or `reth_node_optimism::OptimismNode`.
 ///
-/// The [NodeBuilder::node] function configures the node's types and components in one step.
+/// The [`NodeBuilder::node`] function configures the node's types and components in one step.
 ///
 /// ## Components
 ///
-/// All components are configured with a [NodeComponentsBuilder] that is responsible for actually
+/// All components are configured with a [`NodeComponentsBuilder`] that is responsible for actually
 /// creating the node components during the launch process. The
-/// [ComponentsBuilder](crate::components::ComponentsBuilder) is a general purpose implementation of
-/// the [NodeComponentsBuilder] trait that can be used to configure the executor, network,
+/// [`ComponentsBuilder`](crate::components::ComponentsBuilder) is a general purpose implementation
+/// of the [`NodeComponentsBuilder`] trait that can be used to configure the executor, network,
 /// transaction pool and payload builder of the node. It enforces the correct order of
 /// configuration, for example the network and the payload builder depend on the transaction pool
 /// type that is configured first.
 ///
-/// All builder traits are generic over the node types and are invoked with the [BuilderContext]
+/// All builder traits are generic over the node types and are invoked with the [`BuilderContext`]
 /// that gives access to internals of the that are needed to configure the components. This include
 /// the original config, chain spec, the database provider and the task executor,
 ///
@@ -86,44 +86,45 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// Once all the components are configured, the builder can be used to set hooks that are run at
 /// specific points in the node's lifecycle. This way custom services can be spawned before the node
-/// is launched [NodeBuilder::on_component_initialized], or once the rpc server(s) are launched
-/// [NodeBuilder::on_rpc_started]. The [NodeBuilder::extend_rpc_modules] can be used to inject
-/// custom rpc modules into the rpc server before it is launched. See also [RpcContext]
+/// is launched [`NodeBuilder::on_component_initialized`], or once the rpc server(s) are launched
+/// [`NodeBuilder::on_rpc_started`]. The [`NodeBuilder::extend_rpc_modules`] can be used to inject
+/// custom rpc modules into the rpc server before it is launched. See also [`RpcContext`]
 /// All hooks accept a closure that is then invoked at the appropriate time in the node's launch
 /// process.
 ///
 /// ## Flow
 ///
-/// The [NodeBuilder] is intended to sit behind a CLI that provides the necessary [NodeConfig]
-/// input: [NodeBuilder::new]
+/// The [`NodeBuilder`] is intended to sit behind a CLI that provides the necessary [`NodeConfig`]
+/// input: [`NodeBuilder::new`]
 ///
 /// From there the builder is configured with the node's types, components, and hooks, then launched
-/// with the [NodeBuilder::launch] method. On launch all the builtin internals, such as the
-/// `Database` and its providers [BlockchainProvider] are initialized before the configured
-/// [NodeComponentsBuilder] is invoked with the [BuilderContext] to create the transaction pool,
+/// with the [`NodeBuilder::launch`] method. On launch all the builtin internals, such as the
+/// `Database` and its providers [`BlockchainProvider`] are initialized before the configured
+/// [`NodeComponentsBuilder`] is invoked with the [`BuilderContext`] to create the transaction pool,
 /// network, and payload builder components. When the RPC is configured, the corresponding hooks are
 /// invoked to allow for custom rpc modules to be injected into the rpc server:
-/// [NodeBuilder::extend_rpc_modules]
+/// [`NodeBuilder::extend_rpc_modules`]
 ///
-/// Finally all components are created and all services are launched and a [NodeHandle] is returned
-/// that can be used to interact with the node: [FullNode]
+/// Finally all components are created and all services are launched and a [`NodeHandle`] is
+/// returned that can be used to interact with the node: [`FullNode`]
 ///
 /// The following diagram shows the flow of the node builder from CLI to a launched node.
 ///
-/// include_mmd!("docs/mermaid/builder.mmd")
+/// `include_mmd!("docs/mermaid/builder.mmd`")
 ///
 /// ## Internals
 ///
-/// The node builder is fully type safe, it uses the [NodeTypes] trait to enforce that all
+/// The node builder is fully type safe, it uses the [`NodeTypes`] trait to enforce that all
 /// components are configured with the correct types. However the database types and with that the
 /// provider trait implementations are currently created by the builder itself during the launch
-/// process, hence the database type is not part of the [NodeTypes] trait and the node's components,
-/// that depend on the database, are configured separately. In order to have a nice trait that
-/// encapsulates the entire node the [FullNodeComponents] trait was introduced. This trait has
-/// convenient associated types for all the components of the node. After [NodeBuilder::launch] the
-/// [NodeHandle] contains an instance of [FullNode] that implements the [FullNodeComponents] trait
-/// and has access to all the components of the node. Internally the node builder uses several
-/// generic adapter types that are then map to traits with associated types for ease of use.
+/// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
+/// components, that depend on the database, are configured separately. In order to have a nice
+/// trait that encapsulates the entire node the [`FullNodeComponents`] trait was introduced. This
+/// trait has convenient associated types for all the components of the node. After
+/// [`NodeBuilder::launch`] the [`NodeHandle`] contains an instance of [`FullNode`] that implements
+/// the [`FullNodeComponents`] trait and has access to all the components of the node. Internally
+/// the node builder uses several generic adapter types that are then map to traits with associated
+/// types for ease of use.
 ///
 /// ### Limitations
 ///
@@ -141,14 +142,14 @@ pub struct NodeBuilder<DB> {
 
 impl NodeBuilder<()> {
     /// Create a new [`NodeBuilder`].
-    pub fn new(config: NodeConfig) -> Self {
+    pub const fn new(config: NodeConfig) -> Self {
         Self { config, database: () }
     }
 }
 
 impl<DB> NodeBuilder<DB> {
     /// Returns a reference to the node builder's config.
-    pub fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig {
         &self.config
     }
 
@@ -160,11 +161,11 @@ impl<DB> NodeBuilder<DB> {
     /// Preconfigure the builder with the context to launch the node.
     ///
     /// This provides the task executor and the data directory for the node.
-    pub fn with_launch_context(
+    pub const fn with_launch_context(
         self,
         task_executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
-    ) -> WithLaunchContext<NodeBuilder<DB>> {
+    ) -> WithLaunchContext<Self> {
         WithLaunchContext { builder: self, task_executor, data_dir }
     }
 
@@ -206,10 +207,10 @@ where
     }
 }
 
-/// A [NodeBuilder] with it's launch context already configured.
+/// A [`NodeBuilder`] with it's launch context already configured.
 ///
-/// This exposes the same methods as [NodeBuilder] but with the launch context already configured,
-/// See [WithLaunchContext::launch]
+/// This exposes the same methods as [`NodeBuilder`] but with the launch context already configured,
+/// See [`WithLaunchContext::launch`]
 pub struct WithLaunchContext<Builder> {
     builder: Builder,
     task_executor: TaskExecutor,
@@ -218,12 +219,12 @@ pub struct WithLaunchContext<Builder> {
 
 impl<Builder> WithLaunchContext<Builder> {
     /// Returns a reference to the task executor.
-    pub fn task_executor(&self) -> &TaskExecutor {
+    pub const fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
     }
 
     /// Returns a reference to the data directory.
-    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.data_dir
     }
 }
@@ -233,7 +234,7 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
 {
     /// Returns a reference to the node builder's config.
-    pub fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig {
         self.builder.config()
     }
 
@@ -266,7 +267,7 @@ where
     ///
     /// This bootstraps the node internals, creates all the components with the given [Node]
     ///
-    /// Returns a [NodeHandle] that can be used to interact with the node.
+    /// Returns a [`NodeHandle`] that can be used to interact with the node.
     pub async fn launch_node<N>(
         self,
         node: N,
@@ -375,11 +376,11 @@ where
         }
     }
 
-    /// Installs an ExEx (Execution Extension) in the node.
+    /// Installs an `ExEx` (Execution Extension) in the node.
     ///
     /// # Note
     ///
-    /// The ExEx ID must be unique.
+    /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
     where
         F: FnOnce(ExExContext<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> R
@@ -408,7 +409,7 @@ where
     /// Check that the builder can be launched
     ///
     /// This is useful when writing tests to ensure that the builder is configured correctly.
-    pub fn check_launch(self) -> Self {
+    pub const fn check_launch(self) -> Self {
         self
     }
 }
@@ -430,8 +431,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
-    /// Create a new instance of [BuilderContext]
-    pub fn new(
+    /// Create a new instance of [`BuilderContext`]
+    pub const fn new(
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
@@ -443,31 +444,31 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Returns the configured provider to interact with the blockchain.
-    pub fn provider(&self) -> &Node::Provider {
+    pub const fn provider(&self) -> &Node::Provider {
         &self.provider
     }
 
     /// Returns the current head of the blockchain at launch.
-    pub fn head(&self) -> Head {
+    pub const fn head(&self) -> Head {
         self.head
     }
 
     /// Returns the config of the node.
-    pub fn config(&self) -> &NodeConfig {
+    pub const fn config(&self) -> &NodeConfig {
         &self.config
     }
 
     /// Returns the data dir of the node.
     ///
     /// This gives access to all relevant files and directories of the node's datadir.
-    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.data_dir
     }
 
     /// Returns the executor of the node.
     ///
     /// This can be used to execute async tasks or functions during the setup.
-    pub fn task_executor(&self) -> &TaskExecutor {
+    pub const fn task_executor(&self) -> &TaskExecutor {
         &self.executor
     }
 
@@ -502,7 +503,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         )
     }
 
-    /// Creates the [NetworkBuilder] for the node.
+    /// Creates the [`NetworkBuilder`] for the node.
     pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
         self.config
             .build_network(
@@ -517,8 +518,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Convenience function to start the network.
     ///
-    /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
-    /// to that network.
+    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
+    /// connected to that network.
     pub fn start_network<Pool>(
         &self,
         builder: NetworkBuilder<Node::Provider, (), ()>,
@@ -541,7 +542,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             "p2p network task",
             |shutdown| {
                 network.run_until_graceful_shutdown(shutdown, |network| {
-                    write_peers_to_file(network, known_peers_file)
+                    write_peers_to_file(&network, known_peers_file)
                 })
             },
         );

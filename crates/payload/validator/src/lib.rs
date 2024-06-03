@@ -47,7 +47,7 @@ impl ExecutionPayloadValidator {
     /// Cancun specific checks for EIP-4844 blob transactions.
     ///
     /// Ensures that the number of blob versioned hashes matches the number hashes included in the
-    /// _separate_ block_versioned_hashes of the cancun payload fields.
+    /// _separate_ `block_versioned_hashes` of the cancun payload fields.
     fn ensure_matching_blob_versioned_hashes(
         &self,
         sealed_block: &SealedBlock,
@@ -84,20 +84,20 @@ impl ExecutionPayloadValidator {
     ///    - invalid extra data
     ///    - invalid transactions
     ///    - incorrect hash
-    ///    - the versioned hashes passed with the payload do not exactly match transaction
-    ///    versioned hashes
+    ///    - the versioned hashes passed with the payload do not exactly match transaction versioned
+    ///      hashes
     ///    - the block does not contain blob transactions if it is pre-cancun
     ///
     /// The checks are done in the order that conforms with the engine-API specification.
     ///
     /// This is intended to be invoked after receiving the payload from the CLI.
-    /// The additional [MaybeCancunPayloadFields] are not part of the payload, but are additional fields in the `engine_newPayloadV3` RPC call, See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
+    /// The additional [`MaybeCancunPayloadFields`] are not part of the payload, but are additional fields in the `engine_newPayloadV3` RPC call, See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     ///
     /// If the cancun fields are provided this also validates that the versioned hashes in the block
     /// match the versioned hashes passed in the
-    /// [CancunPayloadFields](reth_rpc_types::engine::CancunPayloadFields), if the cancun payload
+    /// [`CancunPayloadFields`](reth_rpc_types::engine::CancunPayloadFields), if the cancun payload
     /// fields are provided. If the payload fields are not provided, but versioned hashes exist
-    /// in the block, this is considered an error: [PayloadError::InvalidVersionedHashes].
+    /// in the block, this is considered an error: [`PayloadError::InvalidVersionedHashes`].
     ///
     /// This validates versioned hashes according to the Engine API Cancun spec:
     /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>

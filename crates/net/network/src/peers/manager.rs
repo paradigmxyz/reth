@@ -92,7 +92,7 @@ pub struct PeersManager {
     /// The set of trusted peer ids.
     ///
     /// This tracks peer ids that are considered trusted, but for which we don't necessarily have
-    /// an address: [Self::add_trusted_peer_id]
+    /// an address: [`Self::add_trusted_peer_id`]
     trusted_peer_ids: HashSet<PeerId>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
@@ -120,7 +120,7 @@ pub struct PeersManager {
     /// If non-trusted peers should be connected to, or the connection from non-trusted
     /// incoming peers should be accepted.
     trusted_nodes_only: bool,
-    /// Timestamp of the last time [Self::tick] was called.
+    /// Timestamp of the last time [`Self::tick`] was called.
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     max_backoff_count: u8,
@@ -205,19 +205,19 @@ impl PeersManager {
 
     /// Returns the number of currently active inbound connections.
     #[inline]
-    pub(crate) fn num_inbound_connections(&self) -> usize {
+    pub(crate) const fn num_inbound_connections(&self) -> usize {
         self.connection_info.num_inbound
     }
 
     /// Returns the number of currently __active__ outbound connections.
     #[inline]
-    pub(crate) fn num_outbound_connections(&self) -> usize {
+    pub(crate) const fn num_outbound_connections(&self) -> usize {
         self.connection_info.num_outbound
     }
 
     /// Returns the number of currently pending outbound connections.
     #[inline]
-    pub(crate) fn num_pending_outbound_connections(&self) -> usize {
+    pub(crate) const fn num_pending_outbound_connections(&self) -> usize {
         self.connection_info.num_pending_out
     }
 
@@ -250,7 +250,7 @@ impl PeersManager {
         Ok(())
     }
 
-    /// Invoked when a previous call to [Self::on_incoming_pending_session] succeeded but it was
+    /// Invoked when a previous call to [`Self::on_incoming_pending_session`] succeeded but it was
     /// rejected.
     pub(crate) fn on_incoming_pending_session_rejected_internally(&mut self) {
         self.connection_info.decr_pending_in();
@@ -661,7 +661,7 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and fork_id will be updated.
+    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: SocketAddr, fork_id: Option<ForkId>) {
         self.add_peer_kind(peer_id, PeerKind::Basic, addr, fork_id)
     }
@@ -681,7 +681,7 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and fork_id will be updated.
+    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
     pub(crate) fn add_peer_kind(
         &mut self,
         peer_id: PeerId,
@@ -763,10 +763,10 @@ impl PeersManager {
 
     /// Returns the idle peer with the highest reputation.
     ///
-    /// Peers that are `trusted`, see [PeerKind], are prioritized as long as they're not currently
+    /// Peers that are `trusted`, see [`PeerKind`], are prioritized as long as they're not currently
     /// marked as banned or backed off.
     ///
-    /// If `trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
+    /// If `trusted_nodes_only` is enabled, see [`PeersConfig`], then this will only consider
     /// `trusted` peers.
     ///
     /// Returns `None` if no peer is available.
@@ -838,11 +838,11 @@ impl PeersManager {
     }
 
     /// Returns the current network connection state.
-    pub fn connection_state(&self) -> &NetworkConnectionState {
+    pub const fn connection_state(&self) -> &NetworkConnectionState {
         &self.net_connection_state
     }
 
-    /// Sets net_connection_state to ShuttingDown.
+    /// Sets `net_connection_state` to `ShuttingDown`.
     pub fn on_shutdown(&mut self) {
         self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
@@ -915,7 +915,7 @@ impl PeersManager {
 
 impl Default for PeersManager {
     fn default() -> Self {
-        PeersManager::new(Default::default())
+        Self::new(Default::default())
     }
 }
 
@@ -948,13 +948,13 @@ pub struct ConnectionInfo {
 
 impl ConnectionInfo {
     ///  Returns `true` if there's still capacity for a new outgoing connection.
-    fn has_out_capacity(&self) -> bool {
+    const fn has_out_capacity(&self) -> bool {
         self.num_pending_out < self.max_concurrent_outbound_dials &&
             self.num_outbound < self.max_outbound
     }
 
     ///  Returns `true` if there's still capacity for a new incoming connection.
-    fn has_in_capacity(&self) -> bool {
+    const fn has_in_capacity(&self) -> bool {
         self.num_inbound < self.max_inbound
     }
 
@@ -1002,7 +1002,7 @@ impl ConnectionInfo {
 
 impl Default for ConnectionInfo {
     fn default() -> Self {
-        ConnectionInfo {
+        Self {
             num_outbound: 0,
             num_inbound: 0,
             max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
@@ -1031,7 +1031,7 @@ pub struct Peer {
     kind: PeerKind,
     /// Whether the peer is currently backed off.
     backed_off: bool,
-    /// Counts number of times the peer was backed off due to a severe [BackoffKind].
+    /// Counts number of times the peer was backed off due to a severe [`BackoffKind`].
     severe_backoff_counter: u8,
 }
 
@@ -1047,7 +1047,7 @@ impl Peer {
     }
 
     /// Returns the reputation of the peer
-    pub fn reputation(&self) -> i32 {
+    pub const fn reputation(&self) -> i32 {
         self.reputation
     }
 
@@ -1102,12 +1102,12 @@ impl Peer {
 
     /// Returns true if the peer's reputation is below the banned threshold.
     #[inline]
-    fn is_banned(&self) -> bool {
+    const fn is_banned(&self) -> bool {
         is_banned_reputation(self.reputation)
     }
 
     #[inline]
-    fn is_backed_off(&self) -> bool {
+    const fn is_backed_off(&self) -> bool {
         self.backed_off
     }
 
@@ -1119,7 +1119,7 @@ impl Peer {
 
     /// Returns whether this peer is trusted
     #[inline]
-    fn is_trusted(&self) -> bool {
+    const fn is_trusted(&self) -> bool {
         matches!(self.kind, PeerKind::Trusted)
     }
 }
@@ -1161,37 +1161,34 @@ impl PeerConnectionState {
     #[inline]
     fn disconnect(&mut self) {
         match self {
-            PeerConnectionState::In => *self = PeerConnectionState::DisconnectingIn,
-            PeerConnectionState::Out => *self = PeerConnectionState::DisconnectingOut,
+            Self::In => *self = Self::DisconnectingIn,
+            Self::Out => *self = Self::DisconnectingOut,
             _ => {}
         }
     }
 
     /// Returns true if this is an active incoming connection.
     #[inline]
-    fn is_incoming(&self) -> bool {
-        matches!(self, PeerConnectionState::In)
+    const fn is_incoming(&self) -> bool {
+        matches!(self, Self::In)
     }
 
     /// Returns whether we're currently connected with this peer
     #[inline]
-    fn is_connected(&self) -> bool {
-        matches!(
-            self,
-            PeerConnectionState::In | PeerConnectionState::Out | PeerConnectionState::PendingOut
-        )
+    const fn is_connected(&self) -> bool {
+        matches!(self, Self::In | Self::Out | Self::PendingOut)
     }
 
     /// Returns if there's currently no connection to that peer.
     #[inline]
-    fn is_unconnected(&self) -> bool {
-        matches!(self, PeerConnectionState::Idle)
+    const fn is_unconnected(&self) -> bool {
+        matches!(self, Self::Idle)
     }
 
     /// Returns true if there's currently an outbound dial to that peer.
     #[inline]
-    fn is_pending_out(&self) -> bool {
-        matches!(self, PeerConnectionState::PendingOut)
+    const fn is_pending_out(&self) -> bool {
+        matches!(self, Self::PendingOut)
     }
 }
 
@@ -1297,7 +1294,7 @@ pub struct PeersConfig {
     /// How long to ban bad peers.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub ban_duration: Duration,
-    /// Restrictions on PeerIds and Ips.
+    /// Restrictions on `PeerIds` and Ips.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
     /// Restrictions on connections.
@@ -1330,38 +1327,38 @@ impl Default for PeersConfig {
 }
 
 impl PeersConfig {
-    /// A set of peer_ids and ip addr that we want to never connect to
+    /// A set of `peer_ids` and ip addr that we want to never connect to
     pub fn with_ban_list(mut self, ban_list: BanList) -> Self {
         self.ban_list = ban_list;
         self
     }
 
     /// Configure how long to ban bad peers
-    pub fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
+    pub const fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
         self.ban_duration = ban_duration;
         self
     }
 
     /// Maximum occupied slots for outbound connections.
-    pub fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
+    pub const fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
         self.connection_info.num_outbound = num_outbound;
         self
     }
 
     /// Maximum occupied slots for inbound connections.
-    pub fn with_max_pending_inbound(mut self, num_inbound: usize) -> Self {
+    pub const fn with_max_pending_inbound(mut self, num_inbound: usize) -> Self {
         self.connection_info.num_inbound = num_inbound;
         self
     }
 
     /// Maximum allowed outbound connections.
-    pub fn with_max_outbound(mut self, max_outbound: usize) -> Self {
+    pub const fn with_max_outbound(mut self, max_outbound: usize) -> Self {
         self.connection_info.max_outbound = max_outbound;
         self
     }
 
     /// Maximum allowed inbound connections with optional update.
-    pub fn with_max_inbound_opt(mut self, max_inbound: Option<usize>) -> Self {
+    pub const fn with_max_inbound_opt(mut self, max_inbound: Option<usize>) -> Self {
         if let Some(max_inbound) = max_inbound {
             self.connection_info.max_inbound = max_inbound;
         }
@@ -1369,7 +1366,7 @@ impl PeersConfig {
     }
 
     /// Maximum allowed outbound connections with optional update.
-    pub fn with_max_outbound_opt(mut self, max_outbound: Option<usize>) -> Self {
+    pub const fn with_max_outbound_opt(mut self, max_outbound: Option<usize>) -> Self {
         if let Some(max_outbound) = max_outbound {
             self.connection_info.max_outbound = max_outbound;
         }
@@ -1377,13 +1374,13 @@ impl PeersConfig {
     }
 
     /// Maximum allowed inbound connections.
-    pub fn with_max_inbound(mut self, max_inbound: usize) -> Self {
+    pub const fn with_max_inbound(mut self, max_inbound: usize) -> Self {
         self.connection_info.max_inbound = max_inbound;
         self
     }
 
     /// Maximum allowed concurrent outbound dials.
-    pub fn with_max_concurrent_dials(mut self, max_concurrent_outbound_dials: usize) -> Self {
+    pub const fn with_max_concurrent_dials(mut self, max_concurrent_outbound_dials: usize) -> Self {
         self.connection_info.max_concurrent_outbound_dials = max_concurrent_outbound_dials;
         self
     }
@@ -1395,7 +1392,7 @@ impl PeersConfig {
     }
 
     /// Connect only to trusted nodes.
-    pub fn with_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
+    pub const fn with_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
         self.trusted_nodes_only = trusted_only;
         self
     }
@@ -1407,19 +1404,22 @@ impl PeersConfig {
     }
 
     /// Configures the max allowed backoff count.
-    pub fn with_max_backoff_count(mut self, max_backoff_count: u8) -> Self {
+    pub const fn with_max_backoff_count(mut self, max_backoff_count: u8) -> Self {
         self.max_backoff_count = max_backoff_count;
         self
     }
 
     /// Configures how to weigh reputation changes.
-    pub fn with_reputation_weights(mut self, reputation_weights: ReputationChangeWeights) -> Self {
+    pub const fn with_reputation_weights(
+        mut self,
+        reputation_weights: ReputationChangeWeights,
+    ) -> Self {
         self.reputation_weights = reputation_weights;
         self
     }
 
     /// Configures how long to backoff peers that are we failed to connect to for non-fatal reasons
-    pub fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
+    pub const fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
         self.backoff_durations = backoff_durations;
         self
     }
@@ -1480,7 +1480,7 @@ pub struct PeerBackoffDurations {
 
 impl PeerBackoffDurations {
     /// Returns the corresponding [`Duration`]
-    pub fn backoff(&self, kind: BackoffKind) -> Duration {
+    pub const fn backoff(&self, kind: BackoffKind) -> Duration {
         match kind {
             BackoffKind::Low => self.low,
             BackoffKind::Medium => self.medium,
@@ -1501,7 +1501,7 @@ impl PeerBackoffDurations {
     /// Returns durations for testing.
     #[cfg(test)]
     const fn test() -> Self {
-        PeerBackoffDurations {
+        Self {
             low: Duration::from_millis(200),
             medium: Duration::from_millis(200),
             high: Duration::from_millis(200),

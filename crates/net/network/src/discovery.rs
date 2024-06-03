@@ -133,7 +133,7 @@ impl Discovery {
         })
     }
 
-    /// Registers a listener for receiving [DiscoveryEvent] updates.
+    /// Registers a listener for receiving [`DiscoveryEvent`] updates.
     pub(crate) fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
         self.discovery_listeners.push(tx);
     }
@@ -148,7 +148,7 @@ impl Discovery {
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
             // use forward-compatible forkid entry
-            discv4.set_eip868_rlp("eth".as_bytes().to_vec(), EnrForkIdEntry::from(fork_id))
+            discv4.set_eip868_rlp(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
         }
         // todo: update discv5 enr
     }
@@ -179,7 +179,7 @@ impl Discovery {
     }
 
     /// Returns the id with which the local node identifies itself in the network
-    pub(crate) fn local_id(&self) -> PeerId {
+    pub(crate) const fn local_id(&self) -> PeerId {
         self.local_enr.id // local discv4 and discv5 have same id, since signed with same secret key
     }
 
@@ -199,7 +199,7 @@ impl Discovery {
         Ok(())
     }
 
-    /// Processes an incoming [NodeRecord] update from a discovery service
+    /// Processes an incoming [`NodeRecord`] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
         let addr = record.tcp_addr();

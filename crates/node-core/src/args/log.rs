@@ -72,7 +72,7 @@ pub struct LogArgs {
 }
 
 impl LogArgs {
-    /// Creates a [LayerInfo] instance.
+    /// Creates a [`LayerInfo`] instance.
     fn layer(&self, format: LogFormat, filter: String, use_color: bool) -> LayerInfo {
         LayerInfo::new(
             format,
@@ -127,9 +127,9 @@ pub enum ColorMode {
 impl Display for ColorMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ColorMode::Always => write!(f, "always"),
-            ColorMode::Auto => write!(f, "auto"),
-            ColorMode::Never => write!(f, "never"),
+            Self::Always => write!(f, "always"),
+            Self::Auto => write!(f, "auto"),
+            Self::Never => write!(f, "never"),
         }
     }
 }

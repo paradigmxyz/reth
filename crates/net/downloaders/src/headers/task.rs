@@ -1,7 +1,7 @@
 use futures::{FutureExt, Stream};
 use futures_util::StreamExt;
 use pin_project::pin_project;
-use reth_interfaces::p2p::headers::{
+use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
     error::HeadersDownloaderResult,
 };
@@ -31,8 +31,8 @@ pub struct TaskDownloader {
 // === impl TaskDownloader ===
 
 impl TaskDownloader {
-    /// Spawns the given `downloader` via [tokio::task::spawn] and returns a [TaskDownloader] that's
-    /// connected to that task.
+    /// Spawns the given `downloader` via [`tokio::task::spawn`] and returns a [`TaskDownloader`]
+    /// that's connected to that task.
     ///
     /// # Panics
     ///
@@ -45,7 +45,7 @@ impl TaskDownloader {
     /// # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloader;
     /// # use reth_downloaders::headers::task::TaskDownloader;
     /// # use reth_consensus::Consensus;
-    /// # use reth_interfaces::p2p::headers::client::HeadersClient;
+    /// # use reth_network_p2p::headers::client::HeadersClient;
     /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
     ///        client,
@@ -60,8 +60,8 @@ impl TaskDownloader {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
 
-    /// Spawns the given `downloader` via the given [TaskSpawner] returns a [TaskDownloader] that's
-    /// connected to that task.
+    /// Spawns the given `downloader` via the given [`TaskSpawner`] returns a [`TaskDownloader`]
+    /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
         T: HeaderDownloader + 'static,
@@ -107,7 +107,7 @@ impl Stream for TaskDownloader {
     }
 }
 
-/// A [HeaderDownloader] that runs on its own task
+/// A [`HeaderDownloader`] that runs on its own task
 struct SpawnedDownloader<T> {
     updates: UnboundedReceiverStream<DownloaderUpdates>,
     headers_tx: PollSender<HeadersDownloaderResult<Vec<SealedHeader>>>,
@@ -169,7 +169,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
     }
 }
 
-/// Commands delegated tot the spawned [HeaderDownloader]
+/// Commands delegated tot the spawned [`HeaderDownloader`]
 enum DownloaderUpdates {
     UpdateSyncGap(SealedHeader, SyncTarget),
     UpdateLocalHead(SealedHeader),
@@ -184,7 +184,7 @@ mod tests {
         reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header,
     };
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::TestHeadersClient;
+    use reth_network_p2p::test_utils::TestHeadersClient;
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]

@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use reth_db::database::Database;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
@@ -14,14 +14,14 @@ use reth_interfaces::p2p::{
 use reth_primitives::{stage::PipelineTarget, BlockNumber, ChainSpec, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
 use reth_tasks::TaskSpawner;
-use reth_tokio_util::EventListeners;
+use reth_tokio_util::EventSender;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// Manages syncing under the control of the engine.
@@ -29,7 +29,7 @@ use tracing::trace;
 /// This type controls the [Pipeline] and supports (single) full block downloads.
 ///
 /// Caution: If the pipeline is running, this type will not emit blocks downloaded from the network
-/// [EngineSyncEvent::FetchedFullBlock] until the pipeline is idle to prevent commits to the
+/// [`EngineSyncEvent::FetchedFullBlock`] until the pipeline is idle to prevent commits to the
 /// database while the pipeline is still active.
 pub(crate) struct EngineSyncController<DB, Client>
 where
@@ -49,8 +49,8 @@ where
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
-    /// Listeners for engine events.
-    listeners: EventListeners<BeaconConsensusEngineEvent>,
+    /// Sender for engine events.
+    event_sender: EventSender<BeaconConsensusEngineEvent>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
@@ -76,7 +76,7 @@ where
         run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<ChainSpec>,
-        listeners: EventListeners<BeaconConsensusEngineEvent>,
+        event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
             full_block_client: FullBlockClient::new(
@@ -90,7 +90,7 @@ where
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
             run_pipeline_continuously,
-            listeners,
+            event_sender,
             max_block,
             metrics: EngineSyncMetrics::default(),
         }
@@ -123,28 +123,23 @@ where
     }
 
     /// Returns whether or not the sync controller is set to run the pipeline continuously.
-    pub(crate) fn run_pipeline_continuously(&self) -> bool {
+    pub(crate) const fn run_pipeline_continuously(&self) -> bool {
         self.run_pipeline_continuously
-    }
-
-    /// Pushes an [UnboundedSender] to the sync controller's listeners.
-    pub(crate) fn push_listener(&mut self, listener: UnboundedSender<BeaconConsensusEngineEvent>) {
-        self.listeners.push_listener(listener);
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
     #[allow(dead_code)]
-    pub(crate) fn is_pipeline_sync_pending(&self) -> bool {
+    pub(crate) const fn is_pipeline_sync_pending(&self) -> bool {
         self.pending_pipeline_target.is_some() && self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is idle.
-    pub(crate) fn is_pipeline_idle(&self) -> bool {
+    pub(crate) const fn is_pipeline_idle(&self) -> bool {
         self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is active.
-    pub(crate) fn is_pipeline_active(&self) -> bool {
+    pub(crate) const fn is_pipeline_active(&self) -> bool {
         !self.is_pipeline_idle()
     }
 
@@ -169,7 +164,7 @@ where
             );
 
             // notify listeners that we're downloading a block range
-            self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+            self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
                 ConsensusEngineLiveSyncProgress::DownloadingBlocks {
                     remaining_blocks: count,
                     target: hash,
@@ -198,7 +193,7 @@ where
         );
 
         // notify listeners that we're downloading a block
-        self.listeners.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
+        self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
             ConsensusEngineLiveSyncProgress::DownloadingBlocks {
                 remaining_blocks: 1,
                 target: hash,
@@ -364,7 +359,7 @@ where
     }
 }
 
-/// A wrapper type around [SealedBlock] that implements the [Ord] trait by block number.
+/// A wrapper type around [`SealedBlock`] that implements the [Ord] trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OrderedSealedBlock(SealedBlock);
 
@@ -380,7 +375,7 @@ impl Ord for OrderedSealedBlock {
     }
 }
 
-/// The event type emitted by the [EngineSyncController].
+/// The event type emitted by the [`EngineSyncController`].
 #[derive(Debug)]
 pub(crate) enum EngineSyncEvent {
     /// A full block has been downloaded from the network.
@@ -407,8 +402,8 @@ pub(crate) enum EngineSyncEvent {
 
 /// The possible pipeline states within the sync controller.
 ///
-/// [PipelineState::Idle] means that the pipeline is currently idle.
-/// [PipelineState::Running] means that the pipeline is currently running.
+/// [`PipelineState::Idle`] means that the pipeline is currently idle.
+/// [`PipelineState::Running`] means that the pipeline is currently running.
 ///
 /// NOTE: The differentiation between these two states is important, because when the pipeline is
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
@@ -423,8 +418,8 @@ enum PipelineState<DB: Database> {
 
 impl<DB: Database> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
-    fn is_idle(&self) -> bool {
-        matches!(self, PipelineState::Idle(_))
+    const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle(_))
     }
 }
 
@@ -434,7 +429,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
-    use reth_interfaces::{p2p::either::Either, test_utils::TestFullBlockClient};
+    use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
         Header, PruneModes, SealedHeader, MAINNET,
@@ -456,7 +451,7 @@ mod tests {
     }
 
     impl TestPipelineBuilder {
-        /// Create a new [TestPipelineBuilder].
+        /// Create a new [`TestPipelineBuilder`].
         fn new() -> Self {
             Self {
                 pipeline_exec_outputs: VecDeque::new(),
@@ -483,7 +478,7 @@ mod tests {
 
         /// Sets the max block for the pipeline to run.
         #[allow(dead_code)]
-        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+        const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
             self.max_block = Some(max_block);
             self
         }
@@ -520,14 +515,14 @@ mod tests {
     }
 
     impl<Client> TestSyncControllerBuilder<Client> {
-        /// Create a new [TestSyncControllerBuilder].
-        fn new() -> Self {
+        /// Create a new [`TestSyncControllerBuilder`].
+        const fn new() -> Self {
             Self { max_block: None, client: None }
         }
 
         /// Sets the max block for the pipeline to run.
         #[allow(dead_code)]
-        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+        const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
             self.max_block = Some(max_block);
             self
         }
