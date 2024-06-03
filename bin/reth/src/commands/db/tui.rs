@@ -46,7 +46,7 @@ pub(crate) enum ViewMode {
 }
 
 enum Entries<T: Table> {
-    /// Pairs of [`Table::Key`] and [`RawValue`<Table::Value>]
+    /// Pairs of [`Table::Key`] and [`RawValue<Table::Value>`]
     RawValues(Vec<(T::Key, RawValue<T::Value>)>),
     /// Pairs of [`Table::Key`] and [`Table::Value`]
     Values(Vec<TableRow<T>>),
