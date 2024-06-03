@@ -43,18 +43,12 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
-    /// Secret key to use for this node.
-    ///
-    /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "PATH")]
-    p2p_secret_key: Option<PathBuf>,
-    /// Disable the discovery service.
-    #[command(flatten)]
-    pub network: NetworkArgs,
-
     /// The number of retries per request
     #[arg(long, default_value = "5")]
     retries: usize,
+
+    #[command(flatten)]
+    network: NetworkArgs,
 
     #[command(flatten)]
     datadir: DatadirArgs,
