@@ -1631,8 +1631,8 @@ impl DepositContract {
 struct OptimismGenesisInfo {
     bedrock_block: Option<u64>,
     regolith_time: Option<u64>,
-    ecotone_time: Option<u64>,
     canyon_time: Option<u64>,
+    ecotone_time: Option<u64>,
     base_fee_params: BaseFeeParamsKind,
 }
 
