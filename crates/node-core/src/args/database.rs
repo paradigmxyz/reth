@@ -1,7 +1,7 @@
 //! clap [Args](clap::Args) for database configuration
 
 use clap::Args;
-use reth_interfaces::db::LogLevel;
+use reth_interfaces::db::{LogLevel, LogLevelValueParser};
 
 use crate::version::default_client_version;
 
@@ -10,7 +10,7 @@ use crate::version::default_client_version;
 #[command(next_help_heading = "Database")]
 pub struct DatabaseArgs {
     /// Database logging level. Levels higher than "notice" require a debug build.
-    #[arg(skip)]
+    #[arg(long = "db.log-level", value_parser = LogLevelValueParser::default())]
     pub log_level: Option<LogLevel>,
     /// Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an
     /// NFS volume.
@@ -25,32 +25,7 @@ impl DatabaseArgs {
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
     }
-
-    /// Parses command-line arguments into a DatabaseArgs struct.
-    pub fn parse() -> Self {
-        let args: Vec<String> = std::env::args().collect();
-        Self::parse_from_args(&args)
-    }
-
-    /// Parses a slice of arguments into a DatabaseArgs struct.
-    pub fn parse_from_args(args: &[String]) -> Self {
-        let mut log_level = None;
-        let mut exclusive = None;
-
-        for arg in args.iter() {
-            if arg.starts_with("--db.log-level=") {
-                if let Some(level_str) = arg.strip_prefix("--db.log-level=") {
-                    log_level = LogLevel::from_str(level_str);
-                }
-            } else if arg == "--db.exclusive" {
-                exclusive = Some(true);
-            }
-        }
-
-        DatabaseArgs { log_level, exclusive }
-    }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,47 +46,32 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_log_level_fatal() {
-        let args = DatabaseArgs::parse_from_args(&[
-            "reth".to_string(),
-            "--db.log-level=fatal".to_string(),
-        ]);
-        assert_eq!(args.log_level, Some(LogLevel::Fatal));
+    fn test_possible_values() {
+        let possible_values: Vec<_> =
+            LogLevel::value_variants().iter().map(|v| format!("{:?}", v)).collect();
+        let expected_values =
+            vec!["Fatal", "Error", "Warn", "Notice", "Verbose", "Debug", "Trace", "Extra"];
+        assert_eq!(possible_values, expected_values);
     }
 
     #[test]
-    fn test_parse_log_level_debug() {
-        let args = DatabaseArgs::parse_from_args(&[
-            "reth".to_string(),
-            "--db.log-level=debug".to_string(),
-        ]);
-        assert_eq!(args.log_level, Some(LogLevel::Debug));
+    fn test_command_parser_with_valid_log_level() {
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.log-level", "Debug"])
+                .unwrap();
+        assert_eq!(cmd.args.log_level, Some(LogLevel::Debug));
     }
 
     #[test]
-    fn test_parse_exclusive() {
-        let args =
-            DatabaseArgs::parse_from_args(&["reth".to_string(), "--db.exclusive".to_string()]);
-        assert_eq!(args.exclusive, Some(true));
+    fn test_command_parser_with_invalid_log_level() {
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.log-level", "invalid"]);
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_parse_combined_args() {
-        let args = DatabaseArgs::parse_from_args(&[
-            "reth".to_string(),
-            "--db.log-level=warn".to_string(),
-            "--db.exclusive".to_string(),
-        ]);
-        assert_eq!(args.log_level, Some(LogLevel::Warn));
-        assert_eq!(args.exclusive, Some(true));
-    }
-
-    #[test]
-    fn test_invalid_log_level() {
-        let args = DatabaseArgs::parse_from_args(&[
-            "reth".to_string(),
-            "--db.log-level=invalid".to_string(),
-        ]);
-        assert_eq!(args.log_level, None);
+    fn test_command_parser_without_log_level() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(&["reth"]).unwrap();
+        assert_eq!(cmd.args.log_level, None);
     }
 }
