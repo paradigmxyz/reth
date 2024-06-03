@@ -389,8 +389,7 @@ mod tests {
         let mut forkhash = ForkHash::from(genesis_hash);
         for (_, condition) in hardforks {
             forkhash += match condition {
-                ForkCondition::Block(n) => n,
-                ForkCondition::Timestamp(n) => n,
+                ForkCondition::Block(n) | ForkCondition::Timestamp(n) => n,
                 _ => unreachable!("only block and timestamp forks are used in this test"),
             }
         }

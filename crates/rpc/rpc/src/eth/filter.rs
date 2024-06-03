@@ -711,12 +711,8 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             FilterError::EthAPIError(err) => err.into(),
-            err @ FilterError::InvalidBlockRangeParams => {
-                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
-            }
-            err @ FilterError::QueryExceedsMaxBlocks(_) => {
-                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
-            }
+            err @ FilterError::InvalidBlockRangeParams |
+            err @ FilterError::QueryExceedsMaxBlocks(_) |
             err @ FilterError::QueryExceedsMaxResults(_) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }

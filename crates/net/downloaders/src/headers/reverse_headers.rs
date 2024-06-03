@@ -378,7 +378,7 @@ where
                 let target = headers.remove(0).seal_slow();
 
                 match sync_target {
-                    SyncTargetBlock::Hash(hash) => {
+                    SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {
                         if target.hash() != hash {
                             return Err(HeadersResponseError {
                                 request,
@@ -399,18 +399,6 @@ where
                                     got: target.number,
                                     expected: number,
                                 }),
-                            }
-                            .into())
-                        }
-                    }
-                    SyncTargetBlock::HashAndNumber { hash, .. } => {
-                        if target.hash() != hash {
-                            return Err(HeadersResponseError {
-                                request,
-                                peer_id: Some(peer_id),
-                                error: DownloadError::InvalidTip(
-                                    GotExpected { got: target.hash(), expected: hash }.into(),
-                                ),
                             }
                             .into())
                         }
@@ -1014,17 +1002,19 @@ impl SyncTargetBlock {
     const fn with_hash(self, hash: B256) -> Self {
         match self {
             Self::Hash(_) => Self::Hash(hash),
-            Self::Number(number) => Self::HashAndNumber { hash, number },
-            Self::HashAndNumber { number, .. } => Self::HashAndNumber { hash, number },
+            Self::Number(number) | Self::HashAndNumber { number, .. } => {
+                Self::HashAndNumber { hash, number }
+            }
         }
     }
 
     /// Set a number on the instance.
     const fn with_number(self, number: u64) -> Self {
         match self {
-            Self::Hash(hash) => Self::HashAndNumber { hash, number },
+            Self::Hash(hash) | Self::HashAndNumber { hash, .. } => {
+                Self::HashAndNumber { hash, number }
+            }
             Self::Number(_) => Self::Number(number),
-            Self::HashAndNumber { hash, .. } => Self::HashAndNumber { hash, number },
         }
     }
 
@@ -1054,9 +1044,8 @@ impl SyncTargetBlock {
     /// Return the hash of the target block, if it is set.
     const fn hash(&self) -> Option<B256> {
         match self {
-            Self::Hash(hash) => Some(*hash),
+            Self::Hash(hash) | Self::HashAndNumber { hash, .. } => Some(*hash),
             Self::Number(_) => None,
-            Self::HashAndNumber { hash, .. } => Some(*hash),
         }
     }
 
@@ -1064,8 +1053,7 @@ impl SyncTargetBlock {
     const fn number(&self) -> Option<u64> {
         match self {
             Self::Hash(_) => None,
-            Self::Number(number) => Some(*number),
-            Self::HashAndNumber { number, .. } => Some(*number),
+            Self::Number(number) | Self::HashAndNumber { number, .. } => Some(*number),
         }
     }
 }
