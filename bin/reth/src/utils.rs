@@ -42,7 +42,7 @@ impl<DB: Database> DbTool<DB> {
 
     /// Get an [Arc] to the [ChainSpec].
     pub fn chain(&self) -> Arc<ChainSpec> {
-        self.provider_factory.chain_spec().clone()
+        self.provider_factory.chain_spec()
     }
 
     /// Grabs the contents of the table within a certain index range and places the
