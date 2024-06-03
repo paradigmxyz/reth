@@ -27,17 +27,6 @@ Options:
       --config <FILE>
           The path to the configuration file to use.
 
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -72,6 +61,14 @@ Options:
 
           You can optionally skip the unwinding phase if you're syncing a block range that has not been synced before.
 
+  -c, --commit
+          Commits the changes in the database. WARNING: potentially destructive.
+
+          Useful when you want to run diagnostics on the database.
+
+      --checkpoints
+          Save stage checkpoints
+
       --instance <INSTANCE>
           Add a new instance of a node.
 
@@ -85,6 +82,21 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
 
 Networking:
   -d, --disable-discovery
@@ -231,14 +243,6 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
-
-  -c, --commit
-          Commits the changes in the database. WARNING: potentially destructive.
-
-          Useful when you want to run diagnostics on the database.
-
-      --checkpoints
-          Save stage checkpoints
 
 Logging:
       --log.stdout.format <FORMAT>

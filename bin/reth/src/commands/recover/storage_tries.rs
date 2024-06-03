@@ -1,7 +1,4 @@
-use crate::{
-    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    dirs::{DataDirPath, MaybePlatformPath},
-};
+use crate::args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS};
 use clap::Parser;
 use reth_cli_runner::CliContext;
 use reth_db::{
@@ -10,7 +7,7 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_db_common::init::init_genesis;
-use reth_node_core::args::DatabaseArgs;
+use reth_node_core::args::{DatabaseArgs, DatadirArgs};
 use reth_primitives::ChainSpec;
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
@@ -22,16 +19,6 @@ use tracing::*;
 /// `reth recover storage-tries` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -44,6 +31,9 @@ pub struct Command {
     )]
     chain: Arc<ChainSpec>,
 
+    #[command(flatten)]
+    datadir: DatadirArgs,
+
     /// All database related arguments
     #[command(flatten)]
     pub db: DatabaseArgs,
@@ -52,7 +42,7 @@ pub struct Command {
 impl Command {
     /// Execute `storage-tries` recovery command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         fs::create_dir_all(&db_path)?;
         let db = Arc::new(init_db(db_path, self.db.database_args())?);

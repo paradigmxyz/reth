@@ -7,17 +7,6 @@ $ reth node --help
 Usage: reth node [OPTIONS]
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
       --config <FILE>
           The path to the configuration file to use.
 
@@ -54,6 +43,21 @@ Metrics:
           Enable Prometheus metrics.
 
           The metrics will be served at the given interface and port.
+
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
 
 Networking:
   -d, --disable-discovery

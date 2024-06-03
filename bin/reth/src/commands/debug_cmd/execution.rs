@@ -4,9 +4,8 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
+        DatabaseArgs, DatadirArgs, NetworkArgs,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     macros::block_executor,
     utils::get_single_header,
 };
@@ -48,16 +47,6 @@ use tracing::*;
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -69,6 +58,9 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -165,7 +157,7 @@ impl Command {
                 self.network.discovery.addr,
                 self.network.discovery.port,
             ))
-            .build(provider_factory.clone())
+            .build(provider_factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -196,7 +188,7 @@ impl Command {
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         let mut config = Config::default();
 
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to

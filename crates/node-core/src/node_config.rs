@@ -2,7 +2,7 @@
 
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
+        get_secret_key, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
         PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
@@ -96,6 +96,9 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
+    /// All data directory related arguments
+    pub datadir: DatadirArgs,
+
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
 
@@ -161,6 +164,12 @@ impl NodeConfig {
     /// Sets --dev mode for the node
     pub const fn dev(mut self) -> Self {
         self.dev.dev = true;
+        self
+    }
+
+    /// Set the data directory args for the node
+    pub fn with_datadir_args(mut self, datadir_args: DatadirArgs) -> Self {
+        self.datadir = datadir_args;
         self
     }
 
@@ -519,6 +528,11 @@ impl NodeConfig {
         self.network = self.network.with_unused_ports();
         self
     }
+
+    /// Resolve the final datadir path.
+    pub fn datadir(&self) -> ChainPath<DataDirPath> {
+        self.datadir.clone().resolve_datadir(self.chain.chain)
+    }
 }
 
 impl Default for NodeConfig {
@@ -536,6 +550,7 @@ impl Default for NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
+            datadir: DatadirArgs::default(),
         }
     }
 }
