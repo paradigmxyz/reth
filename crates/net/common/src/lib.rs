@@ -8,9 +8,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-// PeerId::random() trait
-use alloy_primitives as _;
-
 pub mod ban_list;
 pub mod bandwidth_meter;
 
