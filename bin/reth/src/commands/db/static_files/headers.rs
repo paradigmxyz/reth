@@ -38,7 +38,7 @@ impl Command {
         let path: PathBuf = StaticFileSegment::Headers
             .filename_with_configuration(filters, compression, &block_range)
             .into();
-        let provider = StaticFileProvider::new(PathBuf::default())?;
+        let provider = StaticFileProvider::read_only(PathBuf::default())?;
         let jar_provider = provider.get_segment_provider_from_block(
             StaticFileSegment::Headers,
             self.from,

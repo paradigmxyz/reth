@@ -131,11 +131,6 @@ pub enum BlockExecutionError {
         /// The fork on the other chain
         other_chain_fork: Box<BlockNumHash>,
     },
-    /// Only used for TestExecutor
-    ///
-    /// Note: this is not feature gated for convenience.
-    #[error("execution unavailable for tests")]
-    UnavailableForTest,
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),

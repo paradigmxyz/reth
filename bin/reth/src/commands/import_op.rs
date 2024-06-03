@@ -20,7 +20,10 @@ use reth_downloaders::file_client::{
 };
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, PruneModes};
-use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
+use reth_provider::{
+    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader,
+    StaticFileProviderFactory,
+};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, error, info};
@@ -91,8 +94,11 @@ impl ImportOpCommand {
         let db = Arc::new(init_db(db_path, self.db.database_args())?);
 
         info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), chain_spec.clone(), data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(
+            db.clone(),
+            chain_spec.clone(),
+            StaticFileProvider::read_write(data_dir.static_files())?,
+        );
 
         debug!(target: "reth::cli", chain=%chain_spec.chain, genesis=?chain_spec.genesis_hash(), "Initializing genesis");
 

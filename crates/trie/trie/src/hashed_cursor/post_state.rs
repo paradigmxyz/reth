@@ -689,7 +689,7 @@ mod tests {
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
         let expected =
-            [(address, db_storage.into_iter().chain(post_state_storage).collect())].into_iter();
+            std::iter::once((address, db_storage.into_iter().chain(post_state_storage).collect()));
         assert_storage_cursor_order(&factory, expected);
     }
 
@@ -724,11 +724,10 @@ mod tests {
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-        let expected = [(
+        let expected = std::iter::once((
             address,
             post_state_storage.into_iter().filter(|(_, value)| *value > U256::ZERO).collect(),
-        )]
-        .into_iter();
+        ));
         assert_storage_cursor_order(&factory, expected);
     }
 
@@ -762,7 +761,7 @@ mod tests {
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-        let expected = [(address, post_state_storage)].into_iter();
+        let expected = std::iter::once((address, post_state_storage));
         assert_storage_cursor_order(&factory, expected);
     }
 
@@ -797,7 +796,7 @@ mod tests {
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-        let expected = [(address, storage)].into_iter();
+        let expected = std::iter::once((address, storage));
         assert_storage_cursor_order(&factory, expected);
     }
 

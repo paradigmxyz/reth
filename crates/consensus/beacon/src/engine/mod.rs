@@ -186,6 +186,16 @@ where
     payload_validator: ExecutionPayloadValidator,
     /// Current blockchain tree action.
     blockchain_tree_action: Option<BlockchainTreeAction<EngineT>>,
+    /// Pending forkchoice update.
+    /// It is recorded if we cannot process the forkchoice update because
+    /// a hook with database read-write access is active.
+    /// This is a temporary solution to always process missed FCUs.
+    #[allow(clippy::type_complexity)]
+    pending_forkchoice_update: Option<(
+        ForkchoiceState,
+        Option<EngineT::PayloadAttributes>,
+        oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
+    )>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
@@ -304,6 +314,7 @@ where
             payload_builder,
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             blockchain_tree_action: None,
+            pending_forkchoice_update: None,
             pipeline_run_threshold,
             hooks: EngineHooksController::new(hooks),
             event_sender,
@@ -363,21 +374,6 @@ where
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
-            return Ok(Some(OnForkChoiceUpdated::syncing()))
-        }
-
-        if let Some(hook) = self.hooks.active_db_write_hook() {
-            // We can only process new forkchoice updates if no hook with db write is running,
-            // since it requires exclusive access to the database
-            warn!(
-                target: "consensus::engine",
-                hook = %hook.name(),
-                head_block_hash = ?state.head_block_hash,
-                safe_block_hash = ?state.safe_block_hash,
-                finalized_block_hash = ?state.finalized_block_hash,
-                "Hook is in progress, skipping forkchoice update. \
-                This may affect the performance of your node as a validator."
-            );
             return Ok(Some(OnForkChoiceUpdated::syncing()))
         }
 
@@ -508,20 +504,37 @@ where
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
 
         match self.pre_validate_forkchoice_update(state) {
-            Ok(Some(on_updated)) => {
-                // Pre-validate forkchoice state update and return if it's invalid
-                // or cannot be processed at the moment.
-                self.on_forkchoice_updated_status(state, on_updated, tx);
-            }
-            Ok(None) => {
-                self.set_blockchain_tree_action(
-                    BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx },
-                );
+            Ok(on_updated_result) => {
+                if let Some(on_updated) = on_updated_result {
+                    // Pre-validate forkchoice state update and return if it's invalid
+                    // or cannot be processed at the moment.
+                    self.on_forkchoice_updated_status(state, on_updated, tx);
+                } else if let Some(hook) = self.hooks.active_db_write_hook() {
+                    // We can only process new forkchoice updates if no hook with db write is
+                    // running, since it requires exclusive access to the
+                    // database
+                    let replaced_pending =
+                        self.pending_forkchoice_update.replace((state, attrs, tx));
+                    warn!(
+                        target: "consensus::engine",
+                        hook = %hook.name(),
+                        head_block_hash = ?state.head_block_hash,
+                        safe_block_hash = ?state.safe_block_hash,
+                        finalized_block_hash = ?state.finalized_block_hash,
+                        replaced_pending = ?replaced_pending.map(|(state, _, _)| state),
+                        "Hook is in progress, delaying forkchoice update. \
+                        This may affect the performance of your node as a validator."
+                    );
+                } else {
+                    self.set_blockchain_tree_action(
+                        BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx },
+                    );
+                }
             }
             Err(error) => {
                 let _ = tx.send(Err(error.into()));
             }
-        };
+        }
     }
 
     /// Called after the forkchoice update status has been resolved.
@@ -1827,6 +1840,17 @@ where
                     continue
                 }
 
+                // If the db write hook is no longer active and we have a pending forkchoice update,
+                // process it first.
+                if this.hooks.active_db_write_hook().is_none() {
+                    if let Some((state, attrs, tx)) = this.pending_forkchoice_update.take() {
+                        this.set_blockchain_tree_action(
+                            BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx },
+                        );
+                        continue
+                    }
+                }
+
                 // Process one incoming message from the CL. We don't drain the messages right away,
                 // because we want to sneak a polling of running hook in between them.
                 //
@@ -2155,6 +2179,7 @@ mod tests {
         use super::*;
         use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
         use reth_primitives::U256;
+        use reth_provider::providers::StaticFileProvider;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
 
@@ -2211,8 +2236,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
             env.db
@@ -2268,8 +2296,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2289,9 +2320,12 @@ mod tests {
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
-                [&next_head].into_iter(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
+                std::iter::once(&next_head),
             );
 
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
@@ -2330,8 +2364,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2382,8 +2419,11 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
 
@@ -2428,8 +2468,11 @@ mod tests {
             let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), temp_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(temp_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2455,9 +2498,10 @@ mod tests {
         use super::*;
         use reth_db::test_utils::create_test_static_files_dir;
         use reth_primitives::{genesis::Genesis, Hardfork, U256};
-        use reth_provider::test_utils::blocks::BlockchainTestData;
+        use reth_provider::{
+            providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
+        };
         use reth_testing_utils::{generators::random_block, GenesisAllocator};
-
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
             let mut rng = generators::rng();
@@ -2527,8 +2571,11 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1, &block2].into_iter(),
             );
 
@@ -2596,8 +2643,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2640,9 +2690,12 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
-                [&genesis].into_iter(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
+                std::iter::once(&genesis),
             );
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
@@ -2704,8 +2757,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&data.genesis, &block1].into_iter(),
             );
 

@@ -100,7 +100,7 @@ where
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory()?
+            .with_provider_factory().await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
@@ -166,7 +166,6 @@ where
             // once the Blockchain provider no longer depends on an instance of the tree
             .with_canon_state_notification_sender(canon_state_notification_sender);
 
-        let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Replace the tree component with the actual tree
@@ -301,7 +300,6 @@ where
                 blockchain_db.clone(),
                 node_adapter.components.pool().clone(),
                 consensus_engine_tx.clone(),
-                canon_state_notification_sender,
                 mining_mode,
                 node_adapter.components.block_executor().clone(),
             )

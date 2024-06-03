@@ -12,12 +12,12 @@ use crate::args::{
 use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, init_db, mdbx::DatabaseArguments,
-    models::client_version::ClientVersion, table::TableImporter, tables, transaction::DbTx,
-    DatabaseEnv,
+    models::client_version::ClientVersion, open_db_read_only, table::TableImporter, tables,
+    transaction::DbTx, DatabaseEnv,
 };
 use reth_node_core::dirs::PlatformPath;
 use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -104,9 +104,12 @@ impl Command {
         let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
         let db_path = data_dir.db();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
+        let db = Arc::new(open_db_read_only(&db_path, self.db.database_args())?);
+        let provider_factory = ProviderFactory::new(
+            db,
+            self.chain.clone(),
+            StaticFileProvider::read_only(data_dir.static_files())?,
+        );
 
         info!(target: "reth::cli", "Database opened");
 

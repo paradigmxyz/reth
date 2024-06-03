@@ -198,31 +198,34 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         cfg.disable_base_fee = true;
 
-        // keep a copy of gas related request values
-        let request_gas = request.gas;
-        let request_gas_price = request.gas_price;
-        let env_gas_limit = block.gas_limit;
+        // Keep a copy of gas related request values
+        let tx_request_gas_limit = request.gas;
+        let tx_request_gas_price = request.gas_price;
+        let block_env_gas_limit = block.gas_limit;
 
-        // get the highest possible gas limit, either the request's set value or the currently
-        // configured gas limit
-        let mut highest_gas_limit = request.gas.map(U256::from).unwrap_or(block.gas_limit);
+        // Determine the highest possible gas limit, considering both the request's specified limit
+        // and the block's limit.
+        let mut highest_gas_limit = tx_request_gas_limit
+            .map(|tx_gas_limit| U256::from(tx_gas_limit).max(block_env_gas_limit))
+            .unwrap_or(block_env_gas_limit);
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
+        // Apply any state overrides if specified.
         if let Some(state_override) = state_override {
-            // apply state overrides
             apply_state_overrides(state_override, &mut db)?;
         }
-        // if the request is a simple transfer we can optimize
+
+        // Optimize for simple transfer transactions, potentially reducing the gas estimate.
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
                 if let Ok(code) = db.db.account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // If the tx is a simple transfer (call to an account with no code) we can
-                        // shortcircuit But simply returning
+                        // shortcircuit. But simply returning
                         // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
                         // field combos that bump the price up, so we try executing the function
                         // with the minimum gas limit to make sure.
@@ -238,43 +241,39 @@ where
             }
         }
 
-        // check funds of the sender
+        // Check funds of the sender (only useful to check if transaction gas price is more than 0).
+        //
+        // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
         if env.tx.gas_price > U256::ZERO {
-            let allowance = caller_gas_allowance(&mut db, &env.tx)?;
-
-            if highest_gas_limit > allowance {
-                // cap the highest gas limit by max gas caller can afford with given gas price
-                highest_gas_limit = allowance;
-            }
+            // cap the highest gas limit by max gas caller can afford with given gas price
+            highest_gas_limit = highest_gas_limit.min(caller_gas_allowance(&mut db, &env.tx)?);
         }
 
-        // if the provided gas limit is less than computed cap, use that
-        let gas_limit = std::cmp::min(U256::from(env.tx.gas_limit), highest_gas_limit);
-        env.tx.gas_limit = gas_limit.saturating_to();
+        // We can now normalize the highest gas limit to a u64
+        let mut highest_gas_limit: u64 = highest_gas_limit.try_into().unwrap_or(u64::MAX);
+
+        // If the provided gas limit is less than computed cap, use that
+        env.tx.gas_limit = env.tx.gas_limit.min(highest_gas_limit);
 
         trace!(target: "rpc::eth::estimate", ?env, "Starting gas estimation");
 
-        // transact with the highest __possible__ gas limit
-        let ethres = self.transact(&mut db, env.clone());
-
-        // Exceptional case: init used too much gas, we need to increase the gas limit and try
-        // again
-        if matches!(
-            ethres,
+        // Execute the transaction with the highest possible gas limit.
+        let (mut res, mut env) = match self.transact(&mut db, env.clone()) {
+            // Handle the exceptional case where the transaction initialization uses too much gas.
+            // If the gas price or gas limit was specified in the request, retry the transaction
+            // with the block's gas limit to determine if the failure was due to
+            // insufficient gas.
             Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
-        ) {
-            // if price or limit was included in the request then we can execute the request
-            // again with the block's gas limit to check if revert is gas related or not
-            if request_gas.is_some() || request_gas_price.is_some() {
-                return Err(self.map_out_of_gas_err(env_gas_limit, env, &mut db))
+                if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() =>
+            {
+                return Err(self.map_out_of_gas_err(block_env_gas_limit, env, &mut db));
             }
-        }
+            // Propagate other results (successful or other errors).
+            ethres => ethres?,
+        };
 
-        let (mut res, mut env) = ethres?;
-        match res.result {
-            ExecutionResult::Success { .. } => {
-                // succeeded
-            }
+        let gas_refund = match res.result {
+            ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
             ExecutionResult::Halt { reason, gas_used } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
@@ -283,35 +282,40 @@ where
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
-                return if request_gas.is_some() || request_gas_price.is_some() {
-                    Err(self.map_out_of_gas_err(env_gas_limit, env, &mut db))
+                return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
+                    Err(self.map_out_of_gas_err(block_env_gas_limit, env, &mut db))
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
                 }
             }
-        }
+        };
 
-        // at this point we know the call succeeded but want to find the _best_ (lowest) gas the
-        // transaction succeeds with. We find this by doing a binary search over the
-        // possible range NOTE: this is the gas the transaction used, which is less than the
-        // transaction requires to succeed
-        let gas_used = res.result.gas_used();
-        let mut highest_gas_limit: u64 = highest_gas_limit.try_into().unwrap_or(u64::MAX);
+        // At this point we know the call succeeded but want to find the _best_ (lowest) gas the
+        // transaction succeeds with. We find this by doing a binary search over the possible range.
+        //
+        // NOTE: this is the gas the transaction used, which is less than the
+        // transaction requires to succeed.
+        let mut gas_used = res.result.gas_used();
         // the lowest value is capped by the gas used by the unconstrained transaction
         let mut lowest_gas_limit = gas_used.saturating_sub(1);
 
-        let gas_refund = match res.result {
-            ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
-            _ => 0,
-        };
-        // As stated in Geth, there is a good change that the transaction will pass if we set the
+        // As stated in Geth, there is a good chance that the transaction will pass if we set the
         // gas limit to the execution gas used plus the gas refund, so we check this first
         // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L135
+        //
+        // Calculate the optimistic gas limit by adding gas used and gas refund,
+        // then applying a 64/63 multiplier to account for gas forwarding rules.
         let optimistic_gas_limit = (gas_used + gas_refund) * 64 / 63;
         if optimistic_gas_limit < highest_gas_limit {
+            // Set the transaction's gas limit to the calculated optimistic gas limit.
             env.tx.gas_limit = optimistic_gas_limit;
+            // Re-execute the transaction with the new gas limit and update the result and
+            // environment.
             (res, env) = self.transact(&mut db, env)?;
+            // Update the gas used based on the new result.
+            gas_used = res.result.gas_used();
+            // Update the gas limit estimates (highest and lowest) based on the execution result.
             update_estimated_gas_range(
                 res.result,
                 optimistic_gas_limit,
@@ -320,7 +324,7 @@ where
             )?;
         };
 
-        // pick a point that's close to the estimated gas
+        // Pick a point that's close to the estimated gas
         let mut mid_gas_limit = std::cmp::min(
             gas_used * 3,
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
@@ -328,7 +332,8 @@ where
 
         trace!(target: "rpc::eth::estimate", ?env, ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
 
-        // binary search
+        // Binary search narrows the range to find the minimum gas limit needed for the transaction
+        // to succeed.
         while (highest_gas_limit - lowest_gas_limit) > 1 {
             // An estimation error is allowed once the current gas limit range used in the binary
             // search is small enough (less than 1.5% of the highest gas limit)
@@ -340,27 +345,29 @@ where
             };
 
             env.tx.gas_limit = mid_gas_limit;
-            let ethres = self.transact(&mut db, env.clone());
 
-            // Exceptional case: init used too much gas, we need to increase the gas limit and try
-            // again
-            if matches!(
-                ethres,
-                Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
-            ) {
-                // increase the lowest gas limit
-                lowest_gas_limit = mid_gas_limit;
-            } else {
-                (res, env) = ethres?;
-                update_estimated_gas_range(
-                    res.result,
-                    mid_gas_limit,
-                    &mut highest_gas_limit,
-                    &mut lowest_gas_limit,
-                )?;
+            // Execute transaction and handle potential gas errors, adjusting limits accordingly.
+            match self.transact(&mut db, env.clone()) {
+                // Check if the error is due to gas being too high.
+                Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh)) => {
+                    // Increase the lowest gas limit if gas is too high
+                    lowest_gas_limit = mid_gas_limit;
+                }
+                // Handle other cases, including successful transactions.
+                ethres => {
+                    // Unpack the result and environment if the transaction was successful.
+                    (res, env) = ethres?;
+                    // Update the estimated gas range based on the transaction result.
+                    update_estimated_gas_range(
+                        res.result,
+                        mid_gas_limit,
+                        &mut highest_gas_limit,
+                        &mut lowest_gas_limit,
+                    )?;
+                }
             }
 
-            // new midpoint
+            // New midpoint
             mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
         }
 
@@ -480,8 +487,11 @@ where
     }
 }
 
-/// Updates the highest and lowest gas limits for binary search
-///  based on the result of the execution
+/// Updates the highest and lowest gas limits for binary search based on the execution result.
+///
+/// This function refines the gas limit estimates used in a binary search to find the optimal gas
+/// limit for a transaction. It adjusts the highest or lowest gas limits depending on whether the
+/// execution succeeded, reverted, or halted due to specific reasons.
 #[inline]
 fn update_estimated_gas_range(
     result: ExecutionResult,
@@ -491,26 +501,29 @@ fn update_estimated_gas_range(
 ) -> EthResult<()> {
     match result {
         ExecutionResult::Success { .. } => {
-            // cap the highest gas limit with succeeding gas limit
+            // Cap the highest gas limit with the succeeding gas limit.
             *highest_gas_limit = tx_gas_limit;
         }
         ExecutionResult::Revert { .. } => {
-            // increase the lowest gas limit
+            // Increase the lowest gas limit.
             *lowest_gas_limit = tx_gas_limit;
         }
         ExecutionResult::Halt { reason, .. } => {
             match reason {
                 HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
-                    // either out of gas or invalid opcode can be thrown dynamically if
-                    // gasLeft is too low, so we treat this as `out of gas`, we know this
-                    // call succeeds with a higher gaslimit. common usage of invalid opcode in openzeppelin <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
+                    // Both `OutOfGas` and `InvalidFEOpcode` can occur dynamically if the gas left
+                    // is too low. Treat this as an out of gas condition,
+                    // knowing that the call succeeds with a higher gas limit.
+                    //
+                    // Common usage of invalid opcode in OpenZeppelin:
+                    // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
 
-                    // increase the lowest gas limit
+                    // Increase the lowest gas limit.
                     *lowest_gas_limit = tx_gas_limit;
                 }
                 err => {
-                    // these should be unreachable because we know the transaction succeeds,
-                    // but we consider these cases an error
+                    // These cases should be unreachable because we know the transaction succeeds,
+                    // but if they occur, treat them as an error.
                     return Err(RpcInvalidTransactionError::EvmHalt(err).into())
                 }
             }

@@ -316,7 +316,7 @@ where
                 continue
             }
 
-            debug!(
+            info!(
                 target: "sync::pipeline",
                 from = %checkpoint.block_number,
                 %to,
@@ -353,8 +353,12 @@ where
                         self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        self.provider_factory.static_file_provider().commit()?;
+                        // For unwinding it makes more sense to commit the database first, since if
+                        // this function is interrupted before the static files commit, we can just
+                        // truncate the static files according to the
+                        // checkpoints on the next start-up.
                         provider_rw.commit()?;
+                        self.provider_factory.static_file_provider().commit()?;
 
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
@@ -459,6 +463,10 @@ where
                         result: out.clone(),
                     });
 
+                    // For execution it makes more sense to commit the static files first, since if
+                    // this function is interrupted before the database commit, we can just truncate
+                    // the static files according to the checkpoints on the next
+                    // start-up.
                     self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
 

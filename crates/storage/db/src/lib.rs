@@ -67,6 +67,7 @@
 pub mod abstraction;
 
 mod implementation;
+pub mod lockfile;
 mod metrics;
 pub mod static_file;
 pub mod tables;

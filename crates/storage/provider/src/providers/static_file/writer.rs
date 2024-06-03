@@ -6,7 +6,7 @@ use super::{
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db::codecs::CompactU256;
-use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_nippy_jar::{ConsistencyFailStrategy, NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
     BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
@@ -90,7 +90,14 @@ impl StaticFileProviderRW {
             Err(err) => return Err(err),
         };
 
-        let result = match NippyJarWriter::new(jar) {
+        let reader = Self::upgrade_provider_to_strong_reference(&reader);
+        let access = if reader.is_read_only() {
+            ConsistencyFailStrategy::ThrowError
+        } else {
+            ConsistencyFailStrategy::Heal
+        };
+
+        let result = match NippyJarWriter::new(jar, access) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This static file has been frozen, so we should
@@ -108,6 +115,54 @@ impl StaticFileProviderRW {
         }
 
         Ok(result)
+    }
+
+    /// Checks the consistency of the file and heals it if necessary and `read_only` is set to
+    /// false. If the check fails, it will return an error.
+    ///
+    /// If healing does happen, it will update the end range on the [SegmentHeader]. However, for
+    /// transaction based segments, the block end range has to be found and healed externally.
+    ///
+    /// Check [NippyJarWriter::ensure_file_consistency] for more on healing.
+    pub fn ensure_file_consistency(&mut self, read_only: bool) -> ProviderResult<()> {
+        let inconsistent_error = || {
+            ProviderError::NippyJar(
+                "Inconsistent state found. Restart the node to heal.".to_string(),
+            )
+        };
+
+        let check_mode = if read_only {
+            ConsistencyFailStrategy::ThrowError
+        } else {
+            ConsistencyFailStrategy::Heal
+        };
+
+        self.writer.ensure_file_consistency(check_mode).map_err(|error| {
+            if matches!(error, NippyJarError::InconsistentState) {
+                return inconsistent_error()
+            }
+            ProviderError::NippyJar(error.to_string())
+        })?;
+
+        // If we have lost rows (in this run or previous), we need to update the [SegmentHeader].
+        let expected_rows = if self.user_header().segment().is_headers() {
+            self.user_header().block_len().unwrap_or_default()
+        } else {
+            self.user_header().tx_len().unwrap_or_default()
+        };
+        let pruned_rows = expected_rows - self.writer.rows() as u64;
+        if pruned_rows > 0 {
+            if read_only {
+                return Err(inconsistent_error())
+            }
+            self.user_header_mut().prune(pruned_rows);
+        }
+
+        self.writer.commit().map_err(|error| ProviderError::NippyJar(error.to_string()))?;
+
+        // Updates the [SnapshotProvider] manager
+        self.update_index()?;
+        Ok(())
     }
 
     /// Commits configuration changes to disk and updates the reader index with the new changes.
@@ -285,10 +340,11 @@ impl StaticFileProviderRW {
     fn truncate(
         &mut self,
         segment: StaticFileSegment,
-        mut num_rows: u64,
+        num_rows: u64,
         last_block: Option<u64>,
     ) -> ProviderResult<()> {
-        while num_rows > 0 {
+        let mut remaining_rows = num_rows;
+        while remaining_rows > 0 {
             let len = match segment {
                 StaticFileSegment::Headers => {
                     self.writer.user_header().block_len().unwrap_or_default()
@@ -298,26 +354,13 @@ impl StaticFileProviderRW {
                 }
             };
 
-            if num_rows >= len {
+            if remaining_rows >= len {
                 // If there's more rows to delete than this static file contains, then just
                 // delete the whole file and go to the next static file
-                let previous_snap = self.data_path.clone();
                 let block_start = self.writer.user_header().expected_block_start();
 
                 if block_start != 0 {
-                    let (writer, data_path) = Self::open(
-                        segment,
-                        self.writer.user_header().expected_block_start() - 1,
-                        self.reader.clone(),
-                        self.metrics.clone(),
-                    )?;
-                    self.writer = writer;
-                    self.data_path = data_path;
-
-                    NippyJar::<SegmentHeader>::load(&previous_snap)
-                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?
-                        .delete()
-                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+                    self.delete_current_and_open_previous()?;
                 } else {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
@@ -327,28 +370,57 @@ impl StaticFileProviderRW {
                     break
                 }
 
-                num_rows -= len;
+                remaining_rows -= len;
             } else {
                 // Update `SegmentHeader`
-                self.writer.user_header_mut().prune(num_rows);
+                self.writer.user_header_mut().prune(remaining_rows);
 
                 // Truncate data
                 self.writer
-                    .prune_rows(num_rows as usize)
+                    .prune_rows(remaining_rows as usize)
                     .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-                num_rows = 0;
+                remaining_rows = 0;
             }
         }
 
         // Only Transactions and Receipts
         if let Some(last_block) = last_block {
-            let header = self.writer.user_header_mut();
-            header.set_block_range(header.expected_block_start(), last_block);
+            let mut expected_block_start = self.writer.user_header().expected_block_start();
+
+            if num_rows == 0 {
+                // Edge case for when we are unwinding a chain of empty blocks that goes across
+                // files, and therefore, the only reference point to know which file
+                // we are supposed to be at is `last_block`.
+                while last_block < expected_block_start {
+                    self.delete_current_and_open_previous()?;
+                    expected_block_start = self.writer.user_header().expected_block_start();
+                }
+            }
+            self.writer.user_header_mut().set_block_range(expected_block_start, last_block);
         }
 
         // Commits new changes to disk.
         self.commit()?;
 
+        Ok(())
+    }
+
+    /// Delete the current static file, and replace this provider writer with the previous static
+    /// file.
+    fn delete_current_and_open_previous(&mut self) -> Result<(), ProviderError> {
+        let current_path = self.data_path.clone();
+        let (previous_writer, data_path) = Self::open(
+            self.user_header().segment(),
+            self.writer.user_header().expected_block_start() - 1,
+            self.reader.clone(),
+            self.metrics.clone(),
+        )?;
+        self.writer = previous_writer;
+        self.data_path = data_path;
+        NippyJar::<SegmentHeader>::load(&current_path)
+            .map_err(|e| ProviderError::NippyJar(e.to_string()))?
+            .delete()
+            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
         Ok(())
     }
 
@@ -613,16 +685,26 @@ impl StaticFileProviderRW {
         provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
+    /// Helper function to access [`SegmentHeader`].
+    pub const fn user_header(&self) -> &SegmentHeader {
+        self.writer.user_header()
+    }
+
+    /// Helper function to access a mutable reference to [`SegmentHeader`].
+    pub fn user_header_mut(&mut self) -> &mut SegmentHeader {
+        self.writer.user_header_mut()
+    }
+
     /// Helper function to override block range for testing.
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn set_block_range(&mut self, block_range: std::ops::RangeInclusive<BlockNumber>) {
         self.writer.user_header_mut().set_block_range(*block_range.start(), *block_range.end())
     }
 
+    /// Helper function to override block range for testing.
     #[cfg(any(test, feature = "test-utils"))]
-    /// Helper function to access [`SegmentHeader`].
-    pub const fn user_header(&self) -> &SegmentHeader {
-        self.writer.user_header()
+    pub fn inner(&mut self) -> &mut NippyJarWriter<SegmentHeader> {
+        &mut self.writer
     }
 }
 

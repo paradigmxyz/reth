@@ -1641,8 +1641,7 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
     }
 }
 
-/// Calculates the hash of the given transaction
-
+// Calculates the hash of the given transaction
 impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
