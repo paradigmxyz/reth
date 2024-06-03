@@ -8,15 +8,11 @@ use std::path::PathBuf;
 #[command(next_help_heading = "Benchmark")]
 pub struct BenchmarkArgs {
     /// Run the benchmark from a specific block.
-    ///
-    /// If the `from` block is not provided, the benchmark will start from the latest block.
-    #[arg(long = "benchmark.from", verbatim_doc_comment)]
+    #[arg(long, verbatim_doc_comment)]
     pub from: Option<u64>,
 
     /// Run the benchmark to a specific block.
-    ///
-    /// This is mutually exclusive with `continuous`.
-    #[arg(long = "benchmark.to", verbatim_doc_comment)]
+    #[arg(long, verbatim_doc_comment)]
     pub to: Option<u64>,
 
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
@@ -25,7 +21,7 @@ pub struct BenchmarkArgs {
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
-    #[arg(long = "benchmark.jwtsecret", value_name = "PATH", global = true, required = false)]
+    #[arg(long = "jwtsecret", value_name = "PATH", global = true, required = false)]
     pub auth_jwtsecret: Option<PathBuf>,
 
     /// The RPC url to use for sending engine requests.
