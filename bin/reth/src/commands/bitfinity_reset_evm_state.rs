@@ -107,11 +107,15 @@ impl BitfinityResetEvmStateCommand {
             // let state_provider = provider.state_provider_by_block_number(block_number)?;
             // let res = state_provider.basic_account(...)?;
 
+            let start = std::time::Instant::now();
+
             let tx_ref = provider.tx_mut();
 
             // We need to disable the long read transaction safety to avoid the transaction being closed
             tx_ref.disable_long_read_transaction_safety();
 
+            let plain_accounts_total_count = tx_ref.entries::<tables::PlainAccountState>()?;
+            let mut plain_accounts_recovered_count = 0usize;
             let mut plain_account_cursor = tx_ref.cursor_read::<tables::PlainAccountState>()?;
             let mut contract_storage_cursor = tx_ref.cursor_read::<tables::Bytecodes>()?;
 
@@ -168,13 +172,13 @@ impl BitfinityResetEvmStateCommand {
 
                 if accounts.estimate_byte_size() > MAX_REQUEST_BYTES {
                     let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
-                    split_and_send_add_accout_request(&self.executor, process_accounts).await?;
+                    split_and_send_add_accout_request(&self.executor, process_accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
                 }
             }
 
             if !accounts.data.is_empty() {
                 info!(target: "reth::cli", "Processing last batch of {} accounts", accounts.data.len());
-                split_and_send_add_accout_request(&self.executor, accounts).await?;
+                split_and_send_add_accout_request(&self.executor, accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
             }
 
             info!(target: "reth::cli", "Storage tries recovered successfully");
@@ -279,10 +283,17 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
 async fn split_and_send_add_accout_request(
     executor: &Arc<dyn ResetStateExecutor>,
     accounts: AccountInfoMap,
+    process_start: std::time::Instant,
+    total_accounts: usize,
+    processed_accounts: &mut usize,
 ) -> eyre::Result<()> {
+    *processed_accounts += accounts.data.len();
     for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
         executor.add_accounts(account).await?;
     }
+    let percent_done = (*processed_accounts * 100) / total_accounts;
+    let minutes_elapsed = process_start.elapsed().as_secs() / 60;
+    info!(target: "reth::cli", "Reset Trie Progress {percent_done}%: Processed {processed_accounts}/{total_accounts} accounts in {minutes_elapsed} minute(s)");
     Ok(())
 }
 
