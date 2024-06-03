@@ -11,8 +11,8 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_provider::{
-    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -352,6 +352,15 @@ where
 
                         self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
+
+                        // update finalized block if needed
+                        let last_saved_finalized_block_number =
+                            provider_rw.fetch_latest_finalized_block_number()?;
+                        if checkpoint.block_number < last_saved_finalized_block_number {
+                            provider_rw.save_finalized_block_number(BlockNumber::from(
+                                checkpoint.block_number,
+                            ))?;
+                        }
 
                         // For unwinding it makes more sense to commit the database first, since if
                         // this function is interrupted before the static files commit, we can just

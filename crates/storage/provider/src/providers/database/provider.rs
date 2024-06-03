@@ -6,11 +6,11 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateWriter, StatsReader,
-    StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    Chain, EvmEnvProvider, FinalizedBlockReader, FinalizedBlockWriter, HashingWriter,
+    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, HistoricalStateProvider,
+    HistoryWriter, LatestStateProvider, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RequestsProvider, StageCheckpointReader, StateProviderBox, StateWriter,
+    StatsReader, StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -2750,6 +2750,29 @@ impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
         };
 
         Ok(db_entries + static_file_entries)
+    }
+}
+
+/// Table key used to read and write the last finalized block.
+const FINALIZED_BLOCKS_KEY: u8 = 0;
+
+impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
+    fn fetch_latest_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+        let mut finalized_blocks = self
+            .tx
+            .cursor_read::<tables::FinalizedBlocks>()?
+            .walk(Some(FINALIZED_BLOCKS_KEY))?
+            .take(1)
+            .collect::<Result<BTreeMap<u8, BlockNumber>, _>>()?;
+
+        let last_finalized_block_number = finalized_blocks.pop_first().unwrap_or_default();
+        Ok(last_finalized_block_number.1)
+    }
+}
+
+impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
+    fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        Ok(self.tx.put::<tables::FinalizedBlocks>(FINALIZED_BLOCKS_KEY, block_number)?)
     }
 }
 

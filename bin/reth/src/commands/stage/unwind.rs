@@ -11,7 +11,8 @@ use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
     providers::StaticFileProvider, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
-    FinalizedBlockProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+    FinalizedBlockReader, FinalizedBlockWriter, HeaderSyncMode, ProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -39,28 +40,6 @@ pub struct Command {
 
     #[command(subcommand)]
     command: Subcommands,
-}
-
-struct FinalizedBlockManager<DB> {
-    provider_factory: ProviderFactory<DB>,
-}
-
-impl<DB> FinalizedBlockManager<DB>
-where
-    DB: Database,
-{
-    const fn new(provider_factory: ProviderFactory<DB>) -> Self {
-        Self { provider_factory }
-    }
-}
-
-impl<DB> FinalizedBlockProvider<DB> for FinalizedBlockManager<DB>
-where
-    DB: Database,
-{
-    fn provider_factory(&self) -> &ProviderFactory<DB> {
-        &self.provider_factory
-    }
 }
 
 impl Command {
@@ -97,16 +76,16 @@ impl Command {
                 .take_block_and_execution_range(range.clone())
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
-            provider.commit()?;
-        }
+            // update finalized block if needed
+            let last_saved_finalized_block_number =
+                provider.fetch_latest_finalized_block_number()?;
+            let range_min =
+                range.clone().min().ok_or(eyre::eyre!("Could not fetch lower range end"))?;
+            if range_min < last_saved_finalized_block_number {
+                provider.save_finalized_block_number(BlockNumber::from(range_min))?;
+            }
 
-        // update finalized block if needed
-        let finalized_block_manager = FinalizedBlockManager::new(provider_factory.clone());
-        let last_finalized_block = finalized_block_manager.fetch_latest_finalized_block_number()?;
-        let range_min =
-            range.clone().min().ok_or(eyre::eyre!("Coul not fetch lower end of range"))?;
-        if range_min < last_finalized_block {
-            finalized_block_manager.save_finalized_block_number(BlockNumber::from(range_min))?;
+            provider.commit()?;
         }
 
         println!("Unwound {} blocks", range.count());

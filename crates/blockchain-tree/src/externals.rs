@@ -7,7 +7,8 @@ use reth_db::{
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{
-    FinalizedBlockProvider, ProviderFactory, StaticFileProviderFactory, StatsReader,
+    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
@@ -85,13 +86,18 @@ impl<DB: Database, E> TreeExternals<DB, E> {
         let hashes = hashes.into_iter().rev().take(num_hashes).collect();
         Ok(hashes)
     }
-}
 
-impl<DB, E> FinalizedBlockProvider<DB> for TreeExternals<DB, E>
-where
-    DB: Database,
-{
-    fn provider_factory(&self) -> &ProviderFactory<DB> {
-        &self.provider_factory
+    pub(crate) fn fetch_latest_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.provider_factory.provider()?.fetch_latest_finalized_block_number()
+    }
+
+    pub(crate) fn save_finalized_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
+        let provider_rw = self.provider_factory.provider_rw()?;
+        provider_rw.save_finalized_block_number(block_number)?;
+        provider_rw.commit()?;
+        Ok(())
     }
 }
