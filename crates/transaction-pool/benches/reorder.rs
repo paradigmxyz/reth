@@ -61,7 +61,7 @@ fn txpool_reordering_bench<T: BenchTxPool>(
         let mut txpool = T::default();
         txpool.reorder(base_fee);
 
-        for tx in seed.iter() {
+        for tx in &seed {
             txpool.add_transaction(tx.clone());
         }
         (txpool, new_txs.clone())

@@ -661,7 +661,7 @@ impl TransactionFetcher {
 
         #[cfg(debug_assertions)]
         {
-            for hash in new_announced_hashes.iter() {
+            for hash in &new_announced_hashes {
                 if self.hashes_pending_fetch.contains(hash) {
                     debug!(target: "net::tx", "`{}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{}`: {:?}",
                         format!("{:?}", new_announced_hashes), // Assuming new_announced_hashes can be debug-printed directly

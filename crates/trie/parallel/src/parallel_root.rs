@@ -273,7 +273,7 @@ mod tests {
         );
 
         let mut hashed_state = HashedPostState::default();
-        for (address, (account, storage)) in state.iter_mut() {
+        for (address, (account, storage)) in &mut state {
             let hashed_address = keccak256(address);
 
             let should_update_account = rng.gen_bool(0.5);

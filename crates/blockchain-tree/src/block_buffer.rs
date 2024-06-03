@@ -167,7 +167,7 @@ impl BlockBuffer {
             // get this child blocks children and add them to the remove list.
             if let Some(parent_children) = self.parent_to_child.remove(&parent_hash) {
                 // remove child from buffer
-                for child_hash in parent_children.iter() {
+                for child_hash in &parent_children {
                     if let Some(block) = self.remove_block(child_hash) {
                         removed_blocks.push(block);
                     }

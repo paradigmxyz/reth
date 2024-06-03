@@ -131,7 +131,7 @@ where
 
                 if let Some(percentiles) = &reward_percentiles {
                     let mut block_rewards = Vec::with_capacity(percentiles.len());
-                    for &percentile in percentiles.iter() {
+                    for &percentile in percentiles {
                         block_rewards.push(self.approximate_percentile(entry, percentile));
                     }
                     rewards.push(block_rewards);

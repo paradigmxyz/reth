@@ -552,7 +552,7 @@ impl Discv4Service {
                 builder.tcp6(local_node_record.tcp_port);
             }
 
-            for (key, val) in config.additional_eip868_rlp_pairs.iter() {
+            for (key, val) in &config.additional_eip868_rlp_pairs {
                 builder.add_value_rlp(key, val.clone());
             }
             builder.build(&secret_key).expect("v4 is set")

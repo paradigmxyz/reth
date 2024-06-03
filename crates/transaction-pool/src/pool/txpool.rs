@@ -413,7 +413,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.set_block_info(block_info);
 
         // Remove all transaction that were included in the block
-        for tx_hash in mined_transactions.iter() {
+        for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
                 // Update removed transactions metric
                 self.metrics.removed_transactions.increment(1);
@@ -2173,7 +2173,7 @@ mod tests {
         // dedup the test cases
         let expected_promotions = expected_promotions.into_iter().collect::<HashSet<_>>();
 
-        for promotion_test in expected_promotions.iter() {
+        for promotion_test in &expected_promotions {
             let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
             // set block info so the tx is initially underpriced w.r.t. blob fee

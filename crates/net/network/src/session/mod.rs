@@ -333,14 +333,14 @@ impl SessionManager {
     /// It will trigger the disconnect on all the session tasks to gracefully terminate. The result
     /// will be picked by the receiver.
     pub fn disconnect_all(&self, reason: Option<DisconnectReason>) {
-        for (_, session) in self.active_sessions.iter() {
+        for session in self.active_sessions.values() {
             session.disconnect(reason);
         }
     }
 
     /// Disconnects all pending sessions.
     pub fn disconnect_all_pending(&mut self) {
-        for (_, session) in self.pending_sessions.iter_mut() {
+        for session in self.pending_sessions.values_mut() {
             session.disconnect();
         }
     }

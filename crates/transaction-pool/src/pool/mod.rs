@@ -530,7 +530,7 @@ where
 
         // It may happen that a newly added transaction is immediately discarded, so we need to
         // adjust the result here
-        for res in added.iter_mut() {
+        for res in &mut added {
             if let Ok(hash) = res {
                 if discarded.contains(hash) {
                     *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))

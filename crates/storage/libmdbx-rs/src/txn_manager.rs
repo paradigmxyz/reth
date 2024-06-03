@@ -211,7 +211,7 @@ mod read_transactions {
 
                     // Iterate through active read transactions and time out those that's open for
                     // longer than `self.max_duration`.
-                    for entry in self.active.iter() {
+                    for entry in &self.active {
                         let (tx, start) = entry.value();
                         let duration = now - *start;
 

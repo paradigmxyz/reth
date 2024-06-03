@@ -2829,12 +2829,12 @@ mod tests {
         );
 
         // establish dialed connections
-        for peer_id in num_pendingout_states.iter() {
+        for peer_id in &num_pendingout_states {
             peer_manager.on_active_outgoing_established(*peer_id);
         }
 
         // all dialed connections should now be in 'Out' state
-        for peer_id in num_pendingout_states.iter() {
+        for peer_id in &num_pendingout_states {
             assert_eq!(peer_manager.peers.get(peer_id).unwrap().state, PeerConnectionState::Out);
         }
 
