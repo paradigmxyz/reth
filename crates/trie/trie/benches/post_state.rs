@@ -4,7 +4,7 @@ use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_primitives::{keccak256, revm::compat::into_reth_acc, Address, B256, U256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::db::{states::BundleBuilder, BundleAccount};
-use revm_interpreter::primitives::HashMap as RevmHashMap;
+use std::collections::HashMap;
 
 pub fn calculate_post_state(c: &mut Criterion) {
     let mut group = c.benchmark_group("Calculate Post State");
@@ -25,7 +25,7 @@ pub fn calculate_post_state(c: &mut Criterion) {
     }
 }
 
-fn from_bundle_state_seq(state: &RevmHashMap<Address, BundleAccount>) -> HashedPostState {
+fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostState {
     let mut this = HashedPostState::default();
 
     for (address, account) in state {
@@ -44,7 +44,7 @@ fn from_bundle_state_seq(state: &RevmHashMap<Address, BundleAccount>) -> HashedP
     this
 }
 
-fn generate_test_data(size: usize) -> RevmHashMap<Address, BundleAccount> {
+fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
     let storage_size = 1_000;
     let mut runner = TestRunner::new(ProptestConfig::default());
 

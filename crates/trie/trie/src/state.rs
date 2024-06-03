@@ -4,7 +4,7 @@ use crate::{
     updates::TrieUpdates,
     StateRoot,
 };
-use rayon::prelude::{ParallelBridge, ParallelIterator};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
@@ -18,7 +18,6 @@ use reth_primitives::{
     U256,
 };
 use revm::db::BundleAccount;
-use revm_interpreter::primitives::HashMap as RevmHashMap;
 use std::{
     collections::{hash_map, HashMap, HashSet},
     ops::RangeInclusive,
@@ -37,19 +36,17 @@ impl HashedPostState {
     /// Initialize [HashedPostState] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
-    pub fn from_bundle_state(state: &RevmHashMap<Address, BundleAccount>) -> Self {
-        let mut this = Self::default();
-
-        let changes = state
-            .iter()
-            .par_bridge()
+    pub fn from_bundle_state<'a>(
+        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
+    ) -> Self {
+        let hashed = state
+            .into_par_iter()
             .map(|(address, account)| {
-                let BundleAccount { info, status, storage, .. } = account;
                 let hashed_address = keccak256(address);
-                let hashed_account = info.clone().map(into_reth_acc);
+                let hashed_account = account.info.clone().map(into_reth_acc);
                 let hashed_storage = HashedStorage::from_iter(
-                    status.was_destroyed(),
-                    storage.iter().map(|(key, value)| {
+                    account.status.was_destroyed(),
+                    account.storage.iter().map(|(key, value)| {
                         (keccak256(B256::new(key.to_be_bytes())), value.present_value)
                     }),
                 );
@@ -57,11 +54,13 @@ impl HashedPostState {
             })
             .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
 
-        for (address, (account, storage)) in changes {
-            this.accounts.insert(address, account);
-            this.storages.insert(address, storage);
+        let mut accounts = HashMap::with_capacity(hashed.len());
+        let mut storages = HashMap::with_capacity(hashed.len());
+        for (address, (account, storage)) in hashed {
+            accounts.insert(address, account);
+            storages.insert(address, storage);
         }
-        this
+        Self { accounts, storages }
     }
 
     /// Initialize [HashedPostState] from revert range.
@@ -336,11 +335,11 @@ pub struct HashedStorageSorted {
 mod tests {
     use super::*;
     use reth_db::{database::Database, test_utils::create_test_rw_db};
+    use reth_primitives::hex;
     use revm::{
         db::states::BundleState,
         primitives::{AccountInfo, HashMap},
     };
-    use std::str::FromStr;
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -442,8 +441,7 @@ mod tests {
         let tx = db.tx().expect("failed to create transaction");
         assert_eq!(
             post_state.state_root(&tx).unwrap(),
-            B256::from_str("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
-                .unwrap()
+            hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
     }
 }

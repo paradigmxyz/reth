@@ -304,7 +304,6 @@ reth-trie-parallel = { path = "crates/trie/parallel" }
 revm = { version = "9.0.0", features = [ "std", "secp256k1", "blst", ], default-features = false }
 revm-primitives = { version = "4.0.0", features = [ "std", ], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "2b6fff1" }
-revm-interpreter = "4.0.0"
 
 # eth
 alloy-chains = "0.1.15"
