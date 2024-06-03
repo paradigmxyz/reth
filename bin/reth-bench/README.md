@@ -7,7 +7,7 @@ Reth uses two primary methods for synchronizing the chain:
  * Historical sync, which is used to synchronize the chain from genesis to a known finalized block. This involves re-executing the entire chain history.
  * Live sync, which is used to synchronize the chain from a finalized block to the current head. This involves processing new blocks as they are produced.
 
-Benchmarking historical sync for reth and clients like reth is fairly easy, because historical sync is a long-running, deterministic process.
+Benchmarking historical sync for reth is fairly easy, because historical sync is a long-running, deterministic process.
 Reth specifically contains the `--debug.tip` argument, which allows for running the historical sync pipeline to a specific block.
 However, reth's historical sync applies optimizations that are not always possible when syncing new blocks.
 
@@ -26,12 +26,12 @@ Otherwise, running `make maxperf` at the root of the repo should be sufficient f
 
 ## Command Usage
 
-`reth-bench` contains different commands to initiate benchmarks tailored to different patterns of engine API calls.
-The most representative of ethereum mainnet live sync is is `new-payload-fcu`, which alternates between sending `engine_newPayload` calls and `engine_forkchoiceUpdated` calls.
+`reth-bench` contains different commands to benchmark different patterns of engine API calls.
+The `reth-bench new-payload-fcu` command is the most representative of ethereum mainnet live sync, alternating between sending `engine_newPayload` calls and `engine_forkchoiceUpdated` calls.
 
 Below is an overview of how to execute a benchmark:
 
- 1. **Setup**: Make sure `reth` is running in the background with the necessary configurations. This setup involves ensuring the node is at the correct state, setting up profiling tools, and possibly more depending on the purpose of the benchmark's.
+ 1. **Setup**: Make sure `reth` is running in the background with the proper configuration. This setup involves ensuring the node is at the correct state, setting up profiling tools, and possibly more depending on the purpose of the benchmark's.
  
  2. **Run the Benchmark**:
     ```bash
