@@ -13,6 +13,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use futures::Stream;
 use futures::stream::FuturesUnordered;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -45,14 +46,26 @@ impl EngineOrchestrator {
     }
 }
 
-pub enum Engine
+impl Stream for EngineOrchestrator {
+    type Item = ();
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        todo!()
+    }
+}
+
+///
+pub enum EngineEvent {
+
+
+}
 
 
 /// A trait that manages the tree.
 ///
 // TODO this is effectively a tower layer?
 // TODO move to tree-api
-pub trait TreeHandler: Send + Sync {
+pub trait EngineBehaviour: Send + Sync {
     /// The action this type handles
     type Action;
     /// The outcome
@@ -85,7 +98,7 @@ pub struct TreeEngine {
 #[must_use = "Future does nothing unless polled"]
 pub struct TreeEngineService<T>
 where
-    T: TreeHandler,
+    T: EngineBehaviour,
 {
     /// Keeps track of the state the service is in
     state: (),
@@ -101,7 +114,7 @@ where
 
 impl<T> Future for TreeEngineService<T>
 where
-    T: TreeHandler,
+    T: EngineBehaviour,
 {
     type Output = ();
 
