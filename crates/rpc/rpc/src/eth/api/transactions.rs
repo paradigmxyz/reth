@@ -52,7 +52,7 @@ use crate::eth::revm_utils::FillableTransaction;
 use reth_rpc_types::OptimismTransactionReceiptFields;
 use revm_primitives::db::{Database, DatabaseRef};
 
-/// Helper alias type for the state's [CacheDB]
+/// Helper alias type for the state's [`CacheDB`]
 pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace.
@@ -1402,7 +1402,7 @@ where
     /// Returns the EIP-1559 fees if they are set, otherwise fetches a suggested gas price for
     /// EIP-1559 transactions.
     ///
-    /// Returns (max_fee, priority_fee)
+    /// Returns (`max_fee`, `priority_fee`)
     pub(crate) async fn eip1559_fees(
         &self,
         max_fee_per_gas: Option<U256>,
@@ -1457,7 +1457,7 @@ where
         Err(EthApiError::InvalidTransactionSignature)
     }
 
-    /// Get Transaction by [BlockId] and the index of the transaction within that Block.
+    /// Get Transaction by [`BlockId`] and the index of the transaction within that Block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
     pub(crate) async fn transaction_by_block_and_tx_index(
@@ -1549,9 +1549,9 @@ where
         )
     }
 
-    /// Builds op metadata object using the provided [TransactionSigned], L1 block info and
-    /// `block_timestamp`. The L1BlockInfo is used to calculate the l1 fee and l1 data gas for the
-    /// transaction. If the L1BlockInfo is not provided, the meta info will be empty.
+    /// Builds op metadata object using the provided [`TransactionSigned`], L1 block info and
+    /// `block_timestamp`. The `L1BlockInfo` is used to calculate the l1 fee and l1 data gas for the
+    /// transaction. If the `L1BlockInfo` is not provided, the meta info will be empty.
     #[cfg(feature = "optimism")]
     pub(crate) fn build_op_tx_meta(
         &self,

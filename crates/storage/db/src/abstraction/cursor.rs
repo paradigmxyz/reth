@@ -120,7 +120,7 @@ pub trait DbCursorRW<T: Table> {
     fn delete_current(&mut self) -> Result<(), DatabaseError>;
 }
 
-/// Read Write Cursor over DupSorted table.
+/// Read Write Cursor over `DupSorted` table.
 pub trait DbDupCursorRW<T: DupSort> {
     /// Delete all duplicate entries for current key.
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError>;
@@ -209,7 +209,7 @@ where
 }
 
 impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> ReverseWalker<'cursor, T, CURSOR> {
-    /// construct ReverseWalker
+    /// construct `ReverseWalker`
     pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>) -> Self {
         Self { cursor, start }
     }
@@ -300,7 +300,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for RangeWalker<'cursor,
 }
 
 impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> RangeWalker<'cursor, T, CURSOR> {
-    /// construct RangeWalker
+    /// construct `RangeWalker`
     pub fn new(
         cursor: &'cursor mut CURSOR,
         start: IterPairResult<T>,

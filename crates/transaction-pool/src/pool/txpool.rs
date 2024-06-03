@@ -41,7 +41,7 @@ use tracing::trace;
 ///
 /// This pool maintains the state of all transactions and stores them accordingly.
 ///
-/// include_mmd!("docs/mermaid/txpool.mmd")
+/// `include_mmd!("docs/mermaid/txpool.mmd`")
 pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known information about the senders.
     sender_info: FxHashMap<SenderId, SenderInfo>,
@@ -647,7 +647,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// subpool.
     ///
     /// This is intended to be used when a transaction is included in a block,
-    /// [Self::on_canonical_state_change]
+    /// [`Self::on_canonical_state_change`]
     fn prune_transaction_by_hash(
         &mut self,
         tx_hash: &B256,
@@ -912,7 +912,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     pending_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
-    /// How to handle [TransactionOrigin::Local](crate::TransactionOrigin) transactions.
+    /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
@@ -1272,7 +1272,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Checks if the given transaction's type conflicts with an existing transaction.
     ///
-    /// See also [ValidPoolTransaction::tx_type_conflicts_with].
+    /// See also [`ValidPoolTransaction::tx_type_conflicts_with`].
     ///
     /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
     #[inline]

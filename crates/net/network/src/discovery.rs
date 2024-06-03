@@ -133,7 +133,7 @@ impl Discovery {
         })
     }
 
-    /// Registers a listener for receiving [DiscoveryEvent] updates.
+    /// Registers a listener for receiving [`DiscoveryEvent`] updates.
     pub(crate) fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
         self.discovery_listeners.push(tx);
     }
@@ -199,7 +199,7 @@ impl Discovery {
         Ok(())
     }
 
-    /// Processes an incoming [NodeRecord] update from a discovery service
+    /// Processes an incoming [`NodeRecord`] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
         let addr = record.tcp_addr();

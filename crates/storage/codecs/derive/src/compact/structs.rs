@@ -68,7 +68,7 @@ impl<'a> StructHandler<'a> {
                 })
             }
 
-            return
+            return;
         }
 
         let name = format_ident!("{name}");

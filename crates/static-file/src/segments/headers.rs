@@ -11,7 +11,7 @@ use reth_provider::{
 use reth_storage_errors::provider::ProviderResult;
 use std::{ops::RangeInclusive, path::Path};
 
-/// Static File segment responsible for [StaticFileSegment::Headers] part of data.
+/// Static File segment responsible for [`StaticFileSegment::Headers`] part of data.
 #[derive(Debug, Default)]
 pub struct Headers;
 

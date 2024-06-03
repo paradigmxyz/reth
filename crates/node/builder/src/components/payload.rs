@@ -9,7 +9,7 @@ use std::future::Future;
 pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
     /// Spawns the payload service and returns the handle to it.
     ///
-    /// The [BuilderContext] is provided to allow access to the node's configuration.
+    /// The [`BuilderContext`] is provided to allow access to the node's configuration.
     fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,

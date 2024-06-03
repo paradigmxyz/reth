@@ -50,14 +50,14 @@ pub(crate) struct DevSigner {
 
 #[allow(dead_code)]
 impl DevSigner {
-    /// Generates a random dev signer which satisfies [EthSigner] trait
+    /// Generates a random dev signer which satisfies [`EthSigner`] trait
     pub(crate) fn random() -> Box<dyn EthSigner> {
         let mut signers = Self::random_signers(1);
         signers.pop().expect("expect to generate at least one signer")
     }
 
     /// Generates provided number of random dev signers
-    /// which satisfy [EthSigner] trait
+    /// which satisfy [`EthSigner`] trait
     pub(crate) fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
         let mut signers = Vec::new();
         for _ in 0..num {

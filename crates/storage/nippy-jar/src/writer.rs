@@ -45,7 +45,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     /// Creates a [`NippyJarWriter`] from [`NippyJar`].
     ///
     /// If `read_only` is set to `true`, any inconsistency issue won't be healed, and will return
-    /// [NippyJarError::InconsistentState] instead.
+    /// [`NippyJarError::InconsistentState`] instead.
     pub fn new(
         jar: NippyJar<H>,
         check_mode: ConsistencyFailStrategy,
@@ -127,7 +127,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     /// Performs consistency checks on the [`NippyJar`] file and might self-heal or throw an error
-    /// according to [ConsistencyFailStrategy].
+    /// according to [`ConsistencyFailStrategy`].
     /// * Is the offsets file size expected?
     /// * Is the data file size expected?
     ///
@@ -142,7 +142,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         // When an offset size is smaller than the initial (8), we are dealing with immutable
         // data.
         if reader.offset_size() != OFFSET_SIZE_BYTES {
-            return Err(NippyJarError::FrozenJar)
+            return Err(NippyJarError::FrozenJar);
         }
 
         let expected_offsets_file_size: u64 = (1 + // first byte is the size of one offset
@@ -153,7 +153,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         if check_mode.should_err() &&
             expected_offsets_file_size.cmp(&actual_offsets_file_size) != Ordering::Equal
         {
-            return Err(NippyJarError::InconsistentState)
+            return Err(NippyJarError::InconsistentState);
         }
 
         // Offsets configuration wasn't properly committed
@@ -184,7 +184,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         let data_file_len = self.data_file.get_ref().metadata()?.len();
 
         if check_mode.should_err() && last_offset.cmp(&data_file_len) != Ordering::Equal {
-            return Err(NippyJarError::InconsistentState)
+            return Err(NippyJarError::InconsistentState);
         }
 
         // Offset list wasn't properly committed
@@ -214,7 +214,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                         // Since we decrease the offset list, we need to check the consistency of
                         // `self.jar.rows` again
                         self.ensure_file_consistency(ConsistencyFailStrategy::Heal)?;
-                        break
+                        break;
                     }
                 }
             }
@@ -347,7 +347,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     return Err(NippyJarError::InvalidPruning(
                         num_offsets,
                         remaining_to_prune as u64,
-                    ))
+                    ));
                 }
 
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
@@ -373,7 +373,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     self.data_file.get_mut().set_len(last_offset)?;
                 }
             } else {
-                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
+                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64));
             }
         }
 
@@ -463,7 +463,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         for offset in self.offsets.drain(..) {
             if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
                 if last_offset_ondisk == offset {
-                    continue
+                    continue;
                 }
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;
@@ -514,7 +514,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 }
 
-/// Strategy on encountering an inconsistent state when creating a [NippyJarWriter].
+/// Strategy on encountering an inconsistent state when creating a [`NippyJarWriter`].
 #[derive(Debug, Copy, Clone)]
 pub enum ConsistencyFailStrategy {
     /// Writer should heal.

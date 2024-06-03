@@ -1,4 +1,4 @@
-//! `eth_` PubSub RPC handler implementation
+//! `eth_` `PubSub` RPC handler implementation
 
 use crate::{
     eth::logs_utils,
@@ -44,7 +44,7 @@ pub struct EthPubSub<Provider, Pool, Events, Network> {
 impl<Provider, Pool, Events, Network> EthPubSub<Provider, Pool, Events, Network> {
     /// Creates a new, shareable instance.
     ///
-    /// Subscription tasks are spawned via [tokio::task::spawn]
+    /// Subscription tasks are spawned via [`tokio::task::spawn`]
     pub fn new(provider: Provider, pool: Pool, chain_events: Events, network: Network) -> Self {
         Self::with_spawner(
             provider,

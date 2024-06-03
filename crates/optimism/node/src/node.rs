@@ -38,7 +38,7 @@ impl OptimismNode {
         Self { args }
     }
 
-    /// Returns the components for the given [RollupArgs].
+    /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
         args: RollupArgs,
     ) -> ComponentsBuilder<

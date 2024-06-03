@@ -6,7 +6,7 @@ pub(crate) type ParseEntryResult<T> = Result<T, ParseDnsEntryError>;
 /// Alias for lookup results
 pub(crate) type LookupResult<T> = Result<T, LookupError>;
 
-/// Error while parsing a [DnsEntry](crate::tree::DnsEntry)
+/// Error while parsing a [`DnsEntry`](crate::tree::DnsEntry)
 #[derive(thiserror::Error, Debug)]
 pub enum ParseDnsEntryError {
     /// Unknown entry error.

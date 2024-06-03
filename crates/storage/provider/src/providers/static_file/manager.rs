@@ -107,17 +107,17 @@ pub struct StaticFileProviderInner {
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
     /// Available static file block ranges on disk indexed by max transactions.
     static_files_tx_index: RwLock<SegmentRanges>,
-    /// Directory where static_files are located
+    /// Directory where `static_files` are located
     path: PathBuf,
     /// Whether [`StaticFileJarProvider`] loads filters into memory. If not, `by_hash` queries
     /// won't be able to be queried directly.
     load_filters: bool,
-    /// Maintains a map of StaticFile writers for each [`StaticFileSegment`]
+    /// Maintains a map of `StaticFile` writers for each [`StaticFileSegment`]
     writers: DashMap<StaticFileSegment, StaticFileProviderRW>,
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Access rights of the provider.
     access: StaticFileAccess,
-    /// Write lock for when access is [StaticFileAccess::RW].
+    /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
 }
 
@@ -516,7 +516,7 @@ impl StaticFileProvider {
     ///
     /// For each static file segment:
     /// * the corresponding database table should overlap or have continuity in their keys
-    ///   ([TxNumber] or [BlockNumber]).
+    ///   ([`TxNumber`] or [`BlockNumber`]).
     /// * its highest block should match the stage checkpoint block number if it's equal or higher
     ///   than the corresponding database table last entry.
     ///
@@ -626,7 +626,7 @@ impl StaticFileProvider {
     /// Check invariants for each corresponding table and static file segment:
     ///
     /// * the corresponding database table should overlap or have continuity in their keys
-    ///   ([TxNumber] or [BlockNumber]).
+    ///   ([`TxNumber`] or [`BlockNumber`]).
     /// * its highest block should match the stage checkpoint block number if it's equal or higher
     ///   than the corresponding database table last entry.
     ///   * If the checkpoint block is higher, then request a pipeline unwind to the static file
@@ -726,7 +726,7 @@ impl StaticFileProvider {
         }
     }
 
-    /// Iterates through segment static_files in reverse order, executing a function until it
+    /// Iterates through segment `static_files` in reverse order, executing a function until it
     /// returns some object. Useful for finding objects by [`TxHash`] or [`BlockHash`].
     pub fn find_static_file<T>(
         &self,
@@ -856,7 +856,7 @@ impl StaticFileProvider {
         }))
     }
 
-    /// Returns directory where static_files are located.
+    /// Returns directory where `static_files` are located.
     pub fn directory(&self) -> &Path {
         &self.path
     }
@@ -897,13 +897,13 @@ impl StaticFileProvider {
         fetch_from_database()
     }
 
-    /// Gets data within a specified range, potentially spanning different static_files and
+    /// Gets data within a specified range, potentially spanning different `static_files` and
     /// database.
     ///
     /// # Arguments
     /// * `segment` - The segment of the static file to query.
     /// * `block_range` - The range of data to fetch.
-    /// * `fetch_from_static_file` - A function to fetch data from the static_file.
+    /// * `fetch_from_static_file` - A function to fetch data from the `static_file`.
     /// * `fetch_from_database` - A function to fetch data from the database.
     /// * `predicate` - A function used to evaluate each item in the fetched data. Fetching is
     ///   terminated when this function returns false, thereby filtering the data based on the
@@ -949,7 +949,7 @@ impl StaticFileProvider {
     }
 
     #[cfg(any(test, feature = "test-utils"))]
-    /// Returns static_files directory
+    /// Returns `static_files` directory
     pub fn path(&self) -> &Path {
         &self.path
     }

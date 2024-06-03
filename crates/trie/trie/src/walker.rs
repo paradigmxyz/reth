@@ -29,7 +29,7 @@ pub struct TrieWalker<C> {
 }
 
 impl<C> TrieWalker<C> {
-    /// Constructs a new TrieWalker from existing stack and a cursor.
+    /// Constructs a new `TrieWalker` from existing stack and a cursor.
     pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         let mut this =
             Self { cursor, changes, stack, can_skip_current_node: false, trie_updates: None };
@@ -111,7 +111,7 @@ impl<C> TrieWalker<C> {
 }
 
 impl<C: TrieCursor> TrieWalker<C> {
-    /// Constructs a new TrieWalker, setting up the initial state of the stack and cursor.
+    /// Constructs a new `TrieWalker`, setting up the initial state of the stack and cursor.
     pub fn new(cursor: C, changes: PrefixSet) -> Self {
         // Initialize the walker with a single empty stack element.
         let mut this = Self {

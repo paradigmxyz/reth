@@ -10,7 +10,7 @@ pub(crate) struct NodeHooks<Node: FullNodeComponents> {
 }
 
 impl<Node: FullNodeComponents> NodeHooks<Node> {
-    /// Creates a new, empty [NodeHooks] instance for the given node type.
+    /// Creates a new, empty [`NodeHooks`] instance for the given node type.
     pub(crate) fn new() -> Self {
         Self {
             on_component_initialized: Box::<()>::default(),

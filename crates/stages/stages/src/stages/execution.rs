@@ -36,30 +36,30 @@ use tracing::*;
 /// update history indexes.
 ///
 /// Input tables:
-/// - [tables::CanonicalHeaders] get next block to execute.
-/// - [tables::Headers] get for revm environment variables.
-/// - [tables::HeaderTerminalDifficulties]
-/// - [tables::BlockBodyIndices] to get tx number
-/// - [tables::Transactions] to execute
+/// - [`tables::CanonicalHeaders`] get next block to execute.
+/// - [`tables::Headers`] get for revm environment variables.
+/// - [`tables::HeaderTerminalDifficulties`]
+/// - [`tables::BlockBodyIndices`] to get tx number
+/// - [`tables::Transactions`] to execute
 ///
-/// For state access [LatestStateProviderRef] provides us latest state and history state
-/// For latest most recent state [LatestStateProviderRef] would need (Used for execution Stage):
-/// - [tables::PlainAccountState]
-/// - [tables::Bytecodes]
-/// - [tables::PlainStorageState]
+/// For state access [`LatestStateProviderRef`] provides us latest state and history state
+/// For latest most recent state [`LatestStateProviderRef`] would need (Used for execution Stage):
+/// - [`tables::PlainAccountState`]
+/// - [`tables::Bytecodes`]
+/// - [`tables::PlainStorageState`]
 ///
 /// Tables updated after state finishes execution:
-/// - [tables::PlainAccountState]
-/// - [tables::PlainStorageState]
-/// - [tables::Bytecodes]
-/// - [tables::AccountChangeSets]
-/// - [tables::StorageChangeSets]
+/// - [`tables::PlainAccountState`]
+/// - [`tables::PlainStorageState`]
+/// - [`tables::Bytecodes`]
+/// - [`tables::AccountChangeSets`]
+/// - [`tables::StorageChangeSets`]
 ///
 /// For unwinds we are accessing:
-/// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
-/// - [tables::AccountsHistory] to remove change set and apply old values to
-/// - [tables::PlainAccountState] [tables::StoragesHistory] to remove change set and apply old
-///   values to [tables::PlainStorageState]
+/// - [`tables::BlockBodyIndices`] get tx index to know what needs to be unwinded
+/// - [`tables::AccountsHistory`] to remove change set and apply old values to
+/// - [`tables::PlainAccountState`] [`tables::StoragesHistory`] to remove change set and apply old
+///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<E> {
@@ -75,7 +75,7 @@ pub struct ExecutionStage<E> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
-    /// Handle to communicate with ExEx manager.
+    /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle,
 }
 
@@ -100,7 +100,7 @@ impl<E> ExecutionStage<E> {
 
     /// Create an execution stage with the provided executor.
     ///
-    /// The commit threshold will be set to 10_000.
+    /// The commit threshold will be set to `10_000`.
     pub fn new_with_executor(executor_provider: E) -> Self {
         Self::new(
             executor_provider,
@@ -111,7 +111,7 @@ impl<E> ExecutionStage<E> {
         )
     }
 
-    /// Create new instance of [ExecutionStage] from configuration.
+    /// Create new instance of [`ExecutionStage`] from configuration.
     pub fn from_config(
         executor_provider: E,
         config: ExecutionConfig,

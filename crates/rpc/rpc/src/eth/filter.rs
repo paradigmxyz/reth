@@ -53,7 +53,7 @@ where
     /// This uses the given pool to get notified about new transactions, the provider to interact
     /// with the blockchain, the cache to fetch cacheable data, like the logs.
     ///
-    /// See also [EthFilterConfig].
+    /// See also [`EthFilterConfig`].
     ///
     /// This also spawns a task that periodically clears stale filters.
     pub fn new(
@@ -97,7 +97,7 @@ where
         &self.inner.active_filters
     }
 
-    /// Endless future that [Self::clear_stale_filters] every `stale_filter_ttl` interval.
+    /// Endless future that [`Self::clear_stale_filters`] every `stale_filter_ttl` interval.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
         let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);

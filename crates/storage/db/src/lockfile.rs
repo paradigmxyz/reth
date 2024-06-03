@@ -18,7 +18,7 @@ use sysinfo::System;
 pub struct StorageLock(Arc<StorageLockInner>);
 
 impl StorageLock {
-    /// Tries to acquires a write lock on the target directory, returning [StorageLockError] if
+    /// Tries to acquire a write lock on the target directory, returning [`StorageLockError`] if
     /// unsuccessful.
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
         let path = path.join("lock");
