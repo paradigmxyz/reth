@@ -374,7 +374,7 @@ impl TransactionFetcher {
     pub fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
         let mut max_retried_and_evicted_hashes = vec![];
 
-        for hash in hashes.into_iter() {
+        for hash in hashes {
             // hash could have been evicted from bounded lru map
             if self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_none() {
                 continue
@@ -665,7 +665,7 @@ impl TransactionFetcher {
                 if self.hashes_pending_fetch.contains(hash) {
                     debug!(target: "net::tx", "`{}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{}`: {:?}",
                         format!("{:?}", new_announced_hashes), // Assuming new_announced_hashes can be debug-printed directly
-                        format!("{:?}", new_announced_hashes), 
+                        format!("{:?}", new_announced_hashes),
                         new_announced_hashes.iter().map(|hash| {
                             let metadata = self.hashes_fetch_inflight_and_pending_fetch.get(hash);
                             // Assuming you only need `retries` and `tx_encoded_length` for debugging

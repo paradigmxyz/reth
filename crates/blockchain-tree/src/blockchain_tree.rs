@@ -897,7 +897,7 @@ where
         hashes: impl IntoIterator<Item = impl Into<BlockNumHash>>,
     ) -> ProviderResult<()> {
         // check unconnected block buffer for children of the canonical hashes
-        for added_block in hashes.into_iter() {
+        for added_block in hashes {
             self.try_connect_buffered_blocks(added_block.into())
         }
 
@@ -908,7 +908,7 @@ where
                 all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
         }
-        for block in all_chain_blocks.into_iter() {
+        for block in all_chain_blocks {
             self.try_connect_buffered_blocks(block)
         }
 
@@ -927,7 +927,7 @@ where
         // first remove all the children of the new block from the buffer
         let include_blocks = self.state.buffered_blocks.remove_block_with_children(&new_block.hash);
         // then try to reinsert them into the tree
-        for block in include_blocks.into_iter() {
+        for block in include_blocks {
             // don't fail on error, just ignore the block.
             let _ = self
                 .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
@@ -1506,7 +1506,7 @@ mod tests {
             }
             if let Some(fork_to_child) = self.fork_to_child {
                 let mut x: HashMap<BlockHash, LinkedHashSet<BlockHash>> = HashMap::new();
-                for (key, hash_set) in fork_to_child.into_iter() {
+                for (key, hash_set) in fork_to_child {
                     x.insert(key, hash_set.into_iter().collect());
                 }
                 assert_eq!(*tree.state.block_indices.fork_to_child(), x);

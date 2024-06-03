@@ -175,7 +175,7 @@ where
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
         peers.shuffle(&mut rand::thread_rng());
 
-        for (peer_id, peer) in peers.into_iter() {
+        for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -316,10 +316,7 @@ where
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
-            PeerAction::DisconnectBannedIncoming { peer_id } => {
-                self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
-            }
+            PeerAction::DisconnectBannedIncoming { peer_id } |
             PeerAction::DisconnectUntrustedIncoming { peer_id } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
@@ -334,8 +331,7 @@ where
             PeerAction::PeerRemoved(peer_id) => {
                 self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
             }
-            PeerAction::BanPeer { .. } => {}
-            PeerAction::UnBanPeer { .. } => {}
+            PeerAction::BanPeer { .. } | PeerAction::UnBanPeer { .. } => {}
         }
     }
 

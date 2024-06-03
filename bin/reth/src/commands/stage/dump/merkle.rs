@@ -47,7 +47,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
         dry_run(
             ProviderFactory::new(
                 output_db,
-                db_tool.chain.clone(),
+                db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
             ),
             to,
@@ -84,7 +84,7 @@ async fn unwind_and_copy<DB: Database>(
 
     MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
-    let executor = block_executor!(db_tool.chain.clone());
+    let executor = block_executor!(db_tool.chain());
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(

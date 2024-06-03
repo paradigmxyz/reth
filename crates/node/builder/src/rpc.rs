@@ -291,8 +291,8 @@ where
 
     let server_config = config.rpc.rpc_server_config();
     let launch_rpc = modules.clone().start_server(server_config).map_ok(|handle| {
-        if let Some(url) = handle.ipc_endpoint() {
-            info!(target: "reth::cli", url=%url, "RPC IPC server started");
+        if let Some(path) = handle.ipc_endpoint() {
+            info!(target: "reth::cli", %path, "RPC IPC server started");
         }
         if let Some(addr) = handle.http_local_addr() {
             info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
