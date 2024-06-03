@@ -12,7 +12,7 @@ use futures::Future;
 use reth_db::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    test_utils::{create_test_rw_db, TempDatabase},
+    test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
 };
 use reth_exex::ExExContext;
@@ -20,7 +20,7 @@ use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
-    dirs::{ChainPath, DataDirPath},
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
@@ -174,8 +174,11 @@ impl<DB> NodeBuilder<DB> {
         self,
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
-        let db = create_test_rw_db();
-        let data_dir = self.config.datadir();
+        let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
+        let data_dir =
+            path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
+
+        let db = create_test_rw_db_with_path(data_dir.db());
 
         WithLaunchContext { builder: self.with_database(db), task_executor, data_dir }
     }
