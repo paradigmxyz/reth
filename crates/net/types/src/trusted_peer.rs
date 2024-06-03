@@ -1,4 +1,4 @@
-//! NodeRecord type that uses a domain instead of an IP.
+//! `NodeRecord` type that uses a domain instead of an IP.
 
 use std::{
     fmt::{self, Write},
