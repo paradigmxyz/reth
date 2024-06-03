@@ -7,6 +7,7 @@ use reth_tracing::FileWorkerGuard;
 
 mod new_payload_fcu;
 mod new_payload_only;
+mod output;
 
 /// `reth bench` command
 #[derive(Debug, Parser)]
