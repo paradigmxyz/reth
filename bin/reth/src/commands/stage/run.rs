@@ -6,9 +6,8 @@ use crate::{
     args::{
         get_secret_key,
         utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs, StageEnum,
+        DatabaseArgs, DatadirArgs, NetworkArgs, StageEnum,
     },
-    dirs::{DataDirPath, MaybePlatformPath},
     macros::block_executor,
     prometheus_exporter,
     version::SHORT_VERSION,
@@ -45,16 +44,6 @@ pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
-
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -106,12 +95,6 @@ pub struct Command {
     #[arg(long, short)]
     skip_unwind: bool,
 
-    #[command(flatten)]
-    network: NetworkArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
-
     /// Commits the changes in the database. WARNING: potentially destructive.
     ///
     /// Useful when you want to run diagnostics on the database.
@@ -123,6 +106,15 @@ pub struct Command {
     /// Save stage checkpoints
     #[arg(long)]
     checkpoints: bool,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
+
+    #[command(flatten)]
+    network: NetworkArgs,
+
+    #[command(flatten)]
+    db: DatabaseArgs,
 }
 
 impl Command {
@@ -133,7 +125,7 @@ impl Command {
         let _ = fdlimit::raise_fd_limit();
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let config: Config = confy::load_path(config_path).unwrap_or_default();

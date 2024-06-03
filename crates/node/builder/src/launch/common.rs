@@ -333,6 +333,8 @@ where
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
     pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
+        println!("datadir: {:?}", self.data_dir());
+
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),

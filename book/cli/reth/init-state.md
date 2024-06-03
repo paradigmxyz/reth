@@ -6,38 +6,7 @@ Initialize the database from a state dump file
 $ reth init-state --help
 Usage: reth init-state [OPTIONS] <STATE_DUMP_FILE>
 
-Arguments:
-  <STATE_DUMP_FILE>
-          JSONL file with state dump.
-
-          Must contain accounts in following format, additional account fields are ignored. Must
-          also contain { "root": \<state-root\> } as first line.
-          {
-              "balance": "\<balance\>",
-              "nonce": \<nonce\>,
-              "code": "\<bytecode\>",
-              "storage": {
-                  "\<key\>": "\<value\>",
-                  ..
-              },
-              "address": "\<address\>",
-          }
-
-          Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
-          and including the non-genesis block to init chain at. See 'import' command.
-
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -60,6 +29,40 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
+
+  <STATE_DUMP_FILE>
+          JSONL file with state dump.
+
+          Must contain accounts in following format, additional account fields are ignored. Must
+          also contain { "root": \<state-root\> } as first line.
+          {
+              "balance": "\<balance\>",
+              "nonce": \<nonce\>,
+              "code": "\<bytecode\>",
+              "storage": {
+                  "\<key\>": "\<value\>",
+                  ..
+              },
+              "address": "\<address\>",
+          }
+
+          Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
+          and including the non-genesis block to init chain at. See 'import' command.
 
 Database:
       --db.log-level <LOG_LEVEL>
