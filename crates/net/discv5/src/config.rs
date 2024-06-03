@@ -9,9 +9,8 @@ use std::{
 use derive_more::Display;
 use discv5::ListenConfig;
 use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, TrustedPeer};
+use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
 use tracing::warn;
-use url::Host;
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
@@ -129,13 +128,10 @@ impl ConfigBuilder {
         self
     }
 
-    /// Adds boot nodes in the form a list of [`TrustedPeer`]s, parsed enodes.
-    pub fn add_unsigned_boot_nodes<T: Into<TrustedPeer>>(
-        mut self,
-        enodes: impl Iterator<Item = T>,
-    ) -> Self {
+    /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
+    pub fn add_unsigned_boot_nodes(mut self, enodes: impl Iterator<Item = NodeRecord>) -> Self {
         for node in enodes {
-            if let Ok(node) = BootNode::from_unsigned(node.into()) {
+            if let Ok(node) = BootNode::from_unsigned(node) {
                 self.bootstrap_nodes.insert(node);
             }
         }
@@ -429,17 +425,14 @@ pub enum BootNode {
 }
 
 impl BootNode {
-    /// Parses a [`TrustedPeer`] and serializes according to CL format. Note: [`discv5`] is
+    /// Parses a [`NodeRecord`] and serializes according to CL format. Note: [`discv5`] is
     /// originally a CL library hence needs this format to add the node.
-    pub fn from_unsigned(node_record: TrustedPeer) -> Result<Self, secp256k1::Error> {
-        let TrustedPeer { host, udp_port, id, .. } = node_record;
+    pub fn from_unsigned(node_record: NodeRecord) -> Result<Self, secp256k1::Error> {
+        let NodeRecord { address, udp_port, id, .. } = node_record;
         let mut multi_address = Multiaddr::empty();
-        match host {
-            Host::Ipv4(ip) => multi_address.push(Protocol::Ip4(ip)),
-            Host::Ipv6(ip) => multi_address.push(Protocol::Ip6(ip)),
-            Host::Domain(domain) => {
-                multi_address.push(Protocol::Dns(domain.into()));
-            }
+        match address {
+            IpAddr::V4(ip) => multi_address.push(Protocol::Ip4(ip)),
+            IpAddr::V6(ip) => multi_address.push(Protocol::Ip6(ip)),
         }
 
         multi_address.push(Protocol::Udp(udp_port));
