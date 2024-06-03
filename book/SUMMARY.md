@@ -45,7 +45,6 @@
       - [`reth db clear`](./cli/reth/db/clear.md)
         - [`reth db clear mdbx`](./cli/reth/db/clear/mdbx.md)
         - [`reth db clear static-file`](./cli/reth/db/clear/static-file.md)
-      - [`reth db create-static-files`](./cli/reth/db/create-static-files.md)
       - [`reth db version`](./cli/reth/db/version.md)
       - [`reth db path`](./cli/reth/db/path.md)
     - [`reth stage`](./cli/reth/stage.md)
