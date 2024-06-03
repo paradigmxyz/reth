@@ -1573,7 +1573,8 @@ impl RpcServerConfig {
 
     /// Configures the [`SocketAddr`] of the http server
     ///
-    /// Default is [`Ipv4Addr::LOCALHOST`] and [`DEFAULT_HTTP_RPC_PORT`]
+    /// Default is [`Ipv4Addr::LOCALHOST`] and
+    /// [`reth_rpc_server_types::constants::DEFAULT_HTTP_RPC_PORT`]
     pub const fn with_http_address(mut self, addr: SocketAddr) -> Self {
         self.http_addr = Some(addr);
         self
@@ -1581,7 +1582,8 @@ impl RpcServerConfig {
 
     /// Configures the [`SocketAddr`] of the ws server
     ///
-    /// Default is [`Ipv4Addr::LOCALHOST`] and [`DEFAULT_WS_RPC_PORT`]
+    /// Default is [`Ipv4Addr::LOCALHOST`] and
+    /// [`reth_rpc_server_types::constants::DEFAULT_WS_RPC_PORT`]
     pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
         self
@@ -1618,7 +1620,7 @@ impl RpcServerConfig {
 
     /// Configures the endpoint of the ipc server
     ///
-    /// Default is [`DEFAULT_IPC_ENDPOINT`]
+    /// Default is [`reth_rpc_server_types::constants::DEFAULT_IPC_ENDPOINT`]
     pub fn with_ipc_endpoint(mut self, path: impl Into<String>) -> Self {
         self.ipc_endpoint = Some(path.into());
         self
