@@ -8,10 +8,10 @@ use reth_db_api::database::Database;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::args::NetworkArgs;
-use reth_primitives::{BlockHashOrNumber, PruneModes, B256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256};
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
+    FinalizedBlockProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -39,6 +39,28 @@ pub struct Command {
 
     #[command(subcommand)]
     command: Subcommands,
+}
+
+struct FinalizedBlockManager<DB> {
+    provider_factory: ProviderFactory<DB>,
+}
+
+impl<DB> FinalizedBlockManager<DB>
+where
+    DB: Database,
+{
+    const fn new(provider_factory: ProviderFactory<DB>) -> Self {
+        Self { provider_factory }
+    }
+}
+
+impl<DB> FinalizedBlockProvider<DB> for FinalizedBlockManager<DB>
+where
+    DB: Database,
+{
+    fn provider_factory(&self) -> &ProviderFactory<DB> {
+        &self.provider_factory
+    }
 }
 
 impl Command {
@@ -76,6 +98,15 @@ impl Command {
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
             provider.commit()?;
+        }
+
+        // update finalized block if needed
+        let finalized_block_manager = FinalizedBlockManager::new(provider_factory.clone());
+        let last_finalized_block = finalized_block_manager.fetch_latest_finalized_block_number()?;
+        let range_min =
+            range.clone().min().ok_or(eyre::eyre!("Coul not fetch lower end of range"))?;
+        if range_min < last_finalized_block {
+            finalized_block_manager.save_finalized_block_number(BlockNumber::from(range_min))?;
         }
 
         println!("Unwound {} blocks", range.count());
