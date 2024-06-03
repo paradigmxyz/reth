@@ -409,7 +409,7 @@ where
 
     /// Inserts multiple block bodies.
     fn insert_bodies(&mut self, bodies: impl IntoIterator<Item = BodyResponse>) {
-        for body in bodies.into_iter() {
+        for body in bodies {
             self.insert_body(body);
         }
     }

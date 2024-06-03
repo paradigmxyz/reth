@@ -328,7 +328,7 @@ impl BlockIndices {
 
         let mut lose_chains = BTreeSet::new();
 
-        for block_hash in finalized_blocks.into_iter() {
+        for block_hash in finalized_blocks {
             // there is a fork block.
             if let Some(fork_blocks) = self.fork_to_child.remove(&block_hash) {
                 lose_chains = fork_blocks.into_iter().fold(lose_chains, |mut fold, fork_child| {

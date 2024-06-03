@@ -524,7 +524,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let mut receipts = Vec::new();
         // loop break if we are at the end of the blocks.
-        for (_, block_body) in block_bodies.into_iter() {
+        for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
