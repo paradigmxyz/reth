@@ -81,7 +81,7 @@ impl TableObject for ObjectLength {
 impl<const LEN: usize> TableObject for [u8; LEN] {
     fn decode(data_val: &[u8]) -> Result<Self, Error> {
         if data_val.len() != LEN {
-            return Err(Error::DecodeErrorLenDiff)
+            return Err(Error::DecodeErrorLenDiff);
         }
         let mut a = [0; LEN];
         a[..].copy_from_slice(data_val);
