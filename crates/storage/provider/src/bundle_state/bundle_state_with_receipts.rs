@@ -873,7 +873,7 @@ mod tests {
 
         // insert initial state to the database
         db.update(|tx| {
-            for (address, (account, storage)) in prestate.iter() {
+            for (address, (account, storage)) in &prestate {
                 let hashed_address = keccak256(address);
                 tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
                 for (slot, value) in storage {

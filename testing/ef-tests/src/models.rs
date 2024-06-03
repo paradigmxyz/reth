@@ -154,7 +154,7 @@ pub struct State(BTreeMap<Address, Account>);
 impl State {
     /// Write the state to the database.
     pub fn write_to_db(&self, tx: &impl DbTxMut) -> Result<(), Error> {
-        for (&address, account) in self.0.iter() {
+        for (&address, account) in &self.0 {
             let hashed_address = keccak256(address);
             let has_code = !account.code.is_empty();
             let code_hash = has_code.then(|| keccak256(&account.code));
@@ -230,7 +230,7 @@ impl Account {
         }
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-        for (slot, value) in self.storage.iter() {
+        for (slot, value) in &self.storage {
             if let Some(entry) =
                 storage_cursor.seek_by_key_subkey(address, B256::new(slot.to_be_bytes()))?
             {

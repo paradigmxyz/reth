@@ -29,7 +29,7 @@ impl ReceiptsLogPruneConfig {
     /// Example:
     ///
     /// `{ addrA: Before(872), addrB: Before(500), addrC: Distance(128) }`
-    ///  
+    ///
     ///    for `tip: 1000`, gets transformed to a map such as:
     ///
     /// `{ 500: [addrB], 872: [addrA, addrC] }`
@@ -46,7 +46,7 @@ impl ReceiptsLogPruneConfig {
         let mut map = BTreeMap::new();
         let pruned_block = pruned_block.unwrap_or_default();
 
-        for (address, mode) in self.0.iter() {
+        for (address, mode) in &self.0 {
             // Getting `None`, means that there is nothing to prune yet, so we need it to include in
             // the BTreeMap (block = 0), otherwise it will be excluded.
             // Reminder that this BTreeMap works as an inclusion list that excludes (prunes) all
@@ -75,7 +75,7 @@ impl ReceiptsLogPruneConfig {
         let pruned_block = pruned_block.unwrap_or_default();
         let mut lowest = None;
 
-        for (_, mode) in self.0.iter() {
+        for mode in self.0.values() {
             if let PruneMode::Distance(_) = mode {
                 if let Some((block, _)) =
                     mode.prune_target_block(tip, PruneSegment::ContractLogs, PrunePurpose::User)?

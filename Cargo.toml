@@ -161,6 +161,7 @@ doc_markdown = "warn"
 unnecessary_struct_initialization = "warn"
 string_lit_as_bytes = "warn"
 explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
 type_repetition_in_bounds = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not

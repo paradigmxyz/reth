@@ -71,7 +71,7 @@ impl Compact for HashBuilderState {
 
         buf.put_u16(self.stack.len() as u16);
         len += 2;
-        for item in self.stack.iter() {
+        for item in &self.stack {
             buf.put_u16(item.len() as u16);
             buf.put_slice(&item[..]);
             len += 2 + item.len();

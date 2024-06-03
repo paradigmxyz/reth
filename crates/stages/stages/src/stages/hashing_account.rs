@@ -91,7 +91,7 @@ impl AccountHashingStage {
             let mut account_cursor =
                 provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
             accounts.sort_by(|a, b| a.0.cmp(&b.0));
-            for (addr, acc) in accounts.iter() {
+            for (addr, acc) in &accounts {
                 account_cursor.append(*addr, *acc)?;
             }
 

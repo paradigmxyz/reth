@@ -329,7 +329,7 @@ impl Future for ExExManager {
         self.update_capacity();
 
         // handle incoming exex events
-        for exex in self.exex_handles.iter_mut() {
+        for exex in &mut self.exex_handles {
             while let Poll::Ready(Some(event)) = exex.receiver.poll_recv(cx) {
                 debug!(exex_id = %exex.id, ?event, "Received event from exex");
                 exex.metrics.events_sent_total.increment(1);

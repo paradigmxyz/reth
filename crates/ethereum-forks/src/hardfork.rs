@@ -658,20 +658,20 @@ mod tests {
         let op_hardforks =
             [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon, Hardfork::Ecotone];
 
-        for hardfork in pow_hardforks.iter() {
+        for hardfork in &pow_hardforks {
             assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfWork);
             assert!(!hardfork.is_proof_of_stake());
             assert!(hardfork.is_proof_of_work());
         }
 
-        for hardfork in pos_hardforks.iter() {
+        for hardfork in &pos_hardforks {
             assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfStake);
             assert!(hardfork.is_proof_of_stake());
             assert!(!hardfork.is_proof_of_work());
         }
 
         #[cfg(feature = "optimism")]
-        for hardfork in op_hardforks.iter() {
+        for hardfork in &op_hardforks {
             assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfStake);
             assert!(hardfork.is_proof_of_stake());
             assert!(!hardfork.is_proof_of_work());
