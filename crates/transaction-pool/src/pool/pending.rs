@@ -403,7 +403,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             removed.clear();
 
             // loop through the highest nonces set, removing transactions until we reach the limit
-            for tx in self.highest_nonces.iter() {
+            for tx in &self.highest_nonces {
                 // return early if the pool is under limits
                 if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
                     non_local_senders == 0

@@ -484,7 +484,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         if TAKE {
             // iterate over local plain state remove all account and all storages.
-            for (address, (old_account, new_account, storage)) in state.iter() {
+            for (address, (old_account, new_account, storage)) in &state {
                 // revert account if needed.
                 if old_account != new_account {
                     let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
@@ -665,7 +665,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         if TAKE {
             // Remove TransactionHashNumbers
             let mut tx_hash_cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
-            for (_, tx) in transactions.iter() {
+            for (_, tx) in &transactions {
                 if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
                     tx_hash_cursor.delete_current()?;
                 }
@@ -742,7 +742,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             self.get_or_take::<tables::HeaderTerminalDifficulties, TAKE>(range)?;
             // rm HeaderNumbers
             let mut header_number_cursor = self.tx.cursor_write::<tables::HeaderNumbers>()?;
-            for (_, hash) in block_header_hashes.iter() {
+            for (_, hash) in &block_header_hashes {
                 if header_number_cursor.seek_exact(*hash)?.is_some() {
                     header_number_cursor.delete_current()?;
                 }

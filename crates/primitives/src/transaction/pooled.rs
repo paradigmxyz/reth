@@ -737,7 +737,7 @@ mod tests {
             &hex!("d30102808083c5cd02887dc5cdfd9e64fd9e407c56"),
         ];
 
-        for hex_data in input_too_short.iter() {
+        for hex_data in &input_too_short {
             let input_rlp = &mut &hex_data[..];
             let res = PooledTransactionsElement::decode(input_rlp);
 

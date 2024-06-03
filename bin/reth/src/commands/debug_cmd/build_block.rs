@@ -199,7 +199,7 @@ impl Command {
             })
             .transpose()?;
 
-        for tx_bytes in self.transactions.iter() {
+        for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
                 .into_ecrecovered()

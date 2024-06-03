@@ -208,7 +208,7 @@ where
     pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
         let number = msg.block.block.header.number;
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
-        for (peer_id, peer) in self.active_peers.iter_mut() {
+        for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -421,7 +421,7 @@ where
             let mut received_responses = Vec::new();
 
             // poll all connected peers for responses
-            for (id, peer) in self.active_peers.iter_mut() {
+            for (id, peer) in &mut self.active_peers {
                 if let Some(mut response) = peer.pending_response.take() {
                     match response.poll(cx) {
                         Poll::Ready(res) => {

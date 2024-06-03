@@ -632,7 +632,7 @@ where
     /// in the tree.
     fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockchainId> {
         // iterate over all blocks in chain and find any fork blocks that are in tree.
-        for (number, block) in chain.blocks().iter() {
+        for (number, block) in chain.blocks() {
             let hash = block.hash();
 
             // find all chains that fork from this block.
@@ -903,8 +903,8 @@ where
 
         // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
-        for (_, chain) in self.state.chains.iter() {
-            for (&number, block) in chain.blocks().iter() {
+        for chain in self.state.chains.values() {
+            for (&number, block) in chain.blocks() {
                 all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
         }

@@ -645,7 +645,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            for tx in txs.iter() {
+            for tx in &txs {
                 pool.add_transaction(factory.validated_arc(tx.clone()));
             }
 

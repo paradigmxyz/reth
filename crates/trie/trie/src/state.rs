@@ -181,7 +181,7 @@ impl HashedPostState {
 
         // Populate storage prefix sets.
         let mut storage_prefix_sets = HashMap::with_capacity(self.storages.len());
-        for (hashed_address, hashed_storage) in self.storages.iter() {
+        for (hashed_address, hashed_storage) in &self.storages {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
             let mut prefix_set = PrefixSetMut::with_capacity(hashed_storage.storage.len());
