@@ -1,8 +1,3 @@
-use clap::{
-    builder::{PossibleValue, TypedValueParser},
-    error::ErrorKind,
-    Arg, Command, Error,
-};
 use std::{fmt::Display, str::FromStr};
 use thiserror::Error;
 
@@ -172,42 +167,5 @@ impl FromStr for LogLevel {
             "extra" => Ok(Self::Extra),
             _ => Err(format!("Invalid log level: {}", s)),
         }
-    }
-}
-
-/// clap value parser for [`LogLevel`].
-#[derive(Clone, Debug, Default)]
-pub struct LogLevelValueParser;
-
-impl TypedValueParser for LogLevelValueParser {
-    type Value = LogLevel;
-
-    fn parse_ref(
-        &self,
-        _cmd: &Command,
-        arg: Option<&Arg>,
-        value: &std::ffi::OsStr,
-    ) -> Result<Self::Value, Error> {
-        let val =
-            value.to_str().ok_or_else(|| Error::raw(ErrorKind::InvalidUtf8, "Invalid UTF-8"))?;
-
-        val.parse::<LogLevel>().map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
-            let possible_values = LogLevel::value_variants()
-                .iter()
-                .map(|v| format!("{:?}", v))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
-            );
-            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
-        })
-    }
-
-    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values =
-            LogLevel::value_variants().iter().map(|v| PossibleValue::new(v.help_message()));
-        Some(Box::new(values))
     }
 }

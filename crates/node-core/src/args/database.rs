@@ -1,8 +1,12 @@
 //! clap [Args](clap::Args) for database configuration
 
 use crate::version::default_client_version;
-use clap::Args;
-use reth_storage_errors::db::{LogLevel, LogLevelValueParser};
+use clap::{
+    builder::{PossibleValue, TypedValueParser},
+    error::ErrorKind,
+    Arg, Args, Command, Error,
+};
+use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
@@ -23,6 +27,43 @@ impl DatabaseArgs {
         reth_db::mdbx::DatabaseArguments::new(default_client_version())
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
+    }
+}
+
+/// clap value parser for [`LogLevel`].
+#[derive(Clone, Debug, Default)]
+struct LogLevelValueParser;
+
+impl TypedValueParser for LogLevelValueParser {
+    type Value = LogLevel;
+
+    fn parse_ref(
+        &self,
+        _cmd: &Command,
+        arg: Option<&Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, Error> {
+        let val =
+            value.to_str().ok_or_else(|| Error::raw(ErrorKind::InvalidUtf8, "Invalid UTF-8"))?;
+
+        val.parse::<LogLevel>().map_err(|err| {
+            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let possible_values = LogLevel::value_variants()
+                .iter()
+                .map(|v| format!("{:?}", v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let msg = format!(
+                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
+            );
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+        })
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values =
+            LogLevel::value_variants().iter().map(|v| PossibleValue::new(v.help_message()));
+        Some(Box::new(values))
     }
 }
 #[cfg(test)]
@@ -70,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_command_parser_without_log_level() {
-        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(&["reth"]).unwrap();
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth"]).unwrap();
         assert_eq!(cmd.args.log_level, None);
     }
 }
