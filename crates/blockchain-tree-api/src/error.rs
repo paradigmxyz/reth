@@ -280,6 +280,7 @@ impl InsertBlockErrorKind {
     /// Returns true if the error is caused by an invalid block
     ///
     /// This is intended to be used to determine if the block should be marked as invalid.
+    #[allow(clippy::match_same_arms)]
     pub const fn is_invalid_block(&self) -> bool {
         match self {
             Self::SenderRecovery | Self::Consensus(_) => true,
@@ -321,9 +322,9 @@ impl InsertBlockErrorKind {
                 CanonicalError::BlockchainTree(_) |
                 CanonicalError::CanonicalCommit(_) |
                 CanonicalError::CanonicalRevert(_) |
-                CanonicalError::OptimisticTargetRevert(_) => false,
-                CanonicalError::Validation(_) => true,
+                CanonicalError::OptimisticTargetRevert(_) |
                 CanonicalError::Provider(_) => false,
+                CanonicalError::Validation(_) => true,
             },
             Self::BlockchainTree(_) => false,
         }

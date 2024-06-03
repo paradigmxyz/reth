@@ -111,7 +111,7 @@ impl BlockIndices {
 
     /// Insert block to chain and fork child indices of the new chain
     pub(crate) fn insert_chain(&mut self, chain_id: BlockchainId, chain: &Chain) {
-        for (number, block) in chain.blocks().iter() {
+        for (number, block) in chain.blocks() {
             // add block -> chain_id index
             self.blocks_to_chain.insert(block.hash(), chain_id);
             // add number -> block
@@ -328,7 +328,7 @@ impl BlockIndices {
 
         let mut lose_chains = BTreeSet::new();
 
-        for block_hash in finalized_blocks.into_iter() {
+        for block_hash in finalized_blocks {
             // there is a fork block.
             if let Some(fork_blocks) = self.fork_to_child.remove(&block_hash) {
                 lose_chains = fork_blocks.into_iter().fold(lose_chains, |mut fold, fork_child| {

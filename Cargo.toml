@@ -156,9 +156,13 @@ use_self = "warn"
 missing_const_for_fn = "warn"
 empty_line_after_doc_comments = "warn"
 iter_on_single_items = "warn"
+match_same_arms = "warn"
 doc_markdown = "warn"
 unnecessary_struct_initialization = "warn"
 string_lit_as_bytes = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+type_repetition_in_bounds = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -174,10 +178,9 @@ non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
-type_repetition_in_bounds = "allow"
 
 [workspace.package]
-version = "0.2.0-beta.7"
+version = "0.2.0-beta.8"
 edition = "2021"
 rust-version = "1.76"
 license = "MIT OR Apache-2.0"

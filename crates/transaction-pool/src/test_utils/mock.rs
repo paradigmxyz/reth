@@ -1504,7 +1504,7 @@ impl MockTransactionSet {
         assert!(gap_range.start >= 1, "gap_range must have a lower bound of at least one");
 
         let mut prev_nonce = 0;
-        for tx in self.transactions.iter_mut() {
+        for tx in &mut self.transactions {
             if rng.gen_bool(gap_pct as f64 / 100.0) {
                 prev_nonce += gap_range.start;
             } else {

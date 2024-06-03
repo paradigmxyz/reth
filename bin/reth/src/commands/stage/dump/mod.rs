@@ -103,7 +103,7 @@ impl Command {
 
         info!(target: "reth::cli", "Database opened");
 
-        let tool = DbTool::new(provider_factory, self.chain.clone())?;
+        let tool = DbTool::new(provider_factory)?;
 
         match &self.command {
             Stages::Execution(StageCommand { output_datadir, from, to, dry_run, .. }) => {

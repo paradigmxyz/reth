@@ -260,7 +260,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        for peer in this.peers.iter_mut() {
+        for peer in &mut this.peers {
             let _ = peer.poll_unpin(cx);
         }
         Poll::Pending

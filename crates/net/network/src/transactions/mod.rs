@@ -429,7 +429,7 @@ where
             // Iterate through the transactions to propagate and fill the hashes and full
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
-            for tx in to_propagate.iter() {
+            for tx in &to_propagate {
                 if peer.seen_transactions.insert(tx.hash()) {
                     hashes.push(tx);
 
@@ -469,7 +469,7 @@ where
                 } else {
                     let new_full_transactions = full_transactions.build();
 
-                    for tx in new_full_transactions.iter() {
+                    for tx in &new_full_transactions {
                         propagated
                             .0
                             .entry(tx.hash())
@@ -527,7 +527,7 @@ where
         }
 
         let new_full_transactions = full_transactions.build();
-        for tx in new_full_transactions.iter() {
+        for tx in &new_full_transactions {
             propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(peer_id));
         }
         // send full transactions
@@ -955,7 +955,7 @@ where
         // requests (based on received `NewPooledTransactionHashes`) then we already
         // recorded the hashes as seen by this peer in `Self::on_new_pooled_transaction_hashes`.
         let mut num_already_seen_by_peer = 0;
-        for tx in transactions.iter() {
+        for tx in &transactions {
             if source.is_broadcast() && !peer.seen_transactions.insert(*tx.hash()) {
                 num_already_seen_by_peer += 1;
             }
