@@ -1,6 +1,6 @@
 use crate::EventStream;
 use tokio::sync::broadcast::{self, Sender};
-use tracing::error;
+use tracing::trace;
 
 const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 2000;
 
@@ -30,7 +30,7 @@ impl<T: Clone + Send + Sync + 'static> EventSender<T> {
     /// Broadcasts an event to all listeners.
     pub fn notify(&self, event: T) {
         if self.sender.send(event).is_err() {
-            error!("channel closed");
+            trace!("no receivers for broadcast events");
         }
     }
 
