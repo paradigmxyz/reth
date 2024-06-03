@@ -14,22 +14,3 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives.workspace = true
-reth-ipc.workspace = true
-reth-rpc-layer.workspace = true
-
-# metrics
-reth-metrics = { workspace = true, features = ["common"] }
-metrics.workspace = true
-
-# rpc/net
-jsonrpsee = { workspace = true, features = ["server"] }
-tower-http.workspace = true
-tower.workspace = true
-hyper.workspace = true
-pin-project.workspace = true
-
-# misc
-strum = { workspace = true, features = ["derive"] }
-serde = { workspace = true, features = ["derive"] }
-thiserror.workspace = true
-tracing.workspace = true

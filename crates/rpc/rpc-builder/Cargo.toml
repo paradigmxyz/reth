@@ -32,6 +32,10 @@ tower = { workspace = true, features = ["full"] }
 hyper.workspace = true
 pin-project.workspace = true
 
+# metrics
+reth-metrics = { workspace = true, features = ["common"] }
+metrics.workspace = true
+
 # misc
 strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }

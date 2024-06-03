@@ -7815,6 +7815,7 @@ version = "0.2.0-beta.7"
 dependencies = [
  "hyper 0.14.28",
  "jsonrpsee",
+ "metrics",
  "pin-project",
  "reth-beacon-consensus",
  "reth-engine-primitives",
@@ -7822,6 +7823,7 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-ipc",
+ "reth-metrics",
  "reth-network-api",
  "reth-payload-builder",
  "reth-primitives",
@@ -7899,20 +7901,7 @@ dependencies = [
 name = "reth-rpc-server-types"
 version = "0.2.0-beta.7"
 dependencies = [
- "hyper 0.14.28",
- "jsonrpsee",
- "metrics",
- "pin-project",
- "reth-ipc",
- "reth-metrics",
  "reth-primitives",
- "reth-rpc-layer",
- "serde",
- "strum",
- "thiserror",
- "tower",
- "tower-http",
- "tracing",
 ]
 
 [[package]]
