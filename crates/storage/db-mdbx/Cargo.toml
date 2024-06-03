@@ -82,7 +82,6 @@ assert_matches.workspace = true
 default = ["mdbx"]
 test-utils = ["tempfile", "arbitrary"]
 mdbx = ["reth-libmdbx"]
-bench = []
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
@@ -90,18 +89,3 @@ arbitrary = [
     "dep:proptest-derive",
 ]
 optimism = []
-
-[[bench]]
-name = "hash_keys"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "criterion"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "iai"
-required-features = ["test-utils"]
-harness = false
