@@ -27,7 +27,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
         dry_run(
             ProviderFactory::new(
                 output_db,
-                db_tool.chain.clone(),
+                db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
             ),
             to,
@@ -128,7 +128,7 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.provider_rw()?;
 
-    let executor = block_executor!(db_tool.chain.clone());
+    let executor = block_executor!(db_tool.chain());
     let mut exec_stage = ExecutionStage::new_with_executor(executor);
 
     exec_stage.unwind(
