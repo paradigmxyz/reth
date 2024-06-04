@@ -332,6 +332,9 @@ pub struct AnnouncedTxTypesMetrics {
 
     /// Histogram for tracking frequency of EIP-4844 transaction type
     pub(crate) eip4844: Histogram,
+
+    /// Histogram for tracking frequency of EIP-7702 transaction type
+    pub(crate) eip7702: Histogram,
 }
 
 #[derive(Debug, Default)]
@@ -340,6 +343,7 @@ pub struct TxTypesCounter {
     pub(crate) eip2930: usize,
     pub(crate) eip1559: usize,
     pub(crate) eip4844: usize,
+    pub(crate) eip7702: usize,
 }
 
 impl TxTypesCounter {
@@ -358,6 +362,9 @@ impl TxTypesCounter {
             TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
+            TxType::Eip7702 => {
+                self.eip7702 += 1;
+            }
             _ => {}
         }
     }
@@ -371,5 +378,6 @@ impl AnnouncedTxTypesMetrics {
         self.eip2930.record(tx_types_counter.eip2930 as f64);
         self.eip1559.record(tx_types_counter.eip1559 as f64);
         self.eip4844.record(tx_types_counter.eip4844 as f64);
+        self.eip7702.record(tx_types_counter.eip7702 as f64);
     }
 }

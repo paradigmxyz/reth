@@ -331,6 +331,7 @@ impl FilterAnnouncement for EthMessageFilter {
     }
 }
 
+// TODO(eip7702): update tests as needed
 #[cfg(test)]
 mod test {
     use super::*;

@@ -144,6 +144,7 @@ impl Hardfork {
             Hardfork::Paris => Some(15537394),
             Hardfork::Shanghai => Some(17034870),
             Hardfork::Cancun => Some(19426587),
+            Hardfork::Prague => Some(0), // TODO(eip7702): fix me
 
             _ => None,
         }
@@ -356,6 +357,7 @@ impl Hardfork {
             Hardfork::Paris => Some(1663224162),
             Hardfork::Shanghai => Some(1681338455),
             Hardfork::Cancun => Some(1710338135),
+            Hardfork::Prague => Some(0), // TODO(eip7702): fix me
 
             // upcoming hardforks
             _ => None,

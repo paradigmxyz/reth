@@ -235,6 +235,7 @@ pub(crate) fn create_txn_env(
         chain_id,
         blob_versioned_hashes,
         max_fee_per_blob_gas,
+        authorization_list,
         ..
     } = request;
 
@@ -270,6 +271,22 @@ pub(crate) fn create_txn_env(
         // EIP-4844 fields
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
+        // EIP-7702 fields
+        authorization_list: authorization_list
+            .map(|list| {
+                list.0
+                    .into_iter()
+                    .map(|a| revm_primitives::Authorization {
+                        chain_id: a.chain_id,
+                        address: a.address,
+                        nonce: a.nonce,
+                        y_parity: a.y_parity,
+                        r: a.r,
+                        s: a.s,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
         #[cfg(feature = "optimism")]
         optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         // TODO(EOF)

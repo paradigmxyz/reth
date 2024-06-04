@@ -402,6 +402,10 @@ impl Decodable for ReceiptWithBloom {
                         buf.advance(1);
                         Self::decode_receipt(buf, TxType::Eip4844)
                     }
+                    0x04 => {
+                        buf.advance(1);
+                        Self::decode_receipt(buf, TxType::Eip7702)
+                    }
                     #[cfg(feature = "optimism")]
                     0x7E => {
                         buf.advance(1);
@@ -533,6 +537,9 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
             }
             TxType::Eip4844 => {
                 out.put_u8(0x03);
+            }
+            TxType::Eip7702 => {
+                out.put_u8(0x04);
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => {

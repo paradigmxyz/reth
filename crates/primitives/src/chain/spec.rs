@@ -65,6 +65,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
+            (Hardfork::Prague, ForkCondition::Timestamp(0)), // TODO(eip7702): fix me
         ]),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
@@ -239,6 +240,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ),
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
             (Hardfork::Cancun, ForkCondition::Timestamp(0)),
+            (Hardfork::Prague, ForkCondition::Timestamp(0)),
             #[cfg(feature = "optimism")]
             (Hardfork::Regolith, ForkCondition::Timestamp(0)),
             #[cfg(feature = "optimism")]
@@ -1233,6 +1235,13 @@ impl ChainSpecBuilder {
     pub fn cancun_activated(mut self) -> Self {
         self = self.shanghai_activated();
         self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Prague at genesis.
+    pub fn prague_activated(mut self) -> Self {
+        self = self.cancun_activated();
+        self.hardforks.insert(Hardfork::Prague, ForkCondition::Timestamp(0));
         self
     }
 
