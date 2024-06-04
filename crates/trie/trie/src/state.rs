@@ -213,7 +213,8 @@ impl HashedPostState {
     /// # Example
     ///
     /// ```
-    /// use reth_db::{database::Database, test_utils::create_test_rw_db};
+    /// use reth_db::test_utils::create_test_rw_db;
+    /// use reth_db_api::database::Database;
     /// use reth_primitives::{Account, U256};
     /// use reth_trie::HashedPostState;
     ///
