@@ -528,12 +528,12 @@ impl EthTransactionValidatorBuilder {
 
     /// Disables the support for EIP-4844 transactions.
     pub const fn no_eip4844(self) -> Self {
-        self.set_eip1559(false)
+        self.set_eip4844(false)
     }
 
     /// Set the support for EIP-4844 transactions.
-    pub const fn set_eip4844(mut self, eip1559: bool) -> Self {
-        self.eip1559 = eip1559;
+    pub const fn set_eip4844(mut self, eip4844: bool) -> Self {
+        self.eip4844 = eip4844;
         self
     }
 
