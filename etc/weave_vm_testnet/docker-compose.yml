@@ -82,13 +82,13 @@ services:
     depends_on:
       - reth
     ports:
-      - 9091:9091 # metrics
+      - "9091:9091" # metrics
     volumes:
       - ./../ethereum-metrics-exporter/config.yaml:/root/config.yaml
     command:
       - --config=/root/config.yaml
       - --metrics-port=9091
-      -
+
   # Consensus client part
 
   # Runs a Prysm beacon chain from a specified genesis state
