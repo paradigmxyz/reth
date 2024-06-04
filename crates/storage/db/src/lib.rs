@@ -85,10 +85,11 @@ pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, Data
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::{mdbx::DatabaseArguments, models::client_version::ClientVersion};
+    use crate::mdbx::DatabaseArguments;
     use reth_db_api::{
         database::Database,
         database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+        models::ClientVersion,
     };
     use reth_fs_util;
     use reth_libmdbx::MaxReadTransactionDuration;

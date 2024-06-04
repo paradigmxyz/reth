@@ -3,7 +3,6 @@
 use crate::{
     lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
-    models::client_version::ClientVersion,
     tables::{self, TableType, Tables},
     utils::default_page_size,
     DatabaseError,
@@ -14,6 +13,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    models::client_version::ClientVersion,
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{
@@ -461,7 +461,6 @@ impl Deref for DatabaseEnv {
 mod tests {
     use super::*;
     use crate::{
-        models::{AccountBeforeTx, ShardedKey},
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
@@ -470,6 +469,7 @@ mod tests {
     };
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        models::{AccountBeforeTx, ShardedKey},
         table::{Encode, Table},
     };
     use reth_libmdbx::Error;

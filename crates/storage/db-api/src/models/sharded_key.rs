@@ -1,11 +1,11 @@
 //! Sharded key
-
-use std::hash::Hash;
-
-use crate::DatabaseError;
-use reth_db_api::table::{Decode, Encode};
+use crate::{
+    table::{Decode, Encode},
+    DatabaseError,
+};
 use reth_primitives::BlockNumber;
 use serde::{Deserialize, Serialize};
+use std::hash::Hash;
 
 /// Number of indices in one shard.
 pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;

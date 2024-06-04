@@ -16,24 +16,22 @@
 #![allow(unknown_lints, non_local_definitions)]
 
 pub mod codecs;
-pub mod models;
 
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
 pub(crate) mod utils;
 
-use crate::tables::{
-    codecs::CompactU256,
+use reth_db_api::{
     models::{
         accounts::{AccountBeforeTx, BlockNumberAddress},
         blocks::{HeaderHash, StoredBlockOmmers},
         client_version::ClientVersion,
         storage_sharded_key::StorageShardedKey,
-        ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
+        CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
+    table::{DupSort, Table},
 };
-use reth_db_api::table::{DupSort, Table};
 use reth_primitives::{
     stage::StageCheckpoint,
     trie::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey},

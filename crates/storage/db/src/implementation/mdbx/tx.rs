@@ -393,11 +393,8 @@ impl DbTxMut for Tx<RW> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        mdbx::DatabaseArguments, models::client_version::ClientVersion, tables, DatabaseEnv,
-        DatabaseEnvKind,
-    };
-    use reth_db_api::{database::Database, transaction::DbTx};
+    use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
+    use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};

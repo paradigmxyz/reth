@@ -19,7 +19,7 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 #[derive(Debug)]
 pub(crate) struct DatabaseEnvMetrics {
     /// Caches `OperationMetrics` handles for each table and operation tuple.
-    operations: FxHashMap<(Tables, Operation), OperationMetrics>,
+    operations: FxHashMap<(&'static str, Operation), OperationMetrics>,
     /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -103,7 +103,7 @@ impl DatabaseEnvMetrics {
     /// Panics if a metric recorder is not found for the given table and operation.
     pub(crate) fn record_operation<R>(
         &self,
-        table: Tables,
+        table: &'static str,
         operation: Operation,
         value_size: Option<usize>,
         f: impl FnOnce() -> R,

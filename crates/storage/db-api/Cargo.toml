@@ -13,15 +13,20 @@ workspace = true
 
 [dependencies]
 # reth
+reth-codecs.workspace = true
+reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 
 # codecs
+modular-bitfield.workspace = true
+parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 serde = { workspace = true, default-features = false }
 
 # metrics
 metrics.workspace = true
 
 # misc
+derive_more.workspace = true
 bytes.workspace = true
 tempfile = { workspace = true, optional = true }
 

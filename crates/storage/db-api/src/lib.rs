@@ -79,3 +79,8 @@ pub mod table;
 pub mod transaction;
 /// Re-exports
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
+
+pub mod models;
+pub mod scale;
+
+mod utils;
