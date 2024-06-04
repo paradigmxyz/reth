@@ -24,7 +24,7 @@ pub struct EnvironmentArgs {
     pub datadir: DatadirArgs,
 
     /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
     /// The chain this node is running.
@@ -45,8 +45,7 @@ pub struct EnvironmentArgs {
 }
 
 impl EnvironmentArgs {
-    /// Initializes environment according to [`AccessRights`] and returns a tuple of [Config] &
-    /// [`ProviderFactory`].
+    /// Initializes environment according to [`AccessRights`] and returns an instance of [`Environment`].
     pub fn init(&self, access: AccessRights) -> eyre::Result<Environment> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
