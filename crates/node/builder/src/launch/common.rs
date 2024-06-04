@@ -373,7 +373,6 @@ where
                     factory.clone(),
                     StaticFileProducer::new(
                         factory.clone(),
-                        factory.static_file_provider(),
                         self.prune_modes().unwrap_or_default(),
                     ),
                 );
@@ -432,7 +431,6 @@ where
     pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
         StaticFileProducer::new(
             self.provider_factory().clone(),
-            self.static_file_provider(),
             self.prune_modes().unwrap_or_default(),
         )
     }
