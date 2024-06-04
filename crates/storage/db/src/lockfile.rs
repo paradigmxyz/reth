@@ -108,4 +108,16 @@ mod tests {
         reth_fs_util::write(&lock_file, "1").unwrap();
         assert_eq!(Err(StorageLockError::Taken(1)), StorageLock::try_acquire(temp_dir.path()));
     }
+
+    #[test]
+    fn test_drop_lock() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let lock_file = temp_dir.path().join(LOCKFILE_NAME);
+
+        let lock = StorageLock::try_acquire(temp_dir.path()).unwrap();
+
+        drop(lock);
+
+        assert!(!lock_file.exists());
+    }
 }
