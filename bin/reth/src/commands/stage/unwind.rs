@@ -158,7 +158,7 @@ impl Command {
             )
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+                StaticFileProducer::new(provider_factory, PruneModes::default()),
             );
         Ok(pipeline)
     }

@@ -20,10 +20,7 @@ use reth_downloaders::file_client::{
 use reth_node_core::args::DatadirArgs;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, PruneModes};
-use reth_provider::{
-    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory,
-};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StageCheckpointReader};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, error, info};

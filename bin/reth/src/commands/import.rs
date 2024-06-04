@@ -30,7 +30,6 @@ use reth_primitives::{stage::StageId, ChainSpec, PruneModes, B256};
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, ChainSpecProvider, HeaderProvider,
     HeaderSyncMode, ProviderError, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory,
 };
 use reth_stages::{prelude::*, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;

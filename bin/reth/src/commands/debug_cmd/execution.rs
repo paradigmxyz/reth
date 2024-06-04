@@ -31,7 +31,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockExecutionWriter, HeaderSyncMode, ProviderFactory,
-    StageCheckpointReader, StaticFileProviderFactory,
+    StageCheckpointReader,
 };
 use reth_stages::{
     sets::DefaultStages,

@@ -24,7 +24,7 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    BundleStateWithReceipts, HeaderSyncMode, StaticFileProviderFactory,
+    BundleStateWithReceipts, HeaderSyncMode,
 };
 use reth_prune::Pruner;
 use reth_rpc_types::engine::{

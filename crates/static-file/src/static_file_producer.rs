@@ -232,8 +232,7 @@ mod tests {
         static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
     };
     use reth_provider::{
-        providers::{StaticFileProvider, StaticFileWriter},
-        ProviderError, ProviderFactory, StaticFileProviderFactory,
+        providers::StaticFileWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::{
@@ -286,7 +285,7 @@ mod tests {
         let (provider_factory, _temp_static_files_dir) = setup();
 
         let static_file_producer =
-            StaticFileProducerInner::new(provider_factory, PruneModes::default());
+            StaticFileProducerInner::new(provider_factory.clone(), PruneModes::default());
 
         let targets = static_file_producer
             .get_static_file_targets(HighestStaticFiles {
@@ -305,7 +304,7 @@ mod tests {
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
-            static_file_provider.get_highest_static_files(),
+            provider_factory.static_file_provider().get_highest_static_files(),
             HighestStaticFiles { headers: Some(1), receipts: Some(1), transactions: Some(1) }
         );
 
@@ -326,7 +325,7 @@ mod tests {
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
-            static_file_provider.get_highest_static_files(),
+            provider_factory.static_file_provider().get_highest_static_files(),
             HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
 
@@ -350,7 +349,7 @@ mod tests {
             Err(ProviderError::BlockBodyIndicesNotFound(4))
         );
         assert_eq!(
-            static_file_provider.get_highest_static_files(),
+            provider_factory.static_file_provider().get_highest_static_files(),
             HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
         );
     }
