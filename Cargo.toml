@@ -157,8 +157,21 @@ use_self = "warn"
 missing_const_for_fn = "warn"
 empty_line_after_doc_comments = "warn"
 iter_on_single_items = "warn"
+match_same_arms = "warn"
+doc_markdown = "warn"
 unnecessary_struct_initialization = "warn"
 string_lit_as_bytes = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+type_repetition_in_bounds = "warn"
+flat_map_option = "warn"
+manual_assert = "warn"
+manual_string_new = "warn"
+naive_bytecount = "warn"
+needless_bitwise_bool = "warn"
+zero_sized_map_values = "warn"
+single_char_pattern = "warn"
+needless_continue = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -174,10 +187,9 @@ non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
-type_repetition_in_bounds = "allow"
 
 [workspace.package]
-version = "0.2.0-beta.7"
+version = "0.2.0-beta.8"
 edition = "2021"
 rust-version = "1.76"
 license = "MIT OR Apache-2.0"
@@ -286,6 +298,7 @@ reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
+reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
@@ -303,14 +316,8 @@ reth-trie = { path = "crates/trie/trie" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "9.0.0", features = [
-    "std",
-    "secp256k1",
-    "blst",
-], default-features = false }
-revm-primitives = { version = "4.0.0", features = [
-    "std",
-], default-features = false }
+revm = { version = "9.0.0", features = [ "std", "secp256k1", "blst", ], default-features = false }
+revm-primitives = { version = "4.0.0", features = [ "std", ], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "2b6fff1" }
 
 # eth

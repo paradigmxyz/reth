@@ -48,7 +48,7 @@ pub use common::LaunchContext;
 ///
 /// This is essentially the launch logic for a node.
 ///
-/// See also [DefaultNodeLauncher] and [NodeBuilderWithComponents::launch_with]
+/// See also [`DefaultNodeLauncher`] and [`NodeBuilderWithComponents::launch_with`]
 pub trait LaunchNode<Target> {
     /// The node type that is created.
     type Node;

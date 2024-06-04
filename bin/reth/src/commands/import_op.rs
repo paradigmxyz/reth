@@ -7,7 +7,6 @@ use crate::{
         DatabaseArgs,
     },
     commands::import::{build_import_pipeline, load_config},
-    dirs::{DataDirPath, MaybePlatformPath},
     version::SHORT_VERSION,
 };
 use clap::Parser;
@@ -18,12 +17,10 @@ use reth_db_common::init::init_genesis;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
+use reth_node_core::args::DatadirArgs;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, PruneModes};
-use reth_provider::{
-    providers::StaticFileProvider, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory,
-};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StageCheckpointReader};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, error, info};
@@ -35,19 +32,12 @@ pub struct ImportOpCommand {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
 
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     #[command(flatten)]
     db: DatabaseArgs,
@@ -77,7 +67,7 @@ impl ImportOpCommand {
         let chain_spec = genesis_value_parser(SUPPORTED_CHAINS[0])?;
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(chain_spec.chain);
+        let data_dir = self.datadir.resolve_datadir(chain_spec.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = load_config(config_path.clone())?;
@@ -141,11 +131,7 @@ impl ImportOpCommand {
                 provider_factory.clone(),
                 &consensus,
                 Arc::new(file_client),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
                 true,
             )
             .await?;

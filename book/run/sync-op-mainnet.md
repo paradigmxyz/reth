@@ -52,3 +52,11 @@ Import of >4 million OP mainnet accounts at Bedrock, completes in 10 minutes.
 ```bash
 ./op-reth init-state --chain optimism <state-dump>
 ```
+
+## Sync from Bedrock to tip
+
+Running the node with `--debug.tip <block-hash>`syncs the node without help from CL until a fixed tip. The
+block hash can be taken from the latest block on <https://optimistic.etherscan.io>.
+
+Use `op-node` to track the tip. Start `op-node` with `--syncmode=execution-layer`. If `op-node`'s RPC
+connection to L1 is over localhost, `--l1.trustrpc` can be set to improve performance.

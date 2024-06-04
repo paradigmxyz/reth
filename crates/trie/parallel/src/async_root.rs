@@ -31,10 +31,10 @@ use crate::metrics::ParallelStateRootMetrics;
 /// nodes in the process. Upon encountering a leaf node, it will poll the storage root
 /// task for the corresponding hashed address.
 ///
-/// Internally, the calculator uses [ConsistentDbView] since
+/// Internally, the calculator uses [`ConsistentDbView`] since
 /// it needs to rely on database state saying the same until
 /// the last transaction is open.
-/// See docs of using [ConsistentDbView] for caveats.
+/// See docs of using [`ConsistentDbView`] for caveats.
 ///
 /// For sync usage, take a look at `ParallelStateRoot`.
 #[derive(Debug)]
@@ -294,7 +294,7 @@ mod tests {
         );
 
         let mut hashed_state = HashedPostState::default();
-        for (address, (account, storage)) in state.iter_mut() {
+        for (address, (account, storage)) in &mut state {
             let hashed_address = keccak256(address);
 
             let should_update_account = rng.gen_bool(0.5);

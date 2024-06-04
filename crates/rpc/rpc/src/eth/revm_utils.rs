@@ -113,14 +113,14 @@ impl FillableTransaction for TransactionSigned {
     }
 }
 
-/// Returns the addresses of the precompiles corresponding to the SpecId.
+/// Returns the addresses of the precompiles corresponding to the `SpecId`.
 #[inline]
 pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
     let spec = PrecompileSpecId::from_spec_id(spec_id);
     Precompiles::new(spec).addresses().copied().map(Address::from)
 }
 
-/// Prepares the [EnvWithHandlerCfg] for execution.
+/// Prepares the [`EnvWithHandlerCfg`] for execution.
 ///
 /// Does not commit any changes to the underlying database.
 ///
@@ -195,7 +195,7 @@ where
     Ok(env)
 }
 
-/// Creates a new [EnvWithHandlerCfg] to be used for executing the [TransactionRequest] in
+/// Creates a new [`EnvWithHandlerCfg`] to be used for executing the [`TransactionRequest`] in
 /// `eth_call`.
 ///
 /// Note: this does _not_ access the Database to check the sender.
@@ -208,10 +208,10 @@ pub(crate) fn build_call_evm_env(
     Ok(EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx))
 }
 
-/// Configures a new [TxEnv]  for the [TransactionRequest]
+/// Configures a new [`TxEnv`]  for the [`TransactionRequest`]
 ///
-/// All [TxEnv] fields are derived from the given [TransactionRequest], if fields are `None`, they
-/// fall back to the [BlockEnv]'s settings.
+/// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are `None`,
+/// they fall back to the [`BlockEnv`]'s settings.
 pub(crate) fn create_txn_env(
     block_env: &BlockEnv,
     request: TransactionRequest,
@@ -277,7 +277,7 @@ pub(crate) fn create_txn_env(
     Ok(env)
 }
 
-/// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
+/// Caps the configured [`TxEnv`] `gas_limit` with the allowance of the caller.
 pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
     db: &mut DB,
     env: &mut TxEnv,
@@ -320,7 +320,7 @@ where
         .unwrap_or_default())
 }
 
-/// Helper type for representing the fees of a [TransactionRequest]
+/// Helper type for representing the fees of a [`TransactionRequest`]
 pub(crate) struct CallFees {
     /// EIP-1559 priority fee
     max_priority_fee_per_gas: Option<U256>,
@@ -338,7 +338,7 @@ pub(crate) struct CallFees {
 // === impl CallFees ===
 
 impl CallFees {
-    /// Ensures the fields of a [TransactionRequest] are not conflicting.
+    /// Ensures the fields of a [`TransactionRequest`] are not conflicting.
     ///
     /// # EIP-4844 transactions
     ///
@@ -346,8 +346,8 @@ impl CallFees {
     /// If the `maxFeePerBlobGas` or `blobVersionedHashes` are set we treat it as an EIP-4844
     /// transaction.
     ///
-    /// Note: Due to the `Default` impl of [BlockEnv] (Some(0)) this assumes the `block_blob_fee` is
-    /// always `Some`
+    /// Note: Due to the `Default` impl of [`BlockEnv`] (Some(0)) this assumes the `block_blob_fee`
+    /// is always `Some`
     fn ensure_fees(
         call_gas_price: Option<U256>,
         call_max_fee: Option<U256>,
@@ -483,7 +483,7 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
     }
 }
 
-/// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
+/// Applies the given state overrides (a set of [`AccountOverride`]) to the [`CacheDB`].
 pub(crate) fn apply_state_overrides<DB>(
     overrides: StateOverride,
     db: &mut CacheDB<DB>,
@@ -498,7 +498,7 @@ where
     Ok(())
 }
 
-/// Applies a single [AccountOverride] to the [CacheDB].
+/// Applies a single [`AccountOverride`] to the [`CacheDB`].
 fn apply_account_override<DB>(
     account: Address,
     account_override: AccountOverride,

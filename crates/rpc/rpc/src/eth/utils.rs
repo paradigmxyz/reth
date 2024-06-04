@@ -3,9 +3,9 @@
 use crate::eth::error::{EthApiError, EthResult};
 use reth_primitives::{Bytes, PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 
-/// Recovers a [PooledTransactionsElementEcRecovered] from an enveloped encoded byte stream.
+/// Recovers a [`PooledTransactionsElementEcRecovered`] from an enveloped encoded byte stream.
 ///
-/// See [PooledTransactionsElement::decode_enveloped]
+/// See [`PooledTransactionsElement::decode_enveloped`]
 pub(crate) fn recover_raw_transaction(
     data: Bytes,
 ) -> EthResult<PooledTransactionsElementEcRecovered> {

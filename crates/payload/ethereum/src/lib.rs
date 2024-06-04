@@ -47,7 +47,7 @@ pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
 }
 
 impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
-    /// EthereumPayloadBuilder constructor.
+    /// `EthereumPayloadBuilder` constructor.
     pub const fn new(evm_config: EvmConfig) -> Self {
         Self { evm_config }
     }

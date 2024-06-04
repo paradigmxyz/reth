@@ -42,7 +42,7 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
-    /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
+    /// Thrown if `engine_getPayloadBodiesByRangeV1` contains an invalid range
     #[error("invalid start ({start}) or count ({count})")]
     InvalidBodiesRange {
         /// Start of the range
@@ -93,7 +93,7 @@ pub enum EngineApiError {
 }
 
 impl EngineApiError {
-    /// Crates a new [EngineApiError::Other] variant.
+    /// Crates a new [`EngineApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }

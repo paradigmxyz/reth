@@ -173,7 +173,7 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 
 /// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
 /// represented as MPT.
-/// See [state_root_unsorted] for more info.
+/// See [`state_root_unsorted`] for more info.
 pub fn state_root_ref_unhashed<'a, A: Into<TrieAccount> + Clone + 'a>(
     state: impl IntoIterator<Item = (&'a Address, &'a A)>,
 ) -> B256 {
@@ -184,7 +184,7 @@ pub fn state_root_ref_unhashed<'a, A: Into<TrieAccount> + Clone + 'a>(
 
 /// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
 /// represented as MPT.
-/// See [state_root_unsorted] for more info.
+/// See [`state_root_unsorted`] for more info.
 pub fn state_root_unhashed<A: Into<TrieAccount>>(
     state: impl IntoIterator<Item = (Address, A)>,
 ) -> B256 {
@@ -192,7 +192,7 @@ pub fn state_root_unhashed<A: Into<TrieAccount>>(
 }
 
 /// Sorts the hashed account keys and calculates the root hash of the state represented as MPT.
-/// See [state_root] for more info.
+/// See [`state_root`] for more info.
 pub fn state_root_unsorted<A: Into<TrieAccount>>(
     state: impl IntoIterator<Item = (B256, A)>,
 ) -> B256 {
@@ -217,13 +217,13 @@ pub fn state_root<A: Into<TrieAccount>>(state: impl IntoIterator<Item = (B256, A
 }
 
 /// Hashes storage keys, sorts them and them calculates the root hash of the storage trie.
-/// See [storage_root_unsorted] for more info.
+/// See [`storage_root_unsorted`] for more info.
 pub fn storage_root_unhashed(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
     storage_root_unsorted(storage.into_iter().map(|(slot, value)| (keccak256(slot), value)))
 }
 
 /// Sorts and calculates the root hash of account storage trie.
-/// See [storage_root] for more info.
+/// See [`storage_root`] for more info.
 pub fn storage_root_unsorted(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
     storage_root(storage.into_iter().sorted_by_key(|(key, _)| *key))
 }

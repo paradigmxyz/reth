@@ -167,7 +167,7 @@ impl Stream for MockDiscovery {
                             }))
                         }
                     }
-                    Message::Pong(_) => {}
+                    Message::Pong(_) | Message::Neighbours(_) => {}
                     Message::FindNode(msg) => {
                         if let Some(nodes) = this.pending_neighbours.remove(&msg.id) {
                             let msg = Message::Neighbours(Neighbours {
@@ -181,7 +181,6 @@ impl Stream for MockDiscovery {
                             }))
                         }
                     }
-                    Message::Neighbours(_) => {}
                     Message::EnrRequest(_) | Message::EnrResponse(_) => todo!(),
                 },
             }

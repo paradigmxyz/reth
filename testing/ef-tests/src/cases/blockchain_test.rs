@@ -148,7 +148,7 @@ impl Case for BlockchainTestCase {
                 match (&case.post_state, &case.post_state_hash) {
                     (Some(state), None) => {
                         // Validate accounts in the state against the provider's database.
-                        for (&address, account) in state.iter() {
+                        for (&address, account) in state {
                             account.assert_db(address, provider.tx_ref())?;
                         }
                     }

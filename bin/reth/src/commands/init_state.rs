@@ -1,16 +1,14 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+use crate::args::{
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs,
 };
 use clap::Parser;
 use reth_config::config::EtlConfig;
 use reth_db::{database::Database, init_db};
 use reth_db_common::init::init_from_state_dump;
+use reth_node_core::args::DatadirArgs;
 use reth_primitives::{ChainSpec, B256};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 
@@ -20,16 +18,6 @@ use tracing::info;
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct InitStateCommand {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -41,6 +29,9 @@ pub struct InitStateCommand {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
 
     /// JSONL file with state dump.
     ///
@@ -72,7 +63,7 @@ impl InitStateCommand {
         info!(target: "reth::cli", "Reth init-state starting");
 
         // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(&db_path, self.db.database_args())?);

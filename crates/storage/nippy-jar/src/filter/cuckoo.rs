@@ -11,7 +11,7 @@ pub struct Cuckoo {
     /// This is necessary because the inner implementation will fail on adding an element past capacity, **but it will still add it and remove other**: [source](https://github.com/axiomhq/rust-cuckoofilter/tree/624da891bed1dd5d002c8fa92ce0dcd301975561#notes--todos)
     remaining: usize,
 
-    /// CuckooFilter.
+    /// `CuckooFilter`.
     filter: CuckooFilter<DefaultHasher>, // TODO does it need an actual hasher?
 }
 
@@ -28,7 +28,7 @@ impl Cuckoo {
 impl InclusionFilter for Cuckoo {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         if self.remaining == 0 {
-            return Err(NippyJarError::FilterMaxCapacity)
+            return Err(NippyJarError::FilterMaxCapacity);
         }
 
         self.remaining -= 1;

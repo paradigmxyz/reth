@@ -7,30 +7,18 @@ $ reth db --help
 Usage: reth db [OPTIONS] <COMMAND>
 
 Commands:
-  stats                Lists all the tables, their entry count and their size
-  list                 Lists the contents of a table
-  checksum             Calculates the content checksum of a table
-  diff                 Create a diff between two database tables or two entire databases
-  get                  Gets the content of a table for the given key
-  drop                 Deletes all database entries
-  clear                Deletes all table entries
-  create-static-files  Creates static files from database tables
-  version              Lists current and local database versions
-  path                 Returns the full database path
-  help                 Print this message or the help of the given subcommand(s)
+  stats     Lists all the tables, their entry count and their size
+  list      Lists the contents of a table
+  checksum  Calculates the content checksum of a table
+  diff      Create a diff between two database tables or two entire databases
+  get       Gets the content of a table for the given key
+  drop      Deletes all database entries
+  clear     Deletes all table entries
+  version   Lists current and local database versions
+  path      Returns the full database path
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -47,12 +35,27 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
 
           [default: 1]
 
   -h, --help
           Print help (see a summary with '-h')
+
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
 
 Database:
       --db.log-level <LOG_LEVEL>

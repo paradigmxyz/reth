@@ -56,7 +56,7 @@ type RefRow<'a> = Vec<&'a [u8]>;
 /// Alias type for a column value wrapped in `Result`.
 pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
 
-/// A trait for the user-defined header of [NippyJar].
+/// A trait for the user-defined header of [`NippyJar`].
 pub trait NippyJarHeader:
     Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static
 {
@@ -87,15 +87,15 @@ impl<T> NippyJarHeader for T where
 /// may also produce false positives but not false negatives, necessitating subsequent data
 /// verification.
 ///
-/// Note: that the key (eg. BlockHash) passed to a filter and phf does not need to actually be
+/// Note: that the key (eg. `BlockHash`) passed to a filter and phf does not need to actually be
 /// stored.
 ///
 /// Ultimately, the `freeze` function yields two files: a data file containing both the data and its
-/// configuration, and an index file that houses the offsets and offsets_index.
+/// configuration, and an index file that houses the offsets and `offsets_index`.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar<H = ()> {
-    /// The version of the NippyJar format.
+    /// The version of the `NippyJar` format.
     version: usize,
     /// User-defined header data.
     /// Default: zero-sized unit type: no header data
@@ -462,7 +462,7 @@ impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
 
 /// Manages the reading of static file data using memory-mapped files.
 ///
-/// Holds file and mmap descriptors of the data and offsets files of a static_file.
+/// Holds file and mmap descriptors of the data and offsets files of a `static_file`.
 #[derive(Debug)]
 pub struct DataReader {
     /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
@@ -844,7 +844,7 @@ mod tests {
         }
     }
 
-    /// Tests NippyJar with everything enabled: compression, filter, offset list and offset index.
+    /// Tests `NippyJar` with everything enabled: compression, filter, offset list and offset index.
     #[test]
     fn test_full_nippy_jar() {
         let (col1, col2) = test_data(None);

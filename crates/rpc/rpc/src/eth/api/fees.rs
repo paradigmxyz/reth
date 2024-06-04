@@ -50,7 +50,7 @@ where
 
     /// Reports the fee history, for the given amount of blocks, up until the given newest block.
     ///
-    /// If `reward_percentiles` are provided the [FeeHistory] will include the _approximated_
+    /// If `reward_percentiles` are provided the [`FeeHistory`] will include the _approximated_
     /// rewards for the requested range.
     pub(crate) async fn fee_history(
         &self,
@@ -131,7 +131,7 @@ where
 
                 if let Some(percentiles) = &reward_percentiles {
                     let mut block_rewards = Vec::with_capacity(percentiles.len());
-                    for &percentile in percentiles.iter() {
+                    for &percentile in percentiles {
                         block_rewards.push(self.approximate_percentile(entry, percentile));
                     }
                     rewards.push(block_rewards);
