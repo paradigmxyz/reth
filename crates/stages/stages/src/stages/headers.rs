@@ -2,12 +2,11 @@ use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_consensus::Consensus;
-use reth_db::{
+use reth_db::{tables, RawKey, RawTable, RawValue};
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    tables,
     transaction::DbTxMut,
-    RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};

@@ -1,5 +1,5 @@
 use crate::DatabaseProviderRO;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_storage_errors::provider::ProviderResult;
 
 /// Database provider factory.

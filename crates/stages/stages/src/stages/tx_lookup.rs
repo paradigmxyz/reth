@@ -1,11 +1,10 @@
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{
+use reth_db::{tables, RawKey, RawValue};
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawValue,
 };
 use reth_etl::Collector;
 use reth_primitives::{

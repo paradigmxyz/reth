@@ -1,8 +1,6 @@
 use crate::segments::{dataset_for_compression, prepare_jar, Segment};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::create_static_file_T1, tables,
-    transaction::DbTx,
-};
+use reth_db::{static_file::create_static_file_T1, tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_primitives::{
     static_file::{SegmentConfig, SegmentHeader},
     BlockNumber, StaticFileSegment, TxNumber,

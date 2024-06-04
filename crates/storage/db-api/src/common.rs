@@ -1,4 +1,4 @@
-use crate::{abstraction::table::*, DatabaseError};
+use crate::{table::*, DatabaseError};
 
 /// A key-value pair for table `T`.
 pub type KeyValue<T> = (<T as Table>::Key, <T as Table>::Value);
@@ -17,23 +17,3 @@ pub type IterPairResult<T> = Option<Result<KeyValue<T>, DatabaseError>>;
 
 /// A value only result for table `T`.
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, DatabaseError>;
-
-// Sealed trait helper to prevent misuse of the Database API.
-mod sealed {
-    use crate::{database::Database, mock::DatabaseMock};
-    use std::sync::Arc;
-
-    /// Sealed trait to limit the implementers of the Database trait.
-    pub trait Sealed: Sized {}
-
-    impl<DB: Database> Sealed for &DB {}
-    impl<DB: Database> Sealed for Arc<DB> {}
-
-    #[cfg(feature = "mdbx")]
-    impl Sealed for crate::DatabaseEnv {}
-    impl Sealed for DatabaseMock {}
-
-    #[cfg(any(test, feature = "test-utils"))]
-    impl<DB: Database> Sealed for crate::test_utils::TempDatabase<DB> {}
-}
-pub(crate) use sealed::Sealed;

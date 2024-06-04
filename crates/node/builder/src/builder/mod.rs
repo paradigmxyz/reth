@@ -10,10 +10,12 @@ use crate::{
 };
 use futures::Future;
 use reth_db::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
     test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
+};
+use reth_db_api::{
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_exex::ExExContext;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};

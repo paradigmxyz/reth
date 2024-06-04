@@ -11,7 +11,7 @@ use reth_codecs::{derive_arbitrary, Compact};
 use reth_primitives::{Account, Address, BlockNumber, Buf, StorageKey};
 use serde::{Deserialize, Serialize};
 
-/// Account as it is saved inside [`AccountChangeSets`][crate::tables::AccountChangeSets].
+/// Account as it is saved in the database.
 ///
 /// [`Address`] is the subkey.
 #[derive_arbitrary(compact)]
@@ -57,8 +57,7 @@ impl Compact for AccountBeforeTx {
     }
 }
 
-/// [`BlockNumber`] concatenated with [`Address`]. Used as the key for
-/// [`StorageChangeSets`](crate::tables::StorageChangeSets)
+/// [`BlockNumber`] concatenated with [`Address`].
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
 #[derive(

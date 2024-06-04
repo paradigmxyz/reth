@@ -6,11 +6,11 @@ use std::{
 use futures_util::TryStreamExt;
 use tracing::*;
 
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
-    tables,
     transaction::DbTxMut,
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
@@ -614,24 +614,19 @@ mod tests {
     }
 
     mod test_utils {
-        use std::{
-            collections::{HashMap, VecDeque},
-            ops::RangeInclusive,
-            pin::Pin,
-            sync::Arc,
-            task::{Context, Poll},
+        use crate::{
+            stages::bodies::BodyStage,
+            test_utils::{
+                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
+                UnwindStageTestRunner,
+            },
         };
-
         use futures_util::Stream;
-
-        use reth_db::{
+        use reth_db::{static_file::HeaderMask, tables, test_utils::TempDatabase, DatabaseEnv};
+        use reth_db_api::{
             cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
-            static_file::HeaderMask,
-            tables,
-            test_utils::TempDatabase,
             transaction::{DbTx, DbTxMut},
-            DatabaseEnv,
         };
         use reth_network_p2p::{
             bodies::{
@@ -653,13 +648,12 @@ mod tests {
             generators,
             generators::{random_block_range, random_signed_tx},
         };
-
-        use crate::{
-            stages::bodies::BodyStage,
-            test_utils::{
-                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
-                UnwindStageTestRunner,
-            },
+        use std::{
+            collections::{HashMap, VecDeque},
+            ops::RangeInclusive,
+            pin::Pin,
+            sync::Arc,
+            task::{Context, Poll},
         };
 
         /// The block hash of the genesis block.

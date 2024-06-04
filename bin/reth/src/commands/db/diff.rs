@@ -4,10 +4,8 @@ use crate::{
     utils::DbTool,
 };
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, tables_to_generic,
-    transaction::DbTx, DatabaseEnv, Tables,
-};
+use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -95,7 +93,7 @@ where
     T::Key: Hash,
     T::Value: PartialEq,
 {
-    let table = T::TABLE;
+    let table = T::NAME;
 
     info!("Analyzing table {table}...");
     let result = find_diffs_advanced::<T>(&primary_tx, &secondary_tx)?;

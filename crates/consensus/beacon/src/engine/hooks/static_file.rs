@@ -5,7 +5,7 @@ use crate::{
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_errors::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};

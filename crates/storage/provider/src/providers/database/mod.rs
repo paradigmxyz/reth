@@ -8,10 +8,8 @@ use crate::{
     StateProviderBox, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::{
-    database::Database, init_db, mdbx::DatabaseArguments, models::StoredBlockBodyIndices,
-    DatabaseEnv,
-};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{

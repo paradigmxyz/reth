@@ -3,7 +3,8 @@
 
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_db::{database::Database, tables, transaction::DbTx};
+use reth_db::tables;
+use reth_db_api::{database::Database, transaction::DbTx};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,

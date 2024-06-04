@@ -3,7 +3,7 @@
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_config::config::EtlConfig;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_db_common::init::init_from_state_dump;
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;

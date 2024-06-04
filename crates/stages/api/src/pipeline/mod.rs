@@ -3,7 +3,7 @@ mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
 pub use event::*;
 use futures_util::Future;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
     stage::{PipelineTarget, StageCheckpoint, StageId},
