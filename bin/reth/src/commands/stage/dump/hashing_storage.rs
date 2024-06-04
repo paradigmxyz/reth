@@ -23,8 +23,8 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
         dry_run(
             ProviderFactory::new(
                 output_db,
-                db_tool.chain.clone(),
-                StaticFileProvider::read_only(output_datadir.static_files())?,
+                db_tool.chain(),
+                StaticFileProvider::read_write(output_datadir.static_files())?,
             ),
             to,
             from,

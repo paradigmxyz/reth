@@ -47,7 +47,7 @@ impl InitStateCommand {
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let hash = init_at_state(self.state, provider_factory, config.stages.etl.clone())?;
+        let hash = init_at_state(self.state, provider_factory, config.stages.etl)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())

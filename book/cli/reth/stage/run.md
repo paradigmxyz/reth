@@ -27,17 +27,6 @@ Options:
       --config <FILE>
           The path to the configuration file to use.
 
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -72,6 +61,14 @@ Options:
 
           You can optionally skip the unwinding phase if you're syncing a block range that has not been synced before.
 
+  -c, --commit
+          Commits the changes in the database. WARNING: potentially destructive.
+
+          Useful when you want to run diagnostics on the database.
+
+      --checkpoints
+          Save stage checkpoints
+
       --instance <INSTANCE>
           Add a new instance of a node.
 
@@ -79,12 +76,27 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
 
           [default: 1]
 
   -h, --help
           Print help (see a summary with '-h')
+
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
 
 Networking:
   -d, --disable-discovery
@@ -110,10 +122,10 @@ Networking:
           [default: 30303]
 
       --discovery.v5.addr <DISCOVERY_V5_ADDR>
-          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv4
+          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv4
 
       --discovery.v5.addr.ipv6 <DISCOVERY_V5_ADDR_IPV6>
-          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv6
+          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
           The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
@@ -202,8 +214,8 @@ Networking:
           Experimental, for usage in research. Sets the max accumulated byte size of transactions to
           request in one request.
 
-          Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
-          transaction announcement (see RLPx specs). This allows a node to request a specific size
+          Since `RLPx` protocol version 68, the byte size of a transaction is shared as metadata in a
+          transaction announcement (see `RLPx` specs). This allows a node to request a specific size
           response.
 
           By default, nodes request only 128 KiB worth of transactions, but should a peer request
@@ -231,14 +243,6 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
-
-  -c, --commit
-          Commits the changes in the database. WARNING: potentially destructive.
-
-          Useful when you want to run diagnostics on the database.
-
-      --checkpoints
-          Save stage checkpoints
 
 Logging:
       --log.stdout.format <FORMAT>

@@ -49,7 +49,7 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
     EvmConfig: ConfigureEvm + 'static,
 {
-    /// Estimate gas needed for execution of the `request` at the [BlockId].
+    /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     pub async fn estimate_gas_at(
         &self,
         request: TransactionRequest,
@@ -177,7 +177,7 @@ where
 
     /// Estimates the gas usage of the `request` with the state.
     ///
-    /// This will execute the [TransactionRequest] and find the best gas limit via binary search
+    /// This will execute the [`TransactionRequest`] and find the best gas limit via binary search
     pub fn estimate_gas_with<S>(
         &self,
         mut cfg: CfgEnvWithHandlerCfg,
@@ -374,7 +374,7 @@ where
         Ok(U256::from(highest_gas_limit))
     }
 
-    /// Creates the AccessList for the `request` at the [BlockId] or latest.
+    /// Creates the `AccessList` for the `request` at the [`BlockId`] or latest.
     pub(crate) async fn create_access_list_at(
         &self,
         request: TransactionRequest,

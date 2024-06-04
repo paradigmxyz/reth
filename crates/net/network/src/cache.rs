@@ -90,7 +90,7 @@ where
     T: Eq + Hash + fmt::Debug,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        for item in iter.into_iter() {
+        for item in iter {
             _ = self.insert(item);
         }
     }

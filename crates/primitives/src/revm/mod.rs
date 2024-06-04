@@ -5,7 +5,7 @@
 ///
 /// The included conversion methods can be used to convert between:
 /// * reth's [Log](crate::Log) type and revm's [Log](revm_primitives::Log) type.
-/// * reth's [Account](crate::Account) type and revm's [AccountInfo](revm_primitives::AccountInfo)
+/// * reth's [Account](crate::Account) type and revm's [`AccountInfo`](revm_primitives::AccountInfo)
 ///   type.
 pub mod compat;
 

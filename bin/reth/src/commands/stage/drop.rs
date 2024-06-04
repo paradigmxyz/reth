@@ -28,7 +28,7 @@ impl Command {
 
         let static_file_provider = provider_factory.static_file_provider();
 
-        let tool = DbTool::new(provider_factory, self.env.chain.clone())?;
+        let tool = DbTool::new(provider_factory)?;
 
         let static_file_segment = match self.stage {
             StageEnum::Headers => Some(StaticFileSegment::Headers),

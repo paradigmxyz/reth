@@ -8,7 +8,7 @@ use reth_primitives::{
 use reth_rpc_types::{Block, BlockError, BlockTransactions, BlockTransactionsKind, Header};
 
 /// Converts the given primitive block into a [Block] response with the given
-/// [BlockTransactionsKind]
+/// [`BlockTransactionsKind`]
 ///
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
 pub fn from_block(
@@ -29,7 +29,7 @@ pub fn from_block(
 /// total difficulty to populate its field in the rpc response.
 ///
 /// This will populate the `transactions` field with only the hashes of the transactions in the
-/// block: [BlockTransactions::Hashes]
+/// block: [`BlockTransactions::Hashes`]
 pub fn from_block_with_tx_hashes(
     block: BlockWithSenders,
     total_difficulty: U256,
@@ -51,7 +51,7 @@ pub fn from_block_with_tx_hashes(
 /// total difficulty to populate its field in the rpc response.
 ///
 /// This will populate the `transactions` field with the _full_
-/// [Transaction](reth_rpc_types::Transaction) objects: [BlockTransactions::Full]
+/// [Transaction](reth_rpc_types::Transaction) objects: [`BlockTransactions::Full`]
 pub fn from_block_full(
     mut block: BlockWithSenders,
     total_difficulty: U256,
@@ -90,7 +90,7 @@ pub fn from_block_full(
     ))
 }
 
-/// Converts from a [reth_primitives::SealedHeader] to a [reth_rpc_types::Header]
+/// Converts from a [`reth_primitives::SealedHeader`] to a [`reth_rpc_types::Header`]
 ///
 /// # Note
 ///

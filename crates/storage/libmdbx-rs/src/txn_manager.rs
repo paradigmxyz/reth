@@ -20,8 +20,8 @@ pub(crate) enum TxnManagerMessage {
 }
 
 /// Manages transactions by doing two things:
-/// - Opening, aborting, and committing transactions using [TxnManager::send_message] with the
-///   corresponding [TxnManagerMessage]
+/// - Opening, aborting, and committing transactions using [`TxnManager::send_message`] with the
+///   corresponding [`TxnManagerMessage`]
 /// - Aborting long-lived read transactions (if the `read-tx-timeouts` feature is enabled and
 ///   `TxnManager::with_max_read_transaction_duration` is called)
 #[derive(Debug)]
@@ -45,12 +45,12 @@ impl TxnManager {
         txn_manager
     }
 
-    /// Spawns a new [std::thread] that listens to incoming [TxnManagerMessage] messages, executes
-    /// an FFI function, and returns the result on the provided channel.
+    /// Spawns a new [`std::thread`] that listens to incoming [`TxnManagerMessage`] messages,
+    /// executes an FFI function, and returns the result on the provided channel.
     ///
-    /// - [TxnManagerMessage::Begin] opens a new transaction with [ffi::mdbx_txn_begin_ex]
-    /// - [TxnManagerMessage::Abort] aborts a transaction with [ffi::mdbx_txn_abort]
-    /// - [TxnManagerMessage::Commit] commits a transaction with [ffi::mdbx_txn_commit_ex]
+    /// - [`TxnManagerMessage::Begin`] opens a new transaction with [`ffi::mdbx_txn_begin_ex`]
+    /// - [`TxnManagerMessage::Abort`] aborts a transaction with [`ffi::mdbx_txn_abort`]
+    /// - [`TxnManagerMessage::Commit`] commits a transaction with [`ffi::mdbx_txn_commit_ex`]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         let task = move || {
             #[allow(clippy::redundant_locals)]
@@ -163,7 +163,7 @@ mod read_transactions {
     #[derive(Debug, Default)]
     pub(super) struct ReadTransactions {
         /// Maximum duration that a read transaction can be open until the
-        /// [ReadTransactions::start_monitor] aborts it.
+        /// [`ReadTransactions::start_monitor`] aborts it.
         max_duration: Duration,
         /// List of currently active read transactions.
         ///
@@ -199,7 +199,7 @@ mod read_transactions {
             self.timed_out_not_aborted.len()
         }
 
-        /// Spawns a new [std::thread] that monitors the list of active read transactions and
+        /// Spawns a new [`std::thread`] that monitors the list of active read transactions and
         /// timeouts those that are open for longer than `ReadTransactions.max_duration`.
         pub(super) fn start_monitor(self: Arc<Self>) {
             let task = move || {
@@ -211,7 +211,7 @@ mod read_transactions {
 
                     // Iterate through active read transactions and time out those that's open for
                     // longer than `self.max_duration`.
-                    for entry in self.active.iter() {
+                    for entry in &self.active {
                         let (tx, start) = entry.value();
                         let duration = now - *start;
 

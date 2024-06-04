@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 
 /// A test stage that can be used for testing.
 ///
-/// This can be used to mock expected outputs of [Stage::execute] and [Stage::unwind]
+/// This can be used to mock expected outputs of [`Stage::execute`] and [`Stage::unwind`]
 #[derive(Debug)]
 pub struct TestStage {
     id: StageId,

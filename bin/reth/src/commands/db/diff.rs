@@ -340,8 +340,7 @@ impl<T: Table> ExtraTableElement<T> {
     /// Return the key for the extra element
     const fn key(&self) -> &T::Key {
         match self {
-            Self::First { key, .. } => key,
-            Self::Second { key, .. } => key,
+            Self::First { key, .. } | Self::Second { key, .. } => key,
         }
     }
 }

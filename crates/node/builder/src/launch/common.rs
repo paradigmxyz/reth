@@ -107,7 +107,7 @@ impl LaunchContext {
         Ok(())
     }
 
-    /// Convenience function to [Self::configure_globals]
+    /// Convenience function to [`Self::configure_globals`]
     pub fn with_configured_globals(self) -> Self {
         self.configure_globals();
         self
@@ -141,7 +141,7 @@ impl LaunchContext {
     }
 }
 
-/// A [LaunchContext] along with an additional value.
+/// A [`LaunchContext`] along with an additional value.
 ///
 /// This can be used to sequentially attach additional values to the type during the launch process.
 ///
@@ -239,22 +239,22 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         self
     }
 
-    /// Returns the attached [NodeConfig].
+    /// Returns the attached [`NodeConfig`].
     pub const fn node_config(&self) -> &NodeConfig {
         &self.left().config
     }
 
-    /// Returns the attached [NodeConfig].
+    /// Returns the attached [`NodeConfig`].
     pub fn node_config_mut(&mut self) -> &mut NodeConfig {
         &mut self.left_mut().config
     }
 
-    /// Returns the attached toml config [reth_config::Config].
+    /// Returns the attached toml config [`reth_config::Config`].
     pub const fn toml_config(&self) -> &reth_config::Config {
         &self.left().toml_config
     }
 
-    /// Returns the attached toml config [reth_config::Config].
+    /// Returns the attached toml config [`reth_config::Config`].
     pub fn toml_config_mut(&mut self) -> &mut reth_config::Config {
         &mut self.left_mut().toml_config
     }
@@ -279,17 +279,17 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         self.node_config().dev.dev
     }
 
-    /// Returns the configured [PruneConfig]
+    /// Returns the configured [`PruneConfig`]
     pub fn prune_config(&self) -> Option<PruneConfig> {
         self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
     }
 
-    /// Returns the configured [PruneModes]
+    /// Returns the configured [`PruneModes`]
     pub fn prune_modes(&self) -> Option<PruneModes> {
         self.prune_config().map(|config| config.segments)
     }
 
-    /// Returns an initialized [PrunerBuilder] based on the configured [PruneConfig]
+    /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
     pub fn pruner_builder(&self) -> PrunerBuilder {
         PrunerBuilder::new(self.prune_config().unwrap_or_default())
             .prune_delete_limit(self.chain_spec().prune_delete_limit)
@@ -313,7 +313,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         Ok(secret)
     }
 
-    /// Returns the [MiningMode] intended for --dev mode.
+    /// Returns the [`MiningMode`] intended for --dev mode.
     pub fn dev_mining_mode(&self, pending_transactions_listener: Receiver<B256>) -> MiningMode {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
@@ -329,7 +329,7 @@ impl<DB> LaunchContextWith<Attached<WithConfigs, DB>>
 where
     DB: Database + Clone + 'static,
 {
-    /// Returns the [ProviderFactory] for the attached storage after executing a consistent check
+    /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
     pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
@@ -353,9 +353,7 @@ where
         {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            if PipelineTarget::Unwind(0) == unwind_target {
-                panic!("A static file <> database inconsistency was found that would trigger an unwind to block 0.")
-            }
+            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
@@ -397,7 +395,7 @@ where
         Ok(factory)
     }
 
-    /// Creates a new [ProviderFactory] and attaches it to the launch context.
+    /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB>>>> {
@@ -420,7 +418,7 @@ where
         self.right().db_ref()
     }
 
-    /// Returns the configured ProviderFactory.
+    /// Returns the configured `ProviderFactory`.
     pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
         self.right()
     }
@@ -430,7 +428,7 @@ where
         self.right().static_file_provider()
     }
 
-    /// Creates a new [StaticFileProducer] with the attached database.
+    /// Creates a new [`StaticFileProducer`] with the attached database.
     pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
         StaticFileProducer::new(
             self.provider_factory().clone(),
@@ -439,7 +437,7 @@ where
         )
     }
 
-    /// Convenience function to [Self::init_genesis]
+    /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
         init_genesis(self.provider_factory().clone())?;
         Ok(self)
@@ -459,7 +457,7 @@ where
         self.node_config().max_block(client, self.provider_factory().clone()).await
     }
 
-    /// Convenience function to [Self::start_prometheus_endpoint]
+    /// Convenience function to [`Self::start_prometheus_endpoint`]
     pub async fn with_prometheus(self) -> eyre::Result<Self> {
         self.start_prometheus_endpoint().await?;
         Ok(self)
@@ -538,7 +536,7 @@ impl<L, R> Attached<L, R> {
     }
 }
 
-/// Helper container type to bundle the initial [NodeConfig] and the loaded settings from the
+/// Helper container type to bundle the initial [`NodeConfig`] and the loaded settings from the
 /// reth.toml config
 #[derive(Debug, Clone)]
 pub struct WithConfigs {

@@ -65,7 +65,7 @@ impl Status {
         Default::default()
     }
 
-    /// Sets the [EthVersion] for the status.
+    /// Sets the [`EthVersion`] for the status.
     pub fn set_eth_version(&mut self, version: EthVersion) {
         self.version = version as u8;
     }
@@ -389,8 +389,7 @@ mod tests {
         let mut forkhash = ForkHash::from(genesis_hash);
         for (_, condition) in hardforks {
             forkhash += match condition {
-                ForkCondition::Block(n) => n,
-                ForkCondition::Timestamp(n) => n,
+                ForkCondition::Block(n) | ForkCondition::Timestamp(n) => n,
                 _ => unreachable!("only block and timestamp forks are used in this test"),
             }
         }

@@ -33,7 +33,7 @@ pub const DEFAULT_MAX_GAS_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0,
 /// The default minimum gas price, under which the sample will be ignored
 pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
 
-/// Settings for the [GasPriceOracle]
+/// Settings for the [`GasPriceOracle`]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GasPriceOracleConfig {
@@ -93,7 +93,7 @@ impl<Provider> GasPriceOracle<Provider>
 where
     Provider: BlockReaderIdExt + 'static,
 {
-    /// Creates and returns the [GasPriceOracle].
+    /// Creates and returns the [`GasPriceOracle`].
     pub fn new(
         provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
@@ -233,7 +233,7 @@ where
 
         let mut prices = Vec::with_capacity(limit);
 
-        for tx in block.body.iter() {
+        for tx in &block.body {
             let mut effective_gas_tip = None;
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {
@@ -269,14 +269,14 @@ where
     }
 }
 
-/// Container type for mutable inner state of the [GasPriceOracle]
+/// Container type for mutable inner state of the [`GasPriceOracle`]
 #[derive(Debug)]
 struct GasPriceOracleInner {
     last_price: GasPriceOracleResult,
     lowest_effective_tip_cache: EffectiveTipLruCache,
 }
 
-/// Wrapper struct for LruMap
+/// Wrapper struct for `LruMap`
 #[derive(Deref, DerefMut)]
 pub struct EffectiveTipLruCache(LruMap<B256, (B256, Vec<U256>), ByLength>);
 

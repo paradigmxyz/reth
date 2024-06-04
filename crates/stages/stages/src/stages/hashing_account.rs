@@ -43,7 +43,7 @@ pub struct AccountHashingStage {
 }
 
 impl AccountHashingStage {
-    /// Create new instance of [AccountHashingStage].
+    /// Create new instance of [`AccountHashingStage`].
     pub const fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
         Self {
             clean_threshold: config.clean_threshold,
@@ -91,7 +91,7 @@ impl AccountHashingStage {
             let mut account_cursor =
                 provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
             accounts.sort_by(|a, b| a.0.cmp(&b.0));
-            for (addr, acc) in accounts.iter() {
+            for (addr, acc) in &accounts {
                 account_cursor.append(*addr, *acc)?;
             }
 
@@ -165,7 +165,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    for (address, account) in chunk.into_iter() {
+                    for (address, account) in chunk {
                         let address = address.key().unwrap();
                         let _ = tx.send((RawKey::new(keccak256(address)), account));
                     }
@@ -365,8 +365,8 @@ mod tests {
                 self.commit_threshold = threshold;
             }
 
-            /// Iterates over PlainAccount table and checks that the accounts match the ones
-            /// in the HashedAccounts table
+            /// Iterates over `PlainAccount` table and checks that the accounts match the ones
+            /// in the `HashedAccounts` table
             pub(crate) fn check_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {
                     let mut acc_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
@@ -384,7 +384,7 @@ mod tests {
                 Ok(())
             }
 
-            /// Same as check_hashed_accounts, only that checks with the old account state,
+            /// Same as `check_hashed_accounts`, only that checks with the old account state,
             /// namely, the same account with nonce - 1 and balance - 1.
             pub(crate) fn check_old_hashed_accounts(&self) -> Result<(), TestRunnerError> {
                 self.db.query(|tx| {

@@ -4,12 +4,9 @@ use clap::Parser;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
-use reth_node_core::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+use reth_node_core::args::{
+    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+    DatabaseArgs, DatadirArgs,
 };
 use reth_primitives::ChainSpec;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
@@ -19,19 +16,12 @@ use tracing::{debug, info};
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
 pub struct EnvironmentArgs {
+    #[command(flatten)]
+    datadir: DatadirArgs,
+
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
-
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    pub datadir: MaybePlatformPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -51,10 +41,10 @@ pub struct EnvironmentArgs {
 }
 
 impl EnvironmentArgs {
-    /// Initializes environment according to [AccessRights] and returns a tuple of [Config] &
-    /// [ProviderFactory].
+    /// Initializes environment according to [`AccessRights`] and returns a tuple of [Config] &
+    /// [`ProviderFactory`].
     pub fn init(&self, access: AccessRights) -> eyre::Result<Environment> {
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
 
@@ -93,7 +83,7 @@ impl EnvironmentArgs {
     }
 }
 
-/// Environment built from [EnvironmentArgs].
+/// Environment built from [`EnvironmentArgs`].
 #[derive(Debug)]
 pub struct Environment {
     /// Configuration for reth node

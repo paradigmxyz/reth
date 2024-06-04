@@ -29,7 +29,7 @@ pub struct DevArgs {
 
     /// Interval between blocks.
     ///
-    /// Parses strings using [humantime::parse_duration]
+    /// Parses strings using [`humantime::parse_duration`]
     /// --dev.block-time 12s
     #[arg(
         long = "dev.block-time",

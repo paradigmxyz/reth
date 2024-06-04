@@ -64,8 +64,8 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of the canonical chain.
     ///
-    /// if [BlockValidationKind::Exhaustive] is specified, the method will verify the state root of
-    /// the block.
+    /// if [`BlockValidationKind::Exhaustive`] is specified, the method will verify the state root
+    /// of the block.
     pub fn new_canonical_fork<DB, E>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
@@ -103,7 +103,7 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of an existing sidechain.
     ///
-    /// This differs from [AppendableChain::new_canonical_fork] in that this starts a new fork.
+    /// This differs from [`AppendableChain::new_canonical_fork`] in that this starts a new fork.
     pub(crate) fn new_chain_fork<DB, E>(
         &self,
         block: SealedBlockWithSenders,
@@ -162,11 +162,11 @@ impl AppendableChain {
     /// state root after execution if possible and requested.
     ///
     /// Note: State root validation is limited to blocks that extend the canonical chain and is
-    /// optional, see [BlockValidationKind]. So this function takes two parameters to determine
+    /// optional, see [`BlockValidationKind`]. So this function takes two parameters to determine
     /// if the state can and should be validated.
-    ///   - [BlockAttachment] represents if the block extends the canonical chain, and thus we can
+    ///   - [`BlockAttachment`] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
-    ///   - [BlockValidationKind] determines if the state root __should__ be validated.
+    ///   - [`BlockValidationKind`] determines if the state root __should__ be validated.
     fn validate_and_execute<BSDP, DB, E>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,

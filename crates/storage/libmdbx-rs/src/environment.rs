@@ -70,13 +70,13 @@ impl Environment {
         self.inner.env_kind
     }
 
-    /// Returns true if the environment was opened in [crate::Mode::ReadWrite] mode.
+    /// Returns true if the environment was opened in [`crate::Mode::ReadWrite`] mode.
     #[inline]
     pub fn is_read_write(&self) -> bool {
         self.inner.env_kind.is_write_map()
     }
 
-    /// Returns true if the environment was opened in [crate::Mode::ReadOnly] mode.
+    /// Returns true if the environment was opened in [`crate::Mode::ReadOnly`] mode.
     #[inline]
     pub fn is_read_only(&self) -> bool {
         !self.inner.env_kind.is_write_map()
@@ -118,10 +118,10 @@ impl Environment {
                     warn!(target: "libmdbx", "Process stalled, awaiting read-write transaction lock.");
                 }
                 sleep(Duration::from_millis(250));
-                continue
+                continue;
             }
 
-            break res
+            break res;
         }?;
         Ok(Transaction::new_from_ptr(self.clone(), txn.0))
     }
@@ -184,7 +184,7 @@ impl Environment {
 
     /// Retrieves the total number of pages on the freelist.
     ///
-    /// Along with [Environment::info()], this can be used to calculate the exact number
+    /// Along with [`Environment::info()`], this can be used to calculate the exact number
     /// of used pages as well as free pages in this environment.
     ///
     /// ```
@@ -216,7 +216,7 @@ impl Environment {
         for result in cursor.iter_slices() {
             let (_key, value) = result?;
             if value.len() < size_of::<usize>() {
-                return Err(Error::Corrupted)
+                return Err(Error::Corrupted);
             }
 
             let s = &value[..size_of::<usize>()];
@@ -230,7 +230,7 @@ impl Environment {
 /// Container type for Environment internals.
 ///
 /// This holds the raw pointer to the MDBX environment and the transaction manager.
-/// The env is opened via [mdbx_env_create](ffi::mdbx_env_create) and closed when this type drops.
+/// The env is opened via [`mdbx_env_create`](ffi::mdbx_env_create) and closed when this type drops.
 struct EnvironmentInner {
     /// The raw pointer to the MDBX environment.
     ///
@@ -265,10 +265,10 @@ pub enum EnvironmentKind {
     #[default]
     Default,
     /// Open the environment as mdbx-WRITEMAP.
-    /// Use a writeable memory map unless the environment is opened as MDBX_RDONLY
-    /// ([crate::Mode::ReadOnly]).
+    /// Use a writeable memory map unless the environment is opened as `MDBX_RDONLY`
+    /// ([`crate::Mode::ReadOnly`]).
     ///
-    /// All data will be mapped into memory in the read-write mode [crate::Mode::ReadWrite]. This
+    /// All data will be mapped into memory in the read-write mode [`crate::Mode::ReadWrite`]. This
     /// offers a significant performance benefit, since the data will be modified directly in
     /// mapped memory and then flushed to disk by single system call, without any memory
     /// management nor copying.
@@ -468,7 +468,7 @@ pub struct PageOps {
     pub fsync: u64,
     /// Number of prefault write operations
     pub prefault: u64,
-    /// Number of mincore() calls
+    /// Number of `mincore()` calls
     pub mincore: u64,
 }
 
@@ -589,7 +589,7 @@ pub struct EnvironmentBuilder {
     handle_slow_readers: Option<HandleSlowReadersCallback>,
     #[cfg(feature = "read-tx-timeouts")]
     /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
-    /// enabled, the default value of [DEFAULT_MAX_READ_TRANSACTION_DURATION] is used.
+    /// enabled, the default value of [`DEFAULT_MAX_READ_TRANSACTION_DURATION`] is used.
     max_read_transaction_duration: Option<read_transactions::MaxReadTransactionDuration>,
 }
 
@@ -708,7 +708,7 @@ impl EnvironmentBuilder {
             })() {
                 ffi::mdbx_env_close_ex(env, false);
 
-                return Err(e)
+                return Err(e);
             }
         }
 
@@ -744,7 +744,7 @@ impl EnvironmentBuilder {
 
     /// Opens the environment with mdbx WRITEMAP
     ///
-    /// See also [EnvironmentKind]
+    /// See also [`EnvironmentKind`]
     pub fn write_map(&mut self) -> &mut Self {
         self.set_kind(EnvironmentKind::WriteMap)
     }
@@ -772,7 +772,7 @@ impl EnvironmentBuilder {
     /// unnamed database can ignore this option.
     ///
     /// Currently a moderate number of slots are cheap but a huge number gets
-    /// expensive: 7-120 words per transaction, and every [Transaction::open_db()]
+    /// expensive: 7-120 words per transaction, and every [`Transaction::open_db()`]
     /// does a linear search of the opened slots.
     pub fn set_max_dbs(&mut self, v: usize) -> &mut Self {
         self.max_dbs = Some(v as u64);
@@ -832,7 +832,8 @@ impl EnvironmentBuilder {
         self
     }
 
-    /// Set the Handle-Slow-Readers callback. See [HandleSlowReadersCallback] for more information.
+    /// Set the Handle-Slow-Readers callback. See [`HandleSlowReadersCallback`] for more
+    /// information.
     #[cfg(not(windows))]
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);

@@ -11,20 +11,6 @@ Arguments:
           The table name
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
-      --start-key <START_KEY>
-          The start of the range to checksum
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -33,6 +19,9 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
 
           [default: mainnet]
+
+      --start-key <START_KEY>
+          The start of the range to checksum
 
       --end-key <END_KEY>
           The end of the range to checksum
@@ -47,7 +36,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
 
           [default: 1]
 
