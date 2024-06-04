@@ -214,7 +214,7 @@ where
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        Ok(SpawnBlocking::spawn_blocking(self, move |this| this.balance(address, block_number))
+        Ok(SpawnBlocking::spawn_blocking_io(self, move |this| this.balance(address, block_number))
             .await?)
     }
 
@@ -226,7 +226,7 @@ where
         block_number: Option<BlockId>,
     ) -> Result<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        let res: B256 = SpawnBlocking::spawn_blocking(self, move |this| {
+        let res: B256 = SpawnBlocking::spawn_blocking_io(self, move |this| {
             this.storage_at(address, index, block_number)
         })
         .await?;
@@ -240,7 +240,7 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(SpawnBlocking::spawn_blocking(self, move |this| {
+        Ok(SpawnBlocking::spawn_blocking_io(self, move |this| {
             this.get_transaction_count(address, block_number)
         })
         .await?)
@@ -249,7 +249,7 @@ where
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        Ok(SpawnBlocking::spawn_blocking(self, move |this| this.get_code(address, block_number))
+        Ok(SpawnBlocking::spawn_blocking_io(self, move |this| this.get_code(address, block_number))
             .await?)
     }
 

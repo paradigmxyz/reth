@@ -325,7 +325,7 @@ where
 
         // no pending block from the CL yet, so we need to build it ourselves via txpool
         let pending_block = match self
-            .spawn_blocking(move |this| {
+            .spawn_blocking_io(move |this| {
                 // we rebuild the block
                 pending.build_block(this.provider(), this.pool())
             })
@@ -422,7 +422,7 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
 where
     Self: Send + Sync + 'static,
 {
-    fn spawn_blocking<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
+    fn spawn_blocking_io<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
     where
         Self: Sized,
         F: FnOnce(Self) -> EthResult<T> + Send + 'static,
@@ -431,6 +431,22 @@ where
         let this = self.clone();
         let fut = self.inner.blocking_task_pool().spawn(move || f(this));
         async move { fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)? }
+    }
+
+    fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>>
+    where
+        Self: Sized,
+        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
+        R: Send + 'static,
+    {
+        let this = self.clone();
+        async move {
+            self.inner
+                .blocking_task_pool
+                .spawn(move || f(this))
+                .await
+                .map_err(|_| EthApiError::InternalBlockingTaskError)?
+        }
     }
 }
 

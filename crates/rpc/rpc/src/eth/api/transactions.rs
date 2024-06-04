@@ -151,22 +151,6 @@ where
         self.inner.gas_cap
     }
 
-    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static,
-    {
-        self.on_blocking_task(|_| c).await
-    }
-
-    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: FnOnce() -> EthResult<R> + Send + 'static,
-        R: Send + 'static,
-    {
-        self.spawn_tracing_task_with(move |_| c()).await
-    }
-
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox> {
         self.state_at_block_id(at)
     }
@@ -184,7 +168,7 @@ where
         F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        self.spawn_blocking(move |this| {
+        self.spawn_tracing(move |this| {
             let state = this.state_at(at)?;
             f(state)
         })
@@ -247,7 +231,10 @@ where
         self.block_by_id(block).await.map(|block| block.map(|block| block.body))
     }
 
-    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>> {
+    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>
+    where
+        Self: SpawnBlocking,
+    {
         // Note: this is mostly used to fetch pooled transactions so we check the pool first
         if let Some(tx) =
             self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
@@ -255,16 +242,19 @@ where
             return Ok(Some(tx))
         }
 
-        self.spawn_blocking(move |this| {
+        self.spawn_blocking_io(move |this| {
             Ok(this.provider().transaction_by_hash(hash)?.map(|tx| tx.envelope_encoded()))
         })
         .await
     }
 
-    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>> {
+    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>
+    where
+        Self: SpawnBlocking,
+    {
         // Try to find the transaction on disk
         let mut resp = self
-            .spawn_blocking(move |this| {
+            .spawn_blocking_io(move |this| {
                 match this.provider().transaction_by_hash_with_meta(hash)? {
                     None => Ok(None),
                     Some((tx, meta)) => {
@@ -808,7 +798,7 @@ where
         }
 
         // replay all transactions of the block
-        self.spawn_blocking(move |this| {
+        self.spawn_tracing(move |this| {
             // we need to get the state of the parent block because we're replaying this block on
             // top of its parent block's state
             let state_at = block.parent_hash;

@@ -125,25 +125,6 @@ pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
 
-    /// Executes the future on a new blocking task.
-    ///
-    /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
-    /// or CPU bound operations in general use [Self::spawn_blocking].
-    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static;
-
-    /// Executes a blocking task on the tracing pool.
-    ///
-    /// Note: This is expected for futures that are predominantly CPU bound, as it uses `rayon`
-    /// under the hood, for blocking IO futures use [Self::spawn_blocking_future]. See
-    /// <https://ryhl.io/blog/async-what-is-blocking/>.
-    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: FnOnce() -> EthResult<R> + Send + 'static,
-        R: Send + 'static;
-
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox>;
 
@@ -209,14 +190,18 @@ pub trait EthTransactions: Send + Sync {
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>;
+    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>
+    where
+        Self: SpawnBlocking;
 
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>;
+    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>
+    where
+        Self: SpawnBlocking;
 
     /// Returns the transaction by including its corresponding [BlockId]
     ///
@@ -259,7 +244,7 @@ pub trait EthTransactions: Send + Sync {
         Self: SpawnBlocking + Clone + 'static,
     {
         let this = self.clone();
-        self.spawn_blocking(move |_| {
+        self.spawn_blocking_io(move |_| {
             let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
                 Some((tx, meta)) => (tx, meta),
                 None => return Ok(None),

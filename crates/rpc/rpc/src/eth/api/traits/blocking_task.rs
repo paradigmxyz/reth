@@ -6,10 +6,24 @@ use crate::eth::error::EthResult;
 
 /// Executes code on a blocking thread.
 pub trait SpawnBlocking {
-    /// Executes closure on a blocking thread.
-    fn spawn_blocking<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
+    /// Executes the future on a new blocking task.
+    ///
+    /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
+    /// or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing).
+    fn spawn_blocking_io<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
     where
         Self: Sized,
         F: FnOnce(Self) -> EthResult<T> + Send + 'static,
         T: Send + 'static;
+
+    /// Executes a blocking task on the tracing pool.
+    ///
+    /// Note: This is expected for futures that are predominantly CPU bound, as it uses `rayon`
+    /// under the hood, for blocking IO futures use [`spawn_blocking`](Self::spawn_blocking_io). See
+    /// <https://ryhl.io/blog/async-what-is-blocking/>.
+    fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>>
+    where
+        Self: Sized,
+        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
+        R: Send + 'static;
 }

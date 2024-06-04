@@ -58,7 +58,7 @@ where
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
-        self.spawn_blocking(move |this| {
+        self.spawn_blocking_io(move |this| {
             let state = this.state_at(at)?;
             this.estimate_gas_with(cfg, block_env, request, state, state_override)
         })
@@ -376,7 +376,8 @@ where
         let block_id = block_number.unwrap_or_default();
         let (cfg, block, at) = self.evm_env_at(block_id).await?;
 
-        self.spawn_blocking(move |this| this.create_access_list_with(cfg, block, at, request)).await
+        self.spawn_blocking_io(move |this| this.create_access_list_with(cfg, block, at, request))
+            .await
     }
 
     fn create_access_list_with(
