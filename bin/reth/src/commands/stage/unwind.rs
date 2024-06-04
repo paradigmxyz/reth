@@ -44,7 +44,7 @@ pub struct Command {
 impl Command {
     /// Execute `db stage unwind` command
     pub async fn execute(self) -> eyre::Result<()> {
-        let Environment { provider_factory, config } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
         let range = self.command.unwind_range(provider_factory.clone())?;
         if *range.start() == 0 {

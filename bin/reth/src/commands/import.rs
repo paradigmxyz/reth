@@ -68,7 +68,7 @@ impl ImportCommand {
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
         let consensus = Arc::new(EthBeaconConsensus::new(self.env.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");

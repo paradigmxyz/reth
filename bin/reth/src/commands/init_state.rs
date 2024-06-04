@@ -43,7 +43,7 @@ impl InitStateCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        let Environment { config, provider_factory } = self.env.init(AccessRights::RW)?;
+        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
         info!(target: "reth::cli", "Initiating state dump");
 

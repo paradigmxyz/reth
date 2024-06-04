@@ -53,7 +53,7 @@ impl ImportOpCommand {
             "Chunking chain import"
         );
 
-        let Environment { provider_factory, config } = self.env.init(AccessRights::RW)?;
+        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
         // we use noop here because we expect the inputs to be valid
         let consensus = Arc::new(NoopConsensus::default());

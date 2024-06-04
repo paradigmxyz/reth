@@ -4,9 +4,12 @@ use clap::Parser;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
-use reth_node_core::args::{
-    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    DatabaseArgs, DatadirArgs,
+use reth_node_core::{
+    args::{
+        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, DatadirArgs,
+    },
+    dirs::{ChainPath, DataDirPath},
 };
 use reth_primitives::ChainSpec;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
@@ -80,7 +83,7 @@ impl EnvironmentArgs {
             init_genesis(provider_factory.clone())?;
         }
 
-        Ok(Environment { config, provider_factory })
+        Ok(Environment { config, provider_factory, data_dir })
     }
 }
 
@@ -91,6 +94,8 @@ pub struct Environment {
     pub config: Config,
     /// Provider factory.
     pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    /// Datadir path.
+    pub data_dir: ChainPath<DataDirPath>,
 }
 
 /// Environment access rights.
