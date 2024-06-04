@@ -1036,7 +1036,7 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        #[allow(unreachable_patterns)]
+        #[allow(unreachable_patterns, clippy::match_same_arms)]
         match &self.transaction.transaction {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),

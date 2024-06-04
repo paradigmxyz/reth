@@ -142,7 +142,7 @@ fn truncate_pending(
         let mut txpool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();
 
-        for tx in seed.iter() {
+        for tx in &seed {
             // add transactions with a basefee of zero, so they are not immediately removed
             txpool.add_transaction(f.validated_arc(tx.clone()), 0);
         }
@@ -177,7 +177,7 @@ fn truncate_queued(
         let mut txpool = ParkedPool::<QueuedOrd<_>>::default();
         let mut f = MockTransactionFactory::default();
 
-        for tx in seed.iter() {
+        for tx in &seed {
             txpool.add_transaction(f.validated_arc(tx.clone()));
         }
         txpool
@@ -211,7 +211,7 @@ fn truncate_basefee(
         let mut txpool = ParkedPool::<BasefeeOrd<_>>::default();
         let mut f = MockTransactionFactory::default();
 
-        for tx in seed.iter() {
+        for tx in &seed {
             txpool.add_transaction(f.validated_arc(tx.clone()));
         }
         txpool

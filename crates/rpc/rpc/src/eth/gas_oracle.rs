@@ -233,7 +233,7 @@ where
 
         let mut prices = Vec::with_capacity(limit);
 
-        for tx in block.body.iter() {
+        for tx in &block.body {
             let mut effective_gas_tip = None;
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {

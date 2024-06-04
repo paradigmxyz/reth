@@ -613,7 +613,7 @@ where
 
         let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let mut index = 0;
-        for tx in transactions.into_iter() {
+        for tx in transactions {
             if tx.hash() == target_tx_hash {
                 // reached the target transaction
                 break

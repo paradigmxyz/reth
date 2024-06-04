@@ -883,10 +883,8 @@ impl PeersManager {
                 for peer_id in unbanned_peers {
                     if let Some(peer) = self.peers.get_mut(&peer_id) {
                         peer.unban();
-                    } else {
-                        continue
+                        self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                     }
-                    self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                 }
 
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
@@ -2829,12 +2827,12 @@ mod tests {
         );
 
         // establish dialed connections
-        for peer_id in num_pendingout_states.iter() {
+        for peer_id in &num_pendingout_states {
             peer_manager.on_active_outgoing_established(*peer_id);
         }
 
         // all dialed connections should now be in 'Out' state
-        for peer_id in num_pendingout_states.iter() {
+        for peer_id in &num_pendingout_states {
             assert_eq!(peer_manager.peers.get(peer_id).unwrap().state, PeerConnectionState::Out);
         }
 

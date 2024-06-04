@@ -423,7 +423,7 @@ impl ActiveSession {
     /// session should be terminated.
     #[must_use]
     fn check_timed_out_requests(&mut self, now: Instant) -> bool {
-        for (id, req) in self.inflight_requests.iter_mut() {
+        for (id, req) in &mut self.inflight_requests {
             if req.is_timed_out(now) {
                 if req.is_waiting() {
                     debug!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");

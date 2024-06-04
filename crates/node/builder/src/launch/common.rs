@@ -333,8 +333,6 @@ where
     /// between the database and static files. **It may execute a pipeline unwind if it fails this
     /// check.**
     pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
-        println!("datadir: {:?}", self.data_dir());
-
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
@@ -355,9 +353,7 @@ where
         {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            if PipelineTarget::Unwind(0) == unwind_target {
-                panic!("A static file <> database inconsistency was found that would trigger an unwind to block 0.")
-            }
+            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 

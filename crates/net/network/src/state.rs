@@ -175,7 +175,7 @@ where
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
         peers.shuffle(&mut rand::thread_rng());
 
-        for (peer_id, peer) in peers.into_iter() {
+        for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -208,7 +208,7 @@ where
     pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
         let number = msg.block.block.header.number;
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
-        for (peer_id, peer) in self.active_peers.iter_mut() {
+        for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -316,10 +316,7 @@ where
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
-            PeerAction::DisconnectBannedIncoming { peer_id } => {
-                self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
-            }
+            PeerAction::DisconnectBannedIncoming { peer_id } |
             PeerAction::DisconnectUntrustedIncoming { peer_id } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
@@ -334,8 +331,7 @@ where
             PeerAction::PeerRemoved(peer_id) => {
                 self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
             }
-            PeerAction::BanPeer { .. } => {}
-            PeerAction::UnBanPeer { .. } => {}
+            PeerAction::BanPeer { .. } | PeerAction::UnBanPeer { .. } => {}
         }
     }
 
@@ -421,7 +417,7 @@ where
             let mut received_responses = Vec::new();
 
             // poll all connected peers for responses
-            for (id, peer) in self.active_peers.iter_mut() {
+            for (id, peer) in &mut self.active_peers {
                 if let Some(mut response) = peer.pending_response.take() {
                     match response.poll(cx) {
                         Poll::Ready(res) => {

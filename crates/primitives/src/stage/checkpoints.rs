@@ -48,7 +48,7 @@ impl Compact for MerkleCheckpoint {
 
         buf.put_u16(self.walker_stack.len() as u16);
         len += 2;
-        for item in self.walker_stack.into_iter() {
+        for item in self.walker_stack {
             len += item.to_compact(buf);
         }
 

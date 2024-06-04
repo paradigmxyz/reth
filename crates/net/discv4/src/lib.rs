@@ -552,7 +552,7 @@ impl Discv4Service {
                 builder.tcp6(local_node_record.tcp_port);
             }
 
-            for (key, val) in config.additional_eip868_rlp_pairs.iter() {
+            for (key, val) in &config.additional_eip868_rlp_pairs {
                 builder.add_value_rlp(key, val.clone());
             }
             builder.build(&secret_key).expect("v4 is set")
@@ -948,7 +948,7 @@ impl Discv4Service {
     ///
     /// See [`Self::add_node`]
     pub fn add_all_nodes(&mut self, records: impl IntoIterator<Item = NodeRecord>) {
-        for record in records.into_iter() {
+        for record in records {
             self.add_node(record);
         }
     }
