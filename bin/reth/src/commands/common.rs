@@ -16,8 +16,9 @@ use tracing::{debug, info};
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
 pub struct EnvironmentArgs {
+    /// Parameters for datadir configuration
     #[command(flatten)]
-    datadir: DatadirArgs,
+    pub datadir: DatadirArgs,
 
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
