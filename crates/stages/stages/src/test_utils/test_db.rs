@@ -1,15 +1,18 @@
 use reth_db::{
+    tables,
+    test_utils::{
+        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
+    },
+    DatabaseEnv,
+};
+use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
-    tables,
-    test_utils::{
-        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
-    },
     transaction::{DbTx, DbTxMut},
-    DatabaseEnv, DatabaseError as DbError,
+    DatabaseError as DbError,
 };
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,

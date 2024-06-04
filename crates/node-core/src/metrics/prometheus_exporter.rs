@@ -9,7 +9,7 @@ use hyper::{
 use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_db::database_metrics::DatabaseMetrics;
+use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use reth_provider::providers::StaticFileProvider;
 use reth_tasks::TaskExecutor;

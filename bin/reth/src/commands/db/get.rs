@@ -1,10 +1,12 @@
 use crate::utils::DbTool;
 use clap::Parser;
 use reth_db::{
-    database::Database,
     static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
-    table::{Decompress, DupSort, Table},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
+};
+use reth_db_api::{
+    database::Database,
+    table::{Decompress, DupSort, Table},
 };
 use reth_primitives::{BlockHash, Header, StaticFileSegment};
 use reth_provider::StaticFileProviderFactory;
@@ -200,10 +202,8 @@ pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error
 mod tests {
     use super::*;
     use clap::{Args, Parser};
-    use reth_db::{
-        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-        AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory,
-    };
+    use reth_db::{AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory};
+    use reth_db_api::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
     use reth_primitives::{Address, B256};
     use std::str::FromStr;
 

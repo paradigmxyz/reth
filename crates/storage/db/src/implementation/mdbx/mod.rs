@@ -1,19 +1,21 @@
 //! Module that interacts with MDBX.
 
 use crate::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
     lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
-    models::client_version::ClientVersion,
     tables::{self, TableType, Tables},
-    transaction::{DbTx, DbTxMut},
     utils::default_page_size,
     DatabaseError,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    models::client_version::ClientVersion,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
@@ -459,14 +461,16 @@ impl Deref for DatabaseEnv {
 mod tests {
     use super::*;
     use crate::{
-        abstraction::table::{Encode, Table},
-        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        models::{AccountBeforeTx, ShardedKey},
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
         AccountChangeSets,
+    };
+    use reth_db_api::{
+        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        models::{AccountBeforeTx, ShardedKey},
+        table::{Encode, Table},
     };
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};

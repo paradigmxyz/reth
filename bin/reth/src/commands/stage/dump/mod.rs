@@ -8,10 +8,10 @@ use crate::{
 
 use crate::args::DatadirArgs;
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, init_db, mdbx::DatabaseArguments,
-    models::client_version::ClientVersion, table::TableImporter, tables, transaction::DbTx,
-    DatabaseEnv,
+use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
+use reth_db_api::{
+    cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,
+    transaction::DbTx,
 };
 use reth_node_core::dirs::PlatformPath;
 use std::path::PathBuf;

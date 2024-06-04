@@ -1,7 +1,7 @@
 use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts, StateWriter};
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 pub use reth_execution_types::*;
@@ -67,11 +67,11 @@ impl StateWriter for BundleStateWithReceipts {
 mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, AccountReader};
-    use reth_db::{
+    use reth_db::test_utils::create_test_rw_db;
+    use reth_db_api::{
         cursor::DbDupCursorRO,
         database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
-        test_utils::create_test_rw_db,
     };
     use reth_primitives::{
         keccak256,

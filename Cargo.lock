@@ -2594,6 +2594,7 @@ dependencies = [
  "alloy-rlp",
  "rayon",
  "reth-db",
+ "reth-db-api",
  "reth-evm-ethereum",
  "reth-primitives",
  "reth-provider",
@@ -6180,6 +6181,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-db-api",
  "reth-db-common",
  "reth-discv4",
  "reth-discv5",
@@ -6284,6 +6286,7 @@ dependencies = [
  "reth-config",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-downloaders",
  "reth-engine-primitives",
  "reth-errors",
@@ -6328,6 +6331,7 @@ dependencies = [
  "reth-blockchain-tree-api",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-execution-errors",
@@ -6440,16 +6444,12 @@ dependencies = [
  "eyre",
  "iai-callgrind",
  "metrics",
- "modular-bitfield",
- "once_cell",
  "page_size",
- "parity-scale-codec",
  "paste",
  "pprof",
  "proptest",
- "proptest-derive",
  "rand 0.8.5",
- "reth-codecs",
+ "reth-db-api",
  "reth-fs-util",
  "reth-libmdbx",
  "reth-metrics",
@@ -6468,6 +6468,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-db-api"
+version = "0.2.0-beta.8"
+dependencies = [
+ "arbitrary",
+ "assert_matches",
+ "bytes",
+ "criterion",
+ "derive_more",
+ "iai-callgrind",
+ "metrics",
+ "modular-bitfield",
+ "parity-scale-codec",
+ "paste",
+ "pprof",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-primitives",
+ "reth-storage-errors",
+ "serde",
+ "serde_json",
+ "test-fuzz",
+]
+
+[[package]]
 name = "reth-db-common"
 version = "0.2.0-beta.8"
 dependencies = [
@@ -6475,6 +6501,7 @@ dependencies = [
  "reth-codecs",
  "reth-config",
  "reth-db",
+ "reth-db-api",
  "reth-etl",
  "reth-primitives",
  "reth-provider",
@@ -6575,6 +6602,7 @@ dependencies = [
  "reth-config",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-metrics",
  "reth-network-p2p",
  "reth-network-types",
@@ -6790,7 +6818,7 @@ name = "reth-etl"
 version = "0.2.0-beta.8"
 dependencies = [
  "rayon",
- "reth-db",
+ "reth-db-api",
  "reth-primitives",
  "tempfile",
 ]
@@ -7117,7 +7145,7 @@ dependencies = [
 name = "reth-node-api"
 version = "0.2.0-beta.8"
 dependencies = [
- "reth-db",
+ "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
  "reth-network",
@@ -7143,6 +7171,7 @@ dependencies = [
  "reth-config",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-db-common",
  "reth-downloaders",
  "reth-evm",
@@ -7197,6 +7226,7 @@ dependencies = [
  "reth-config",
  "reth-consensus-common",
  "reth-db",
+ "reth-db-api",
  "reth-discv4",
  "reth-discv5",
  "reth-engine-primitives",
@@ -7265,7 +7295,7 @@ dependencies = [
  "humantime",
  "pin-project",
  "reth-beacon-consensus",
- "reth-db",
+ "reth-db-api",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
@@ -7451,6 +7481,7 @@ dependencies = [
  "reth-blockchain-tree-api",
  "reth-codecs",
  "reth-db",
+ "reth-db-api",
  "reth-errors",
  "reth-evm",
  "reth-execution-types",
@@ -7481,6 +7512,7 @@ dependencies = [
  "rayon",
  "reth-config",
  "reth-db",
+ "reth-db-api",
  "reth-errors",
  "reth-metrics",
  "reth-primitives",
@@ -7739,6 +7771,7 @@ dependencies = [
  "reth-config",
  "reth-consensus",
  "reth-db",
+ "reth-db-api",
  "reth-downloaders",
  "reth-etl",
  "reth-evm",
@@ -7772,7 +7805,7 @@ dependencies = [
  "futures-util",
  "metrics",
  "reth-consensus",
- "reth-db",
+ "reth-db-api",
  "reth-errors",
  "reth-metrics",
  "reth-network-p2p",
@@ -7796,6 +7829,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rayon",
  "reth-db",
+ "reth-db-api",
  "reth-nippy-jar",
  "reth-primitives",
  "reth-provider",
@@ -7823,7 +7857,7 @@ name = "reth-storage-api"
 version = "0.2.0-beta.8"
 dependencies = [
  "auto_impl",
- "reth-db",
+ "reth-db-api",
  "reth-execution-types",
  "reth-primitives",
  "reth-storage-errors",
@@ -7940,6 +7974,7 @@ dependencies = [
  "proptest",
  "rayon",
  "reth-db",
+ "reth-db-api",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives",
@@ -7967,6 +8002,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-db",
+ "reth-db-api",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives",
@@ -8168,6 +8204,7 @@ dependencies = [
  "jsonrpsee",
  "reth",
  "reth-db",
+ "reth-db-api",
  "reth-node-ethereum",
  "tokio",
 ]

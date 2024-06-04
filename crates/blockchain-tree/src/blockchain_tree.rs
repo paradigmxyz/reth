@@ -10,7 +10,7 @@ use reth_blockchain_tree_api::{
     BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 use reth_consensus::{Consensus, ConsensusError};
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -1377,7 +1377,8 @@ mod tests {
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     #[cfg(not(feature = "optimism"))]

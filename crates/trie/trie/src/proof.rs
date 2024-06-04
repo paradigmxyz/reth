@@ -6,7 +6,8 @@ use crate::{
     walker::TrieWalker,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db::{tables, transaction::DbTx};
+use reth_db::tables;
+use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
@@ -167,7 +168,7 @@ mod tests {
     use super::*;
     use crate::StateRoot;
     use once_cell::sync::Lazy;
-    use reth_db::database::Database;
+    use reth_db_api::database::Database;
     use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
     use reth_storage_errors::provider::ProviderResult;

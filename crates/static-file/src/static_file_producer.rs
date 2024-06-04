@@ -3,7 +3,7 @@
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
 use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_storage_errors::provider::ProviderResult;
@@ -228,7 +228,8 @@ mod tests {
         StaticFileProducer, StaticFileProducerInner, StaticFileTargets,
     };
     use assert_matches::assert_matches;
-    use reth_db::{database::Database, test_utils::TempDatabase, transaction::DbTx, DatabaseEnv};
+    use reth_db::{test_utils::TempDatabase, DatabaseEnv};
+    use reth_db_api::{database::Database, transaction::DbTx};
     use reth_primitives::{
         static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
     };

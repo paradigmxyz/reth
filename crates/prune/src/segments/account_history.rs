@@ -4,7 +4,8 @@ use crate::{
     },
     PrunerError,
 };
-use reth_db::{database::Database, models::ShardedKey, tables};
+use reth_db::tables;
+use reth_db_api::{database::Database, models::ShardedKey};
 use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::DatabaseProviderRW;
 use tracing::{instrument, trace};

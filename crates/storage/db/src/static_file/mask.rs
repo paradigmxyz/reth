@@ -1,4 +1,4 @@
-use crate::table::Decompress;
+use reth_db_api::table::Decompress;
 
 /// Generic Mask helper struct for selecting specific column values to read and decompress.
 ///

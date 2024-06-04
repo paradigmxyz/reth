@@ -4,10 +4,8 @@ use crate::{
 };
 use ahash::RandomState;
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawKey,
-    RawTable, RawValue, TableViewer, Tables,
-};
+use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use std::{
     hash::{BuildHasher, Hasher},
     sync::Arc,

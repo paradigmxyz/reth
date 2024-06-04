@@ -3,12 +3,13 @@
 use super::cursor::Cursor;
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
-    table::{Compress, DupSort, Encode, Table, TableImporter},
-    tables::{utils::decode_one, Tables},
-    transaction::{DbTx, DbTxMut},
+    tables::utils::decode_one,
     DatabaseError,
 };
-use once_cell::sync::OnceCell;
+use reth_db_api::{
+    table::{Compress, DupSort, Encode, Table, TableImporter},
+    transaction::{DbTx, DbTxMut},
+};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
@@ -36,10 +37,6 @@ pub struct Tx<K: TransactionKind> {
     ///
     /// If [Some], then metrics are reported.
     metrics_handler: Option<MetricsHandler<K>>,
-
-    /// Database table handle cache.
-    // TODO: Use `std::sync::OnceLock` once `get_or_try_init` is stable.
-    db_handles: [OnceCell<DBI>; Tables::COUNT],
 }
 
 impl<K: TransactionKind> Tx<K> {
@@ -69,14 +66,7 @@ impl<K: TransactionKind> Tx<K> {
 
     #[inline]
     const fn new_inner(inner: Transaction<K>, metrics_handler: Option<MetricsHandler<K>>) -> Self {
-        // NOTE: These constants are needed to initialize `OnceCell` at compile-time, as array
-        // initialization is not allowed with non-Copy types, and `const { }` blocks are not stable
-        // yet.
-        #[allow(clippy::declare_interior_mutable_const)]
-        const ONCECELL_DBI_NEW: OnceCell<DBI> = OnceCell::new();
-        #[allow(clippy::declare_interior_mutable_const)]
-        const DB_HANDLES: [OnceCell<DBI>; Tables::COUNT] = [ONCECELL_DBI_NEW; Tables::COUNT];
-        Self { inner, db_handles: DB_HANDLES, metrics_handler }
+        Self { inner, metrics_handler }
     }
 
     /// Gets this transaction ID.
@@ -86,14 +76,10 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Gets a table database handle if it exists, otherwise creates it.
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
-        self.db_handles[T::TABLE as usize]
-            .get_or_try_init(|| {
-                self.inner
-                    .open_db(Some(T::NAME))
-                    .map(|db| db.dbi())
-                    .map_err(|e| DatabaseError::Open(e.into()))
-            })
-            .copied()
+        self.inner
+            .open_db(Some(T::NAME))
+            .map(|db| db.dbi())
+            .map_err(|e| DatabaseError::Open(e.into()))
     }
 
     /// Create db Cursor
@@ -170,7 +156,7 @@ impl<K: TransactionKind> Tx<K> {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
-                .record_operation(T::TABLE, operation, value_size, || f(&self.inner))
+                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }
@@ -391,10 +377,8 @@ impl DbTxMut for Tx<RW> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        database::Database, mdbx::DatabaseArguments, models::client_version::ClientVersion, tables,
-        transaction::DbTx, DatabaseEnv, DatabaseEnvKind,
-    };
+    use crate::{mdbx::DatabaseArguments, tables, DatabaseEnv, DatabaseEnvKind};
+    use reth_db_api::{database::Database, models::ClientVersion, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};

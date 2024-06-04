@@ -11,6 +11,7 @@ repository.workspace = true
 # reth
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
 reth-provider.workspace = true
 reth-config.workspace = true
 reth-trie.workspace = true

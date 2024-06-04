@@ -4,10 +4,10 @@ use crate::{
     },
     PrunerError,
 };
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
-    tables,
 };
 use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::DatabaseProviderRW;

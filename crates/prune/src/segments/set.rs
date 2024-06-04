@@ -2,7 +2,7 @@ use crate::segments::{
     AccountHistory, Receipts, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory,
     TransactionLookup,
 };
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::PruneModes;
 
 /// Collection of [Segment]. Thread-safe, allocated on the heap.
