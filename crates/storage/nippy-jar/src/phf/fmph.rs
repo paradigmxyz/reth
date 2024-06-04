@@ -28,7 +28,7 @@ impl PerfectHashingFunction for Fmph {
 
     fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
         if let Some(f) = &self.function {
-            return Ok(f.get(key));
+            return Ok(f.get(key))
         }
         Err(NippyJarError::PHFMissingKeys)
     }
@@ -92,7 +92,7 @@ impl<'de> Deserialize<'de> for Fmph {
                 function: Some(
                     Function::read(&mut std::io::Cursor::new(buffer)).map_err(D::Error::custom)?,
                 ),
-            });
+            })
         }
         Ok(Self { function: None })
     }
