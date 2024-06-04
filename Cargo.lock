@@ -6663,16 +6663,31 @@ dependencies = [
 
 [[package]]
 name = "reth-engine-tree"
-version = "0.2.0-beta.7"
+version = "0.2.0-beta.8"
 dependencies = [
  "aquamarine",
  "futures",
  "metrics",
  "reth-blockchain-tree-api",
+ "reth-db",
+ "reth-engine-primitives",
+ "reth-errors",
+ "reth-ethereum-consensus",
  "reth-metrics",
+ "reth-network-p2p",
+ "reth-payload-builder",
+ "reth-payload-validator",
  "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-rpc-types",
+ "reth-stages-api",
+ "reth-static-file",
+ "reth-tasks",
+ "reth-tokio-util",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

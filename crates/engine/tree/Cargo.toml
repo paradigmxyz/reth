@@ -14,6 +14,20 @@ workspace = true
 # reth
 reth-blockchain-tree-api.workspace = true
 reth-primitives.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-stages-api.workspace = true
+reth-errors.workspace = true
+reth-db.workspace = true
+reth-provider.workspace = true
+reth-rpc-types.workspace = true
+reth-tasks.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-validator.workspace = true
+reth-prune.workspace = true
+reth-static-file.workspace = true
+reth-tokio-util.workspace = true
+reth-engine-primitives.workspace = true
+reth-network-p2p.workspace = true
 
 # common
 tokio = { workspace = true, features = ["macros", "sync"] }
@@ -26,3 +40,4 @@ metrics.workspace = true
 
 # misc
 aquamarine.workspace = true
+tracing.workspace = true
