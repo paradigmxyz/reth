@@ -157,7 +157,7 @@ impl LogLevel {
             Self::Fatal => "Enables logging for critical conditions, i.e. assertion failures",
             Self::Error => "Enables logging for error conditions",
             Self::Warn => "Enables logging for warning conditions",
-            Self::Notice => "Enables logging for normal but significant conditions",
+            Self::Notice => "Enables logging for normal but significant condition",
             Self::Verbose => "Enables logging for verbose informational",
             Self::Debug => "Enables logging for debug-level messages",
             Self::Trace => "Enables logging for trace debug-level messages",

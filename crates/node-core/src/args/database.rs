@@ -89,11 +89,32 @@ mod tests {
 
     #[test]
     fn test_possible_values() {
-        let possible_values: Vec<_> =
-            LogLevel::value_variants().iter().map(|v| format!("{:?}", v)).collect();
-        let expected_values =
-            vec!["Fatal", "Error", "Warn", "Notice", "Verbose", "Debug", "Trace", "Extra"];
-        assert_eq!(possible_values, expected_values);
+        // Initialize the LogLevelValueParser
+        let parser = LogLevelValueParser;
+
+        // Call the possible_values method
+        let possible_values: Vec<PossibleValue> = parser.possible_values().unwrap().collect();
+
+        // Expected possible values
+        let expected_values = vec![
+            PossibleValue::new("fatal")
+                .help("Enables logging for critical conditions, i.e. assertion failures"),
+            PossibleValue::new("error").help("Enables logging for error conditions"),
+            PossibleValue::new("warn").help("Enables logging for warning conditions"),
+            PossibleValue::new("notice")
+                .help("Enables logging for normal but significant condition"),
+            PossibleValue::new("verbose").help("Enables logging for verbose informational"),
+            PossibleValue::new("debug").help("Enables logging for debug-level messages"),
+            PossibleValue::new("trace").help("Enables logging for trace debug-level messages"),
+            PossibleValue::new("extra").help("Enables logging for extra debug-level messages"),
+        ];
+
+        // Check that the possible values match the expected values
+        assert_eq!(possible_values.len(), expected_values.len());
+        for (actual, expected) in possible_values.iter().zip(expected_values.iter()) {
+            assert_eq!(actual.get_name(), expected.get_name());
+            assert_eq!(actual.get_help(), expected.get_help());
+        }
     }
 
     #[test]
