@@ -34,7 +34,9 @@ impl DatabaseEnvMetrics {
         // Pre-populate metric handle maps with all possible combinations of labels
         // to avoid runtime locks on the map when recording metrics.
         Self {
-            operations: Self::generate_operation_handles(),
+            // not possible
+            // operations: Self::generate_operation_handles(),
+            operations: Default::default(),
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
@@ -47,17 +49,18 @@ impl DatabaseEnvMetrics {
             Tables::COUNT * Operation::COUNT,
             BuildHasherDefault::<FxHasher>::default(),
         );
-        for table in Tables::ALL {
-            for operation in Operation::iter() {
-                operations.insert(
-                    (*table, operation),
-                    OperationMetrics::new_with_labels(&[
-                        (Labels::Table.as_str(), table.name()),
-                        (Labels::Operation.as_str(), operation.as_str()),
-                    ]),
-                );
-            }
+        // not possible
+        /*for table in Tables::ALL {
+        for operation in Operation::iter() {
+            operations.insert(
+                (*table, operation),
+                OperationMetrics::new_with_labels(&[
+                    (Labels::Table.as_str(), table.name()),
+                    (Labels::Operation.as_str(), operation.as_str()),
+                ]),
+            );
         }
+        }*/
         operations
     }
 

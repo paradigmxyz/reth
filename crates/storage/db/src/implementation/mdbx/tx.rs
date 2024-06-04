@@ -88,14 +88,19 @@ impl<K: TransactionKind> Tx<K> {
 
     /// Gets a table database handle if it exists, otherwise creates it.
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, DatabaseError> {
-        self.db_handles[T::TABLE as usize]
-            .get_or_try_init(|| {
-                self.inner
-                    .open_db(Some(T::NAME))
-                    .map(|db| db.dbi())
-                    .map_err(|e| DatabaseError::Open(e.into()))
-            })
-            .copied()
+        // does this even do anything at all actually or
+        /*self.db_handles[T::TABLE as usize]
+        .get_or_try_init(|| {
+            self.inner
+                .open_db(Some(T::NAME))
+                .map(|db| db.dbi())
+                .map_err(|e| DatabaseError::Open(e.into()))
+        })
+        .copied()*/
+        self.inner
+            .open_db(Some(T::NAME))
+            .map(|db| db.dbi())
+            .map_err(|e| DatabaseError::Open(e.into()))
     }
 
     /// Create db Cursor
@@ -172,7 +177,7 @@ impl<K: TransactionKind> Tx<K> {
             metrics_handler.log_backtrace_on_long_read_transaction();
             metrics_handler
                 .env_metrics
-                .record_operation(T::TABLE, operation, value_size, || f(&self.inner))
+                .record_operation(T::NAME, operation, value_size, || f(&self.inner))
         } else {
             f(&self.inner)
         }

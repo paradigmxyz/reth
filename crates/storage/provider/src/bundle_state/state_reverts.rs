@@ -1,8 +1,8 @@
 use rayon::slice::ParallelSliceMut;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};

@@ -18,6 +18,7 @@ reth-primitives.workspace = true
 reth-stages-api.workspace = true
 reth-errors.workspace = true
 reth-db.workspace = true
+reth-db-api.workspace = true
 reth-provider.workspace = true
 reth-rpc-types.workspace = true
 reth-tasks.workspace = true
@@ -74,5 +75,5 @@ optimism = [
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
     "reth-ethereum-consensus/optimism",
-    "reth-rpc/optimism"
+    "reth-rpc/optimism",
 ]

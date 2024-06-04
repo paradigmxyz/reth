@@ -19,6 +19,7 @@ reth-stages.workspace = true
 reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-db.workspace = true
+reth-db-api.workspace = true
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 

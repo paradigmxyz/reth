@@ -1,8 +1,9 @@
 #![allow(unreachable_pub)]
 
 use super::constants;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
+use reth_db::tables;
+use reth_db_api::{
+    cursor::DbCursorRO, database::Database, transaction::DbTx, DatabaseError as DbError,
 };
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_stages::{

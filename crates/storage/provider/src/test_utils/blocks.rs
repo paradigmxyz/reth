@@ -2,7 +2,9 @@
 use crate::{BundleStateWithReceipts, DatabaseProviderRW};
 use alloy_primitives::Log;
 use alloy_rlp::Decodable;
-use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
+use reth_db::tables;
+use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
+
 use reth_primitives::{
     alloy_primitives, b256,
     hex_literal::hex,

@@ -5,12 +5,11 @@ use crate::{
     StateRoot,
 };
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_db::{
+use reth_db::{tables, DatabaseError};
+use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
-    tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
 use reth_primitives::{

@@ -5,7 +5,7 @@ use futures::Stream;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
-use reth_db::{database::Database, database_metrics::DatabaseMetadata};
+use reth_db_api::{database::Database, database_metrics::DatabaseMetadata};
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{

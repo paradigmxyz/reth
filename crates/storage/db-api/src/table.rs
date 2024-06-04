@@ -79,16 +79,6 @@ impl<T> Value for T where T: Compress + Decompress + Serialize {}
 ///
 /// It allows for the use of codecs. See [`crate::models::ShardedKey`] for a custom
 /// implementation.
-
-// todo(onbjerg): remove this. it's needed to make it compile because of the associated type TABLE
-// below -.-
-pub enum Tables {}
-impl Tables {
-    pub const fn name(&self) -> &'static str {
-        "hello"
-    }
-}
-
 pub trait Table: Send + Sync + Debug + 'static {
     /// The table's name.
     const NAME: &'static str;

@@ -1,7 +1,7 @@
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_execution_errors::StorageRootError;
 use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},

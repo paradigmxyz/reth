@@ -14,7 +14,8 @@ use crate::{
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
-use reth_db::{
+use reth_db::{tables, BlockNumberList};
+use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
     database::Database,
@@ -23,9 +24,8 @@ use reth_db::{
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
     table::{Table, TableRow},
-    tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, DatabaseError,
+    DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
 use reth_network_p2p::headers::downloader::SyncTarget;

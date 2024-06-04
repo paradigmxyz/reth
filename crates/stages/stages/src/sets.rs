@@ -42,7 +42,7 @@ use crate::{
 };
 use reth_config::config::StageConfig;
 use reth_consensus::Consensus;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives::PruneModes;

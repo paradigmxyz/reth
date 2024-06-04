@@ -226,12 +226,13 @@ mod tests {
     use crate::{
         init_db,
         mdbx::DatabaseArguments,
-        models::client_version::ClientVersion,
         open_db, tables,
         version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;
-    use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+    use reth_db_api::{
+        cursor::DbCursorRO, database::Database, models::ClientVersion, transaction::DbTx,
+    };
     use reth_libmdbx::MaxReadTransactionDuration;
     use std::time::Duration;
     use tempfile::tempdir;
