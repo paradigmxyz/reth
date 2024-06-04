@@ -7,15 +7,6 @@ $ reth db diff --help
 Usage: reth db diff [OPTIONS] --secondary-datadir <SECONDARY_DATADIR> --output <OUTPUT>
 
 Options:
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
       --secondary-datadir <SECONDARY_DATADIR>
           The path to the data dir for all reth files and subdirectories.
 

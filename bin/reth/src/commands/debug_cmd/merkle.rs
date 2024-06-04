@@ -1,11 +1,8 @@
 //! Command for debugging merkle trie calculation.
 
 use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs, NetworkArgs,
-    },
+    args::{get_secret_key, NetworkArgs},
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     utils::get_single_header,
 };
@@ -15,17 +12,15 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db::{cursor::DbCursorRO, init_db, tables, transaction::DbTx, DatabaseEnv};
+use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx, DatabaseEnv};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
-use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
-use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, ChainSpec, PruneModes};
+use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, PruneModes};
 use reth_provider::{
-    providers::StaticFileProvider, BlockNumReader, BlockWriter, BundleStateWithReceipts,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory,
-    StateWriter,
+    BlockNumReader, BlockWriter, BundleStateWithReceipts, ChainSpecProvider, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
@@ -39,23 +34,8 @@ use tracing::*;
 /// `reth debug merkle` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
     #[command(flatten)]
-    datadir: DatadirArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
+    env: EnvironmentArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -85,7 +65,7 @@ impl Command {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
+            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
             .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
             .discovery_addr(SocketAddr::new(
@@ -102,21 +82,9 @@ impl Command {
 
     /// Execute `merkle-debug` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let config = Config::default();
+        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
 
-        // add network name to data dir
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
-        let db_path = data_dir.db();
-        fs::create_dir_all(&db_path)?;
-
-        // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let factory = ProviderFactory::new(
-            db.clone(),
-            self.chain.clone(),
-            StaticFileProvider::read_write(data_dir.static_files())?,
-        );
-        let provider_rw = factory.provider_rw()?;
+        let provider_rw = provider_factory.provider_rw()?;
 
         // Configure and build network
         let network_secret_path =
@@ -125,13 +93,13 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                factory.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )
             .await?;
 
-        let executor_provider = block_executor!(self.chain.clone());
+        let executor_provider = block_executor!(provider_factory.chain_spec());
 
         // Initialize the fetch client
         info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
@@ -151,7 +119,7 @@ impl Command {
 
         // build the full block client
         let consensus: Arc<dyn Consensus> =
-            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 
         // get best block number
