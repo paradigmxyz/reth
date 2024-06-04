@@ -247,7 +247,7 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
         let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::Start request...");
-            client.admin_reset_state(EvmResetState::Start).await??;
+            client.reset_state(EvmResetState::Start).await??;
             info!(target: "reth::cli", "EvmResetState::Start request sent");
             Ok(())
         })
@@ -260,7 +260,7 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
         let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::AddAccounts request with {} accounts...", accounts.data.len());
-            client.admin_reset_state(EvmResetState::AddAccounts(accounts)).await??;
+            client.reset_state(EvmResetState::AddAccounts(accounts)).await??;
             info!(target: "reth::cli", "EvmResetState::AddAccounts request sent");
             Ok(())
         })
@@ -273,7 +273,7 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
         let client = self.client.clone();
         Box::pin(async move {
             info!(target: "reth::cli", "Send EvmResetState::End request...");
-            client.admin_reset_state(EvmResetState::End(block)).await??;
+            client.reset_state(EvmResetState::End(block)).await??;
             info!(target: "reth::cli", "EvmResetState::End request sent");
             Ok(())
         })
