@@ -1,4 +1,8 @@
-use std::{fmt::Display, str::FromStr};
+use reth_primitives::Log;
+use std::{
+    fmt::{self, Display, Formatter},
+    str::FromStr,
+};
 use thiserror::Error;
 
 /// Database error type.
@@ -135,6 +139,20 @@ impl LogLevel {
             Self::Trace,
             Self::Extra,
         ]
+    }
+
+    /// Static str reference to `LogLevel` enum, required for `Clap::Builder::PossibleValue::new()`
+    pub const fn variant_name(&self) -> &'static str {
+        match self {
+            Self::Fatal => "fatal",
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Notice => "notice",
+            Self::Verbose => "verbose",
+            Self::Debug => "debug",
+            Self::Trace => "trace",
+            Self::Extra => "extra",
+        }
     }
 
     /// Returns all variants descriptions

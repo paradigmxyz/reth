@@ -32,6 +32,7 @@ impl DatabaseArgs {
 
 /// clap value parser for [`LogLevel`].
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 struct LogLevelValueParser;
 
 impl TypedValueParser for LogLevelValueParser {
@@ -61,8 +62,9 @@ impl TypedValueParser for LogLevelValueParser {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        let values =
-            LogLevel::value_variants().iter().map(|v| PossibleValue::new(v.help_message()));
+        let values = LogLevel::value_variants()
+            .iter()
+            .map(|v| PossibleValue::new(v.variant_name()).help(v.help_message()));
         Some(Box::new(values))
     }
 }
