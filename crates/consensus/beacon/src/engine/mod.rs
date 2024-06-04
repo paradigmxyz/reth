@@ -1,4 +1,5 @@
 use futures::{stream::BoxStream, Future, StreamExt};
+use itertools::Either;
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
@@ -94,7 +95,7 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// received by Engine API (JSON-RPC).
 ///
 /// The consensus engine is idle until it receives the first
-/// [BeaconEngineMessage::ForkchoiceUpdated] message from the CL which would initiate the sync. At
+/// [`BeaconEngineMessage::ForkchoiceUpdated`] message from the CL which would initiate the sync. At
 /// first, the consensus engine would run the [Pipeline] until the latest known block hash.
 /// Afterward, it would attempt to create/restore the [`BlockchainTreeEngine`] from the blocks
 /// that are currently available. In case the restoration is successful, the consensus engine would
@@ -106,10 +107,10 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 /// ## New Payload (`engine_newPayloadV{}`)
 ///
 /// The engine receives new payloads from the CL. If the payload is connected to the canonical
-/// chain, it will be fully validated added to a chain in the [BlockchainTreeEngine]: `VALID`
+/// chain, it will be fully validated added to a chain in the [`BlockchainTreeEngine`]: `VALID`
 ///
 /// If the payload's chain is disconnected (at least 1 block is missing) then it will be buffered:
-/// `SYNCING` ([BlockStatus::Disconnected]).
+/// `SYNCING` ([`BlockStatus::Disconnected`]).
 ///
 /// ## Forkchoice Update (FCU) (`engine_forkchoiceUpdatedV{}`)
 ///
@@ -124,14 +125,14 @@ pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 ///
 /// ### The chain is connected
 ///
-/// All blocks of the `head_hash`'s chain are present in the [BlockchainTreeEngine] and are
+/// All blocks of the `head_hash`'s chain are present in the [`BlockchainTreeEngine`] and are
 /// committed to the canonical chain. This also includes reorgs.
 ///
 /// ### The chain is disconnected
 ///
-/// In this case the [BlockchainTreeEngine] doesn't know how the new chain connects to the existing
-/// canonical chain. It could be a simple commit (new blocks extend the current head) or a re-org
-/// that requires unwinding the canonical chain.
+/// In this case the [`BlockchainTreeEngine`] doesn't know how the new chain connects to the
+/// existing canonical chain. It could be a simple commit (new blocks extend the current head) or a
+/// re-org that requires unwinding the canonical chain.
 ///
 /// This further distinguishes between two variants:
 ///
@@ -185,6 +186,16 @@ where
     payload_validator: ExecutionPayloadValidator,
     /// Current blockchain tree action.
     blockchain_tree_action: Option<BlockchainTreeAction<EngineT>>,
+    /// Pending forkchoice update.
+    /// It is recorded if we cannot process the forkchoice update because
+    /// a hook with database read-write access is active.
+    /// This is a temporary solution to always process missed FCUs.
+    #[allow(clippy::type_complexity)]
+    pending_forkchoice_update: Option<(
+        ForkchoiceState,
+        Option<EngineT::PayloadAttributes>,
+        oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
+    )>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
@@ -220,7 +231,7 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     EngineT: EngineTypes + Unpin + 'static,
 {
-    /// Create a new instance of the [BeaconConsensusEngine].
+    /// Create a new instance of the [`BeaconConsensusEngine`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Client,
@@ -253,16 +264,17 @@ where
         )
     }
 
-    /// Create a new instance of the [BeaconConsensusEngine] using the given channel to configure
-    /// the [BeaconEngineMessage] communication channel.
+    /// Create a new instance of the [`BeaconConsensusEngine`] using the given channel to configure
+    /// the [`BeaconEngineMessage`] communication channel.
     ///
     /// By default the engine is started with idle pipeline.
     /// The pipeline can be launched immediately in one of the following ways descending in
     /// priority:
-    /// - Explicit [Option::Some] target block hash provided via a constructor argument.
+    /// - Explicit [`Option::Some`] target block hash provided via a constructor argument.
     /// - The process was previously interrupted amidst the pipeline run. This is checked by
-    ///   comparing the checkpoints of the first ([StageId::Headers]) and last ([StageId::Finish])
-    ///   stages. In this case, the latest available header in the database is used as the target.
+    ///   comparing the checkpoints of the first ([`StageId::Headers`]) and last
+    ///   ([`StageId::Finish`]) stages. In this case, the latest available header in the database is
+    ///   used as the target.
     ///
     /// Propagates any database related error.
     #[allow(clippy::too_many_arguments)]
@@ -303,6 +315,7 @@ where
             payload_builder,
             invalid_headers: InvalidHeaderCache::new(MAX_INVALID_HEADERS),
             blockchain_tree_action: None,
+            pending_forkchoice_update: None,
             pipeline_run_threshold,
             hooks: EngineHooksController::new(hooks),
             event_sender,
@@ -322,7 +335,7 @@ where
         Ok((this, handle))
     }
 
-    /// Returns current [EngineHookContext] that's used for polling engine hooks.
+    /// Returns current [`EngineHookContext`] that's used for polling engine hooks.
     fn current_engine_hook_context(&self) -> RethResult<EngineHookContext> {
         Ok(EngineHookContext {
             tip_block_number: self.blockchain.canonical_tip().number,
@@ -333,6 +346,12 @@ where
         })
     }
 
+    /// Set the next blockchain tree action.
+    fn set_blockchain_tree_action(&mut self, action: BlockchainTreeAction<EngineT>) {
+        let previous_action = self.blockchain_tree_action.replace(action);
+        debug_assert!(previous_action.is_none(), "Pre-existing action found");
+    }
+
     /// Pre-validate forkchoice update and check whether it can be processed.
     ///
     /// This method returns the update outcome if validation fails or
@@ -340,41 +359,26 @@ where
     fn pre_validate_forkchoice_update(
         &mut self,
         state: ForkchoiceState,
-    ) -> Option<OnForkChoiceUpdated> {
+    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
         if state.head_block_hash.is_zero() {
-            return Some(OnForkChoiceUpdated::invalid_state())
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
         }
 
         // check if the new head hash is connected to any ancestor that we previously marked as
         // invalid
         let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
-        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu) {
-            return Some(OnForkChoiceUpdated::with_invalid(status))
+        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
+            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
         }
 
         if self.sync.is_pipeline_active() {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
-            return Some(OnForkChoiceUpdated::syncing())
+            return Ok(Some(OnForkChoiceUpdated::syncing()))
         }
 
-        if let Some(hook) = self.hooks.active_db_write_hook() {
-            // We can only process new forkchoice updates if no hook with db write is running,
-            // since it requires exclusive access to the database
-            warn!(
-                target: "consensus::engine",
-                hook = %hook.name(),
-                head_block_hash = ?state.head_block_hash,
-                safe_block_hash = ?state.safe_block_hash,
-                finalized_block_hash = ?state.finalized_block_hash,
-                "Hook is in progress, skipping forkchoice update. \
-                This may affect the performance of your node as a validator."
-            );
-            return Some(OnForkChoiceUpdated::syncing())
-        }
-
-        None
+        Ok(None)
     }
 
     /// Process the result of attempting to make forkchoice state head hash canonical.
@@ -435,7 +439,7 @@ where
                     Err(err)
                 } else {
                     Ok(OnForkChoiceUpdated::valid(
-                        self.on_failed_canonical_forkchoice_update(&state, err),
+                        self.on_failed_canonical_forkchoice_update(&state, err)?,
                     ))
                 }
             }
@@ -500,15 +504,37 @@ where
         self.blockchain.on_forkchoice_update_received(&state);
         trace!(target: "consensus::engine", ?state, "Received new forkchoice state update");
 
-        if let Some(on_updated) = self.pre_validate_forkchoice_update(state) {
-            // Pre-validate forkchoice state update and return if it's invalid
-            // or cannot be processed at the moment.
-            self.on_forkchoice_updated_status(state, on_updated, tx);
-        } else {
-            let previous_action = self
-                .blockchain_tree_action
-                .replace(BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx });
-            debug_assert!(previous_action.is_none(), "Pre-existing action found");
+        match self.pre_validate_forkchoice_update(state) {
+            Ok(on_updated_result) => {
+                if let Some(on_updated) = on_updated_result {
+                    // Pre-validate forkchoice state update and return if it's invalid
+                    // or cannot be processed at the moment.
+                    self.on_forkchoice_updated_status(state, on_updated, tx);
+                } else if let Some(hook) = self.hooks.active_db_write_hook() {
+                    // We can only process new forkchoice updates if no hook with db write is
+                    // running, since it requires exclusive access to the
+                    // database
+                    let replaced_pending =
+                        self.pending_forkchoice_update.replace((state, attrs, tx));
+                    warn!(
+                        target: "consensus::engine",
+                        hook = %hook.name(),
+                        head_block_hash = ?state.head_block_hash,
+                        safe_block_hash = ?state.safe_block_hash,
+                        finalized_block_hash = ?state.finalized_block_hash,
+                        replaced_pending = ?replaced_pending.map(|(state, _, _)| state),
+                        "Hook is in progress, delaying forkchoice update. \
+                        This may affect the performance of your node as a validator."
+                    );
+                } else {
+                    self.set_blockchain_tree_action(
+                        BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx },
+                    );
+                }
+            }
+            Err(error) => {
+                let _ = tx.send(Err(error.into()));
+            }
         }
     }
 
@@ -707,53 +733,41 @@ where
     ///     - It is fully validated and deemed VALID
     ///     - Any other ancestor of the invalid payload with a higher blockNumber is INVALID
     ///   - 0x0000000000000000000000000000000000000000000000000000000000000000 if the above
-    ///     conditions are satisfied by a PoW block.
+    ///     conditions are satisfied by a `PoW` block.
     ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
     ///     the above conditions.
     fn latest_valid_hash_for_invalid_payload(
         &mut self,
         parent_hash: B256,
-        insert_err: Option<&InsertBlockErrorKind>,
-    ) -> Option<B256> {
-        // check pre merge block error
-        if insert_err.map(|err| err.is_block_pre_merge()).unwrap_or_default() {
-            return Some(B256::ZERO)
-        }
-
+    ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
-        // TODO: handle find_block_by_hash errors.
-        if matches!(self.blockchain.find_block_by_hash(parent_hash, BlockSource::Any), Ok(Some(_)))
-        {
-            Some(parent_hash)
-        } else {
-            // iterate over ancestors in the invalid cache
-            // until we encounter the first valid ancestor
-            let mut current_hash = parent_hash;
-            let mut current_header = self.invalid_headers.get(&current_hash);
-            while let Some(header) = current_header {
-                current_hash = header.parent_hash;
-                current_header = self.invalid_headers.get(&current_hash);
-
-                // If current_header is None, then the current_hash does not have an invalid
-                // ancestor in the cache, check its presence in blockchain tree
-                if current_header.is_none() &&
-                    matches!(
-                        // TODO: handle find_block_by_hash errors.
-                        self.blockchain.find_block_by_hash(current_hash, BlockSource::Any),
-                        Ok(Some(_))
-                    )
-                {
-                    return Some(current_hash)
-                }
-            }
-            None
+        if self.blockchain.find_block_by_hash(parent_hash, BlockSource::Any)?.is_some() {
+            return Ok(Some(parent_hash))
         }
+
+        // iterate over ancestors in the invalid cache
+        // until we encounter the first valid ancestor
+        let mut current_hash = parent_hash;
+        let mut current_header = self.invalid_headers.get(&current_hash);
+        while let Some(header) = current_header {
+            current_hash = header.parent_hash;
+            current_header = self.invalid_headers.get(&current_hash);
+
+            // If current_header is None, then the current_hash does not have an invalid
+            // ancestor in the cache, check its presence in blockchain tree
+            if current_header.is_none() &&
+                self.blockchain.find_block_by_hash(current_hash, BlockSource::Any)?.is_some()
+            {
+                return Ok(Some(current_hash))
+            }
+        }
+        Ok(None)
     }
 
     /// Prepares the invalid payload response for the given hash, checking the
     /// database for the parent hash and populating the payload status with the latest valid hash
     /// according to the engine api spec.
-    fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> PayloadStatus {
+    fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
         if let Ok(Some(parent)) = self.blockchain.header_by_hash_or_number(parent_hash.into()) {
@@ -762,12 +776,11 @@ where
             }
         }
 
-        let valid_parent_hash =
-            self.latest_valid_hash_for_invalid_payload(parent_hash, None).unwrap_or_default();
-        PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+        let valid_parent_hash = self.latest_valid_hash_for_invalid_payload(parent_hash)?;
+        Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
-        .with_latest_valid_hash(valid_parent_hash)
+        .with_latest_valid_hash(valid_parent_hash.unwrap_or_default()))
     }
 
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
@@ -779,27 +792,27 @@ where
         &mut self,
         check: B256,
         head: B256,
-    ) -> Option<PayloadStatus> {
+    ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
-        let header = self.invalid_headers.get(&check)?;
+        let Some(header) = self.invalid_headers.get(&check) else { return Ok(None) };
 
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(header.parent_hash);
+        let status = self.prepare_invalid_response(header.parent_hash)?;
 
         // insert the head block into the invalid header cache
         self.invalid_headers.insert_with_invalid_ancestor(head, header);
 
-        Some(status)
+        Ok(Some(status))
     }
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response
     /// to a forkchoice update.
-    fn check_invalid_ancestor(&mut self, head: B256) -> Option<PayloadStatus> {
+    fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
         // check if the head was previously marked as invalid
-        let header = self.invalid_headers.get(&head)?;
+        let Some(header) = self.invalid_headers.get(&head) else { return Ok(None) };
 
         // populate the latest valid hash field
-        Some(self.prepare_invalid_response(header.parent_hash))
+        Ok(Some(self.prepare_invalid_response(header.parent_hash)?))
     }
 
     /// Record latency metrics for one call to make a block canonical
@@ -829,9 +842,9 @@ where
     /// made canonical.
     ///
     /// If the forkchoice state is consistent, this will return Ok(None). Otherwise, this will
-    /// return an instance of [OnForkChoiceUpdated] that is INVALID.
+    /// return an instance of [`OnForkChoiceUpdated`] that is INVALID.
     ///
-    /// This also updates the safe and finalized blocks in the [CanonChainTracker], if they are
+    /// This also updates the safe and finalized blocks in the [`CanonChainTracker`], if they are
     /// consistent with the head block.
     fn ensure_consistent_forkchoice_state(
         &self,
@@ -959,29 +972,29 @@ where
     ///
     /// If the newest head is not invalid, then this will trigger a new pipeline run to sync the gap
     ///
-    /// See [Self::on_forkchoice_updated] and [BlockchainTreeEngine::make_canonical].
+    /// See [`Self::on_forkchoice_updated`] and [`BlockchainTreeEngine::make_canonical`].
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
         error: CanonicalError,
-    ) -> PayloadStatus {
+    ) -> ProviderResult<PayloadStatus> {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
         // check if the new head was previously invalidated, if so then we deem this FCU
         // as invalid
-        if let Some(invalid_ancestor) = self.check_invalid_ancestor(state.head_block_hash) {
+        if let Some(invalid_ancestor) = self.check_invalid_ancestor(state.head_block_hash)? {
             warn!(target: "consensus::engine", %error, ?state, ?invalid_ancestor, head=?state.head_block_hash, "Failed to canonicalize the head hash, head is also considered invalid");
             debug!(target: "consensus::engine", head=?state.head_block_hash, current_error=%error, "Head was previously marked as invalid");
-            return invalid_ancestor
+            return Ok(invalid_ancestor)
         }
 
         match &error {
             CanonicalError::Validation(BlockValidationError::BlockPreMerge { .. }) => {
                 warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
-                return PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: error.to_string(),
                 })
-                .with_latest_valid_hash(B256::ZERO)
+                .with_latest_valid_hash(B256::ZERO))
             }
             CanonicalError::BlockchainTree(BlockchainTreeError::BlockHashNotFoundInChain {
                 ..
@@ -992,7 +1005,7 @@ where
             }
             CanonicalError::OptimisticTargetRevert(block_number) => {
                 self.sync.set_pipeline_sync_target(PipelineTarget::Unwind(*block_number));
-                return PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+                return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
             }
             _ => {
                 warn!(target: "consensus::engine", %error, ?state, "Failed to canonicalize the head hash");
@@ -1033,7 +1046,7 @@ where
         }
 
         debug!(target: "consensus::engine", %target, "Syncing to new target");
-        PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+        Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
     }
 
     /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
@@ -1066,71 +1079,40 @@ where
         &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-        tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
-    ) {
+    ) -> Result<Either<PayloadStatus, SealedBlock>, BeaconOnNewPayloadError> {
         self.metrics.new_payload_messages.increment(1);
 
-        let block = match self.ensure_well_formed_payload(payload, cancun_fields) {
-            Ok(block) => block,
-            Err(status) => {
-                let _ = tx.send(Ok(status));
-                return
-            }
-        };
-
-        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash());
-        if lowest_buffered_ancestor == block.hash() {
-            lowest_buffered_ancestor = block.parent_hash;
-        }
-
-        // now check the block itself
-        if let Some(status) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash())
-        {
-            let _ = tx.send(Ok(status));
-            return
-        }
-
-        let previous_action = self
-            .blockchain_tree_action
-            .replace(BlockchainTreeAction::InsertNewPayload { block, tx });
-        debug_assert!(previous_action.is_none(), "Pre-existing action found");
-    }
-
-    /// Ensures that the given payload does not violate any consensus rules that concern the block's
-    /// layout, like:
-    ///    - missing or invalid base fee
-    ///    - invalid extra data
-    ///    - invalid transactions
-    ///    - incorrect hash
-    ///    - the versioned hashes passed with the payload do not exactly match transaction versioned
-    ///      hashes
-    ///    - the block does not contain blob transactions if it is pre-cancun
-    ///
-    /// This validates the following engine API rule:
-    ///
-    /// 3. Given the expected array of blob versioned hashes client software **MUST** run its
-    ///    validation by taking the following steps:
-    ///
-    ///   1. Obtain the actual array by concatenating blob versioned hashes lists
-    ///      (`tx.blob_versioned_hashes`) of each [blob
-    ///      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
-    ///      in the payload, respecting the order of inclusion. If the payload has no blob
-    ///      transactions the expected array **MUST** be `[]`.
-    ///
-    ///   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage | null}`
-    ///      if the expected and the actual arrays don't match.
-    ///
-    /// This validation **MUST** be instantly run in all cases even during active sync process.
-    fn ensure_well_formed_payload(
-        &mut self,
-        payload: ExecutionPayload,
-        cancun_fields: Option<CancunPayloadFields>,
-    ) -> Result<SealedBlock, PayloadStatus> {
+        // Ensures that the given payload does not violate any consensus rules that concern the
+        // block's layout, like:
+        //    - missing or invalid base fee
+        //    - invalid extra data
+        //    - invalid transactions
+        //    - incorrect hash
+        //    - the versioned hashes passed with the payload do not exactly match transaction
+        //      versioned hashes
+        //    - the block does not contain blob transactions if it is pre-cancun
+        //
+        // This validates the following engine API rule:
+        //
+        // 3. Given the expected array of blob versioned hashes client software **MUST** run its
+        //    validation by taking the following steps:
+        //
+        //   1. Obtain the actual array by concatenating blob versioned hashes lists
+        //      (`tx.blob_versioned_hashes`) of each [blob
+        //      transaction](https://eips.ethereum.org/EIPS/eip-4844#new-transaction-type) included
+        //      in the payload, respecting the order of inclusion. If the payload has no blob
+        //      transactions the expected array **MUST** be `[]`.
+        //
+        //   2. Return `{status: INVALID, latestValidHash: null, validationError: errorMessage |
+        //      null}` if the expected and the actual arrays don't match.
+        //
+        // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
-
-        match self.payload_validator.ensure_well_formed_payload(payload, cancun_fields.into()) {
-            Ok(block) => Ok(block),
+        let block = match self
+            .payload_validator
+            .ensure_well_formed_payload(payload, cancun_fields.into())
+        {
+            Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", %error, "Invalid payload");
                 // we need to convert the error to a payload status (response to the CL)
@@ -1142,12 +1124,28 @@ where
                         // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
                         None
                     } else {
-                        self.latest_valid_hash_for_invalid_payload(parent_hash, None)
+                        self.latest_valid_hash_for_invalid_payload(parent_hash)
+                            .map_err(BeaconOnNewPayloadError::internal)?
                     };
 
                 let status = PayloadStatusEnum::from(error);
-                Err(PayloadStatus::new(status, latest_valid_hash))
+                return Ok(Either::Left(PayloadStatus::new(status, latest_valid_hash)))
             }
+        };
+
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block.hash());
+        if lowest_buffered_ancestor == block.hash() {
+            lowest_buffered_ancestor = block.parent_hash;
+        }
+
+        // now check the block itself
+        if let Some(status) = self
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.hash())
+            .map_err(BeaconOnNewPayloadError::internal)?
+        {
+            Ok(Either::Left(status))
+        } else {
+            Ok(Either::Right(block))
         }
     }
 
@@ -1239,10 +1237,10 @@ where
 
         let elapsed = start.elapsed();
         let mut latest_valid_hash = None;
-        let block = Arc::new(block);
         let status = match status {
             InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)) => {
                 latest_valid_hash = Some(block_hash);
+                let block = Arc::new(block);
                 let event = if attachment.is_canonical() {
                     BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed)
                 } else {
@@ -1259,7 +1257,9 @@ where
             InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                 // check if the block's parent is already marked as invalid
                 if let Some(status) =
-                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash())
+                    self.check_invalid_ancestor_with_head(block.parent_hash, block.hash()).map_err(
+                        |error| InsertBlockError::new(block, InsertBlockErrorKind::Provider(error)),
+                    )?
                 {
                     return Ok(status)
                 }
@@ -1321,7 +1321,7 @@ where
     /// Attempt to form a new canonical chain based on the current sync target.
     ///
     /// This is invoked when we successfully __downloaded__ a new block from the network which
-    /// resulted in [BlockStatus::Valid].
+    /// resulted in [`BlockStatus::Valid`].
     ///
     /// Note: This will not succeed if the sync target has changed since the block download request
     /// was issued and the new target is still disconnected and additional missing blocks are
@@ -1386,7 +1386,7 @@ where
         }
     }
 
-    /// Event handler for events emitted by the [EngineSyncController].
+    /// Event handler for events emitted by the [`EngineSyncController`].
     ///
     /// This returns a result to indicate whether the engine future should resolve (fatal error).
     fn on_sync_event(
@@ -1397,12 +1397,14 @@ where
             EngineSyncEvent::FetchedFullBlock(block) => {
                 trace!(target: "consensus::engine", hash=?block.hash(), number=%block.number, "Downloaded full block");
                 // Insert block only if the block's parent is not marked as invalid
-                if self.check_invalid_ancestor_with_head(block.parent_hash, block.hash()).is_none()
+                if self
+                    .check_invalid_ancestor_with_head(block.parent_hash, block.hash())
+                    .map_err(|error| BeaconConsensusEngineError::Common(error.into()))?
+                    .is_none()
                 {
-                    let previous_action = self
-                        .blockchain_tree_action
-                        .replace(BlockchainTreeAction::InsertDownloadedPayload { block });
-                    debug_assert!(previous_action.is_none(), "Pre-existing action found");
+                    self.set_blockchain_tree_action(
+                        BlockchainTreeAction::InsertDownloadedPayload { block },
+                    );
                 }
                 EngineEventOutcome::Processed
             }
@@ -1489,7 +1491,7 @@ where
             .check_invalid_ancestor_with_head(
                 lowest_buffered_ancestor,
                 sync_target_state.head_block_hash,
-            )
+            )?
             .is_some()
         {
             warn!(
@@ -1657,8 +1659,12 @@ where
                         // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
                         // returned.
                         warn!(target: "consensus::engine", invalid_hash=?block.hash(), invalid_number=?block.number, %error, "Invalid block error on new payload");
-                        let latest_valid_hash = self
-                            .latest_valid_hash_for_invalid_payload(block.parent_hash, Some(&error));
+                        let latest_valid_hash = if error.is_block_pre_merge() {
+                            // zero hash must be returned if block is pre-merge
+                            Some(B256::ZERO)
+                        } else {
+                            self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
+                        };
                         // keep track of the invalid header
                         self.invalid_headers.insert(block.header);
                         PayloadStatus::new(
@@ -1673,14 +1679,13 @@ where
                         // if we're currently syncing and the inserted block is the targeted
                         // FCU head block, we can try to make it canonical.
                         if block_hash == target.head_block_hash {
-                            let previous_action = self.blockchain_tree_action.replace(
+                            self.set_blockchain_tree_action(
                                 BlockchainTreeAction::MakeNewPayloadCanonical {
                                     payload_num_hash: block_num_hash,
                                     status,
                                     tx,
                                 },
                             );
-                            debug_assert!(previous_action.is_none(), "Pre-existing action found");
                             return Ok(EngineEventOutcome::Processed)
                         }
                     }
@@ -1781,7 +1786,7 @@ where
 }
 
 /// On initialization, the consensus engine will poll the message receiver and return
-/// [Poll::Pending] until the first forkchoice update message is received.
+/// [`Poll::Pending`] until the first forkchoice update message is received.
 ///
 /// As soon as the consensus engine receives the first forkchoice updated message and updates the
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
@@ -1836,6 +1841,17 @@ where
                     continue
                 }
 
+                // If the db write hook is no longer active and we have a pending forkchoice update,
+                // process it first.
+                if this.hooks.active_db_write_hook().is_none() {
+                    if let Some((state, attrs, tx)) = this.pending_forkchoice_update.take() {
+                        this.set_blockchain_tree_action(
+                            BlockchainTreeAction::MakeForkchoiceHeadCanonical { state, attrs, tx },
+                        );
+                        continue
+                    }
+                }
+
                 // Process one incoming message from the CL. We don't drain the messages right away,
                 // because we want to sneak a polling of running hook in between them.
                 //
@@ -1847,7 +1863,19 @@ where
                             this.on_forkchoice_updated(state, payload_attrs, tx);
                         }
                         BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                            this.on_new_payload(payload, cancun_fields, tx);
+                            match this.on_new_payload(payload, cancun_fields) {
+                                Ok(Either::Right(block)) => {
+                                    this.set_blockchain_tree_action(
+                                        BlockchainTreeAction::InsertNewPayload { block, tx },
+                                    );
+                                }
+                                Ok(Either::Left(status)) => {
+                                    let _ = tx.send(Ok(status));
+                                }
+                                Err(error) => {
+                                    let _ = tx.send(Err(error));
+                                }
+                            }
                         }
                         BeaconEngineMessage::TransitionConfigurationExchanged => {
                             this.blockchain.on_transition_configuration_exchanged();
@@ -1919,13 +1947,13 @@ enum BlockchainTreeAction<EngineT: EngineTypes> {
     /// Action to insert a new block that we successfully downloaded from the network.
     /// There are several outcomes for inserting a downloaded block into the tree:
     ///
-    /// ## [BlockStatus::Valid]
+    /// ## [`BlockStatus::Valid`]
     ///
     /// The block is connected to the current canonical chain and is valid.
     /// If the block is an ancestor of the current forkchoice head, then we can try again to
     /// make the chain canonical.
     ///
-    /// ## [BlockStatus::Disconnected]
+    /// ## [`BlockStatus::Disconnected`]
     ///
     /// The block is not connected to the canonical chain, and we need to download the
     /// missing parent first.
@@ -2152,6 +2180,7 @@ mod tests {
         use super::*;
         use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
         use reth_primitives::U256;
+        use reth_provider::providers::StaticFileProvider;
         use reth_rpc_types::engine::ForkchoiceUpdateError;
         use reth_testing_utils::generators::random_block;
 
@@ -2208,8 +2237,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
             env.db
@@ -2265,8 +2297,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2286,9 +2321,12 @@ mod tests {
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
-                [&next_head].into_iter(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
+                std::iter::once(&next_head),
             );
 
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
@@ -2327,8 +2365,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2379,8 +2420,11 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
 
@@ -2425,8 +2469,11 @@ mod tests {
             let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), temp_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(temp_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2452,9 +2499,10 @@ mod tests {
         use super::*;
         use reth_db::test_utils::create_test_static_files_dir;
         use reth_primitives::{genesis::Genesis, Hardfork, U256};
-        use reth_provider::test_utils::blocks::BlockchainTestData;
+        use reth_provider::{
+            providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
+        };
         use reth_testing_utils::{generators::random_block, GenesisAllocator};
-
         #[tokio::test]
         async fn new_payload_before_forkchoice() {
             let mut rng = generators::rng();
@@ -2524,8 +2572,11 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1, &block2].into_iter(),
             );
 
@@ -2593,8 +2644,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&genesis, &block1].into_iter(),
             );
 
@@ -2637,9 +2691,12 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
-                [&genesis].into_iter(),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
+                std::iter::once(&genesis),
             );
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
@@ -2701,8 +2758,11 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(env.db.as_ref(), chain_spec.clone(), static_dir_path)
-                    .expect("create provider factory with static_files"),
+                ProviderFactory::new(
+                    env.db.as_ref(),
+                    chain_spec.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
                 [&data.genesis, &block1].into_iter(),
             );
 

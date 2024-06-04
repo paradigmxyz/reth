@@ -15,8 +15,8 @@ use tracing::{instrument, trace};
 
 /// Number of storage history tables to prune in one step
 ///
-/// Storage History consists of two tables: [tables::StorageChangeSets] and
-/// [tables::StoragesHistory]. We want to prune them to the same block number.
+/// Storage History consists of two tables: [`tables::StorageChangeSets`] and
+/// [`tables::StoragesHistory`]. We want to prune them to the same block number.
 const STORAGE_HISTORY_TABLES_TO_PRUNE: usize = 2;
 
 #[derive(Debug)]

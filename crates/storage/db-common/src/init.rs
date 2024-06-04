@@ -579,14 +579,11 @@ mod tests {
         init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(
-            ProviderFactory::new(
-                factory.into_db(),
-                MAINNET.clone(),
-                static_file_provider.path().into(),
-            )
-            .unwrap(),
-        );
+        let genesis_hash = init_genesis(ProviderFactory::new(
+            factory.into_db(),
+            MAINNET.clone(),
+            static_file_provider,
+        ));
 
         assert_eq!(
             genesis_hash.unwrap_err(),

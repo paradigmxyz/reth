@@ -148,7 +148,7 @@ where
         let root = hash_builder.root();
 
         let all_proof_nodes = hash_builder.take_proofs();
-        for proof in proofs.iter_mut() {
+        for proof in &mut proofs {
             // Iterate over all proof nodes and find the matching ones.
             // The filtered results are guaranteed to be in order.
             let matching_proof_nodes = all_proof_nodes

@@ -2,8 +2,8 @@
 
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DebugArgs, DevArgs, DiscoveryArgs, ExperimentalArgs,
-        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        get_secret_key, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
+        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
@@ -68,7 +68,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```
 ///
 /// This can also be used to launch a node with a temporary test database. This can be done with
-/// the [NodeConfig::test] method.
+/// the [`NodeConfig::test`] method.
 ///
 /// # Example
 /// ```rust
@@ -96,6 +96,9 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// ```
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
+    /// All data directory related arguments
+    pub datadir: DatadirArgs,
+
     /// The path to the configuration file to use.
     pub config: Option<PathBuf>,
 
@@ -118,11 +121,11 @@ pub struct NodeConfig {
     /// port numbers that conflict with each other.
     ///
     /// Changes to the following port numbers:
-    /// - DISCOVERY_PORT: default + `instance` - 1
-    /// - DISCOVERY_V5_PORT: default + `instance` - 1
-    /// - AUTH_PORT: default + `instance` * 100 - 100
-    /// - HTTP_RPC_PORT: default - `instance` + 1
-    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    /// - `DISCOVERY_PORT`: default + `instance` - 1
+    /// - `DISCOVERY_V5_PORT`: default + `instance` - 1
+    /// - `AUTH_PORT`: default + `instance` * 100 - 100
+    /// - `HTTP_RPC_PORT`: default - `instance` + 1
+    /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     pub instance: u16,
 
     /// All networking related arguments
@@ -154,7 +157,7 @@ pub struct NodeConfig {
 }
 
 impl NodeConfig {
-    /// Creates a testing [NodeConfig], causing the database to be launched ephemerally.
+    /// Creates a testing [`NodeConfig`], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self::default()
             // set all ports to zero by default for test instances
@@ -167,13 +170,19 @@ impl NodeConfig {
         self
     }
 
+    /// Set the data directory args for the node
+    pub fn with_datadir_args(mut self, datadir_args: DatadirArgs) -> Self {
+        self.datadir = datadir_args;
+        self
+    }
+
     /// Set the config file for the node
     pub fn with_config(mut self, config: impl Into<PathBuf>) -> Self {
         self.config = Some(config.into());
         self
     }
 
-    /// Set the [ChainSpec] for the node
+    /// Set the [`ChainSpec`] for the node
     pub fn with_chain(mut self, chain: impl Into<Arc<ChainSpec>>) -> Self {
         self.chain = chain.into();
         self
@@ -296,22 +305,22 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Create the [NetworkConfig] for the node
+    /// Create the [`NetworkConfig`] for the node
     pub fn network_config<C>(
         &self,
         config: &Config,
         client: C,
         executor: TaskExecutor,
         head: Head,
-        data_dir: &ChainPath<DataDirPath>,
+        data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<NetworkConfig<C>> {
         info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = self.network_secret(data_dir)?;
+        let secret_key = self.network_secret(&data_dir)?;
         let default_peers_path = data_dir.known_peers();
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
-    /// Create the [NetworkBuilder].
+    /// Create the [`NetworkBuilder`].
     ///
     /// This only configures it and does not spawn it.
     pub async fn build_network<C>(
@@ -320,7 +329,7 @@ impl NodeConfig {
         client: C,
         executor: TaskExecutor,
         head: Head,
-        data_dir: &ChainPath<DataDirPath>,
+        data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<NetworkBuilder<C, (), ()>>
     where
         C: BlockNumReader,
@@ -330,7 +339,7 @@ impl NodeConfig {
         Ok(builder)
     }
 
-    /// Loads 'MAINNET_KZG_TRUSTED_SETUP'
+    /// Loads '`MAINNET_KZG_TRUSTED_SETUP`'
     pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
         Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
     }
@@ -450,7 +459,7 @@ impl NodeConfig {
         }
     }
 
-    /// Builds the [NetworkConfig] with the given [ProviderFactory].
+    /// Builds the [`NetworkConfig`] with the given [`ProviderFactory`].
     pub fn load_network_config<C>(
         &self,
         config: &Config,
@@ -510,7 +519,7 @@ impl NodeConfig {
     }
 
     /// Change rpc port numbers based on the instance number, using the inner
-    /// [RpcServerArgs::adjust_instance_ports] method.
+    /// [`RpcServerArgs::adjust_instance_ports`] method.
     pub fn adjust_instance_ports(&mut self) {
         self.rpc.adjust_instance_ports(self.instance);
     }
@@ -521,6 +530,11 @@ impl NodeConfig {
         self.rpc = self.rpc.with_unused_ports();
         self.network = self.network.with_unused_ports();
         self
+    }
+
+    /// Resolve the final datadir path.
+    pub fn datadir(&self) -> ChainPath<DataDirPath> {
+        self.datadir.clone().resolve_datadir(self.chain.chain)
     }
 }
 
@@ -539,6 +553,7 @@ impl Default for NodeConfig {
             db: DatabaseArgs::default(),
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
+            datadir: DatadirArgs::default(),
             experimental: ExperimentalArgs::default(),
         }
     }

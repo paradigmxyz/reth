@@ -99,11 +99,8 @@ mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                PingPongProtoMessageKind::Ping => {}
-                PingPongProtoMessageKind::Pong => {}
-                PingPongProtoMessageKind::PingMessage(msg) => {
-                    buf.put(msg.as_bytes());
-                }
+                PingPongProtoMessageKind::Ping | PingPongProtoMessageKind::Pong => {}
+                PingPongProtoMessageKind::PingMessage(msg) |
                 PingPongProtoMessageKind::PongMessage(msg) => {
                     buf.put(msg.as_bytes());
                 }

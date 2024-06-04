@@ -3,7 +3,6 @@
 use std::{fmt, num::ParseIntError, str::FromStr};
 
 /// A macro that generates types that maps "0" to "None" when parsing CLI arguments.
-
 macro_rules! zero_as_none {
     ($type_name:ident, $inner_type:ty) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]

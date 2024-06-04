@@ -67,17 +67,17 @@ impl Capability {
         Self::new_static("eth", version as usize)
     }
 
-    /// Returns the [EthVersion::Eth66] capability.
+    /// Returns the [`EthVersion::Eth66`] capability.
     pub const fn eth_66() -> Self {
         Self::eth(EthVersion::Eth66)
     }
 
-    /// Returns the [EthVersion::Eth67] capability.
+    /// Returns the [`EthVersion::Eth67`] capability.
     pub const fn eth_67() -> Self {
         Self::eth(EthVersion::Eth67)
     }
 
-    /// Returns the [EthVersion::Eth68] capability.
+    /// Returns the [`EthVersion::Eth68`] capability.
     pub const fn eth_68() -> Self {
         Self::eth(EthVersion::Eth68)
     }
@@ -331,8 +331,7 @@ impl SharedCapability {
     /// message id space.
     pub const fn message_id_offset(&self) -> u8 {
         match self {
-            Self::Eth { offset, .. } => *offset,
-            Self::UnknownCapability { offset, .. } => *offset,
+            Self::Eth { offset, .. } | Self::UnknownCapability { offset, .. } => *offset,
         }
     }
 
@@ -550,8 +549,8 @@ pub enum SharedCapabilityError {
     /// Unsupported `eth` version.
     #[error(transparent)]
     UnsupportedVersion(#[from] ParseVersionError),
-    /// Thrown when the message id for a [SharedCapability] overlaps with the reserved p2p message
-    /// id space [`MAX_RESERVED_MESSAGE_ID`].
+    /// Thrown when the message id for a [`SharedCapability`] overlaps with the reserved p2p
+    /// message id space [`MAX_RESERVED_MESSAGE_ID`].
     #[error("message id offset `{0}` is reserved")]
     ReservedMessageIdOffset(u8),
 }

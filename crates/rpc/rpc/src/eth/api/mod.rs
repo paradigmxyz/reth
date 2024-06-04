@@ -10,6 +10,7 @@ use crate::eth::{
     error::{EthApiError, EthResult},
     gas_oracle::GasPriceOracle,
     signer::EthSigner,
+    traits::RawTransactionForwarder,
 };
 use async_trait::async_trait;
 use reth_errors::{RethError, RethResult};
@@ -48,7 +49,6 @@ mod sign;
 mod state;
 mod transactions;
 
-use crate::eth::traits::RawTransactionForwarder;
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// `Eth` API trait.
@@ -78,7 +78,7 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 /// `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
-/// These are implemented two-fold: Core functionality is implemented as [EthApiSpec]
+/// These are implemented two-fold: Core functionality is implemented as [`EthApiSpec`]
 /// trait. Additionally, the required server implementations (e.g. [`reth_rpc_api::EthApiServer`])
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
@@ -229,14 +229,14 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
-    /// Returns the state at the given [BlockId] enum.
+    /// Returns the state at the given [`BlockId`] enum.
     ///
-    /// Note: if not [BlockNumberOrTag::Pending] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
+    /// Note: if not [`BlockNumberOrTag::Pending`] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
     pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
         Ok(self.provider().state_by_block_id(at)?)
     }
 
-    /// Returns the state at the given [BlockId] enum or the latest.
+    /// Returns the state at the given [`BlockId`] enum or the latest.
     ///
     /// Convenience function to interprets `None` as `BlockId::Number(BlockNumberOrTag::Latest)`
     pub fn state_at_block_id_or_latest(
@@ -269,7 +269,7 @@ where
     Network: NetworkInfo + Send + Sync + 'static,
     EvmConfig: ConfigureEvm + Clone + 'static,
 {
-    /// Configures the [CfgEnvWithHandlerCfg] and [BlockEnv] for the pending block
+    /// Configures the [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
@@ -432,10 +432,10 @@ where
     }
 }
 
-/// The default gas limit for eth_call and adjacent calls.
+/// The default gas limit for `eth_call` and adjacent calls.
 ///
 /// This is different from the default to regular 30M block gas limit
-/// [ETHEREUM_BLOCK_GAS_LIMIT](reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT) to allow for
+/// [`ETHEREUM_BLOCK_GAS_LIMIT`](reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT) to allow for
 /// more complex calls.
 pub const RPC_DEFAULT_GAS_CAP: GasCap = GasCap(50_000_000);
 

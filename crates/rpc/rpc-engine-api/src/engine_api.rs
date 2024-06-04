@@ -25,10 +25,6 @@ use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
 
-/// The list of additional V4 caps
-// TODO(mattsse): move to alloy
-const V4_CAPABILITIES: [&str; 2] = ["engine_getPayloadV4", "engine_newPayloadV4"];
-
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
@@ -63,7 +59,7 @@ where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
     EngineT: EngineTypes + 'static,
 {
-    /// Create new instance of [EngineApi].
+    /// Create new instance of [`EngineApi`].
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
@@ -364,7 +360,7 @@ where
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
     /// blocks.
     ///
-    /// WARNING: This method is associated with the BeaconBlocksByRange message in the consensus
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
@@ -507,13 +503,13 @@ where
     ///
     /// The payload attributes will be validated according to the engine API rules for the given
     /// message version:
-    /// * If the version is [EngineApiMessageVersion::V1], then the payload attributes will be
+    /// * If the version is [`EngineApiMessageVersion::V1`], then the payload attributes will be
     ///   validated according to the Paris rules.
-    /// * If the version is [EngineApiMessageVersion::V2], then the payload attributes will be
+    /// * If the version is [`EngineApiMessageVersion::V2`], then the payload attributes will be
     ///   validated according to the Shanghai rules, as well as the validity changes from cancun:
     ///   <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/cancun.md#update-the-methods-of-previous-forks>
     ///
-    /// * If the version above [EngineApiMessageVersion::V3], then the payload attributes will be
+    /// * If the version above [`EngineApiMessageVersion::V3`], then the payload attributes will be
     ///   validated according to the Cancun rules.
     async fn validate_and_execute_forkchoice(
         &self,
@@ -565,9 +561,11 @@ where
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
         let start = Instant::now();
+        let gas_used = payload.gas_used;
         let res = Self::new_payload_v1(self, payload).await;
-        self.inner.metrics.latency.new_payload_v1.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v1.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -576,9 +574,11 @@ where
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         let start = Instant::now();
+        let gas_used = payload.execution_payload.gas_used;
         let res = Self::new_payload_v2(self, payload).await;
-        self.inner.metrics.latency.new_payload_v2.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v2.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -592,10 +592,12 @@ where
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
         let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
         let res =
             Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
-        self.inner.metrics.latency.new_payload_v3.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v3.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -607,10 +609,12 @@ where
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         let start = Instant::now();
+        let gas_used = payload.payload_inner.payload_inner.payload_inner.gas_used;
         let res =
             Self::new_payload_v4(self, payload, versioned_hashes, parent_beacon_block_root).await;
-        self.inner.metrics.latency.new_payload_v4.record(start.elapsed());
-        self.inner.metrics.new_payload_response.update_response_metrics(&res);
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v4.record(elapsed);
+        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -813,7 +817,7 @@ where
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(CAPABILITIES.into_iter().chain(V4_CAPABILITIES.into_iter()).map(str::to_owned).collect())
+        Ok(CAPABILITIES.iter().cloned().map(str::to_owned).collect())
     }
 }
 

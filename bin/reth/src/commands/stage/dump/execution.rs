@@ -6,7 +6,7 @@ use reth_db::{
 };
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::stage::StageCheckpoint;
-use reth_provider::{ChainSpecProvider, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, ChainSpecProvider, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
 use tracing::info;
 
@@ -25,7 +25,11 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 
     if should_run {
         dry_run(
-            ProviderFactory::new(output_db, db_tool.chain.clone(), output_datadir.static_files())?,
+            ProviderFactory::new(
+                output_db,
+                db_tool.chain(),
+                StaticFileProvider::read_write(output_datadir.static_files())?,
+            ),
             to,
             from,
         )
@@ -113,8 +117,8 @@ fn import_tables_with_range<DB: Database>(
     Ok(())
 }
 
-/// Dry-run an unwind to FROM block, so we can get the PlainStorageState and
-/// PlainAccountState safely. There might be some state dependency from an address
+/// Dry-run an unwind to FROM block, so we can get the `PlainStorageState` and
+/// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
 async fn unwind_and_copy<DB: Database>(
     db_tool: &DbTool<DB>,
@@ -124,7 +128,7 @@ async fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.provider_rw()?;
 
-    let executor = block_executor!(db_tool.chain.clone());
+    let executor = block_executor!(db_tool.chain());
     let mut exec_stage = ExecutionStage::new_with_executor(executor);
 
     exec_stage.unwind(

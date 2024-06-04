@@ -90,7 +90,7 @@ pub(crate) struct ActiveSession {
     pub(crate) internal_request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
     pub(crate) internal_request_timeout_interval: Interval,
-    /// If an [ActiveSession] does not receive a response at all within this duration then it is
+    /// If an [`ActiveSession`] does not receive a response at all within this duration then it is
     /// considered a protocol violation and the session will initiate a drop.
     pub(crate) protocol_breach_request_timeout: Duration,
     /// Used to reserve a slot to guarantee that the termination message is delivered
@@ -423,7 +423,7 @@ impl ActiveSession {
     /// session should be terminated.
     #[must_use]
     fn check_timed_out_requests(&mut self, now: Instant) -> bool {
-        for (id, req) in self.inflight_requests.iter_mut() {
+        for (id, req) in &mut self.inflight_requests {
             if req.is_timed_out(now) {
                 if req.is_waiting() {
                     debug!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");

@@ -14,7 +14,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// Creates a new [PayloadBuilderService] for testing purposes.
+/// Creates a new [`PayloadBuilderService`] for testing purposes.
 pub fn test_payload_service<Engine>() -> (
     PayloadBuilderService<
         TestPayloadJobGenerator,
@@ -32,7 +32,7 @@ where
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
-/// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
+/// Creates a new [`PayloadBuilderService`] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
 where
     Engine: EngineTypes<
@@ -45,7 +45,7 @@ where
     handle
 }
 
-/// A [PayloadJobGenerator] for testing purposes
+/// A [`PayloadJobGenerator`] for testing purposes
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct TestPayloadJobGenerator;
@@ -61,7 +61,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
     }
 }
 
-/// A [PayloadJobGenerator] for testing purposes
+/// A [`PayloadJobGenerator`] for testing purposes
 #[derive(Debug)]
 pub struct TestPayloadJob {
     attr: EthPayloadBuilderAttributes,

@@ -18,7 +18,7 @@ impl BlockResponse {
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [BlockResponse].
+    /// Calculates a heuristic for the in-memory size of the [`BlockResponse`].
     #[inline]
     pub fn size(&self) -> usize {
         match self {

@@ -374,10 +374,10 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///
     /// If UNWIND is false we will just read the state/blocks and return them.
     ///
-    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all the
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
     ///    transaction ids.
-    /// 2. Iterate over the [StorageChangeSets][tables::StorageChangeSets] table and the
-    ///    [AccountChangeSets][tables::AccountChangeSets] tables in reverse order to    reconstruct
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
     ///    the changesets.
     ///    - In order to have both the old and new values in the changesets, we also access the
     ///      plain state tables.
@@ -484,7 +484,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         if TAKE {
             // iterate over local plain state remove all account and all storages.
-            for (address, (old_account, new_account, storage)) in state.iter() {
+            for (address, (old_account, new_account, storage)) in &state {
                 // revert account if needed.
                 if old_account != new_account {
                     let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
@@ -524,7 +524,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let mut receipts = Vec::new();
         // loop break if we are at the end of the blocks.
-        for (_, block_body) in block_bodies.into_iter() {
+        for (_, block_body) in block_bodies {
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for _ in block_body.tx_num_range() {
                 if let Some((_, receipt)) = receipt_iter.next() {
@@ -665,7 +665,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         if TAKE {
             // Remove TransactionHashNumbers
             let mut tx_hash_cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
-            for (_, tx) in transactions.iter() {
+            for (_, tx) in &transactions {
                 if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
                     tx_hash_cursor.delete_current()?;
                 }
@@ -742,7 +742,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             self.get_or_take::<tables::HeaderTerminalDifficulties, TAKE>(range)?;
             // rm HeaderNumbers
             let mut header_number_cursor = self.tx.cursor_write::<tables::HeaderNumbers>()?;
-            for (_, hash) in block_header_hashes.iter() {
+            for (_, hash) in &block_header_hashes {
                 if header_number_cursor.seek_exact(*hash)?.is_some() {
                     header_number_cursor.delete_current()?;
                 }
@@ -1641,8 +1641,7 @@ impl<TX: DbTx> TransactionsProviderExt for DatabaseProvider<TX> {
     }
 }
 
-/// Calculates the hash of the given transaction
-
+// Calculates the hash of the given transaction
 impl<TX: DbTx> TransactionsProvider for DatabaseProvider<TX> {
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)

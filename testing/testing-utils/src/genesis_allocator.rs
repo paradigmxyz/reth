@@ -157,7 +157,7 @@ impl<'a> GenesisAllocator<'a> {
         self.alloc.insert(address, GenesisAccount::default().with_balance(balance));
     }
 
-    /// Adds the given [GenesisAccount] to the genesis alloc.
+    /// Adds the given [`GenesisAccount`] to the genesis alloc.
     ///
     /// Returns the key pair for the account and the account's address.
     pub fn add_account(&mut self, account: GenesisAccount) -> Address {

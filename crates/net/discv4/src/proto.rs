@@ -197,7 +197,7 @@ pub struct NodeEndpoint {
     pub address: IpAddr,
     /// The UDP port used for communication in the discovery protocol.
     pub udp_port: u16,
-    /// The TCP port used for communication in the RLPx protocol.
+    /// The TCP port used for communication in the `RLPx` protocol.
     pub tcp_port: u16,
 }
 
@@ -343,11 +343,11 @@ impl Decodable for EnrRequest {
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
 ///
-/// This packet is used to respond to an ENRRequest packet and includes the requested ENR along with
-/// the hash of the original request.
+/// This packet is used to respond to an `ENRRequest` packet and includes the requested ENR along
+/// with the hash of the original request.
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct EnrResponse {
-    /// The hash of the ENRRequest packet being replied to.
+    /// The hash of the `ENRRequest` packet being replied to.
     pub request_hash: B256,
     /// The ENR (Ethereum Node Record) for the responding node.
     pub enr: Enr<SecretKey>,
@@ -376,7 +376,7 @@ pub struct Ping {
     pub to: NodeEndpoint,
     /// The expiration timestamp.
     pub expire: u64,
-    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    /// Optional `enr_seq` for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
 }
 
@@ -469,7 +469,7 @@ pub struct Pong {
     pub echo: B256,
     /// The expiration timestamp.
     pub expire: u64,
-    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    /// Optional `enr_seq` for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
 }
 

@@ -5,7 +5,7 @@
 //!
 //! ## Capabilities
 //!
-//! The network manages peers depending on their announced capabilities via their RLPx sessions. Most importantly the [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md)(`eth`).
+//! The network manages peers depending on their announced capabilities via their `RLPx` sessions. Most importantly the [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md)(`eth`).
 //!
 //! ## Overview
 //!
@@ -13,7 +13,7 @@
 //! made up of peer-to-peer connections between nodes that are available on the same network.
 //! Responsible for peer discovery is ethereum's discovery protocol (discv4, discv5). If the address
 //! (IP+port) of our node is published via discovery, remote peers can initiate inbound connections
-//! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
+//! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
@@ -129,7 +129,7 @@ impl<C> NetworkManager<C> {
         self.to_eth_request_handler = Some(tx);
     }
 
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.swarm.add_rlpx_sub_protocol(protocol)
     }
@@ -161,8 +161,8 @@ impl<C> NetworkManager<C> {
         // update metrics for whole poll function
         metrics.duration_poll_network_manager.set(start.elapsed().as_secs_f64());
         // update poll metrics for nested items
-        metrics.duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
-        metrics.duration_poll_swarm.set(acc_swarm.as_secs_f64());
+        metrics.acc_duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
+        metrics.acc_duration_poll_swarm.set(acc_swarm.as_secs_f64());
     }
 }
 
@@ -893,7 +893,7 @@ impl<C> NetworkManager<C>
 where
     C: BlockReader + Unpin,
 {
-    /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
+    /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
     /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
     pub async fn run_until_graceful_shutdown<F, R>(

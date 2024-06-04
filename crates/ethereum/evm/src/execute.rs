@@ -131,7 +131,7 @@ where
     /// # Note
     ///
     /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
-    /// [EthBlockExecutor::post_execution].
+    /// [`EthBlockExecutor::post_execution`].
     fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
@@ -203,8 +203,14 @@ where
         }
 
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+            // Collect all EIP-6110 deposits
+            let deposit_requests =
+                crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
+
             // Collect all EIP-7685 requests
-            apply_withdrawal_requests_contract_call(&mut evm)?
+            let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
+
+            [deposit_requests, withdrawal_requests].concat()
         } else {
             vec![]
         };
@@ -406,7 +412,7 @@ where
         let EthExecuteOutput { receipts, requests, gas_used: _ } =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
-        validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &[])?;
+        validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &requests)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -454,8 +460,9 @@ mod tests {
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
     use reth_primitives::{
-        constants::ETH_TO_WEI, keccak256, public_key_to_address, trie::EMPTY_ROOT_HASH, Account,
-        Block, ChainSpecBuilder, ForkCondition, Transaction, TxKind, TxLegacy, B256,
+        constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
+        keccak256, public_key_to_address, Account, Block, ChainSpecBuilder, ForkCondition,
+        Transaction, TxKind, TxLegacy, B256,
     };
     use reth_revm::{
         database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,

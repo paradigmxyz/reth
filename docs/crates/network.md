@@ -145,7 +145,7 @@ pub struct NetworkConfig<C> {
     pub executor: Option<TaskExecutor>,
     /// The `Status` message to send to peers at the beginning.
     pub status: Status,
-    /// Sets the hello message for the p2p handshake in RLPx
+    /// Sets the hello message for the p2p handshake in ``RLPx``
     pub hello_message: HelloMessage,
 }
 ```
@@ -312,7 +312,7 @@ pub struct NetworkState<C> {
     genesis_hash: B256,
     /// The type that handles requests.
     ///
-    /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
+    /// The fetcher streams ``RLPx`` related requests on a per-peer basis to this type. This type will
     /// then queue in the request and notify the fetcher once the result has been received.
     state_fetcher: StateFetcher,
 }
@@ -648,7 +648,7 @@ fn on_bodies_request(
 
 ## Transactions Task
 
-The transactions task listens for, requests, and propagates transactions both from the node's peers, and those that are added locally (e.g., submitted via RPC). Note that this task focuses solely on the network communication involved with Ethereum transactions, we will talk more about the structure of the transaction pool itself 
+The transactions task listens for, requests, and propagates transactions both from the node's peers, and those that are added locally (e.g., submitted via RPC). Note that this task focuses solely on the network communication involved with Ethereum transactions, we will talk more about the structure of the transaction pool itself
 in the [transaction-pool](../../../ethereum/transaction-pool/README.md) chapter.
 
 Again, like the network management and ETH requests tasks, the transactions task is implemented as an endless future that runs as a background task on a standalone `tokio::task`. It's represented by the `TransactionsManager` struct:
@@ -832,7 +832,7 @@ struct Peer {
 }
 ```
 
-Note that the `Peer` struct contains a field `transactions`, which is an [LRU cache](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) of the transactions this peer is aware of. 
+Note that the `Peer` struct contains a field `transactions`, which is an [LRU cache](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) of the transactions this peer is aware of.
 
 The `request_tx` field on the `Peer` is used as the sender end of a channel to send requests to the session with the peer.
 
