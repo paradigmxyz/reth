@@ -146,11 +146,7 @@ impl ImportCommand {
                 provider_factory.clone(),
                 &consensus,
                 Arc::new(file_client),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
                 self.no_state,
             )
             .await?;

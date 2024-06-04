@@ -5,10 +5,7 @@ use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db::database::Database;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
-use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    ProviderFactory,
-};
+use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -31,16 +28,8 @@ pub struct StaticFileProducer<DB>(Arc<Mutex<StaticFileProducerInner<DB>>>);
 
 impl<DB: Database> StaticFileProducer<DB> {
     /// Creates a new [`StaticFileProducer`].
-    pub fn new(
-        provider_factory: ProviderFactory<DB>,
-        static_file_provider: StaticFileProvider,
-        prune_modes: PruneModes,
-    ) -> Self {
-        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(
-            provider_factory,
-            static_file_provider,
-            prune_modes,
-        ))))
+    pub fn new(provider_factory: ProviderFactory<DB>, prune_modes: PruneModes) -> Self {
+        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider_factory, prune_modes))))
     }
 }
 
@@ -58,8 +47,6 @@ impl<DB> Deref for StaticFileProducer<DB> {
 pub struct StaticFileProducerInner<DB> {
     /// Provider factory
     provider_factory: ProviderFactory<DB>,
-    /// Static File provider
-    static_file_provider: StaticFileProvider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
     /// needed in [`StaticFileProducerInner`] to prevent attempting to move prunable data to static
     /// files. See [`StaticFileProducerInner::get_static_file_targets`].
@@ -102,17 +89,8 @@ impl StaticFileTargets {
 }
 
 impl<DB: Database> StaticFileProducerInner<DB> {
-    fn new(
-        provider_factory: ProviderFactory<DB>,
-        static_file_provider: StaticFileProvider,
-        prune_modes: PruneModes,
-    ) -> Self {
-        Self {
-            provider_factory,
-            static_file_provider,
-            prune_modes,
-            event_sender: Default::default(),
-        }
+    fn new(provider_factory: ProviderFactory<DB>, prune_modes: PruneModes) -> Self {
+        Self { provider_factory, prune_modes, event_sender: Default::default() }
     }
 
     /// Listen for events on the `static_file_producer`.
@@ -135,7 +113,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         }
 
         debug_assert!(targets.is_contiguous_to_highest_static_files(
-            self.static_file_provider.get_highest_static_files()
+            self.provider_factory.static_file_provider().get_highest_static_files()
         ));
 
         self.event_sender.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
@@ -162,7 +140,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
             let provider = self.provider_factory.provider()?.disable_long_read_transaction_safety();
-            segment.copy_to_static_files(provider, self.static_file_provider.clone(), block_range.clone())?;
+            segment.copy_to_static_files(provider, self.provider_factory.static_file_provider(), block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
@@ -170,9 +148,11 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             Ok(())
         })?;
 
-        self.static_file_provider.commit()?;
+        self.provider_factory.static_file_provider().commit()?;
         for (segment, block_range) in segments {
-            self.static_file_provider.update_index(segment.segment(), Some(*block_range.end()))?;
+            self.provider_factory
+                .static_file_provider()
+                .update_index(segment.segment(), Some(*block_range.end()))?;
         }
 
         let elapsed = start.elapsed(); // TODO(alexey): track in metrics
@@ -191,7 +171,8 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         &self,
         finalized_block_numbers: HighestStaticFiles,
     ) -> ProviderResult<StaticFileTargets> {
-        let highest_static_files = self.static_file_provider.get_highest_static_files();
+        let highest_static_files =
+            self.provider_factory.static_file_provider().get_highest_static_files();
 
         let targets = StaticFileTargets {
             headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
@@ -297,19 +278,15 @@ mod tests {
         db.insert_receipts(receipts).expect("insert receipts");
 
         let provider_factory = db.factory;
-        let static_file_provider = provider_factory.static_file_provider();
-        (provider_factory, static_file_provider, db.temp_static_files_dir)
+        (provider_factory, db.temp_static_files_dir)
     }
 
     #[test]
     fn run() {
-        let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
+        let (provider_factory, _temp_static_files_dir) = setup();
 
-        let static_file_producer = StaticFileProducerInner::new(
-            provider_factory,
-            static_file_provider.clone(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducerInner::new(provider_factory, PruneModes::default());
 
         let targets = static_file_producer
             .get_static_file_targets(HighestStaticFiles {
@@ -381,10 +358,9 @@ mod tests {
     /// Tests that a cloneable [`StaticFileProducer`] type is not susceptible to any race condition.
     #[test]
     fn only_one() {
-        let (provider_factory, static_file_provider, _temp_static_files_dir) = setup();
+        let (provider_factory, _temp_static_files_dir) = setup();
 
-        let static_file_producer =
-            StaticFileProducer::new(provider_factory, static_file_provider, PruneModes::default());
+        let static_file_producer = StaticFileProducer::new(provider_factory, PruneModes::default());
 
         let (tx, rx) = channel();
 

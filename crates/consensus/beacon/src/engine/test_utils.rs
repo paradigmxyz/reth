@@ -349,11 +349,8 @@ where
             }
         };
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(B256::default());

@@ -223,11 +223,8 @@ impl Command {
             )
             .await?;
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
         // Configure the pipeline
         let fetch_client = network.fetch_client().await?;
