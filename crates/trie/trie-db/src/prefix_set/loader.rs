@@ -1,4 +1,4 @@
-use super::{PrefixSetMut, TriePrefixSets};
+use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
 use derive_more::Deref;
 use reth_db::{
     cursor::DbCursorRO,

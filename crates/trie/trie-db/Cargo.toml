@@ -1,12 +1,12 @@
 [package]
-name = "reth-trie"
+name = "reth-trie-db"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Merkle trie implementation"
+description = "Database integration with the merkle trie implementation"
 
 [lints]
 workspace = true
@@ -15,6 +15,8 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-execution-errors.workspace = true
+reth-trie.workspace = true
+reth-db.workspace = true
 
 revm.workspace = true
 
@@ -39,6 +41,7 @@ triehash = { version = "0.8", optional = true }
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
 
@@ -57,11 +60,3 @@ criterion.workspace = true
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 test-utils = ["triehash"]
-
-[[bench]]
-name = "prefix_set"
-harness = false
-
-[[bench]]
-name = "hash_post_state"
-harness = false
