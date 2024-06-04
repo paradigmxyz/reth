@@ -1,20 +1,42 @@
 //! Spawns a blocking task. Should be used for long-lived database reads.
 
 use futures::Future;
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
+use tokio::sync::oneshot;
 
-use crate::eth::error::EthResult;
+use crate::eth::error::{EthApiError, EthResult};
 
 /// Executes code on a blocking thread.
 pub trait SpawnBlocking {
+    /// Returns a handle for spawning IO heavy blocking tasks.
+    ///
+    /// Runtime access in default trait method implementations.
+    fn io_task_spawner(&self) -> &dyn TaskSpawner;
+
+    /// Returns a handle for spawning CPU heavy blocking tasks.
+    ///
+    /// Runtime access in default trait method implementations.
+    fn tracing_task_pool(&self) -> &BlockingTaskPool;
+
     /// Executes the future on a new blocking task.
     ///
     /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
     /// or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing).
     fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
     where
-        Self: Sized,
+        Self: Sized + Clone + Send + Sync + 'static,
         F: FnOnce(Self) -> EthResult<R> + Send + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let this = self.clone();
+        self.io_task_spawner().spawn_blocking(Box::pin(async move {
+            let res = async move { f(this) }.await;
+            let _ = tx.send(res);
+        }));
+
+        async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
+    }
 
     /// Executes a blocking task on the tracing pool.
     ///
@@ -23,7 +45,16 @@ pub trait SpawnBlocking {
     /// <https://ryhl.io/blog/async-what-is-blocking/>.
     fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>>
     where
-        Self: Sized,
+        Self: Sized + Clone + Send + Sync + 'static,
         F: FnOnce(Self) -> EthResult<R> + Send + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+        let this = self.clone();
+        async move {
+            self.tracing_task_pool()
+                .spawn(move || f(this))
+                .await
+                .map_err(|_| EthApiError::InternalBlockingTaskError)?
+        }
+    }
 }

@@ -19,11 +19,10 @@ use reth_transaction_pool::TransactionPool;
 use revm_primitives::{CfgEnv, SpecId};
 use std::{
     fmt::Debug,
-    future::Future,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 use traits::SpawnBlocking;
 
 use crate::eth::{
@@ -422,36 +421,12 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
 where
     Self: Send + Sync + 'static,
 {
-    fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
-    where
-        Self: Sized,
-        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = async move { f(this) }.await;
-            let _ = tx.send(res);
-        }));
-
-        async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
+    fn io_task_spawner(&self) -> &dyn TaskSpawner {
+        self.inner.task_spawner()
     }
 
-    fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>>
-    where
-        Self: Sized,
-        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
-        R: Send + 'static,
-    {
-        let this = self.clone();
-        async move {
-            self.inner
-                .blocking_task_pool
-                .spawn(move || f(this))
-                .await
-                .map_err(|_| EthApiError::InternalBlockingTaskError)?
-        }
+    fn tracing_task_pool(&self) -> &BlockingTaskPool {
+        self.inner.blocking_task_pool()
     }
 }
 
