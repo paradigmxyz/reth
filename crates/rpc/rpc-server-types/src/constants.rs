@@ -65,3 +65,30 @@ pub mod gas_oracle {
     /// The default minimum gas price, under which the sample will be ignored
     pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
 }
+
+/// Cache specific constants
+pub mod cache {
+    // TODO: memory based limiter is currently disabled pending <https://github.com/paradigmxyz/reth/issues/3503>
+    /// Default cache size for the block cache: 500MB
+    ///
+    /// With an average block size of ~100kb this should be able to cache ~5000 blocks.
+    pub const DEFAULT_BLOCK_CACHE_SIZE_BYTES_MB: usize = 500;
+
+    /// Default cache size for the receipts cache: 500MB
+    pub const DEFAULT_RECEIPT_CACHE_SIZE_BYTES_MB: usize = 500;
+
+    /// Default cache size for the env cache: 1MB
+    pub const DEFAULT_ENV_CACHE_SIZE_BYTES_MB: usize = 1;
+
+    /// Default cache size for the block cache: 5000 blocks.
+    pub const DEFAULT_BLOCK_CACHE_MAX_LEN: u32 = 5000;
+
+    /// Default cache size for the receipts cache: 2000 receipts.
+    pub const DEFAULT_RECEIPT_CACHE_MAX_LEN: u32 = 2000;
+
+    /// Default cache size for the env cache: 1000 envs.
+    pub const DEFAULT_ENV_CACHE_MAX_LEN: u32 = 1000;
+
+    /// Default number of concurrent database requests.
+    pub const DEFAULT_CONCURRENT_DB_REQUESTS: usize = 512;
+}
