@@ -34,9 +34,7 @@ impl DatabaseEnvMetrics {
         // Pre-populate metric handle maps with all possible combinations of labels
         // to avoid runtime locks on the map when recording metrics.
         Self {
-            // not possible
-            // operations: Self::generate_operation_handles(),
-            operations: Default::default(),
+            operations: Self::generate_operation_handles(),
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
@@ -44,23 +42,22 @@ impl DatabaseEnvMetrics {
 
     /// Generate a map of all possible operation handles for each table and operation tuple.
     /// Used for tracking all operation metrics.
-    fn generate_operation_handles() -> FxHashMap<(Tables, Operation), OperationMetrics> {
+    fn generate_operation_handles() -> FxHashMap<(&'static str, Operation), OperationMetrics> {
         let mut operations = FxHashMap::with_capacity_and_hasher(
             Tables::COUNT * Operation::COUNT,
             BuildHasherDefault::<FxHasher>::default(),
         );
-        // not possible
-        /*for table in Tables::ALL {
-        for operation in Operation::iter() {
-            operations.insert(
-                (*table, operation),
-                OperationMetrics::new_with_labels(&[
-                    (Labels::Table.as_str(), table.name()),
-                    (Labels::Operation.as_str(), operation.as_str()),
-                ]),
-            );
+        for table in Tables::ALL {
+            for operation in Operation::iter() {
+                operations.insert(
+                    (table.name(), operation),
+                    OperationMetrics::new_with_labels(&[
+                        (Labels::Table.as_str(), table.name()),
+                        (Labels::Operation.as_str(), operation.as_str()),
+                    ]),
+                );
+            }
         }
-        }*/
         operations
     }
 
