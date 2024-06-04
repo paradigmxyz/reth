@@ -13,7 +13,7 @@ use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{
     constants::{eip4844::MAX_BLOBS_PER_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT},
     Address, GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -119,6 +119,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     eip1559: bool,
     /// Fork indicator whether we are using EIP-4844 blob transactions.
     eip4844: bool,
+    /// Fork indicator whether we are using EIP-7702 type transactions.
+    eip7702: bool,
     /// The current max gas limit
     block_gas_limit: u64,
     /// Minimum priority fee to enforce for acceptance into the pool.
@@ -182,6 +184,15 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
+                    )
+                }
+            }
+            EIP7702_TX_TYPE_ID => {
+                // Reject EIP-7702 transactions.
+                if !self.eip7702 {
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::Eip7702Disabled.into(),
                     )
                 }
             }
@@ -424,6 +435,8 @@ pub struct EthTransactionValidatorBuilder {
     eip1559: bool,
     /// Whether using EIP-4844 type transactions is allowed
     eip4844: bool,
+    /// Whether using EIP-7702 type transactions is allowed
+    eip7702: bool,
     /// The current max gas limit
     block_gas_limit: u64,
     /// Minimum priority fee to enforce for acceptance into the pool.
@@ -464,6 +477,7 @@ impl EthTransactionValidatorBuilder {
             eip2718: true,
             eip1559: true,
             eip4844: true,
+            eip7702: true,
 
             // shanghai is activated by default
             shanghai: true,
@@ -594,6 +608,7 @@ impl EthTransactionValidatorBuilder {
             eip2718,
             eip1559,
             eip4844,
+            eip7702,
             block_gas_limit,
             minimum_priority_fee,
             kzg_settings,
@@ -612,6 +627,7 @@ impl EthTransactionValidatorBuilder {
             eip1559,
             fork_tracker,
             eip4844,
+            eip7702,
             block_gas_limit,
             minimum_priority_fee,
             blob_store: Box::new(blob_store),
