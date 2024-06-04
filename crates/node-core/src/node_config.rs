@@ -2,8 +2,8 @@
 
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        get_secret_key, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, DiscoveryArgs,
+        ExperimentalArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
