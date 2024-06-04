@@ -76,6 +76,19 @@ services:
              find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
              /run.sh"
 
+  metrics-exporter:
+    restart: unless-stopped
+    image: ethpandaops/ethereum-metrics-exporter:debian-latest
+    depends_on:
+      - reth
+    ports:
+      - 9091:9091 # metrics
+    volumes:
+      - ./../ethereum-metrics-exporter/config.yaml:/root/config.yaml
+    command:
+      - --config=/root/config.yaml
+      - --metrics-port=9091
+      -
   # Consensus client part
 
   # Runs a Prysm beacon chain from a specified genesis state
