@@ -1,6 +1,6 @@
 use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
-use crate::table::Decompress;
 use derive_more::{Deref, DerefMut};
+use reth_db_api::table::Decompress;
 use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
 use reth_primitives::{static_file::SegmentHeader, B256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
