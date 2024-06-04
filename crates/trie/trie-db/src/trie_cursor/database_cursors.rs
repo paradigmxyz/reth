@@ -1,4 +1,3 @@
-use super::{TrieCursor, TrieCursorFactory};
 use crate::updates::TrieKey;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -10,19 +9,32 @@ use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
     B256,
 };
+use reth_trie::trie_cursor::{TrieCursor, TrieCursorFactory};
+
+/// New-type for a [`DbTx`] reference with [`TrieCursorFactory`] support.
+pub struct DbTxRefWrapper<'a, TX: DbTx>(&'a TX);
+
+/// Converts reference to [`DbTx`] into [`DbTxRefWrapper`].
+impl<'a, TX: DbTx> From<&'a TX> for DbTxRefWrapper<'a, TX> {
+    fn from(value: &'a TX) -> Self {
+        Self(value)
+    }
+}
 
 /// Implementation of the trie cursor factory for a database transaction.
-impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::new(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?)))
+impl<'a, TX: DbTx> TrieCursorFactory for DbTxRefWrapper<'a, TX> {
+    type Err = DatabaseError;
+
+    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor<Err= Self::Err> + '_>, Self::Err> {
+        Ok(Box::new(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?)))
     }
 
     fn storage_tries_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
+    ) -> Result<Box<dyn TrieCursor<Err= Self::Err> + '_>, Self::Err> {
         Ok(Box::new(DatabaseStorageTrieCursor::new(
-            self.cursor_dup_read::<tables::StoragesTrie>()?,
+            self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         )))
     }
@@ -43,11 +55,13 @@ impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
 where
     C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
 {
+    type Err = DatabaseError;
+
     /// Seeks an exact match for the provided key in the account trie.
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1 .0)))
     }
 
@@ -55,12 +69,12 @@ where
     fn seek(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1 .0)))
     }
 
     /// Retrieves the current key in the cursor.
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<TrieKey>, Self::Err> {
         Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k)))
     }
 }
@@ -85,11 +99,13 @@ impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
 where
     C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
 {
+    type Err = DatabaseError;
+
     /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key.clone()))?
@@ -101,7 +117,7 @@ where
     fn seek(
         &mut self,
         key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?

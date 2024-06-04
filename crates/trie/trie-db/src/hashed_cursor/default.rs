@@ -1,4 +1,4 @@
-use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
+use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
@@ -6,13 +6,19 @@ use reth_db::{
 };
 use reth_primitives::{Account, B256, U256};
 
-impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
+/// New-type for a [`DbTx`] reference with [`HashedCursorFactory`] support.
+pub struct DbTxRefWrapper<'a, TX: DbTx>(&'a TX);
+
+/// New-type for a [`DbCursorRO`] reference with [`HashedCursor`] support.
+pub struct DbCursorROWrapper<T: DbCursorRO<tables::HashedAccounts>>(T);
+
+impl<'a, TX: DbTx> HashedCursorFactory for DbTxRefWrapper<'a, TX> {
     type AccountCursor = <TX as DbTx>::Cursor<tables::HashedAccounts>;
     type StorageCursor =
         DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
-        self.cursor_read::<tables::HashedAccounts>()
+        self.0.cursor_read::<tables::HashedAccounts>()
     }
 
     fn hashed_storage_cursor(
@@ -20,24 +26,25 @@ impl<'a, TX: DbTx> HashedCursorFactory for &'a TX {
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         Ok(DatabaseHashedStorageCursor::new(
-            self.cursor_dup_read::<tables::HashedStorages>()?,
+            self.0.cursor_dup_read::<tables::HashedStorages>()?,
             hashed_address,
         ))
     }
 }
 
-impl<C> HashedCursor for C
+impl<C> HashedCursor for DbCursorROWrapper<C>
 where
     C: DbCursorRO<tables::HashedAccounts>,
 {
+    type Err = reth_db::DatabaseError;
     type Value = Account;
 
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
-        self.seek(key)
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, Self::Err> {
+        self.0.seek(key)
     }
 
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
-        self.next()
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, Self::Err> {
+        self.0.next()
     }
 }
 
@@ -63,6 +70,7 @@ impl<C> HashedCursor for DatabaseHashedStorageCursor<C>
 where
     C: DbCursorRO<tables::HashedStorages> + DbDupCursorRO<tables::HashedStorages>,
 {
+    type Err = reth_db::DatabaseError;
     type Value = U256;
 
     fn seek(

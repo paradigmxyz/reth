@@ -1,8 +1,7 @@
-use crate::{
+use crate::{updates::TrieUpdates, StateRoot, state_root};
+use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    updates::TrieUpdates,
-    StateRoot,
 };
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{
@@ -216,7 +215,7 @@ impl HashedPostState {
     /// ```
     /// use reth_db::{database::Database, test_utils::create_test_rw_db};
     /// use reth_primitives::{Account, U256};
-    /// use reth_trie::HashedPostState;
+    /// use reth_trie_db::HashedPostState;
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
@@ -239,7 +238,7 @@ impl HashedPostState {
     pub fn state_root<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let sorted = self.clone().into_sorted();
         let prefix_sets = self.construct_prefix_sets();
-        StateRoot::from_tx(tx)
+        state_root::from_tx(tx)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
             .with_prefix_sets(prefix_sets)
             .root()
@@ -253,7 +252,7 @@ impl HashedPostState {
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let sorted = self.clone().into_sorted();
         let prefix_sets = self.construct_prefix_sets();
-        StateRoot::from_tx(tx)
+        state_root::from_tx(tx)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
             .with_prefix_sets(prefix_sets)
             .root_with_updates()

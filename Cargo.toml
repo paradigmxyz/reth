@@ -82,6 +82,7 @@ members = [
     "crates/transaction-pool/",
     "crates/trie/parallel/",
     "crates/trie/trie",
+    "crates/trie/trie-db",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -311,6 +312,7 @@ reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie/trie" }
+reth-trie-db = { path = "crates/trie/trie-db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm

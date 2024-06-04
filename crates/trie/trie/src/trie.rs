@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::{PrefixSet, PrefixSetLoader, TriePrefixSets},
+    prefix_set::{PrefixSet, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
     trie_cursor::TrieCursorFactory,
@@ -9,7 +9,6 @@ use crate::{
     walker::TrieWalker,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
@@ -24,7 +23,7 @@ use tracing::{debug, trace};
 use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
 
 /// `StateRoot` is used to compute the root node of a state trie.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct StateRoot<T, H> {
     /// The factory for trie cursors.
     pub trie_cursor_factory: T,
@@ -90,79 +89,6 @@ impl<T, H> StateRoot<T, H> {
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
-    }
-}
-
-impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
-    /// Create a new [`StateRoot`] instance.
-    pub fn from_tx(tx: &'a TX) -> Self {
-        Self {
-            trie_cursor_factory: tx,
-            hashed_cursor_factory: tx,
-            prefix_sets: TriePrefixSets::default(),
-            previous_state: None,
-            threshold: 100_000,
-            #[cfg(feature = "metrics")]
-            metrics: StateRootMetrics::default(),
-        }
-    }
-
-    /// Given a block number range, identifies all the accounts and storage keys that
-    /// have changed.
-    ///
-    /// # Returns
-    ///
-    /// An instance of state root calculator with account and storage prefixes loaded.
-    pub fn incremental_root_calculator(
-        tx: &'a TX,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<Self, StateRootError> {
-        let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
-        Ok(Self::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
-    }
-
-    /// Computes the state root of the trie with the changed account and storage prefixes and
-    /// existing trie nodes.
-    ///
-    /// # Returns
-    ///
-    /// The updated state root.
-    pub fn incremental_root(
-        tx: &'a TX,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<B256, StateRootError> {
-        debug!(target: "trie::loader", ?range, "incremental state root");
-        Self::incremental_root_calculator(tx, range)?.root()
-    }
-
-    /// Computes the state root of the trie with the changed account and storage prefixes and
-    /// existing trie nodes collecting updates in the process.
-    ///
-    /// Ignores the threshold.
-    ///
-    /// # Returns
-    ///
-    /// The updated state root and the trie updates.
-    pub fn incremental_root_with_updates(
-        tx: &'a TX,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<(B256, TrieUpdates), StateRootError> {
-        debug!(target: "trie::loader", ?range, "incremental state root");
-        Self::incremental_root_calculator(tx, range)?.root_with_updates()
-    }
-
-    /// Computes the state root of the trie with the changed account and storage prefixes and
-    /// existing trie nodes collecting updates in the process.
-    ///
-    /// # Returns
-    ///
-    /// The intermediate progress of state root computation.
-    pub fn incremental_root_with_progress(
-        tx: &'a TX,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<StateRootProgress, StateRootError> {
-        debug!(target: "trie::loader", ?range, "incremental state root with progress");
-        Self::incremental_root_calculator(tx, range)?.root_with_progress()
     }
 }
 
@@ -419,30 +345,6 @@ impl<T, H> StorageRoot<T, H> {
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
-    }
-}
-
-impl<'a, TX: DbTx> StorageRoot<&'a TX, &'a TX> {
-    /// Create a new storage root calculator from database transaction and raw address.
-    pub fn from_tx(tx: &'a TX, address: Address) -> Self {
-        Self::new(
-            tx,
-            tx,
-            address,
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
-        )
-    }
-
-    /// Create a new storage root calculator from database transaction and hashed address.
-    pub fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
-        Self::new_hashed(
-            tx,
-            tx,
-            hashed_address,
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
-        )
     }
 }
 
