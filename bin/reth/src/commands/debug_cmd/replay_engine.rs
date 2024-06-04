@@ -25,7 +25,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{ChainSpec, PruneModes};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
-    CanonStateSubscriptions, ProviderFactory, StaticFileProviderFactory,
+    CanonStateSubscriptions, ProviderFactory,
 };
 use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
@@ -181,11 +181,7 @@ impl Command {
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),

@@ -48,7 +48,6 @@
 //! # let executor_provider = EthExecutorProvider::mainnet();
 //! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
-//! #    provider_factory.static_file_provider(),
 //! #    PruneModes::default()
 //! # );
 //! // Create a pipeline that can fully sync
