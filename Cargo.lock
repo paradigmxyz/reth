@@ -6444,16 +6444,12 @@ dependencies = [
  "eyre",
  "iai-callgrind",
  "metrics",
- "modular-bitfield",
  "once_cell",
  "page_size",
- "parity-scale-codec",
  "paste",
  "pprof",
  "proptest",
- "proptest-derive",
  "rand 0.8.5",
- "reth-codecs",
  "reth-db-api",
  "reth-fs-util",
  "reth-libmdbx",
@@ -7151,7 +7147,6 @@ dependencies = [
 name = "reth-node-api"
 version = "0.2.0-beta.8"
 dependencies = [
- "reth-db",
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
@@ -7302,7 +7297,6 @@ dependencies = [
  "humantime",
  "pin-project",
  "reth-beacon-consensus",
- "reth-db",
  "reth-db-api",
  "reth-network",
  "reth-network-api",
@@ -7813,7 +7807,6 @@ dependencies = [
  "futures-util",
  "metrics",
  "reth-consensus",
- "reth-db",
  "reth-db-api",
  "reth-errors",
  "reth-metrics",
@@ -7866,7 +7859,6 @@ name = "reth-storage-api"
 version = "0.2.0-beta.8"
 dependencies = [
  "auto_impl",
- "reth-db",
  "reth-db-api",
  "reth-execution-types",
  "reth-primitives",

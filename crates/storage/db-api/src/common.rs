@@ -17,18 +17,3 @@ pub type IterPairResult<T> = Option<Result<KeyValue<T>, DatabaseError>>;
 
 /// A value only result for table `T`.
 pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, DatabaseError>;
-
-// Sealed trait helper to prevent misuse of the Database API.
-mod sealed {
-    use crate::{database::Database, mock::DatabaseMock};
-    use std::sync::Arc;
-
-    /// Sealed trait to limit the implementers of the Database trait.
-    pub trait Sealed: Sized {}
-
-    impl<DB: Database> Sealed for &DB {}
-    impl<DB: Database> Sealed for Arc<DB> {}
-
-    impl Sealed for DatabaseMock {}
-}
-pub(crate) use sealed::Sealed;

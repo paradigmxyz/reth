@@ -62,6 +62,8 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
+#![allow(unknown_lints, non_local_definitions)]
 
 /// Common types used throughout the abstraction.
 pub mod common;
@@ -81,6 +83,6 @@ pub mod transaction;
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
 
 pub mod models;
-pub mod scale;
+mod scale;
 
 mod utils;
