@@ -16,7 +16,7 @@ use reth_downloaders::file_client::{
 };
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, PruneModes};
-use reth_provider::{StageCheckpointReader, StaticFileProviderFactory};
+use reth_provider::StageCheckpointReader;
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, error, info};
@@ -92,11 +92,7 @@ impl ImportOpCommand {
                 provider_factory.clone(),
                 &consensus,
                 Arc::new(file_client),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
                 true,
             )
             .await?;

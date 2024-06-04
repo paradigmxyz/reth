@@ -24,7 +24,7 @@ use reth_node_events::node::NodeEvent;
 use reth_primitives::{stage::StageId, PruneModes, B256};
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
-    ProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
+    ProviderFactory, StageCheckpointReader,
 };
 use reth_stages::{prelude::*, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -96,11 +96,7 @@ impl ImportCommand {
                 provider_factory.clone(),
                 &consensus,
                 Arc::new(file_client),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
                 self.no_state,
             )
             .await?;

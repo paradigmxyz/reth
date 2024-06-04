@@ -436,7 +436,6 @@ mod tests {
     };
     use reth_provider::{
         test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
-        StaticFileProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_static_file::StaticFileProducer;
@@ -499,11 +498,8 @@ mod tests {
 
             let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
 
-            let static_file_producer = StaticFileProducer::new(
-                provider_factory.clone(),
-                provider_factory.static_file_provider(),
-                PruneModes::default(),
-            );
+            let static_file_producer =
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
             pipeline.build(provider_factory, static_file_producer)
         }

@@ -23,8 +23,7 @@ use reth_network_api::NetworkInfo;
 use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
 use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, PruneModes, B256};
 use reth_provider::{
-    BlockExecutionWriter, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
-    StageCheckpointReader, StaticFileProviderFactory,
+    BlockExecutionWriter, ChainSpecProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -182,11 +181,8 @@ impl Command {
             )
             .await?;
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
         // Configure the pipeline
         let fetch_client = network.fetch_client().await?;
