@@ -41,22 +41,21 @@ impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CompilerExecutorBuilder {
         };
 
         let compiler_config = &ctx.config().experimental.compiler;
+        let compiler_dir = ctx.config().datadir().compiler();
         if !compiler_config.compiler {
             tracing::debug!("EVM bytecode compiler is disabled");
             return Ok(mk_return(CompilerEvmConfig::disabled()));
         }
         tracing::info!("EVM bytecode compiler initialized");
 
-        let out_dir = compiler_config
-            .out_dir
-            .clone()
-            .unwrap_or_else(|| ctx.data_dir().compiler().join("artifacts"));
+        let out_dir =
+            compiler_config.out_dir.clone().unwrap_or_else(|| compiler_dir.join("artifacts"));
         let mut compiler = EvmParCompiler::new(out_dir.clone())?;
 
         let contracts_path = compiler_config
             .contracts_file
             .clone()
-            .unwrap_or_else(|| ctx.data_dir().compiler().join("contracts.toml"));
+            .unwrap_or_else(|| compiler_dir.join("contracts.toml"));
         let contracts_config = ContractsConfig::load(&contracts_path)?;
 
         let done = Arc::new(AtomicBool::new(false));
