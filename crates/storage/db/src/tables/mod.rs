@@ -130,7 +130,7 @@ macro_rules! tables {
             }
 
             impl reth_db_api::table::Table for $name {
-            const NAME: &'static str = table_names::$name;
+                const NAME: &'static str = table_names::$name;
 
                 type Key = $key;
                 type Value = $value;
