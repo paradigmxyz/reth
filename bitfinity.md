@@ -24,8 +24,6 @@ make build
 
 When running the node, it will also run a block import process. This process will download the blocks from the network and import them into the database. This process can take a long time, depending on the network speed and the number of blocks to import.
 
-Before running the node, you will need to have a `bitfinity.spec.json` file in the root of the project. This file should contain the genesis block and other configuration options for the node. An example of this file can be found in the root of the project.
-
 To run the node, use the following command:
 
 ```sh
