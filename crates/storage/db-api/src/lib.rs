@@ -69,7 +69,6 @@ pub mod cursor;
 pub mod database;
 /// Database metrics trait extensions.
 pub mod database_metrics;
-/// mock
 pub mod mock;
 /// Table traits
 pub mod table;
