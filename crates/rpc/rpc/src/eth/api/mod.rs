@@ -23,7 +23,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use traits::SpawnBlocking;
 
 use crate::eth::{
@@ -428,9 +428,14 @@ where
         F: FnOnce(Self) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
+        let (tx, rx) = oneshot::channel();
         let this = self.clone();
-        let fut = self.inner.blocking_task_pool().spawn(move || f(this));
-        async move { fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)? }
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            let res = async move { f(this) }.await;
+            let _ = tx.send(res);
+        }));
+
+        async move { rx.await.map_err(|_| EthApiError::InternalEthError)? }
     }
 
     fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>>
