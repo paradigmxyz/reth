@@ -3,7 +3,7 @@
 use crate::{
     args::{
         types::{MaxU32, ZeroAsNoneU64},
-        GasPriceOracleArgs, RpcStateCacheArgs,
+        GasPriceOracleArgs,
     },
     cli::config::RethRpcConfig,
     utils::get_or_create_jwt_secret_from_path,
@@ -21,7 +21,7 @@ use reth_rpc_builder::{
     auth::AuthServerConfig, error::RpcError, EthConfig, Identity, IpcServerBuilder, RethRpcModule,
     RpcModuleConfig, RpcModuleSelection, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 };
-use reth_rpc_server_types::constants;
+use reth_rpc_server_types::{args::RpcStateCacheArgs, constants};
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},

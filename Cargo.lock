@@ -7687,6 +7687,7 @@ name = "reth-rpc-server-types"
 version = "0.2.0-beta.8"
 dependencies = [
  "alloy-primitives",
+ "clap",
 ]
 
 [[package]]

@@ -1,8 +1,8 @@
-use clap::Args;
-use reth_rpc::eth::cache::{
+use crate::constants::cache::{
     DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_ENV_CACHE_MAX_LEN,
     DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
+use clap::Args;
 
 /// Parameters to configure RPC state cache.
 #[derive(Debug, Clone, Args, PartialEq, Eq)]

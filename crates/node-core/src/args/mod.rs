@@ -8,10 +8,6 @@ pub use network::{DiscoveryArgs, NetworkArgs};
 mod rpc_server;
 pub use rpc_server::RpcServerArgs;
 
-/// `RpcStateCacheArgs` struct for configuring RPC state cache
-mod rpc_state_cache;
-pub use rpc_state_cache::RpcStateCacheArgs;
-
 /// DebugArgs struct for debugging purposes
 mod debug;
 pub use debug::DebugArgs;
