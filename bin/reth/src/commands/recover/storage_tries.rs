@@ -1,7 +1,7 @@
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_cli_runner::CliContext;
-use reth_db::{init_db, tables};
+use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
     transaction::DbTx,
