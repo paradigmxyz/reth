@@ -28,7 +28,6 @@ metrics.workspace = true
 # misc
 derive_more.workspace = true
 bytes.workspace = true
-tempfile = { workspace = true, optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -43,7 +42,6 @@ reth-codecs.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 
-tempfile.workspace = true
 test-fuzz.workspace = true
 
 pprof = { workspace = true, features = [
@@ -63,7 +61,7 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-test-utils = ["tempfile", "arbitrary"]
+test-utils = ["arbitrary"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",

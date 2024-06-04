@@ -6490,7 +6490,6 @@ dependencies = [
  "reth-storage-errors",
  "serde",
  "serde_json",
- "tempfile",
  "test-fuzz",
 ]
 
