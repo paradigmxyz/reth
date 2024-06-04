@@ -49,7 +49,7 @@ Datadir:
           The absolute path to store static files in.
 
       --config <FILE>
-          The path to the configuration file to use.
+          The path to the configuration file to use
 
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
