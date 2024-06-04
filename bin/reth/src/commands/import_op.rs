@@ -10,7 +10,8 @@ use crate::{
 };
 use clap::Parser;
 use reth_consensus::noop::NoopConsensus;
-use reth_db::{tables, transaction::DbTx};
+use reth_db::tables;
+use reth_db_api::transaction::DbTx;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };

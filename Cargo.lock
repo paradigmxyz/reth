@@ -6181,6 +6181,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-db-api",
  "reth-db-common",
  "reth-discv4",
  "reth-discv5",
