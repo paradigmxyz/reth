@@ -1,8 +1,4 @@
-use reth_primitives::Log;
-use std::{
-    fmt::{self, Display, Formatter},
-    str::FromStr,
-};
+use std::str::FromStr;
 use thiserror::Error;
 
 /// Database error type.
