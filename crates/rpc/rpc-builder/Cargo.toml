@@ -19,6 +19,7 @@ reth-provider.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-layer.workspace = true
+reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
