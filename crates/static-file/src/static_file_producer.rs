@@ -246,7 +246,7 @@ mod tests {
     };
     use tempfile::TempDir;
 
-    fn setup() -> (ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, StaticFileProvider, TempDir) {
+    fn setup() -> (ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, TempDir) {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
