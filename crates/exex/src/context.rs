@@ -1,8 +1,5 @@
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
-use reth_node_core::{
-    dirs::{ChainPath, DataDirPath},
-    node_config::NodeConfig,
-};
+use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
@@ -14,8 +11,6 @@ use crate::{ExExEvent, ExExNotification};
 pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.
     pub head: Head,
-    /// The data dir of the node.
-    pub data_dir: ChainPath<DataDirPath>,
     /// The config of the node
     pub config: NodeConfig,
     /// The loaded node config

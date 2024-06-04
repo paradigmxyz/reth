@@ -49,7 +49,7 @@ where
     type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let data_dir = ctx.data_dir();
+        let data_dir = ctx.config().datadir();
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
