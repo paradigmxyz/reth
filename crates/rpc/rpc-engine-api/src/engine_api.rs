@@ -817,7 +817,7 @@ where
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(CAPABILITIES.iter().map(|cap| cap.to_owned().to_owned()).collect())
+        Ok(CAPABILITIES.iter().cloned().map(str::to_owned).collect())
     }
 }
 
