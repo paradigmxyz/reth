@@ -23,11 +23,11 @@ services:
       - --metrics=0.0.0.0:9001
       - --http
       - --http.addr=0.0.0.0
-      - --http.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
+      - --http.api=eth,net,trace,txpool,web3,rpc
       - --http.corsdomain=*
       - --ws
       - --ws.addr=0.0.0.0
-      - --ws.api=debug,eth,net,trace,txpool,web3,rpc,reth,ots
+      - --ws.api=eth,net,trace,txpool,web3,rpc
       - --ws.origins=*
       - --auth-ipc
       - --auth-ipc.path=/data/reth_engine_api.ipc
@@ -38,8 +38,6 @@ services:
       - --disable-discovery
       - --datadir=/data
       - --log.file.directory=/root/logs
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
 
   # default prometheus + grafana setup
   prometheus:
@@ -55,8 +53,6 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
 
   grafana:
     restart: unless-stopped
@@ -79,8 +75,6 @@ services:
       sh -c "cp -r /etc/grafana/provisioning_temp/dashboards/. /etc/grafana/provisioning/dashboards &&
              find /etc/grafana/provisioning/dashboards/ -name '*.json' -exec sed -i 's/$${DS_PROMETHEUS}/Prometheus/g' {} \+ &&
              /run.sh"
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
 
   metrics-exporter:
     restart: unless-stopped
@@ -94,8 +88,6 @@ services:
     command:
       - --config=/root/config.yaml
       - --metrics-port=9091
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
 
   # Consensus client part
 
@@ -128,8 +120,6 @@ services:
       - --suggested-fee-recipient=a2A0D977847805fE224B789D8C4d3D711ab251e7
       - --minimum-peers-per-subnet=0
       - --enable-debug-rpc-endpoints
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
 
   # We run a validator client with deterministically-generated keys that match
   # The validator keys present in the beacon chain genesis state generated a few steps above.
@@ -147,8 +137,6 @@ services:
     depends_on:
       beacon-chain:
         condition: service_started
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
 
 volumes:
   reth_data:
