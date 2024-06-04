@@ -563,6 +563,13 @@ impl StaticFileProvider {
             // interruption.
             let mut highest_block = self.get_highest_static_file_block(segment);
             if initial_highest_block != highest_block {
+                info!(
+                    target: "reth::providers::static_file",
+                    ?initial_highest_block,
+                    unwind_target = highest_block,
+                    ?segment,
+                    "Setting unwind target."
+                );
                 update_unwind_target(highest_block.unwrap_or_default());
             }
 
@@ -590,6 +597,13 @@ impl StaticFileProvider {
                     }
                     last_block -= 1;
 
+                    info!(
+                        target: "reth::providers::static_file",
+                        highest_block = self.get_highest_static_file_block(segment),
+                        unwind_target = last_block,
+                        ?segment,
+                        "Setting unwind target."
+                    );
                     highest_block = Some(last_block);
                     update_unwind_target(last_block);
                 }
@@ -650,6 +664,14 @@ impl StaticFileProvider {
             if !(db_first_entry <= highest_static_file_entry ||
                 highest_static_file_entry + 1 == db_first_entry)
             {
+                info!(
+                    target: "reth::providers::static_file",
+                    ?db_first_entry,
+                    ?highest_static_file_entry,
+                    unwind_target = highest_static_file_block,
+                    ?segment,
+                    "Setting unwind target."
+                );
                 return Ok(Some(highest_static_file_block))
             }
 
@@ -673,6 +695,13 @@ impl StaticFileProvider {
 
         // If the checkpoint is ahead, then we lost static file data. May be data corruption.
         if checkpoint_block_number > highest_static_file_block {
+            info!(
+                target: "reth::providers::static_file",
+                checkpoint_block_number,
+                unwind_target = highest_static_file_block,
+                ?segment,
+                "Setting unwind target."
+            );
             return Ok(Some(highest_static_file_block));
         }
 
