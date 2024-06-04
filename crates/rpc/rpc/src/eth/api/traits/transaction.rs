@@ -134,10 +134,11 @@ pub trait EthTransactions: Send + Sync {
         F: Future<Output = EthResult<R>> + Send + 'static,
         R: Send + 'static;
 
-    /// Executes a blocking on the tracing pol.
+    /// Executes a blocking task on the tracing pool.
     ///
-    /// Note: This is expected for futures that are predominantly CPU bound, for blocking IO futures
-    /// use [Self::spawn_blocking_future].
+    /// Note: This is expected for futures that are predominantly CPU bound, as it uses `rayon`
+    /// under the hood, for blocking IO futures use [Self::spawn_blocking_future]. See
+    /// <https://ryhl.io/blog/async-what-is-blocking/>.
     async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
     where
         F: FnOnce() -> EthResult<R> + Send + 'static,

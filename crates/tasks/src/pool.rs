@@ -43,7 +43,8 @@ impl BlockingTaskGuard {
 ///
 /// This is a dedicated threadpool for blocking tasks which are CPU bound.
 /// RPC calls that perform blocking IO (disk lookups) are not executed on this pool but on the tokio
-/// runtime's blocking pool, which performs poorly with CPU bound tasks. Once the tokio blocking
+/// runtime's blocking pool, which performs poorly with CPU bound tasks (see
+/// <https://ryhl.io/blog/async-what-is-blocking/>). Once the tokio blocking
 /// pool is saturated it is converted into a queue, blocking tasks could then interfere with the
 /// queue and block other RPC calls.
 ///
