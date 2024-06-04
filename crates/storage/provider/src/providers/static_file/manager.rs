@@ -702,7 +702,7 @@ impl StaticFileProvider {
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block));
+            return Ok(Some(highest_static_file_block))
         }
 
         // If the checkpoint is behind, then we failed to do a database commit **but committed** to

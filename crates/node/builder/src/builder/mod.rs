@@ -425,8 +425,6 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) provider: Node::Provider,
     /// The executor of the node.
     pub(crate) executor: TaskExecutor,
-    /// The data dir of the node.
-    pub(crate) data_dir: ChainPath<DataDirPath>,
     /// The config of the node
     pub(crate) config: NodeConfig,
     /// loaded config
@@ -439,11 +437,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
-        data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
     ) -> Self {
-        Self { head, provider, executor, data_dir, config, reth_config }
+        Self { head, provider, executor, config, reth_config }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -459,13 +456,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config of the node.
     pub const fn config(&self) -> &NodeConfig {
         &self.config
-    }
-
-    /// Returns the data dir of the node.
-    ///
-    /// This gives access to all relevant files and directories of the node's datadir.
-    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
-        &self.data_dir
     }
 
     /// Returns the executor of the node.
@@ -502,7 +492,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             self.provider.clone(),
             self.executor.clone(),
             self.head,
-            self.data_dir(),
+            self.config.datadir(),
         )
     }
 
@@ -514,7 +504,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 self.provider.clone(),
                 self.executor.clone(),
                 self.head,
-                self.data_dir(),
+                self.config.datadir(),
             )
             .await
     }
@@ -539,7 +529,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.executor.spawn_critical("p2p txpool", txpool);
         self.executor.spawn_critical("p2p eth request handler", eth);
 
-        let default_peers_path = self.data_dir().known_peers();
+        let default_peers_path = self.config.datadir().known_peers();
         let known_peers_file = self.config.network.persistent_peers_file(default_peers_path);
         self.executor.spawn_critical_with_graceful_shutdown_signal(
             "p2p network task",
@@ -560,7 +550,6 @@ impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
             .field("head", &self.head)
             .field("provider", &std::any::type_name::<Node::Provider>())
             .field("executor", &self.executor)
-            .field("data_dir", &self.data_dir)
             .field("config", &self.config)
             .finish()
     }

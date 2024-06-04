@@ -146,7 +146,6 @@ where
             head,
             blockchain_db.clone(),
             ctx.task_executor().clone(),
-            ctx.data_dir().clone(),
             ctx.node_config().clone(),
             ctx.toml_config().clone(),
         );
@@ -195,7 +194,6 @@ where
             // create the launch context for the exex
             let context = ExExContext {
                 head,
-                data_dir: ctx.data_dir().clone(),
                 config: ctx.node_config().clone(),
                 reth_config: ctx.toml_config().clone(),
                 components: node_adapter.clone(),
