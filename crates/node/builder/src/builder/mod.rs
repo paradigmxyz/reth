@@ -10,7 +10,7 @@ use crate::{
 };
 use futures::Future;
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_rw_db_with_path, tempdir_path, TempDatabase},
+    test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
 };
 use reth_db_api::{

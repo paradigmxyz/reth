@@ -44,7 +44,6 @@ sysinfo = "0.30"
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"] }
-once_cell.workspace = true
 
 [dev-dependencies]
 # reth libs with arbitrary

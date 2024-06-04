@@ -6444,7 +6444,6 @@ dependencies = [
  "eyre",
  "iai-callgrind",
  "metrics",
- "once_cell",
  "page_size",
  "paste",
  "pprof",
