@@ -10,11 +10,11 @@ pub trait SpawnBlocking {
     ///
     /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
     /// or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing).
-    fn spawn_blocking_io<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
+    fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: Sized,
-        F: FnOnce(Self) -> EthResult<T> + Send + 'static,
-        T: Send + 'static;
+        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
+        R: Send + 'static;
 
     /// Executes a blocking task on the tracing pool.
     ///

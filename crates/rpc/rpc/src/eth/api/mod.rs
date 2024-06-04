@@ -422,11 +422,11 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
 where
     Self: Send + Sync + 'static,
 {
-    fn spawn_blocking_io<F, T>(&self, f: F) -> impl Future<Output = EthResult<T>> + Send
+    fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: Sized,
-        F: FnOnce(Self) -> EthResult<T> + Send + 'static,
-        T: Send + 'static,
+        F: FnOnce(Self) -> EthResult<R> + Send + 'static,
+        R: Send + 'static,
     {
         let this = self.clone();
         let fut = self.inner.blocking_task_pool().spawn(move || f(this));
