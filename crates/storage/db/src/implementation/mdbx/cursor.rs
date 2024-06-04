@@ -1,15 +1,17 @@
 //! Cursor wrapper for libmdbx-sys.
 
 use crate::{
+    metrics::{DatabaseEnvMetrics, Operation},
+    tables::utils::*,
+    DatabaseError,
+};
+use reth_db_api::{
     common::{PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    metrics::{DatabaseEnvMetrics, Operation},
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
-    tables::utils::*,
-    DatabaseError,
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};

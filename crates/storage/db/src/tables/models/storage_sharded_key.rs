@@ -1,10 +1,8 @@
 //! Storage sharded key
 
-use crate::{
-    table::{Decode, Encode},
-    DatabaseError,
-};
+use crate::DatabaseError;
 use derive_more::AsRef;
+use reth_db_api::table::{Decode, Encode};
 use reth_primitives::{Address, BlockNumber, B256};
 use serde::{Deserialize, Serialize};
 

@@ -2,10 +2,8 @@
 
 use std::hash::Hash;
 
-use crate::{
-    table::{Decode, Encode},
-    DatabaseError,
-};
+use crate::DatabaseError;
+use reth_db_api::table::{Decode, Encode};
 use reth_primitives::BlockNumber;
 use serde::{Deserialize, Serialize};
 

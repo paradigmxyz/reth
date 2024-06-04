@@ -23,20 +23,17 @@ pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
 pub(crate) mod utils;
 
-use crate::{
-    abstraction::table::Table,
-    table::DupSort,
-    tables::{
-        codecs::CompactU256,
-        models::{
-            accounts::{AccountBeforeTx, BlockNumberAddress},
-            blocks::{HeaderHash, StoredBlockOmmers},
-            client_version::ClientVersion,
-            storage_sharded_key::StorageShardedKey,
-            ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
-        },
+use crate::tables::{
+    codecs::CompactU256,
+    models::{
+        accounts::{AccountBeforeTx, BlockNumberAddress},
+        blocks::{HeaderHash, StoredBlockOmmers},
+        client_version::ClientVersion,
+        storage_sharded_key::StorageShardedKey,
+        ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
 };
+use reth_db_api::table::{DupSort, Table};
 use reth_primitives::{
     stage::StageCheckpoint,
     trie::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey},
@@ -136,8 +133,8 @@ macro_rules! tables {
                 }
             }
 
-            impl $crate::table::Table for $name {
-                const TABLE: Tables = Tables::$name;
+            impl reth_db_api::table::Table for $name {
+            const NAME: &'static str = table_names::$name;
 
                 type Key = $key;
                 type Value = $value;

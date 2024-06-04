@@ -3,12 +3,14 @@
 use super::cursor::Cursor;
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
-    table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::{utils::decode_one, Tables},
-    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use once_cell::sync::OnceCell;
+use reth_db_api::{
+    table::{Compress, DupSort, Encode, Table, TableImporter},
+    transaction::{DbTx, DbTxMut},
+};
 use reth_libmdbx::{ffi::DBI, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
@@ -392,9 +394,10 @@ impl DbTxMut for Tx<RW> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        database::Database, mdbx::DatabaseArguments, models::client_version::ClientVersion, tables,
-        transaction::DbTx, DatabaseEnv, DatabaseEnvKind,
+        mdbx::DatabaseArguments, models::client_version::ClientVersion, tables, DatabaseEnv,
+        DatabaseEnvKind,
     };
+    use reth_db_api::{database::Database, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
     use reth_storage_errors::db::DatabaseError;
     use std::{sync::atomic::Ordering, thread::sleep, time::Duration};

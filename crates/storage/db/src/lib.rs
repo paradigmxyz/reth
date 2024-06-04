@@ -63,9 +63,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Traits defining the database abstractions, such as cursors and transactions.
-pub mod abstraction;
-
 mod implementation;
 pub mod lockfile;
 mod metrics;
@@ -77,9 +74,7 @@ pub mod version;
 #[cfg(feature = "mdbx")]
 pub mod mdbx;
 
-pub use abstraction::*;
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
-pub use table::*;
 pub use tables::*;
 pub use utils::is_database_empty;
 
@@ -90,11 +85,10 @@ pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, Data
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
     use super::*;
-    use crate::{
+    use crate::{mdbx::DatabaseArguments, models::client_version::ClientVersion};
+    use reth_db_api::{
         database::Database,
         database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
-        mdbx::DatabaseArguments,
-        models::client_version::ClientVersion,
     };
     use reth_fs_util;
     use reth_libmdbx::MaxReadTransactionDuration;
@@ -228,20 +222,17 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use crate::{
-        cursor::DbCursorRO,
-        database::Database,
         init_db,
         mdbx::DatabaseArguments,
         models::client_version::ClientVersion,
         open_db, tables,
-        transaction::DbTx,
         version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;
+    use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
     use reth_libmdbx::MaxReadTransactionDuration;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     #[test]

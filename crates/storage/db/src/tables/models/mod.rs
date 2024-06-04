@@ -1,10 +1,8 @@
 //! Implements data structures specific to the database
 
-use crate::{
-    table::{Decode, Encode},
-    DatabaseError,
-};
+use crate::DatabaseError;
 use reth_codecs::Compact;
+use reth_db_api::table::{Decode, Encode};
 use reth_primitives::{
     trie::{StoredNibbles, StoredNibblesSubKey},
     Address, PruneSegment, B256,

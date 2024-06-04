@@ -1,5 +1,5 @@
 use crate::{
-    abstraction::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -79,12 +79,19 @@ impl<T> Value for T where T: Compress + Decompress + Serialize {}
 ///
 /// It allows for the use of codecs. See [`crate::models::ShardedKey`] for a custom
 /// implementation.
-pub trait Table: Send + Sync + Debug + 'static {
-    /// The dynamic type of the table.
-    const TABLE: crate::Tables;
 
+// todo(onbjerg): remove this. it's needed to make it compile because of the associated type TABLE
+// below -.-
+pub enum Tables {}
+impl Tables {
+    pub const fn name(&self) -> &'static str {
+        "hello"
+    }
+}
+
+pub trait Table: Send + Sync + Debug + 'static {
     /// The table's name.
-    const NAME: &'static str = Self::TABLE.name();
+    const NAME: &'static str;
 
     /// Key element of `Table`.
     ///

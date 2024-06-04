@@ -1,56 +1,34 @@
 [package]
-name = "reth-db"
+name = "reth-db-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Database primitives used in reth."
+description = "Database abstraction used in reth."
 
 [lints]
 workspace = true
 
 [dependencies]
 # reth
-reth-db-api.workspace = true
-reth-primitives.workspace = true
-reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
-reth-codecs.workspace = true
-reth-libmdbx = { workspace = true, optional = true, features = [
-    "return-borrowed",
-    "read-tx-timeouts",
-] }
-reth-nippy-jar.workspace = true
-reth-tracing.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-modular-bitfield.workspace = true
 
 # metrics
-reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
 bytes.workspace = true
-page_size = "0.6.0"
-thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
-derive_more.workspace = true
-eyre.workspace = true
-paste.workspace = true
-rustc-hash.workspace = true
-sysinfo = "0.30"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-strum = { workspace = true, features = ["derive"] }
-once_cell.workspace = true
 
 [dev-dependencies]
 # reth libs with arbitrary
@@ -80,10 +58,7 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx"]
 test-utils = ["tempfile", "arbitrary"]
-mdbx = ["reth-libmdbx"]
-bench = []
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
@@ -91,18 +66,3 @@ arbitrary = [
     "dep:proptest-derive",
 ]
 optimism = []
-
-[[bench]]
-name = "hash_keys"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "criterion"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "iai"
-required-features = ["test-utils"]
-harness = false

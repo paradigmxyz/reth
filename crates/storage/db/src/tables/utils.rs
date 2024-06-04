@@ -1,9 +1,7 @@
 //! Small database table utilities and helper functions.
 
-use crate::{
-    table::{Decode, Decompress, Table, TableRow},
-    DatabaseError,
-};
+use crate::DatabaseError;
+use reth_db_api::table::{Decode, Decompress, Table, TableRow};
 use std::borrow::Cow;
 
 #[macro_export]

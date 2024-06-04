@@ -2,12 +2,9 @@
 
 use std::ops::{Range, RangeInclusive};
 
-use crate::{
-    impl_fixed_arbitrary,
-    table::{Decode, Encode},
-    DatabaseError,
-};
+use crate::{impl_fixed_arbitrary, DatabaseError};
 use reth_codecs::{derive_arbitrary, Compact};
+use reth_db_api::table::{Decode, Encode};
 use reth_primitives::{Account, Address, BlockNumber, Buf, StorageKey};
 use serde::{Deserialize, Serialize};
 

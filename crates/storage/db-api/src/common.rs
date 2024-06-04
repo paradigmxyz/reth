@@ -1,4 +1,4 @@
-use crate::{abstraction::table::*, DatabaseError};
+use crate::{table::*, DatabaseError};
 
 /// A key-value pair for table `T`.
 pub type KeyValue<T> = (<T as Table>::Key, <T as Table>::Value);
@@ -29,11 +29,6 @@ mod sealed {
     impl<DB: Database> Sealed for &DB {}
     impl<DB: Database> Sealed for Arc<DB> {}
 
-    #[cfg(feature = "mdbx")]
-    impl Sealed for crate::DatabaseEnv {}
     impl Sealed for DatabaseMock {}
-
-    #[cfg(any(test, feature = "test-utils"))]
-    impl<DB: Database> Sealed for crate::test_utils::TempDatabase<DB> {}
 }
 pub(crate) use sealed::Sealed;

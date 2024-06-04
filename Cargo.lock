@@ -6450,6 +6450,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
+ "reth-db-api",
  "reth-fs-util",
  "reth-libmdbx",
  "reth-metrics",
@@ -6465,6 +6466,30 @@ dependencies = [
  "tempfile",
  "test-fuzz",
  "thiserror",
+]
+
+[[package]]
+name = "reth-db-api"
+version = "0.2.0-beta.7"
+dependencies = [
+ "arbitrary",
+ "assert_matches",
+ "bytes",
+ "criterion",
+ "iai-callgrind",
+ "metrics",
+ "paste",
+ "pprof",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-primitives",
+ "reth-storage-errors",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "test-fuzz",
 ]
 
 [[package]]
