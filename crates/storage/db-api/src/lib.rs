@@ -1,4 +1,4 @@
-//! reth's database abstraction layer with concrete implementations.
+//! reth's database abstraction layer.
 //!
 //! The database abstraction assumes that the underlying store is a KV store subdivided into tables.
 //!
@@ -40,20 +40,20 @@
 //!
 //! An overview of the current data model of reth can be found in the [`mod@tables`] module.
 //!
-//! [`Database`]: crate::abstraction::database::Database
-//! [`DbTx`]: crate::abstraction::transaction::DbTx
-//! [`DbTxMut`]: crate::abstraction::transaction::DbTxMut
-//! [`DbCursorRO`]: crate::abstraction::cursor::DbCursorRO
-//! [`DbCursorRW`]: crate::abstraction::cursor::DbCursorRW
-//! [`Walker`]: crate::abstraction::cursor::Walker
-//! [`RangeWalker`]: crate::abstraction::cursor::RangeWalker
-//! [`ReverseWalker`]: crate::abstraction::cursor::ReverseWalker
-//! [`DbDupCursorRO`]: crate::abstraction::cursor::DbDupCursorRO
-//! [`Encode`]: crate::abstraction::table::Encode
-//! [`Decode`]: crate::abstraction::table::Decode
-//! [`Compress`]: crate::abstraction::table::Compress
-//! [`Decompress`]: crate::abstraction::table::Decompress
-//! [`Table`]: crate::abstraction::table::Table
+//! [`Database`]: crate::database::Database
+//! [`DbTx`]: crate::transaction::DbTx
+//! [`DbTxMut`]: crate::transaction::DbTxMut
+//! [`DbCursorRO`]: crate::cursor::DbCursorRO
+//! [`DbCursorRW`]: crate::cursor::DbCursorRW
+//! [`Walker`]: crate::cursor::Walker
+//! [`RangeWalker`]: crate::cursor::RangeWalker
+//! [`ReverseWalker`]: crate::cursor::ReverseWalker
+//! [`DbDupCursorRO`]: crate::cursor::DbDupCursorRO
+//! [`Encode`]: crate::table::Encode
+//! [`Decode`]: crate::table::Decode
+//! [`Compress`]: crate::table::Compress
+//! [`Decompress`]: crate::table::Decompress
+//! [`Table`]: crate::table::Table
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
