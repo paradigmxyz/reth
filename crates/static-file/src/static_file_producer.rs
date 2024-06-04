@@ -101,8 +101,9 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     /// Run the `static_file_producer`.
     ///
     /// For each [Some] target in [`StaticFileTargets`], initializes a corresponding [Segment] and
-    /// runs it with the provided block range using [`StaticFileProvider`] and a read-only
-    /// database transaction from [`ProviderFactory`]. All segments are run in parallel.
+    /// runs it with the provided block range using [`reth_provider::providers::StaticFileProvider`]
+    /// and a read-only database transaction from [`ProviderFactory`]. All segments are run in
+    /// parallel.
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
@@ -166,7 +167,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
 
     /// Returns a static file targets at the provided finalized block numbers per segment.
     /// The target is determined by the check against highest `static_files` using
-    /// [`StaticFileProvider::get_highest_static_files`].
+    /// [`reth_provider::providers::StaticFileProvider::get_highest_static_files`].
     pub fn get_static_file_targets(
         &self,
         finalized_block_numbers: HighestStaticFiles,
