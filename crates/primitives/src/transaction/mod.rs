@@ -936,8 +936,8 @@ fn from_compact_zstd_unaware(mut buf: &[u8], _len: usize) -> (TransactionSignedN
     let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
     let zstd_bit = bitflags >> 3;
-    assert!(
-        zstd_bit == 0,
+    assert_eq!(
+        zstd_bit, 0,
         "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
     );
 
