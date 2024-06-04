@@ -10,6 +10,3 @@
 
 /// Common RPC constants.
 pub mod constants;
-
-/// Parameters for configuring the rpc more granularity via CLI
-pub mod args;
