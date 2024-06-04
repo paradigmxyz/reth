@@ -333,7 +333,8 @@ pub struct HashedStorageSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{database::Database, test_utils::create_test_rw_db};
+    use reth_db::test_utils::create_test_rw_db;
+    use reth_db_api::database::Database;
     use reth_primitives::hex;
     use revm::{
         db::states::BundleState,

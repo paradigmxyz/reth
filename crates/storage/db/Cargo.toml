@@ -75,7 +75,7 @@ default = ["mdbx"]
 test-utils = ["tempfile", "arbitrary"]
 mdbx = ["reth-libmdbx"]
 bench = []
-arbitrary = ["reth-primitives/arbitrary"]
+arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
 
 [[bench]]
