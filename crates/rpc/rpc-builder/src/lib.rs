@@ -159,7 +159,6 @@ use crate::{
     auth::AuthRpcModule, cors::CorsDomainError, error::WsHttpSamePortError,
     metrics::RpcRequestMetrics, RpcModuleSelection::Selection,
 };
-use constants::*;
 use error::{ConflictingModules, RpcError, ServerKind};
 use hyper::{header::AUTHORIZATION, HeaderMap};
 pub use jsonrpsee::server::ServerBuilder;
@@ -192,6 +191,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
+pub use reth_rpc_server_types::constants;
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -225,9 +225,6 @@ pub mod error;
 
 /// Eth utils
 mod eth;
-
-/// Common RPC constants.
-pub mod constants;
 
 // Rpc server metrics
 mod metrics;
@@ -1576,7 +1573,8 @@ impl RpcServerConfig {
 
     /// Configures the [`SocketAddr`] of the http server
     ///
-    /// Default is [`Ipv4Addr::LOCALHOST`] and [`DEFAULT_HTTP_RPC_PORT`]
+    /// Default is [`Ipv4Addr::LOCALHOST`] and
+    /// [`reth_rpc_server_types::constants::DEFAULT_HTTP_RPC_PORT`]
     pub const fn with_http_address(mut self, addr: SocketAddr) -> Self {
         self.http_addr = Some(addr);
         self
@@ -1584,7 +1582,8 @@ impl RpcServerConfig {
 
     /// Configures the [`SocketAddr`] of the ws server
     ///
-    /// Default is [`Ipv4Addr::LOCALHOST`] and [`DEFAULT_WS_RPC_PORT`]
+    /// Default is [`Ipv4Addr::LOCALHOST`] and
+    /// [`reth_rpc_server_types::constants::DEFAULT_WS_RPC_PORT`]
     pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
         self
@@ -1621,7 +1620,7 @@ impl RpcServerConfig {
 
     /// Configures the endpoint of the ipc server
     ///
-    /// Default is [`DEFAULT_IPC_ENDPOINT`]
+    /// Default is [`reth_rpc_server_types::constants::DEFAULT_IPC_ENDPOINT`]
     pub fn with_ipc_endpoint(mut self, path: impl Into<String>) -> Self {
         self.ipc_endpoint = Some(path.into());
         self
@@ -1681,12 +1680,13 @@ impl RpcServerConfig {
     ) -> Result<WsHttpServer, RpcError> {
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
-            DEFAULT_HTTP_RPC_PORT,
+            constants::DEFAULT_HTTP_RPC_PORT,
         )));
 
-        let ws_socket_addr = self
-            .ws_addr
-            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, DEFAULT_WS_RPC_PORT)));
+        let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::LOCALHOST,
+            constants::DEFAULT_WS_RPC_PORT,
+        )));
 
         // If both are configured on the same port, we combine them into one server.
         if self.http_addr == self.ws_addr &&
@@ -1815,7 +1815,8 @@ impl RpcServerConfig {
 
         if let Some(builder) = self.ipc_server_config {
             let metrics = modules.ipc.as_ref().map(RpcRequestMetrics::ipc).unwrap_or_default();
-            let ipc_path = self.ipc_endpoint.unwrap_or_else(|| DEFAULT_IPC_ENDPOINT.into());
+            let ipc_path =
+                self.ipc_endpoint.unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
             let ipc = builder
                 .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
                 .build(ipc_path);

@@ -31,7 +31,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockExecutionWriter, HeaderSyncMode, ProviderFactory,
-    StageCheckpointReader, StaticFileProviderFactory,
+    StageCheckpointReader,
 };
 use reth_stages::{
     sets::DefaultStages,
@@ -223,11 +223,8 @@ impl Command {
             )
             .await?;
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
         // Configure the pipeline
         let fetch_client = network.fetch_client().await?;

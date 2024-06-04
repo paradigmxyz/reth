@@ -1,6 +1,3 @@
-use crate::constants::{
-    default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
-};
 use reth_rpc::{
     eth::{
         cache::{EthStateCache, EthStateCacheConfig},
@@ -8,6 +5,9 @@ use reth_rpc::{
         EthFilterConfig, FeeHistoryCacheConfig, RPC_DEFAULT_GAS_CAP,
     },
     EthApi, EthFilter, EthPubSub,
+};
+use reth_rpc_server_types::constants::{
+    default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
 use reth_tasks::pool::BlockingTaskPool;
 use serde::{Deserialize, Serialize};

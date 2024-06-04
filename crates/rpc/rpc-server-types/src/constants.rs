@@ -1,8 +1,3 @@
-/// GPO reexports
-pub use reth_rpc::eth::gas_oracle::{
-    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-    DEFAULT_MAX_GAS_PRICE,
-};
 use std::cmp::max;
 
 /// The default port for the http server
@@ -46,3 +41,27 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc
 /// The `engine_api` IPC endpoint
 #[cfg(not(windows))]
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
+
+/// GPO specific constants
+pub mod gas_oracle {
+    use alloy_primitives::U256;
+
+    /// The number of transactions sampled in a block
+    pub const SAMPLE_NUMBER: usize = 3_usize;
+
+    /// The default maximum number of blocks to use for the gas price oracle.
+    pub const MAX_HEADER_HISTORY: u64 = 1024;
+
+    /// Number of recent blocks to check for gas price
+    pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
+
+    /// The percentile of gas prices to use for the estimate
+    pub const DEFAULT_GAS_PRICE_PERCENTILE: u32 = 60;
+
+    /// Maximum transaction priority fee (or gas price before London Fork) to be recommended by the
+    /// gas price oracle
+    pub const DEFAULT_MAX_GAS_PRICE: U256 = U256::from_limbs([500_000_000_000u64, 0, 0, 0]);
+
+    /// The default minimum gas price, under which the sample will be ignored
+    pub const DEFAULT_IGNORE_GAS_PRICE: U256 = U256::from_limbs([2u64, 0, 0, 0]);
+}
