@@ -2,6 +2,10 @@
 //!
 //! This crate is an implementation of [`reth-db-api`] for MDBX, as well as a few other common
 //! database types.
+//!
+//! # Overview
+//!
+//! An overview of the current data model of reth can be found in the [`mod@tables`] module.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

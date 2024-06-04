@@ -55,10 +55,8 @@ pub enum TableType {
 /// # Example
 ///
 /// ```
-/// use reth_db::{
-///     table::{DupSort, Table},
-///     TableViewer, Tables,
-/// };
+/// use reth_db::{TableViewer, Tables};
+/// use reth_db_api::table::{DupSort, Table};
 ///
 /// struct MyTableViewer;
 ///
@@ -248,11 +246,12 @@ macro_rules! tables {
         /// # Examples
         ///
         /// ```
-        /// use reth_db::{Table, Tables, tables_to_generic};
+        /// use reth_db::{Tables, tables_to_generic};
+        /// use reth_db_api::table::Table;
         ///
         /// let table = Tables::Headers;
-        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::TABLE);
-        /// assert_eq!(result, table);
+        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::NAME);
+        /// assert_eq!(result, table.name());
         /// ```
         #[macro_export]
         macro_rules! tables_to_generic {

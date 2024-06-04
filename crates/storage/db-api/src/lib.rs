@@ -36,10 +36,6 @@
 //!
 //! Tables implement the [`Table`] trait.
 //!
-//! # Overview
-//!
-//! An overview of the current data model of reth can be found in the [`mod@tables`] module.
-//!
 //! [`Database`]: crate::database::Database
 //! [`DbTx`]: crate::transaction::DbTx
 //! [`DbTxMut`]: crate::transaction::DbTxMut
