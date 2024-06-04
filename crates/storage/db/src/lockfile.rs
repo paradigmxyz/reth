@@ -9,31 +9,34 @@ use std::{
 };
 use sysinfo::System;
 
-/// A file lock for a storage directory to ensure exclusive read-write access.
+/// File lock name.
+const LOCKFILE_NAME: &str = "lock";
+
+/// A file lock for a storage directory to ensure exclusive read-write access across different
+/// processes.
 ///
 /// This lock stores the PID of the process holding it and is released (deleted) on a graceful
 /// shutdown. On resuming from a crash, the stored PID helps verify that no other process holds the
 /// lock.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageLock(Arc<StorageLockInner>);
 
 impl StorageLock {
     /// Tries to acquire a write lock on the target directory, returning [`StorageLockError`] if
     /// unsuccessful.
+    ///
+    /// Note: In-process exclusivity is not on scope. If called from the same process (or another
+    /// with the same PID), it will succeed.
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
-        let path = path.join("lock");
-        let lock = match parse_lock_file_pid(&path)? {
-            Some(pid) => {
-                if System::new_all().process(pid.into()).is_some() {
-                    return Err(StorageLockError::Taken(pid))
-                } else {
-                    // If PID is no longer active, take hold of the lock.
-                    StorageLockInner::new(path)
-                }
+        let path = path.join(LOCKFILE_NAME);
+
+        if let Some(pid) = parse_lock_file_pid(&path)? {
+            if pid != (process::id() as usize) && System::new_all().process(pid.into()).is_some() {
+                return Err(StorageLockError::Taken(pid))
             }
-            None => StorageLockInner::new(path),
-        };
-        Ok(Self(Arc::new(lock?)))
+        }
+
+        Ok(Self(Arc::new(StorageLockInner::new(path)?)))
     }
 }
 
@@ -50,7 +53,7 @@ impl Drop for StorageLock {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct StorageLockInner {
     file_path: PathBuf,
 }
@@ -76,4 +79,33 @@ fn parse_lock_file_pid(path: &Path) -> Result<Option<usize>, StorageLockError> {
         return Ok(contents.trim().parse().ok())
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lock() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let lock = StorageLock::try_acquire(temp_dir.path()).unwrap();
+
+        // Same process can re-acquire the lock
+        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire(temp_dir.path()));
+
+        // A lock of a non existent PID can be acquired.
+        let lock_file = temp_dir.path().join(LOCKFILE_NAME);
+        let mut fake_pid = 1337;
+        let system = System::new_all();
+        while system.process(fake_pid.into()).is_some() {
+            fake_pid += 1;
+        }
+        reth_fs_util::write(&lock_file, format!("{}", fake_pid)).unwrap();
+        assert_eq!(Ok(lock), StorageLock::try_acquire(temp_dir.path()));
+
+        // A lock of a different but existing PID cannot be acquired.
+        reth_fs_util::write(&lock_file, "1").unwrap();
+        assert_eq!(Err(StorageLockError::Taken(1)), StorageLock::try_acquire(temp_dir.path()));
+    }
 }
