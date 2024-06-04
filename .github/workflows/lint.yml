@@ -105,8 +105,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cat rustfmt.toml
-      - run: cargo fmt --version
       - run: cargo fmt --all --check
 
   book:
