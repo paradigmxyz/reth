@@ -28,7 +28,15 @@ crates/rpc/                 @mattsse @Rjected
 crates/stages/              @onbjerg @rkrasiuk @shekhirin
 crates/static-file/         @joshieDo @shekhirin
 crates/static-file-types/   @joshieDo @shekhirin
-crates/storage/             @rakita @joshieDo @shekhirin
+crates/storage/codecs/      @joshieDo
+crates/storage/db/          @joshieDo @rakita
+crates/storage/db-api/      @joshieDo @rakita
+crates/storage/db-common/   @Rjected @onbjerg
+crates/storage/errors/      @rakita @onbjerg
+crates/storage/libmdbx-rs/  @rakita @shekhirin
+crates/storage/nippy-jar/   @joshieDo @shekhirin
+crates/storage/provider/    @rakita @joshieDo @shekhirin
+crates/storage/storage-api/ @joshieDo @rkrasiuk
 crates/tasks/               @mattsse
 crates/tokio-util/          @fgimenez @emhane
 crates/tracing/             @onbjerg
