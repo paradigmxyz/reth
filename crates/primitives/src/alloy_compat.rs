@@ -129,9 +129,12 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                             .into(),
                     ))
                 }
-                Ok(Self::Legacy(TxLegacy {
-                    chain_id: tx.chain_id.or_else(|| {
-                        tx.signature.and_then(|signature| {
+
+                // extract the chain id if possible
+                let chain_id = match tx.chain_id {
+                    Some(chain_id) => Some(chain_id),
+                    None => {
+                        if let Some(signature) = tx.signature {
                             // TODO: make this error conversion better. This is needed because
                             // sometimes rpc providers return legacy transactions without a chain id
                             // explicitly in the response, however those transactions may also have
@@ -139,8 +142,14 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                             extract_chain_id(signature.v.to())
                                 .map_err(|err| ConversionError::Eip2718Error(err.into()))?
                                 .1
-                        })
-                    }),
+                        } else {
+                            return Err(ConversionError::MissingChainId)
+                        }
+                    }
+                };
+
+                Ok(Self::Legacy(TxLegacy {
+                    chain_id,
                     nonce: tx.nonce,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                     gas_limit: tx
