@@ -19,9 +19,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
-use reth_storage_api::{
-    AccountReader, ChangeSetReader, FullBundleStateDataProvider, StateProviderFactory,
-};
+use reth_storage_api::{AccountReader, ChangeSetReader};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
