@@ -6,12 +6,12 @@ use crate::{
 };
 use reth_evm::ConfigureEvm;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256};
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
-};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+
+use super::LoadState;
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
@@ -110,6 +110,15 @@ where
             })
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)?
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: StateProviderFactory,
+{
+    fn provider(&self) -> &impl StateProviderFactory {
+        &self.inner.provider
     }
 }
 

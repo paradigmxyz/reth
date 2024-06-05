@@ -7,12 +7,9 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
-    U256, U64,
+    Address, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, U256, U64,
 };
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
-};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -51,7 +48,7 @@ pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
 pub use receipt::ReceiptBuilder;
-pub use traits::{BuildReceipt, EthBlocks, EthTransactions, StateCacheDB};
+pub use traits::{BuildReceipt, EthBlocks, EthTransactions, LoadState, StateCacheDB};
 pub use transactions::TransactionSource;
 
 /// `Eth` API trait.
@@ -200,45 +197,6 @@ where
     /// Returns fee history cache
     pub fn fee_history_cache(&self) -> &FeeHistoryCache {
         &self.inner.fee_history_cache
-    }
-}
-
-// === State access helpers ===
-
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-{
-    /// Returns the state at the given [`BlockId`] enum.
-    ///
-    /// Note: if not [`BlockNumberOrTag::Pending`] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
-    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
-        Ok(self.provider().state_by_block_id(at)?)
-    }
-
-    /// Returns the state at the given [`BlockId`] enum or the latest.
-    ///
-    /// Convenience function to interprets `None` as `BlockId::Number(BlockNumberOrTag::Latest)`
-    pub fn state_at_block_id_or_latest(
-        &self,
-        block_id: Option<BlockId>,
-    ) -> EthResult<StateProviderBox> {
-        if let Some(block_id) = block_id {
-            self.state_at_block_id(block_id)
-        } else {
-            Ok(self.latest_state()?)
-        }
-    }
-
-    /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox> {
-        Ok(self.provider().history_by_block_hash(block_hash)?)
-    }
-
-    /// Returns the _latest_ state
-    pub fn latest_state(&self) -> RethResult<StateProviderBox> {
-        Ok(self.provider().latest()?)
     }
 }
 

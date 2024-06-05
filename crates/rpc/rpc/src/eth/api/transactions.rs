@@ -49,6 +49,8 @@ use crate::eth::{
     revm_utils::FillableTransaction,
 };
 
+use super::LoadState;
+
 #[async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
@@ -80,34 +82,23 @@ where
         self.inner.gas_cap
     }
 
-    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox> {
-        self.state_at_block_id(at)
-    }
-
-    fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
-    where
-        F: FnOnce(StateProviderBox) -> EthResult<T>,
-    {
-        let state = self.state_at(at)?;
-        f(state)
-    }
-
     async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
+        Self: LoadState,
         F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
         self.spawn_tracing(move |this| {
-            let state = this.state_at(at)?;
+            let state = this.state_at_block_id(at)?;
             f(state)
         })
         .await
     }
 
-    async fn evm_env_at(
-        &self,
-        at: BlockId,
-    ) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)> {
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
+    where
+        Self: LoadState,
+    {
         if at.is_pending() {
             let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
             Ok((cfg, block_env, origin.state_block_id()))
@@ -495,6 +486,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
+        Self: LoadState,
         F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
@@ -503,7 +495,7 @@ where
         self.inner
             .blocking_task_pool
             .spawn(move || {
-                let state = this.state_at(at)?;
+                let state = this.state_at_block_id(at)?;
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let env = prepare_call_env(
@@ -525,7 +517,10 @@ where
         request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)> {
+    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
+    where
+        Self: LoadState,
+    {
         let this = self.clone();
         self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env)).await
     }
@@ -538,6 +533,7 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
+        Self: LoadState,
         I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
     {
         let this = self.clone();
@@ -555,6 +551,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
+        Self: LoadState,
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         let this = self.clone();
@@ -574,6 +571,7 @@ where
         f: F,
     ) -> EthResult<R>
     where
+        Self: LoadState,
         F: FnOnce(TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
@@ -607,6 +605,7 @@ where
 
     async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
     where
+        Self: LoadState,
         F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
@@ -653,6 +652,7 @@ where
         f: F,
     ) -> EthResult<Option<R>>
     where
+        Self: LoadState,
         F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
@@ -703,6 +703,7 @@ where
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
+        Self: LoadState,
         F: for<'a> Fn(
                 TransactionInfo,
                 Insp,
@@ -761,7 +762,7 @@ where
                 .peekable();
 
             // now get the state
-            let state = this.state_at(state_at.into())?;
+            let state = this.state_at_block_id(state_at.into())?;
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             while let Some((tx_info, tx)) = transactions.next() {
@@ -790,6 +791,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> BuildReceipt
     for EthApi<Provider, Pool, Network, EvmConfig>
 {
+    #[inline]
     fn cache(&self) -> &EthStateCache {
         &self.inner.eth_cache
     }

@@ -25,14 +25,16 @@ use reth_rpc_types::{
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    db::{CacheDB, DatabaseRef},
+    db::CacheDB,
     primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason, TransactTo,
     },
-    DatabaseCommit,
+    DatabaseCommit, DatabaseRef,
 };
 use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
+
+use super::LoadState;
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
@@ -43,6 +45,7 @@ const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadState,
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
@@ -59,7 +62,7 @@ where
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
 
         self.spawn_blocking_io(move |this| {
-            let state = this.state_at(at)?;
+            let state = this.state_at_block_id(at)?;
             this.estimate_gas_with(cfg, block_env, request, state, state_override)
         })
         .await
@@ -394,7 +397,7 @@ where
         at: BlockId,
         mut request: TransactionRequest,
     ) -> EthResult<AccessListWithGasUsed> {
-        let state = self.state_at(at)?;
+        let state = self.state_at_block_id(at)?;
 
         let mut env = build_call_evm_env(cfg, block, request.clone())?;
 

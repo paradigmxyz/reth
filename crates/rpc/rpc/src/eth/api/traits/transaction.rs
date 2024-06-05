@@ -27,7 +27,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use crate::eth::{api::BuildReceipt, revm_utils::FillableTransaction};
 use revm_primitives::db::{Database, DatabaseRef};
 
-use super::SpawnBlocking;
+use super::{LoadState, SpawnBlocking};
 
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
@@ -162,17 +162,20 @@ pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
 
-    /// Returns the state at the given [BlockId]
-    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox>;
-
     /// Executes the closure with the state that corresponds to the given [BlockId].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(StateProviderBox) -> EthResult<T>;
+        Self: LoadState,
+        F: FnOnce(StateProviderBox) -> EthResult<T>,
+    {
+        let state = self.state_at_block_id(at)?;
+        f(state)
+    }
 
     /// Executes the closure with the state that corresponds to the given [BlockId] on a new task
     async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
+        Self: LoadState,
         F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
         T: Send + 'static;
 
@@ -182,8 +185,9 @@ pub trait EthTransactions: Send + Sync {
     /// for.
     /// If the [BlockId] is pending, this will return the "Pending" tag, otherwise this returns the
     /// hash of the exact block.
-    async fn evm_env_at(&self, at: BlockId)
-        -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>;
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
+    where
+        Self: LoadState;
 
     /// Returns the revm evm env for the raw block header
     ///
@@ -319,6 +323,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
+        Self: LoadState,
         F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
@@ -328,7 +333,9 @@ pub trait EthTransactions: Send + Sync {
         request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>;
+    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
+    where
+        Self: LoadState;
 
     /// Executes the call request at the given [BlockId] on a new task and returns the result of the
     /// inspect call.
@@ -340,6 +347,7 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
+        Self: LoadState,
         I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static;
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
@@ -357,6 +365,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
+        Self: LoadState,
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
 
     /// Same as [Self::trace_at] but also provides the used database to the callback.
@@ -374,6 +383,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
+        Self: LoadState,
         F: FnOnce(TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
@@ -399,6 +409,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<R>>
     where
+        Self: LoadState,
         F: FnOnce(TransactionInfo, TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
@@ -419,6 +430,7 @@ pub trait EthTransactions: Send + Sync {
     /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
     async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
     where
+        Self: LoadState,
         F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
         R: Send + 'static;
 
@@ -438,6 +450,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<R>>
     where
+        Self: LoadState,
         F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
@@ -461,6 +474,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
+        Self: LoadState,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
         F: for<'a> Fn(
@@ -498,6 +512,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
+        Self: LoadState,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
         F: for<'a> Fn(
@@ -529,6 +544,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
+        Self: LoadState,
         F: for<'a> Fn(
                 TransactionInfo,
                 TracingInspector,
@@ -567,6 +583,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
+        Self: LoadState,
         F: for<'a> Fn(
                 TransactionInfo,
                 Insp,
