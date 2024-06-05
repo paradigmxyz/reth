@@ -3,7 +3,10 @@
 
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
-    bench::output::{CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow},
+    bench::output::{
+        CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
+        GAS_OUTPUT_SUFFIX,
+    },
     bench_mode::BenchMode,
     valid_payload::EngineApiValidWaitExt,
 };
@@ -36,6 +39,13 @@ impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         info!("Running benchmark using data from RPC URL: {}", self.rpc_url);
+
+        // Ensure that output directory is a directory
+        if let Some(output) = &self.benchmark.output {
+            if output.is_file() {
+                return Err(eyre::eyre!("Output path must be a directory"));
+            }
+        }
 
         // set up alloy client for blocks
         let block_provider = ProviderBuilder::new().on_http(self.rpc_url.parse()?);
@@ -204,23 +214,38 @@ impl Command {
             info!(%combined_result);
 
             // record the current result
-            let row = TotalGasRow { block_number, gas_used, time: current_duration };
-            results.push(row);
+            let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
+            results.push((gas_row, combined_result));
         }
 
-        // write the output to a file
+        let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =
+            results.into_iter().unzip();
+
+        // write the csv output to files
         if let Some(path) = self.benchmark.output {
-            info!("Writing benchmark output to file: {:?}", path);
-            let mut writer = Writer::from_path(path.clone())?;
-            for row in &results {
+            // first write the combined results to a file
+            let output_path = path.join(COMBINED_OUTPUT_SUFFIX);
+            info!("Writing engine api call latency output to file: {:?}", output_path);
+            let mut writer = Writer::from_path(output_path)?;
+            for result in combined_results {
+                writer.serialize(result)?;
+            }
+            writer.flush()?;
+
+            // now write the gas output to a file
+            let output_path = path.join(GAS_OUTPUT_SUFFIX);
+            info!("Writing total gas output to file: {:?}", output_path);
+            let mut writer = Writer::from_path(output_path)?;
+            for row in &gas_output_results {
                 writer.serialize(row)?;
             }
             writer.flush()?;
-            info!("Finished writing benchmark to {:?}.", path);
+
+            info!("Finished writing benchmark output files to {:?}.", path);
         }
 
         // accumulate the results and calculate the overall Ggas/s
-        let gas_output = TotalGasOutput::new(results);
+        let gas_output = TotalGasOutput::new(gas_output_results);
         info!(
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,

@@ -2,7 +2,9 @@
 
 use crate::{
     authenticated_transport::AuthenticatedTransportConnect,
-    bench::output::{NewPayloadResult, TotalGasOutput, TotalGasRow},
+    bench::output::{
+        NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX, NEW_PAYLOAD_OUTPUT_SUFFIX,
+    },
     bench_mode::BenchMode,
     valid_payload::EngineApiValidWaitExt,
 };
@@ -165,22 +167,37 @@ impl Command {
 
             // record the current result
             let row = TotalGasRow { block_number, gas_used, time: current_duration };
-            results.push(row);
+            results.push((row, new_payload_result));
         }
 
-        // write the output to a file
+        let (gas_output_results, new_payload_results): (_, Vec<NewPayloadResult>) =
+            results.into_iter().unzip();
+
+        // write the csv output to files
         if let Some(path) = self.benchmark.output {
-            info!("Writing benchmark output to file: {:?}", path);
-            let mut writer = Writer::from_path(path.clone())?;
-            for row in &results {
+            // first write the new payload results to a file
+            let output_path = path.join(NEW_PAYLOAD_OUTPUT_SUFFIX);
+            info!("Writing newPayload call latency output to file: {:?}", output_path);
+            let mut writer = Writer::from_path(output_path)?;
+            for result in new_payload_results {
+                writer.serialize(result)?;
+            }
+            writer.flush()?;
+
+            // now write the gas output to a file
+            let output_path = path.join(GAS_OUTPUT_SUFFIX);
+            info!("Writing total gas output to file: {:?}", output_path);
+            let mut writer = Writer::from_path(output_path)?;
+            for row in &gas_output_results {
                 writer.serialize(row)?;
             }
             writer.flush()?;
-            info!("Finished writing benchmark to {:?}.", path);
+
+            info!("Finished writing benchmark output files to {:?}.", path);
         }
 
         // accumulate the results and calculate the overall Ggas/s
-        let gas_output = TotalGasOutput::new(results);
+        let gas_output = TotalGasOutput::new(gas_output_results);
         info!(
             total_duration=?gas_output.total_duration,
             total_gas_used=?gas_output.total_gas_used,

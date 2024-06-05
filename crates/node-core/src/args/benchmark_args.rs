@@ -33,7 +33,7 @@ pub struct BenchmarkArgs {
     )]
     pub engine_rpc_url: String,
 
-    /// The path to the output file for granular benchmark results.
+    /// The path to the output directory for granular benchmark results.
     #[arg(long, short, value_name = "BENCHMARK_OUTPUT", verbatim_doc_comment)]
     pub output: Option<PathBuf>,
 }
