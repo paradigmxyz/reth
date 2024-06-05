@@ -3,7 +3,8 @@ use crate::{
     PrunerError,
 };
 use rayon::prelude::*;
-use reth_db::{database::Database, tables};
+use reth_db::tables;
+use reth_db_api::database::Database;
 use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};

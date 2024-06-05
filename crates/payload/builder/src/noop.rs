@@ -22,7 +22,7 @@ impl<Engine> NoopPayloadBuilderService<Engine>
 where
     Engine: EngineTypes + 'static,
 {
-    /// Creates a new [NoopPayloadBuilderService].
+    /// Creates a new [`NoopPayloadBuilderService`].
     pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         (

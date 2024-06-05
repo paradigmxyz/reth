@@ -5,7 +5,7 @@ use futures::Stream;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
-use reth_db::{database::Database, database_metrics::DatabaseMetadata};
+use reth_db_api::{database::Database, database_metrics::DatabaseMetadata};
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{
@@ -37,7 +37,7 @@ const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 struct NodeState<DB> {
     /// Database environment.
     /// Used for freelist calculation reported in the "Status" log message.
-    /// See [EventHandler::poll].
+    /// See [`EventHandler::poll`].
     db: DB,
     /// Connection to the network.
     network: Option<NetworkHandle>,
@@ -394,7 +394,7 @@ pub enum NodeEvent {
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
     Pruner(PrunerEvent),
-    /// A static_file_producer event
+    /// A `static_file_producer` event
     StaticFileProducer(StaticFileProducerEvent),
     /// Used to encapsulate various conditions or situations that do not
     /// naturally fit into the other more specific variants.
@@ -643,8 +643,8 @@ impl Eta {
     /// Format ETA for a given stage.
     ///
     /// NOTE: Currently ETA is enabled only for the stages that have predictable progress.
-    /// It's not the case for network-dependent ([StageId::Headers] and [StageId::Bodies]) and
-    /// [StageId::Execution] stages.
+    /// It's not the case for network-dependent ([`StageId::Headers`] and [`StageId::Bodies`]) and
+    /// [`StageId::Execution`] stages.
     fn fmt_for_stage(&self, stage: StageId) -> Option<String> {
         if !self.is_available() ||
             matches!(stage, StageId::Headers | StageId::Bodies | StageId::Execution)

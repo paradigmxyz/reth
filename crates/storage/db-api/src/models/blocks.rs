@@ -83,7 +83,7 @@ pub struct StoredBlockWithdrawals {
     pub withdrawals: Withdrawals,
 }
 
-/// Hash of the block header. Value for [`CanonicalHeaders`][crate::tables::CanonicalHeaders]
+/// Hash of the block header.
 pub type HeaderHash = B256;
 
 #[cfg(test)]

@@ -139,7 +139,7 @@ fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [ChainSpec], EVM.
+/// [`ChainSpec`], EVM.
 ///
 /// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
 /// state changes are made.
@@ -238,7 +238,7 @@ pub fn insert_post_block_withdrawals_balance_increments(
     // Process withdrawals
     if chain_spec.is_shanghai_active_at_timestamp(block_timestamp) {
         if let Some(withdrawals) = withdrawals {
-            for withdrawal in withdrawals.iter() {
+            for withdrawal in withdrawals {
                 if withdrawal.amount > 0 {
                     *balance_increments.entry(withdrawal.address).or_default() +=
                         withdrawal.amount_wei().to::<u128>();

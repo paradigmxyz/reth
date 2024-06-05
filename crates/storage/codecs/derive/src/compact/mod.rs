@@ -179,7 +179,7 @@ pub fn get_bit_size(ftype: &str) -> u8 {
 }
 
 /// Given the field type in a string format, checks if its type should be added to the
-/// StructFlags.
+/// `StructFlags`.
 pub fn is_flag_type(ftype: &str) -> bool {
     get_bit_size(ftype) > 0
 }

@@ -1,0 +1,16 @@
+[package]
+name = "reth-rpc-server-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "RPC server types and constants"
+
+[lints]
+workspace = true
+
+[dependencies]
+# ethereum
+alloy-primitives.workspace = true

@@ -138,7 +138,7 @@ pub(crate) enum SyncAction {
     Link(String),
 }
 
-/// How the [SyncTree::update_root] changed the root
+/// How the [`SyncTree::update_root`] changed the root
 enum SyncState {
     RootUpdate,
     Pending,

@@ -49,7 +49,7 @@ pub struct MetricsListener {
 }
 
 impl MetricsListener {
-    /// Creates a new [MetricsListener] with the provided receiver of [MetricEvent].
+    /// Creates a new [`MetricsListener`] with the provided receiver of [`MetricEvent`].
     pub fn new(events_rx: UnboundedReceiver<MetricEvent>) -> Self {
         Self { events_rx, sync_metrics: SyncMetrics::default() }
     }

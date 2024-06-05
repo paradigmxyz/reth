@@ -77,8 +77,8 @@ pub enum ECIESErrorImpl {
     ///
     /// This exact error case happens when the wrapped stream in
     /// [`Framed`](tokio_util::codec::Framed) is closed by the peer, See
-    /// [ConnectionReset](std::io::ErrorKind::ConnectionReset) and the ecies codec fails to decode
-    /// a message from the (partially filled) buffer.
+    /// [`ConnectionReset`](std::io::ErrorKind::ConnectionReset) and the ecies codec fails to
+    /// decode a message from the (partially filled) buffer.
     #[error("stream closed due to not being readable")]
     UnreadableStream,
     // Error when data is not received from peer for a prolonged period.

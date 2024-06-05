@@ -1,8 +1,7 @@
 use super::{collect_history_indices, load_history_indices};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-use reth_db::{
-    database::Database, models::ShardedKey, table::Decode, tables, transaction::DbTxMut,
-};
+use reth_db::tables;
+use reth_db_api::{database::Database, models::ShardedKey, table::Decode, transaction::DbTxMut};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     Address, PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
@@ -29,7 +28,7 @@ pub struct IndexAccountHistoryStage {
 }
 
 impl IndexAccountHistoryStage {
-    /// Create new instance of [IndexAccountHistoryStage].
+    /// Create new instance of [`IndexAccountHistoryStage`].
     pub const fn new(
         config: IndexHistoryConfig,
         etl_config: EtlConfig,
@@ -148,14 +147,14 @@ mod tests {
         TestStageDB, UnwindStageTestRunner,
     };
     use itertools::Itertools;
-    use reth_db::{
+    use reth_db::BlockNumberList;
+    use reth_db_api::{
         cursor::DbCursorRO,
         models::{
             sharded_key, sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx,
             StoredBlockBodyIndices,
         },
         transaction::DbTx,
-        BlockNumberList,
     };
     use reth_primitives::{address, BlockNumber, B256};
     use reth_provider::providers::StaticFileWriter;

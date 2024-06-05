@@ -1,8 +1,8 @@
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     database::Database,
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
@@ -84,17 +84,17 @@ pub enum MerkleStage {
 }
 
 impl MerkleStage {
-    /// Stage default for the [MerkleStage::Execution].
+    /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
         Self::Execution { clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD }
     }
 
-    /// Stage default for the [MerkleStage::Unwind].
+    /// Stage default for the [`MerkleStage::Unwind`].
     pub const fn default_unwind() -> Self {
         Self::Unwind
     }
 
-    /// Create new instance of [MerkleStage::Execution].
+    /// Create new instance of [`MerkleStage::Execution`].
     pub const fn new_execution(clean_threshold: u64) -> Self {
         Self::Execution { clean_threshold }
     }
@@ -367,7 +367,7 @@ mod tests {
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
+    use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_primitives::{
         keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
     };
@@ -631,8 +631,8 @@ mod tests {
                             .or_default()
                             .insert(keccak256(entry.key), entry.value);
                     }
-                    for (hashed_address, storage) in tree.into_iter() {
-                        for (hashed_slot, value) in storage.into_iter() {
+                    for (hashed_address, storage) in tree {
+                        for (hashed_slot, value) in storage {
                             let storage_entry = storage_cursor
                                 .seek_by_key_subkey(hashed_address, hashed_slot)
                                 .unwrap();

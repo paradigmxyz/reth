@@ -12,10 +12,10 @@ use std::sync::{atomic::AtomicUsize, Arc};
 /// Error type when interacting with the Sequencer
 #[derive(Debug, thiserror::Error)]
 pub enum SequencerRpcError {
-    /// Wrapper around a [hyper::Error].
+    /// Wrapper around a [`hyper::Error`].
     #[error(transparent)]
     HyperError(#[from] hyper::Error),
-    /// Wrapper around an [reqwest::Error].
+    /// Wrapper around an [`reqwest::Error`].
     #[error(transparent)]
     HttpError(#[from] reqwest::Error),
     /// Thrown when serializing transaction to forward to sequencer
@@ -46,13 +46,13 @@ pub struct SequencerClient {
 }
 
 impl SequencerClient {
-    /// Creates a new [SequencerClient].
+    /// Creates a new [`SequencerClient`].
     pub fn new(sequencer_endpoint: impl Into<String>) -> Self {
         let client = Client::builder().use_rustls_tls().build().unwrap();
         Self::with_client(sequencer_endpoint, client)
     }
 
-    /// Creates a new [SequencerClient].
+    /// Creates a new [`SequencerClient`].
     pub fn with_client(sequencer_endpoint: impl Into<String>, http_client: Client) -> Self {
         let inner = SequencerClientInner {
             sequencer_endpoint: sequencer_endpoint.into(),

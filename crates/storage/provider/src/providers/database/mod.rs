@@ -8,10 +8,8 @@ use crate::{
     StateProviderBox, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::{
-    database::Database, init_db, mdbx::DatabaseArguments, models::StoredBlockBodyIndices,
-    DatabaseEnv,
-};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
@@ -25,7 +23,7 @@ use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 use tracing::trace;
@@ -53,13 +51,9 @@ impl<DB> ProviderFactory<DB> {
     pub fn new(
         db: DB,
         chain_spec: Arc<ChainSpec>,
-        static_files_path: PathBuf,
-    ) -> ProviderResult<Self> {
-        Ok(Self {
-            db: Arc::new(db),
-            chain_spec,
-            static_file_provider: StaticFileProvider::new(static_files_path)?,
-        })
+        static_file_provider: StaticFileProvider,
+    ) -> Self {
+        Self { db: Arc::new(db), chain_spec, static_file_provider }
     }
 
     /// Enables metrics on the static file provider.
@@ -87,12 +81,12 @@ impl ProviderFactory<DatabaseEnv> {
         path: P,
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
-        static_files_path: PathBuf,
+        static_file_provider: StaticFileProvider,
     ) -> RethResult<Self> {
         Ok(Self {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
-            static_file_provider: StaticFileProvider::new(static_files_path)?,
+            static_file_provider,
         })
     }
 }
@@ -588,8 +582,10 @@ impl<DB> Clone for ProviderFactory<DB> {
 mod tests {
     use super::*;
     use crate::{
-        providers::StaticFileWriter, test_utils::create_test_provider_factory, BlockHashReader,
-        BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        providers::{StaticFileProvider, StaticFileWriter},
+        test_utils::create_test_provider_factory,
+        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode,
+        TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -645,7 +641,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
-            static_dir_path,
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
         )
         .unwrap();
 

@@ -48,8 +48,8 @@ mod ipc;
 mod rpc_service;
 
 /// Ipc Server implementation
-
-// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
+///
+/// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
 pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
     endpoint: String,
@@ -82,7 +82,7 @@ where
 {
     /// Start responding to connections requests.
     ///
-    /// This will run on the tokio runtime until the server is stopped or the ServerHandle is
+    /// This will run on the tokio runtime until the server is stopped or the `ServerHandle` is
     /// dropped.
     ///
     /// ```
@@ -273,7 +273,7 @@ pub(crate) struct ServiceData {
     ///
     /// This is used for subscriptions.
     pub(crate) method_sink: MethodSink,
-    /// ServerConfig
+    /// `ServerConfig`
     pub(crate) server_cfg: Settings,
 }
 
@@ -342,7 +342,7 @@ impl<L> RpcServiceBuilder<L> {
     }
 }
 
-/// JsonRPSee service compatible with `tower`.
+/// `JsonRPSee` service compatible with `tower`.
 ///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`](https://docs.rs/hyper/latest/hyper/service/fn.service_fn.html).
@@ -355,8 +355,7 @@ pub struct TowerServiceNoHttp<L> {
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
 where
     RpcMiddleware: for<'a> Layer<RpcService>,
-    <RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static,
-    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static + RpcServiceT<'a>,
 {
     /// The response of a handled RPC call
     ///
@@ -860,8 +859,8 @@ mod tests {
 
         loop {
             match select(closed, stream.next()).await {
-                // subscription closed.
-                Either::Left((_, _)) => break Ok(()),
+                // subscription closed or stream is closed.
+                Either::Left((_, _)) | Either::Right((None, _)) => break Ok(()),
 
                 // received new item from the stream.
                 Either::Right((Some(Ok(item)), c)) => {
@@ -879,9 +878,6 @@ mod tests {
 
                 // Send back back the error.
                 Either::Right((Some(Err(e)), _)) => break Err(e.into()),
-
-                // Stream is closed.
-                Either::Right((None, _)) => break Ok(()),
             }
         }
     }

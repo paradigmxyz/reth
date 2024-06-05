@@ -133,7 +133,7 @@ where
     ///
     /// This function retrieves the data associated with the given key in the
     /// database. If the database supports duplicate keys
-    /// ([DatabaseFlags::DUP_SORT]) then the first data item for the key will be
+    /// ([`DatabaseFlags::DUP_SORT`]) then the first data item for the key will be
     /// returned. Retrieval of other items requires the use of
     /// [Cursor]. If the item is not in the database, then
     /// [None] will be returned.
@@ -210,7 +210,7 @@ where
     ///
     /// If `name` is not [None], then the returned handle will be for a named database. In this
     /// case the environment must be configured to allow named databases through
-    /// [EnvironmentBuilder::set_max_dbs()](crate::EnvironmentBuilder::set_max_dbs).
+    /// [`EnvironmentBuilder::set_max_dbs()`](crate::EnvironmentBuilder::set_max_dbs).
     ///
     /// The returned database handle may be shared among any transaction in the environment.
     ///
@@ -366,9 +366,9 @@ impl Transaction<RW> {
     ///
     /// If `name` is not [None], then the returned handle will be for a named database. In this
     /// case the environment must be configured to allow named databases through
-    /// [EnvironmentBuilder::set_max_dbs()](crate::EnvironmentBuilder::set_max_dbs).
+    /// [`EnvironmentBuilder::set_max_dbs()`](crate::EnvironmentBuilder::set_max_dbs).
     ///
-    /// This function will fail with [Error::BadRslot] if called by a thread with an open
+    /// This function will fail with [`Error::BadRslot`] if called by a thread with an open
     /// transaction.
     pub fn create_db(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
         self.open_db_with_flags(name, flags | DatabaseFlags::CREATE)
@@ -379,7 +379,7 @@ impl Transaction<RW> {
     /// This function stores key/data pairs in the database. The default
     /// behavior is to enter the new key/data pair, replacing any previously
     /// existing key if duplicates are disallowed, or adding a duplicate data
-    /// item if duplicates are allowed ([DatabaseFlags::DUP_SORT]).
+    /// item if duplicates are allowed ([`DatabaseFlags::DUP_SORT`]).
     pub fn put(
         &self,
         dbi: ffi::MDBX_dbi,
@@ -611,7 +611,7 @@ impl TransactionPtr {
 pub struct CommitLatency(ffi::MDBX_commit_latency);
 
 impl CommitLatency {
-    /// Create a new CommitLatency with zero'd inner struct `ffi::MDBX_commit_latency`.
+    /// Create a new `CommitLatency` with zero'd inner struct `ffi::MDBX_commit_latency`.
     pub(crate) const fn new() -> Self {
         unsafe { Self(std::mem::zeroed()) }
     }

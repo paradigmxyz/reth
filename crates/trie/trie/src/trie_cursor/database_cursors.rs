@@ -1,10 +1,9 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::updates::TrieKey;
-use reth_db::{
+use reth_db::{tables, DatabaseError};
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
@@ -117,7 +116,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{cursor::DbCursorRW, transaction::DbTxMut};
+    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_primitives::{
         hex_literal::hex,
         trie::{StorageTrieEntry, StoredBranchNode},

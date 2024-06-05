@@ -1,11 +1,9 @@
 #![allow(unreachable_pub)]
 use itertools::concat;
-use reth_db::{
+use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+use reth_db_api::{
     cursor::DbCursorRO,
-    tables,
-    test_utils::TempDatabase,
     transaction::{DbTx, DbTxMut},
-    DatabaseEnv,
 };
 use reth_primitives::{Account, Address, SealedBlock, B256, U256};
 use reth_stages::{

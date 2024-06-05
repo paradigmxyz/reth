@@ -32,15 +32,15 @@ pub use node_record::{NodeRecord, NodeRecordParseError};
 /// See: <https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211>
 const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 
-/// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
-/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [PeerId].
+/// Converts a [`secp256k1::PublicKey`] to a [`PeerId`] by stripping the
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [`PeerId`].
 #[inline]
 pub fn pk2id(pk: &PublicKey) -> PeerId {
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
-/// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
-/// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
+/// Converts a [`PeerId`] to a [`secp256k1::PublicKey`] by prepending the [`PeerId`] bytes with the
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag.
 #[inline]
 pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId because 512 bits is enough to represent an uncompressed
@@ -51,7 +51,7 @@ pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     PublicKey::from_slice(&s)
 }
 
-/// A peer that can come in ENR or [NodeRecord] form.
+/// A peer that can come in ENR or [`NodeRecord`] form.
 #[derive(
     Debug, Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
@@ -174,7 +174,7 @@ impl<T> WithPeerId<T> {
         WithPeerId(self.0, self.1.into())
     }
 
-    /// Split the wrapper into [PeerId] and data tuple
+    /// Split the wrapper into [`PeerId`] and data tuple
     pub fn split(self) -> (PeerId, T) {
         (self.0, self.1)
     }
