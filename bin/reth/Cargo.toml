@@ -104,7 +104,7 @@ aquamarine.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 tempfile.workspace = true
-backon = "0.4"
+backon.workspace = true
 similar-asserts.workspace = true
 itertools.workspace = true
 rayon.workspace = true
