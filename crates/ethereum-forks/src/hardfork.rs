@@ -251,6 +251,7 @@ impl Hardfork {
             Self::Regolith => Some(0),
             Self::Shanghai | Self::Canyon => Some(2106456),
             Self::Cancun | Self::Ecotone => Some(6383256),
+            Self::Fjord => Some(10615056),
             _ => None,
         }
     }
@@ -485,6 +486,7 @@ impl Hardfork {
             Self::Regolith => Some(1695768288),
             Self::Shanghai | Self::Canyon => Some(1699981200),
             Self::Cancun | Self::Ecotone => Some(1708534800),
+            Self::Fjord => Some(1716998400),
             _ => None,
         }
     }
@@ -513,6 +515,7 @@ impl Hardfork {
             Self::Regolith => Some(1686789347),
             Self::Shanghai | Self::Canyon => Some(1704992401),
             Self::Cancun | Self::Ecotone => Some(1710374401),
+            Self::Fjord => Some(1720627201),
             _ => None,
         }
     }
