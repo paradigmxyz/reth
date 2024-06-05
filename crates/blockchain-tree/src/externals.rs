@@ -1,9 +1,7 @@
 //! Blockchain tree externals.
 
 use reth_consensus::Consensus;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
-};
+use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
 use reth_provider::{
