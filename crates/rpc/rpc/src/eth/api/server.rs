@@ -20,7 +20,7 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{EthBlocks, EthTransactions, SpawnBlocking},
+        api::{BuildReceipt, EthApiSpec, EthBlocks, EthState, EthTransactions},
         error::EthApiError,
         revm_utils::EvmOverrides,
         EthApi,
@@ -28,12 +28,10 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
 };
 
-use super::{BuildReceipt, EthApiSpec};
-
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EthApiSpec + EthTransactions + BuildReceipt + SpawnBlocking,
+    Self: EthApiSpec + EthTransactions + BuildReceipt + EthState,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt
         + ChainSpecProvider
@@ -214,8 +212,7 @@ where
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        Ok(SpawnBlocking::spawn_blocking_io(self, move |this| this.balance(address, block_number))
-            .await?)
+        Ok(EthState::balance(self, address, block_number).await?)
     }
 
     /// Handler for: `eth_getStorageAt`
@@ -226,10 +223,7 @@ where
         block_number: Option<BlockId>,
     ) -> Result<B256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
-        let res: B256 = SpawnBlocking::spawn_blocking_io(self, move |this| {
-            this.storage_at(address, index, block_number)
-        })
-        .await?;
+        let res: B256 = EthState::storage_at(self, address, index, block_number).await?;
         Ok(res)
     }
 
@@ -240,17 +234,13 @@ where
         block_number: Option<BlockId>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(SpawnBlocking::spawn_blocking_io(self, move |this| {
-            this.get_transaction_count(address, block_number)
-        })
-        .await?)
+        Ok(EthState::transaction_count(self, address, block_number).await?)
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        Ok(SpawnBlocking::spawn_blocking_io(self, move |this| this.get_code(address, block_number))
-            .await?)
+        Ok(EthState::get_code(self, address, block_number).await?)
     }
 
     /// Handler for: `eth_getHeaderByNumber`
@@ -412,7 +402,7 @@ where
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-        let res = Self::get_proof(self, address, keys, block_number).await;
+        let res = EthState::get_proof(self, address, keys, block_number).await;
 
         Ok(res.map_err(|e| match e {
             EthApiError::InvalidBlockRange => {

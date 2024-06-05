@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
-    revm::env::fill_block_env_with_coinbase, Address, BlockId, Bytes,
-    FromRecoveredPooledTransaction, Header, IntoRecoveredTransaction, Receipt, SealedBlock,
-    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, B256, U256,
+    revm::env::fill_block_env_with_coinbase, BlockId, Bytes, FromRecoveredPooledTransaction,
+    Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
+    TransactionMeta, TransactionSigned, TxHash, B256,
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, StateProviderBox, TransactionsProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{AnyTransactionReceipt, TransactionInfo, TransactionRequest};
-use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{
@@ -29,9 +29,9 @@ use revm_primitives::{
 
 use crate::{
     eth::{
-        api::{BuildReceipt, LoadState, SpawnBlocking},
+        api::{BuildReceipt, EthState, LoadState, SpawnBlocking},
         cache::EthStateCache,
-        error::{EthApiError, EthResult, RpcInvalidTransactionError},
+        error::{EthApiError, EthResult},
         revm_utils::{EvmOverrides, FillableTransaction},
         traits::RawTransactionForwarder,
         utils::recover_raw_transaction,
@@ -68,7 +68,8 @@ pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
-    /// Transaction pool with pending transactions.
+    /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
+    /// supported transaction type.
     type Pool: TransactionPool;
 
     /// Returns a handle for reading data from disk.
@@ -461,31 +462,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns the hash of the signed transaction.
     async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<B256>
     where
-        Self: EthApiSpec + LoadState;
-
-    /// Returns the number of transactions sent from an address at the given block identifier.
-    ///
-    /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
-    /// look up the highest transaction in pool and return the next nonce (highest + 1).
-    fn get_transaction_count(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256>
-    where
-        Self: LoadState,
-    {
-        if block_id == Some(BlockId::pending()) {
-            let address_txs = self.pool().get_transactions_by_sender(address);
-            if let Some(highest_nonce) =
-                address_txs.iter().map(|item| item.transaction.nonce()).max()
-            {
-                let tx_count = highest_nonce
-                    .checked_add(1)
-                    .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
-                return Ok(U256::from(tx_count))
-            }
-        }
-
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
-    }
+        Self: EthApiSpec + EthState;
 
     /// Prepares the state and env for the given [TransactionRequest] at the given [BlockId] and
     /// executes the closure on a new task returning the result of the closure.

@@ -38,7 +38,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use crate::{
     eth::{
         api::{
-            pending_block::PendingBlockEnv, BuildReceipt, EthTransactions, LoadState,
+            pending_block::PendingBlockEnv, BuildReceipt, EthState, EthTransactions, LoadState,
             SpawnBlocking, StateCacheDB,
         },
         cache::EthStateCache,
@@ -145,7 +145,10 @@ where
         self.block_by_id(block).await.map(|block| block.map(|block| block.body))
     }
 
-    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<B256> {
+    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<B256>
+    where
+        Self: EthState,
+    {
         let from = match request.from {
             Some(from) => from,
             None => return Err(SignError::NoAccount.into()),
@@ -153,7 +156,7 @@ where
 
         // set nonce if not already set before
         if request.nonce.is_none() {
-            let nonce = self.get_transaction_count(from, Some(BlockId::pending()))?;
+            let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;
             // note: `.to()` can't panic because the nonce is constructed from a `u64`
             request.nonce = Some(nonce.to::<u64>());
         }

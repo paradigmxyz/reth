@@ -48,7 +48,7 @@ pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
 pub use receipt::ReceiptBuilder;
-pub use traits::{BuildReceipt, EthBlocks, EthTransactions, LoadState, StateCacheDB};
+pub use traits::{BuildReceipt, EthBlocks, EthState, EthTransactions, LoadState, StateCacheDB};
 pub use transactions::TransactionSource;
 
 /// `Eth` API trait.

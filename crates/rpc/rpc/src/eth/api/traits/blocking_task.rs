@@ -43,7 +43,7 @@ pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Note: This is expected for futures that are predominantly CPU bound, as it uses `rayon`
     /// under the hood, for blocking IO futures use [`spawn_blocking`](Self::spawn_blocking_io). See
     /// <https://ryhl.io/blog/async-what-is-blocking/>.
-    fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>>
+    fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
     where
         F: FnOnce(Self) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
