@@ -5,7 +5,7 @@ use reth_network_p2p::headers::{
 };
 use reth_primitives::SealedHeader;
 
-/// A [HeaderDownloader] implementation that does nothing.
+/// A [`HeaderDownloader`] implementation that does nothing.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct NoopHeaderDownloader;

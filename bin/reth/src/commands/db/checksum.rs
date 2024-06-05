@@ -4,12 +4,11 @@ use crate::{
 };
 use ahash::RandomState;
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, DatabaseEnv, RawKey,
-    RawTable, RawValue, TableViewer, Tables,
-};
+use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use std::{
     hash::{BuildHasher, Hasher},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{info, warn};
@@ -36,7 +35,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db checksum` command
-    pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
         warn!("This command should be run without the node running!");
         self.table.view(&ChecksumViewer {
             tool,

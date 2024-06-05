@@ -5,7 +5,7 @@ use crate::{
     DatabaseProviderFactory, EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
     StaticFileProviderFactory,
 };
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 
 /// Helper trait to unify all provider traits for simplicity.
 pub trait FullProvider<DB: Database>:

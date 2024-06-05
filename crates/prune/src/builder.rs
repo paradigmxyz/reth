@@ -1,6 +1,6 @@
 use crate::{segments::SegmentSet, Pruner};
 use reth_config::PruneConfig;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
 use std::time::Duration;
@@ -21,7 +21,7 @@ pub struct PrunerBuilder {
     prune_delete_limit: usize,
     /// Time a pruner job can run before timing out.
     timeout: Option<Duration>,
-    /// The finished height of all ExEx's.
+    /// The finished height of all `ExEx`'s.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
 }
 
@@ -29,7 +29,7 @@ impl PrunerBuilder {
     /// Default timeout for a prune run.
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
 
-    /// Creates a new [PrunerBuilder] from the given [PruneConfig].
+    /// Creates a new [`PrunerBuilder`] from the given [`PruneConfig`].
     pub fn new(pruner_config: PruneConfig) -> Self {
         Self::default()
             .block_interval(pruner_config.block_interval)
@@ -69,7 +69,7 @@ impl PrunerBuilder {
         self
     }
 
-    /// Sets the receiver for the finished height of all ExEx's.
+    /// Sets the receiver for the finished height of all `ExEx`'s.
     pub fn finished_exex_height(
         mut self,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,

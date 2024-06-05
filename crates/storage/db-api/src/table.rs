@@ -1,5 +1,5 @@
 use crate::{
-    abstraction::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -80,11 +80,8 @@ impl<T> Value for T where T: Compress + Decompress + Serialize {}
 /// It allows for the use of codecs. See [`crate::models::ShardedKey`] for a custom
 /// implementation.
 pub trait Table: Send + Sync + Debug + 'static {
-    /// The dynamic type of the table.
-    const TABLE: crate::Tables;
-
     /// The table's name.
-    const NAME: &'static str = Self::TABLE.name();
+    const NAME: &'static str;
 
     /// Key element of `Table`.
     ///
@@ -98,7 +95,7 @@ pub trait Table: Send + Sync + Debug + 'static {
 /// Tuple with `T::Key` and `T::Value`.
 pub type TableRow<T> = (<T as Table>::Key, <T as Table>::Value);
 
-/// DupSort allows for keys to be repeated in the database.
+/// `DupSort` allows for keys to be repeated in the database.
 ///
 /// Upstream docs: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
 pub trait DupSort: Table {

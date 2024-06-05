@@ -1,7 +1,7 @@
 //! A [Consensus] implementation for local testing purposes
 //! that automatically seals blocks.
 //!
-//! The Mining task polls a [MiningMode], and will return a list of transactions that are ready to
+//! The Mining task polls a [`MiningMode`], and will return a list of transactions that are ready to
 //! be mined.
 //!
 //! These downloaders poll the miner, assemble the block, and return transactions that are ready to
@@ -27,8 +27,7 @@ use reth_primitives::{
     Withdrawals, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
-    StateRootProvider,
+    BlockReaderIdExt, BundleStateWithReceipts, StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
@@ -58,7 +57,7 @@ pub struct AutoSealConsensus {
 }
 
 impl AutoSealConsensus {
-    /// Create a new instance of [AutoSealConsensus]
+    /// Create a new instance of [`AutoSealConsensus`]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
@@ -107,7 +106,6 @@ pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig> {
     mode: MiningMode,
     storage: Storage,
     to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-    canon_state_notification: CanonStateNotificationSender,
     evm_config: EvmConfig,
 }
 
@@ -125,7 +123,6 @@ where
         client: Client,
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-        canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
         evm_config: EvmConfig,
     ) -> Self {
@@ -142,12 +139,11 @@ where
             pool,
             mode,
             to_engine,
-            canon_state_notification,
             evm_config,
         }
     }
 
-    /// Sets the [MiningMode] it operates in, default is [MiningMode::Auto]
+    /// Sets the [`MiningMode`] it operates in, default is [`MiningMode::Auto`]
     pub fn mode(mut self, mode: MiningMode) -> Self {
         self.mode = mode;
         self
@@ -158,22 +154,12 @@ where
     pub fn build(
         self,
     ) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, EvmConfig, Engine>) {
-        let Self {
-            client,
-            consensus,
-            pool,
-            mode,
-            storage,
-            to_engine,
-            canon_state_notification,
-            evm_config,
-        } = self;
+        let Self { client, consensus, pool, mode, storage, to_engine, evm_config } = self;
         let auto_client = AutoSealClient::new(storage.clone());
         let task = MiningTask::new(
             Arc::clone(&consensus.chain_spec),
             mode,
             to_engine,
-            canon_state_notification,
             storage,
             client,
             pool,

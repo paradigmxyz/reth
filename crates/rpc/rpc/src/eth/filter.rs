@@ -53,7 +53,7 @@ where
     /// This uses the given pool to get notified about new transactions, the provider to interact
     /// with the blockchain, the cache to fetch cacheable data, like the logs.
     ///
-    /// See also [EthFilterConfig].
+    /// See also [`EthFilterConfig`].
     ///
     /// This also spawns a task that periodically clears stale filters.
     pub fn new(
@@ -97,7 +97,7 @@ where
         &self.inner.active_filters
     }
 
-    /// Endless future that [Self::clear_stale_filters] every `stale_filter_ttl` interval.
+    /// Endless future that [`Self::clear_stale_filters`] every `stale_filter_ttl` interval.
     /// Nonetheless, this endless future frees the thread at every await point.
     async fn watch_and_clear_stale_filters(&self) {
         let mut interval = tokio::time::interval(self.inner.stale_filter_ttl);
@@ -431,6 +431,10 @@ where
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
         let best_number = chain_info.best_number;
 
+        if to_block < from_block {
+            return Err(FilterError::InvalidBlockRangeParams)
+        }
+
         if to_block - from_block > self.max_blocks_per_filter {
             return Err(FilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
         }
@@ -682,6 +686,8 @@ enum FilterKind {
 pub enum FilterError {
     #[error("filter not found")]
     FilterNotFound(FilterId),
+    #[error("invalid block range params")]
+    InvalidBlockRangeParams,
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
     #[error("query exceeds max results {0}")]
@@ -705,9 +711,8 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             FilterError::EthAPIError(err) => err.into(),
-            err @ FilterError::QueryExceedsMaxBlocks(_) => {
-                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
-            }
+            err @ FilterError::InvalidBlockRangeParams |
+            err @ FilterError::QueryExceedsMaxBlocks(_) |
             err @ FilterError::QueryExceedsMaxResults(_) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }

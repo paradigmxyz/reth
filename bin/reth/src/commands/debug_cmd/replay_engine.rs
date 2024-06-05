@@ -1,10 +1,6 @@
 use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+    args::{get_secret_key, NetworkArgs},
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
 };
 use clap::Parser;
@@ -17,16 +13,15 @@ use reth_blockchain_tree::{
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::DatabaseEnv;
 use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_node_core::engine::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{ChainSpec, PruneModes};
+use reth_primitives::PruneModes;
 use reth_provider::{
-    providers::BlockchainProvider, CanonStateSubscriptions, ProviderFactory,
-    StaticFileProviderFactory,
+    providers::BlockchainProvider, CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
 };
 use reth_stages::Pipeline;
 use reth_static_file::StaticFileProducer;
@@ -41,30 +36,8 @@ use tracing::*;
 /// It does not require
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
     #[command(flatten)]
-    db: DatabaseArgs,
+    env: EnvironmentArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -83,25 +56,21 @@ impl Command {
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
+            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
             .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
             .discovery_addr(SocketAddr::new(
                 self.network.discovery.addr,
                 self.network.discovery.port,
             ))
-            .build(ProviderFactory::new(
-                db,
-                self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-            )?)
+            .build(provider_factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -111,22 +80,12 @@ impl Command {
 
     /// Execute `debug replay-engine` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let config = Config::default();
-
-        // Add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db();
-        fs::create_dir_all(&db_path)?;
-
-        // Initialize the database
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
+        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
-            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(self.chain.clone());
+        let executor = block_executor!(provider_factory.chain_spec());
 
         // Configure blockchain tree
         let tree_externals =
@@ -144,7 +103,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )
@@ -157,7 +116,7 @@ impl Command {
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
         let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            self.chain.clone(),
+            provider_factory.chain_spec(),
             reth_node_optimism::OptimismEvmConfig::default(),
         );
 
@@ -166,7 +125,7 @@ impl Command {
             NoopTransactionPool::default(),
             ctx.task_executor.clone(),
             BasicPayloadJobGeneratorConfig::default(),
-            self.chain.clone(),
+            provider_factory.chain_spec(),
             payload_builder,
         );
 
@@ -190,11 +149,7 @@ impl Command {
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),

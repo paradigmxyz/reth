@@ -4,10 +4,8 @@ use crate::{
     utils::DbTool,
 };
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, tables_to_generic,
-    transaction::DbTx, DatabaseEnv, Tables,
-};
+use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -15,6 +13,7 @@ use std::{
     hash::Hash,
     io::Write,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tracing::{info, warn};
 
@@ -52,7 +51,7 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
@@ -94,7 +93,7 @@ where
     T::Key: Hash,
     T::Value: PartialEq,
 {
-    let table = T::TABLE;
+    let table = T::NAME;
 
     info!("Analyzing table {table}...");
     let result = find_diffs_advanced::<T>(&primary_tx, &secondary_tx)?;
@@ -340,8 +339,7 @@ impl<T: Table> ExtraTableElement<T> {
     /// Return the key for the extra element
     const fn key(&self) -> &T::Key {
         match self {
-            Self::First { key, .. } => key,
-            Self::Second { key, .. } => key,
+            Self::First { key, .. } | Self::Second { key, .. } => key,
         }
     }
 }

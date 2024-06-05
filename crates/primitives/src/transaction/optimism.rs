@@ -31,7 +31,7 @@ pub struct TxDeposit {
 }
 
 impl TxDeposit {
-    /// Calculates a heuristic for the in-memory size of the [TxDeposit] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxDeposit`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<B256>() + // source_hash
@@ -44,7 +44,7 @@ impl TxDeposit {
         self.input.len() // input
     }
 
-    /// Decodes the inner [TxDeposit] fields from RLP bytes.
+    /// Decodes the inner [`TxDeposit`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:

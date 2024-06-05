@@ -1,7 +1,7 @@
 //! Traits for configuring a node.
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
-use reth_db::{
+use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
@@ -26,7 +26,7 @@ pub trait NodeTypes: Send + Sync + 'static {
     type Engine: EngineTypes;
 }
 
-/// A helper trait that is downstream of the [NodeTypes] trait and adds stateful components to the
+/// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.

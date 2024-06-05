@@ -1,22 +1,25 @@
 use reth_db::{
+    tables,
+    test_utils::{
+        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
+    },
+    DatabaseEnv,
+};
+use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
-    tables,
-    test_utils::{
-        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
-    },
     transaction::{DbTx, DbTxMut},
-    DatabaseEnv, DatabaseError as DbError,
+    DatabaseError as DbError,
 };
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
     StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,
 };
 use reth_provider::{
-    providers::{StaticFileProviderRWRefMut, StaticFileWriter},
+    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -32,13 +35,16 @@ pub struct TestStageDB {
 }
 
 impl Default for TestStageDB {
-    /// Create a new instance of [TestStageDB]
+    /// Create a new instance of [`TestStageDB`]
     fn default() -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
         Self {
             temp_static_files_dir: static_dir,
-            factory: ProviderFactory::new(create_test_rw_db(), MAINNET.clone(), static_dir_path)
-                .unwrap(),
+            factory: ProviderFactory::new(
+                create_test_rw_db(),
+                MAINNET.clone(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
         }
     }
 }
@@ -52,9 +58,8 @@ impl TestStageDB {
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
-                static_dir_path,
-            )
-            .unwrap(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
         }
     }
 
@@ -99,7 +104,7 @@ impl TestStageDB {
     }
 
     /// Check that there is no table entry above a given
-    /// number by [Table::Key]
+    /// number by [`Table::Key`]
     pub fn ensure_no_entry_above<T, F>(&self, num: u64, mut selector: F) -> ProviderResult<()>
     where
         T: Table,
@@ -115,7 +120,7 @@ impl TestStageDB {
     }
 
     /// Check that there is no table entry above a given
-    /// number by [Table::Value]
+    /// number by [`Table::Value`]
     pub fn ensure_no_entry_above_by_value<T, F>(
         &self,
         num: u64,
@@ -187,7 +192,7 @@ impl TestStageDB {
         Ok(())
     }
 
-    /// Insert ordered collection of [SealedHeader] into the corresponding static file and tables
+    /// Insert ordered collection of [`SealedHeader`] into the corresponding static file and tables
     /// that are supposed to be populated by the headers stage.
     pub fn insert_headers<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
@@ -198,7 +203,7 @@ impl TestStageDB {
 
     /// Inserts total difficulty of headers into the corresponding static file and tables.
     ///
-    /// Superset functionality of [TestStageDB::insert_headers].
+    /// Superset functionality of [`TestStageDB::insert_headers`].
     pub fn insert_headers_with_td<'a, I>(&self, headers: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = &'a SealedHeader>,
@@ -206,10 +211,10 @@ impl TestStageDB {
         self.insert_headers_inner::<I, true>(headers)
     }
 
-    /// Insert ordered collection of [SealedBlock] into corresponding tables.
-    /// Superset functionality of [TestStageDB::insert_headers].
+    /// Insert ordered collection of [`SealedBlock`] into corresponding tables.
+    /// Superset functionality of [`TestStageDB::insert_headers`].
     ///
-    /// If tx_offset is set to `None`, then transactions will be stored on static files, otherwise
+    /// If `tx_offset` is set to `None`, then transactions will be stored on static files, otherwise
     /// database.
     ///
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
@@ -225,13 +230,17 @@ impl TestStageDB {
         let blocks = blocks.into_iter().collect::<Vec<_>>();
 
         {
-            let mut headers_writer = provider.latest_writer(StaticFileSegment::Headers)?;
+            let mut headers_writer = storage_kind
+                .is_static()
+                .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(Some(&mut headers_writer), &tx, &block.header, U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, &block.header, U256::ZERO)
             })?;
 
-            headers_writer.commit()?;
+            if let Some(mut writer) = headers_writer {
+                writer.commit()?;
+            }
         }
 
         {
@@ -302,7 +311,7 @@ impl TestStageDB {
         })
     }
 
-    /// Insert collection of ([TxNumber], [Receipt]) into the corresponding table.
+    /// Insert collection of ([`TxNumber`], [Receipt]) into the corresponding table.
     pub fn insert_receipts<I>(&self, receipts: I) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (TxNumber, Receipt)>,
@@ -313,6 +322,42 @@ impl TestStageDB {
                 Ok(tx.put::<tables::Receipts>(tx_num, receipt)?)
             })
         })
+    }
+
+    /// Insert collection of ([`TxNumber`], [Receipt]) organized by respective block numbers into
+    /// the corresponding table or static file segment.
+    pub fn insert_receipts_by_block<I, J>(
+        &self,
+        receipts: I,
+        storage_kind: StorageKind,
+    ) -> ProviderResult<()>
+    where
+        I: IntoIterator<Item = (BlockNumber, J)>,
+        J: IntoIterator<Item = (TxNumber, Receipt)>,
+    {
+        match storage_kind {
+            StorageKind::Database(_) => self.commit(|tx| {
+                receipts.into_iter().try_for_each(|(_, receipts)| {
+                    for (tx_num, receipt) in receipts {
+                        tx.put::<tables::Receipts>(tx_num, receipt)?;
+                    }
+                    Ok(())
+                })
+            }),
+            StorageKind::Static => {
+                let provider = self.factory.static_file_provider();
+                let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
+                let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
+                    writer.increment_block(StaticFileSegment::Receipts, block_num)?;
+                    for (tx_num, receipt) in receipts {
+                        writer.append_receipt(tx_num, receipt)?;
+                    }
+                    Ok(())
+                });
+                writer.commit_without_sync_all()?;
+                res
+            }
+        }
     }
 
     pub fn insert_transaction_senders<I>(&self, transaction_senders: I) -> ProviderResult<()>
@@ -371,7 +416,7 @@ impl TestStageDB {
         })
     }
 
-    /// Insert collection of [ChangeSet] into corresponding tables.
+    /// Insert collection of [`ChangeSet`] into corresponding tables.
     pub fn insert_changesets<I>(
         &self,
         changesets: I,

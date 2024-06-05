@@ -80,7 +80,7 @@ impl TxEip1559 {
         }
     }
 
-    /// Decodes the inner [TxEip1559] fields from RLP bytes.
+    /// Decodes the inner [`TxEip1559`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:
@@ -179,7 +179,7 @@ impl TxEip1559 {
         TxType::Eip1559
     }
 
-    /// Calculates a heuristic for the in-memory size of the [TxEip1559] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxEip1559`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id

@@ -9,7 +9,7 @@ use reth_primitives::TxType;
 /// Scope for monitoring transactions sent from the manager to the tx manager
 pub(crate) const NETWORK_POOL_TRANSACTIONS_SCOPE: &str = "network.pool.transactions";
 
-/// Metrics for the entire network, handled by NetworkManager
+/// Metrics for the entire network, handled by `NetworkManager`
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct NetworkMetrics {
@@ -77,7 +77,7 @@ pub struct NetworkMetrics {
     pub(crate) acc_duration_poll_swarm: Gauge,
 }
 
-/// Metrics for SessionManager
+/// Metrics for `SessionManager`
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct SessionManagerMetrics {
@@ -245,43 +245,43 @@ macro_rules! duration_metered_exec {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct DisconnectMetrics {
-    /// Number of peer disconnects due to DisconnectRequested (0x00)
+    /// Number of peer disconnects due to `DisconnectRequested` (0x00)
     pub(crate) disconnect_requested: Counter,
 
-    /// Number of peer disconnects due to TcpSubsystemError (0x01)
+    /// Number of peer disconnects due to `TcpSubsystemError` (0x01)
     pub(crate) tcp_subsystem_error: Counter,
 
-    /// Number of peer disconnects due to ProtocolBreach (0x02)
+    /// Number of peer disconnects due to `ProtocolBreach` (0x02)
     pub(crate) protocol_breach: Counter,
 
-    /// Number of peer disconnects due to UselessPeer (0x03)
+    /// Number of peer disconnects due to `UselessPeer` (0x03)
     pub(crate) useless_peer: Counter,
 
-    /// Number of peer disconnects due to TooManyPeers (0x04)
+    /// Number of peer disconnects due to `TooManyPeers` (0x04)
     pub(crate) too_many_peers: Counter,
 
-    /// Number of peer disconnects due to AlreadyConnected (0x05)
+    /// Number of peer disconnects due to `AlreadyConnected` (0x05)
     pub(crate) already_connected: Counter,
 
-    /// Number of peer disconnects due to IncompatibleP2PProtocolVersion (0x06)
+    /// Number of peer disconnects due to `IncompatibleP2PProtocolVersion` (0x06)
     pub(crate) incompatible: Counter,
 
-    /// Number of peer disconnects due to NullNodeIdentity (0x07)
+    /// Number of peer disconnects due to `NullNodeIdentity` (0x07)
     pub(crate) null_node_identity: Counter,
 
-    /// Number of peer disconnects due to ClientQuitting (0x08)
+    /// Number of peer disconnects due to `ClientQuitting` (0x08)
     pub(crate) client_quitting: Counter,
 
-    /// Number of peer disconnects due to UnexpectedHandshakeIdentity (0x09)
+    /// Number of peer disconnects due to `UnexpectedHandshakeIdentity` (0x09)
     pub(crate) unexpected_identity: Counter,
 
-    /// Number of peer disconnects due to ConnectedToSelf (0x0a)
+    /// Number of peer disconnects due to `ConnectedToSelf` (0x0a)
     pub(crate) connected_to_self: Counter,
 
-    /// Number of peer disconnects due to PingTimeout (0x0b)
+    /// Number of peer disconnects due to `PingTimeout` (0x0b)
     pub(crate) ping_timeout: Counter,
 
-    /// Number of peer disconnects due to SubprotocolSpecific (0x10)
+    /// Number of peer disconnects due to `SubprotocolSpecific` (0x10)
     pub(crate) subprotocol_specific: Counter,
 }
 
@@ -306,20 +306,20 @@ impl DisconnectMetrics {
     }
 }
 
-/// Metrics for the EthRequestHandler
+/// Metrics for the `EthRequestHandler`
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct EthRequestHandlerMetrics {
-    /// Number of GetBlockHeaders requests received
+    /// Number of `GetBlockHeaders` requests received
     pub(crate) eth_headers_requests_received_total: Counter,
 
-    /// Number of GetReceipts requests received
+    /// Number of `GetReceipts` requests received
     pub(crate) eth_receipts_requests_received_total: Counter,
 
-    /// Number of GetBlockBodies requests received
+    /// Number of `GetBlockBodies` requests received
     pub(crate) eth_bodies_requests_received_total: Counter,
 
-    /// Number of GetNodeData requests received
+    /// Number of `GetNodeData` requests received
     pub(crate) eth_node_data_requests_received_total: Counter,
 
     /// Duration in seconds of call to poll
@@ -327,7 +327,7 @@ pub struct EthRequestHandlerMetrics {
     pub(crate) acc_duration_poll_eth_req_handler: Gauge,
 }
 
-/// Eth67 announcement metrics, track entries by TxType
+/// Eth67 announcement metrics, track entries by `TxType`
 #[derive(Metrics)]
 #[metrics(scope = "network.transaction_fetcher")]
 pub struct AnnouncedTxTypesMetrics {
@@ -375,7 +375,7 @@ impl TxTypesCounter {
 
 impl AnnouncedTxTypesMetrics {
     /// Update metrics during announcement validation, by examining each announcement entry based on
-    /// TxType
+    /// `TxType`
     pub(crate) fn update_eth68_announcement_metrics(&self, tx_types_counter: TxTypesCounter) {
         self.legacy.record(tx_types_counter.legacy as f64);
         self.eip2930.record(tx_types_counter.eip2930 as f64);

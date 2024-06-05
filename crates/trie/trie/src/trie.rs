@@ -9,7 +9,7 @@ use crate::{
     walker::TrieWalker,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db::transaction::DbTx;
+use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
@@ -23,7 +23,7 @@ use tracing::{debug, trace};
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
 
-/// StateRoot is used to compute the root node of a state trie.
+/// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
 pub struct StateRoot<T, H> {
     /// The factory for trie cursors.
@@ -94,7 +94,7 @@ impl<T, H> StateRoot<T, H> {
 }
 
 impl<'a, TX: DbTx> StateRoot<&'a TX, &'a TX> {
-    /// Create a new [StateRoot] instance.
+    /// Create a new [`StateRoot`] instance.
     pub fn from_tx(tx: &'a TX) -> Self {
         Self {
             trie_cursor_factory: tx,
@@ -341,7 +341,7 @@ where
     }
 }
 
-/// StorageRoot is used to compute the root node of an account storage trie.
+/// `StorageRoot` is used to compute the root node of an account storage trie.
 #[derive(Debug)]
 pub struct StorageRoot<T, H> {
     /// A reference to the database transaction.
@@ -554,12 +554,10 @@ mod tests {
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     };
     use proptest::{prelude::ProptestConfig, proptest};
-    use reth_db::{
+    use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        tables,
-        test_utils::TempDatabase,
         transaction::DbTxMut,
-        DatabaseEnv,
     };
     use reth_primitives::{
         hex_literal::hex,

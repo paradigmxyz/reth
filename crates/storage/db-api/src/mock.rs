@@ -14,7 +14,7 @@ use crate::{
 use core::ops::Bound;
 use std::{collections::BTreeMap, ops::RangeBounds};
 
-/// Mock database used for testing with inner BTreeMap structure
+/// Mock database used for testing with inner `BTreeMap` structure
 // TODO
 #[derive(Clone, Debug, Default)]
 pub struct DatabaseMock {

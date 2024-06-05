@@ -3,10 +3,10 @@ use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::{
+use reth_db::tables::*;
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     table::{Decode, Decompress, DupSort},
-    tables::*,
     transaction::DbTx,
 };
 

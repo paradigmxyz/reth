@@ -2,12 +2,11 @@ use futures_util::StreamExt;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
 use reth_consensus::Consensus;
-use reth_db::{
+use reth_db::{tables, RawKey, RawTable, RawValue};
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    tables,
     transaction::DbTxMut,
-    RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
@@ -55,9 +54,9 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     consensus: Arc<dyn Consensus>,
     /// Current sync gap.
     sync_gap: Option<HeaderSyncGap>,
-    /// ETL collector with HeaderHash -> BlockNumber
+    /// ETL collector with `HeaderHash` -> `BlockNumber`
     hash_collector: Collector<BlockHash, BlockNumber>,
-    /// ETL collector with BlockNumber -> SealedHeader
+    /// ETL collector with `BlockNumber` -> `SealedHeader`
     header_collector: Collector<BlockNumber, SealedHeader>,
     /// Returns true if the ETL collector has all necessary headers to fill the gap.
     is_etl_ready: bool,

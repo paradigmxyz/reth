@@ -17,7 +17,7 @@ pub enum StateRootError {
 impl From<StateRootError> for DatabaseError {
     fn from(err: StateRootError) -> Self {
         match err {
-            StateRootError::DB(err) => err,
+            StateRootError::DB(err) |
             StateRootError::StorageRootError(StorageRootError::DB(err)) => err,
         }
     }

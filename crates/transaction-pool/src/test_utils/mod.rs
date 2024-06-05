@@ -15,7 +15,7 @@ mod pool;
 pub type TestPool =
     Pool<MockTransactionValidator<MockTransaction>, MockOrdering, InMemoryBlobStore>;
 
-/// Structure encapsulating a [TestPool] used for testing
+/// Structure encapsulating a [`TestPool`] used for testing
 #[derive(Debug, Clone)]
 pub struct TestPoolBuilder(TestPool);
 
@@ -31,7 +31,7 @@ impl Default for TestPoolBuilder {
 }
 
 impl TestPoolBuilder {
-    /// Returns a new [TestPoolBuilder] with a custom validator used for testing purposes
+    /// Returns a new [`TestPoolBuilder`] with a custom validator used for testing purposes
     pub fn with_validator(self, validator: MockTransactionValidator<MockTransaction>) -> Self {
         Self(Pool::new(
             validator,
@@ -41,7 +41,7 @@ impl TestPoolBuilder {
         ))
     }
 
-    /// Returns a new [TestPoolBuilder] with a custom ordering used for testing purposes
+    /// Returns a new [`TestPoolBuilder`] with a custom ordering used for testing purposes
     pub fn with_ordering(self, ordering: MockOrdering) -> Self {
         Self(Pool::new(
             self.pool.validator().clone(),
@@ -51,7 +51,7 @@ impl TestPoolBuilder {
         ))
     }
 
-    /// Returns a new [TestPoolBuilder] with a custom blob store used for testing purposes
+    /// Returns a new [`TestPoolBuilder`] with a custom blob store used for testing purposes
     pub fn with_blob_store(self, blob_store: InMemoryBlobStore) -> Self {
         Self(Pool::new(
             self.pool.validator().clone(),
@@ -61,7 +61,7 @@ impl TestPoolBuilder {
         ))
     }
 
-    /// Returns a new [TestPoolBuilder] with a custom configuration used for testing purposes
+    /// Returns a new [`TestPoolBuilder`] with a custom configuration used for testing purposes
     pub fn with_config(self, config: PoolConfig) -> Self {
         Self(Pool::new(
             self.pool.validator().clone(),
