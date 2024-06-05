@@ -1,17 +1,6 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use crate::eth::{
-    api::{
-        fee_history::FeeHistoryCache,
-        pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
-    },
-    cache::EthStateCache,
-    error::{EthApiError, EthResult},
-    gas_oracle::GasPriceOracle,
-    signer::EthSigner,
-    traits::RawTransactionForwarder,
-};
 use async_trait::async_trait;
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
@@ -30,11 +19,22 @@ use reth_transaction_pool::TransactionPool;
 use revm_primitives::{CfgEnv, SpecId};
 use std::{
     fmt::Debug,
-    future::Future,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
+use traits::SpawnBlocking;
+
+use crate::eth::{
+    api::{
+        fee_history::FeeHistoryCache,
+        pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
+    },
+    cache::EthStateCache,
+    error::{EthApiError, EthResult},
+    gas_oracle::GasPriceOracle,
+    signer::EthSigner,
+};
 
 pub mod block;
 mod call;
@@ -165,28 +165,6 @@ where
         };
 
         Self { inner: Arc::new(inner) }
-    }
-
-    /// Executes the future on a new blocking task.
-    ///
-    /// This accepts a closure that creates a new future using a clone of this type and spawns the
-    /// future onto a new task that is allowed to block.
-    ///
-    /// Note: This is expected for futures that are dominated by blocking IO operations.
-    pub(crate) async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
-    where
-        C: FnOnce(Self) -> F,
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        let this = self.clone();
-        let f = c(this);
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res = f.await;
-            let _ = tx.send(res);
-        }));
-        rx.await.map_err(|_| EthApiError::InternalEthError)?
     }
 
     /// Returns the state cache frontend
@@ -329,40 +307,43 @@ where
             return Ok(pending.origin.into_actual_pending())
         }
 
-        // no pending block from the CL yet, so we need to build it ourselves via txpool
-        self.on_blocking_task(|this| async move {
-            let mut lock = this.inner.pending_block.lock().await;
-            let now = Instant::now();
+        let mut lock = self.inner.pending_block.lock().await;
 
-            // check if the block is still good
-            if let Some(pending_block) = lock.as_ref() {
-                // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                    pending.origin.header().hash() == pending_block.block.parent_hash &&
-                    now <= pending_block.expires_at
-                {
-                    return Ok(Some(pending_block.block.clone()))
-                }
+        let now = Instant::now();
+
+        // check if the block is still good
+        if let Some(pending_block) = lock.as_ref() {
+            // this is guaranteed to be the `latest` header
+            if pending.block_env.number.to::<u64>() == pending_block.block.number &&
+                pending.origin.header().hash() == pending_block.block.parent_hash &&
+                now <= pending_block.expires_at
+            {
+                return Ok(Some(pending_block.block.clone()))
             }
+        }
 
-            // we rebuild the block
-            let pending_block = match pending.build_block(this.provider(), this.pool()) {
-                Ok(block) => block,
-                Err(err) => {
-                    tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                    return Ok(None)
-                }
-            };
+        // no pending block from the CL yet, so we need to build it ourselves via txpool
+        let pending_block = match self
+            .spawn_blocking_io(move |this| {
+                // we rebuild the block
+                pending.build_block(this.provider(), this.pool())
+            })
+            .await
+        {
+            Ok(block) => block,
+            Err(err) => {
+                tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
+                return Ok(None)
+            }
+        };
 
-            let now = Instant::now();
-            *lock = Some(PendingBlock {
-                block: pending_block.clone(),
-                expires_at: now + Duration::from_secs(1),
-            });
+        let now = Instant::now();
+        *lock = Some(PendingBlock {
+            block: pending_block.clone(),
+            expires_at: now + Duration::from_secs(1),
+        });
 
-            Ok(Some(pending_block))
-        })
-        .await
+        Ok(Some(pending_block))
     }
 }
 
@@ -435,6 +416,20 @@ where
     }
 }
 
+impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Send + Sync + 'static,
+{
+    fn io_task_spawner(&self) -> &dyn TaskSpawner {
+        self.inner.task_spawner()
+    }
+
+    fn tracing_task_pool(&self) -> &BlockingTaskPool {
+        self.inner.blocking_task_pool()
+    }
+}
+
 /// The default gas limit for `eth_call` and adjacent calls.
 ///
 /// This is different from the default to regular 30M block gas limit
@@ -487,7 +482,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
     pending_block: Mutex<Option<PendingBlock>>,
-    /// A pool dedicated to blocking tasks.
+    /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
     fee_history_cache: FeeHistoryCache,
@@ -500,13 +495,25 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// Returns a handle to data on disk.
     #[inline]
-    pub fn provider(&self) -> &Provider {
+    pub const fn provider(&self) -> &Provider {
         &self.provider
     }
 
     /// Returns a handle to data in memory.
     #[inline]
-    pub fn cache(&self) -> &EthStateCache {
+    pub const fn cache(&self) -> &EthStateCache {
         &self.eth_cache
+    }
+
+    /// Returns a handle to the task spawner.
+    #[inline]
+    pub const fn task_spawner(&self) -> &dyn TaskSpawner {
+        &*self.task_spawner
+    }
+
+    /// Returns a handle to the blocking thread pool.
+    #[inline]
+    pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
+        &self.blocking_task_pool
     }
 }

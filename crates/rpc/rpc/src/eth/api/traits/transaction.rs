@@ -1,8 +1,6 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::future::Future;
-
 use crate::eth::{
     error::{EthApiError, EthResult},
     revm_utils::EvmOverrides,
@@ -27,6 +25,8 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
 use crate::eth::{api::BuildReceipt, revm_utils::FillableTransaction};
 use revm_primitives::db::{Database, DatabaseRef};
+
+use super::SpawnBlocking;
 
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
@@ -125,24 +125,6 @@ pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
 
-    /// Executes the future on a new blocking task.
-    ///
-    /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
-    /// or CPU bound operations in general use [Self::spawn_blocking].
-    async fn spawn_blocking_future<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: Future<Output = EthResult<R>> + Send + 'static,
-        R: Send + 'static;
-
-    /// Executes a blocking on the tracing pol.
-    ///
-    /// Note: This is expected for futures that are predominantly CPU bound, for blocking IO futures
-    /// use [Self::spawn_blocking_future].
-    async fn spawn_blocking<F, R>(&self, c: F) -> EthResult<R>
-    where
-        F: FnOnce() -> EthResult<R> + Send + 'static,
-        R: Send + 'static;
-
     /// Returns the state at the given [BlockId]
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox>;
 
@@ -208,14 +190,18 @@ pub trait EthTransactions: Send + Sync {
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>;
+    async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>
+    where
+        Self: SpawnBlocking;
 
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>;
+    async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>
+    where
+        Self: SpawnBlocking;
 
     /// Returns the transaction by including its corresponding [BlockId]
     ///
@@ -237,7 +223,7 @@ pub trait EthTransactions: Send + Sync {
     /// Note: The tx receipt is not available for pending transactions.
     async fn transaction_receipt(&self, hash: B256) -> EthResult<Option<AnyTransactionReceipt>>
     where
-        Self: BuildReceipt + Clone + 'static,
+        Self: BuildReceipt + SpawnBlocking + Clone + 'static,
     {
         let result = self.load_transaction_and_receipt(hash).await?;
 
@@ -255,10 +241,10 @@ pub trait EthTransactions: Send + Sync {
         hash: TxHash,
     ) -> EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>>
     where
-        Self: Clone + 'static,
+        Self: SpawnBlocking + Clone + 'static,
     {
         let this = self.clone();
-        self.spawn_blocking_future(async move {
+        self.spawn_blocking_io(move |_| {
             let (tx, meta) = match this.provider().transaction_by_hash_with_meta(hash)? {
                 Some((tx, meta)) => (tx, meta),
                 None => return Ok(None),
