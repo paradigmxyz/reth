@@ -1,5 +1,5 @@
 //! Spawns a blocking task. CPU heavy tasks are executed with the `rayon` library. IO heavy tasks
-//! are executed on the `tokio`` runtime.
+//! are executed on the `tokio` runtime.
 
 use futures::Future;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
