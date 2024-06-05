@@ -28,7 +28,6 @@ reth-rpc-layer.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
 reth-network.workspace = true
-reth-network-types.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-transaction-pool.workspace = true
@@ -59,6 +58,7 @@ eyre.workspace = true
 fdlimit.workspace = true
 confy.workspace = true
 rayon.workspace = true
+backon.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

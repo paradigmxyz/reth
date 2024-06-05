@@ -378,6 +378,7 @@ dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
 url = "2.3"
+backon = "0.4"
 
 # metrics
 metrics = "0.22.0"
@@ -393,7 +394,6 @@ quote = "1.0"
 tokio-stream = "0.1.11"
 tokio = { version = "1.21", default-features = false }
 tokio-util = { version = "0.7.4", features = ["codec"] }
-tokio-retry = { version = "0.3.0" }
 
 # async
 async-stream = "0.3"

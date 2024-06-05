@@ -1,5 +1,6 @@
 //! Helper types that can be used by launchers.
 
+use backon::{ConstantBuilder, Retryable};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
@@ -10,7 +11,6 @@ use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_network_types::RetryStrategy;
 use reth_node_core::{
     cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
@@ -87,14 +87,11 @@ impl LaunchContext {
 
             // resolve trusted peers if they use a domain instead of dns
             for peer in &config.network.trusted_peers {
-                let retry_strategy = RetryStrategy::new(
-                    std::time::Duration::from_millis(config.network.retry_millis),
-                    config.network.retry_attempts,
-                );
-                let resolved = peer
-                    .resolve(Some(retry_strategy))
-                    .await
-                    .wrap_err_with(|| format!("Could not resolve trusted peer {peer}"))?;
+                let backoff = ConstantBuilder::default().with_max_times(config.network.dns_retries);
+                let resolved = (move || { peer.resolve() })
+                .retry(&backoff)
+                .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
+                .await?;
                 toml_config.peers.trusted_nodes.insert(resolved);
             }
         }
