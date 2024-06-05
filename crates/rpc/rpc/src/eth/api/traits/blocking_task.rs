@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 use crate::eth::error::{EthApiError, EthResult};
 
 /// Executes code on a blocking thread.
-pub trait SpawnBlocking {
+pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Returns a handle for spawning IO heavy blocking tasks.
     ///
     /// Runtime access in default trait method implementations.
@@ -25,7 +25,6 @@ pub trait SpawnBlocking {
     /// or CPU bound operations in general use [`spawn_tracing`](Self::spawn_tracing).
     fn spawn_blocking_io<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>> + Send
     where
-        Self: Sized + Clone + Send + Sync + 'static,
         F: FnOnce(Self) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
@@ -46,7 +45,6 @@ pub trait SpawnBlocking {
     /// <https://ryhl.io/blog/async-what-is-blocking/>.
     fn spawn_tracing<F, R>(&self, f: F) -> impl Future<Output = EthResult<R>>
     where
-        Self: Sized + Clone + Send + Sync + 'static,
         F: FnOnce(Self) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
