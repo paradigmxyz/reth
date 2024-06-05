@@ -1,5 +1,4 @@
 //! Storage sharded key
-
 use crate::{
     table::{Decode, Encode},
     DatabaseError,

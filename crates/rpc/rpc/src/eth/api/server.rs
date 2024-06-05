@@ -532,9 +532,7 @@ mod tests {
                     transactions.push(transaction);
                 } else {
                     let transaction = TransactionSigned {
-                        transaction: reth_primitives::Transaction::Legacy(
-                            reth_primitives::TxLegacy { ..Default::default() },
-                        ),
+                        transaction: reth_primitives::Transaction::Legacy(Default::default()),
                         ..Default::default()
                     };
 

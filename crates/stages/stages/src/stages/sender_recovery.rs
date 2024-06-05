@@ -1,12 +1,10 @@
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{
+use reth_db::{static_file::TransactionMask, tables, RawValue};
+use reth_db_api::{
     cursor::DbCursorRW,
     database::Database,
-    static_file::TransactionMask,
-    tables,
     transaction::{DbTx, DbTxMut},
-    RawValue,
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
@@ -24,7 +22,7 @@ use thiserror::Error;
 use tracing::*;
 
 /// Maximum amount of transactions to read from disk at one time before we flush their senders to
-/// disk. Since each rayon worker will hold at most 100 transactions (WORKER_CHUNK_SIZE), we
+/// disk. Since each rayon worker will hold at most 100 transactions (`WORKER_CHUNK_SIZE`), we
 /// effectively max limit each batch to 1000 channels in memory.
 const BATCH_SIZE: usize = 100_000;
 
@@ -42,7 +40,7 @@ pub struct SenderRecoveryStage {
 }
 
 impl SenderRecoveryStage {
-    /// Create new instance of [SenderRecoveryStage].
+    /// Create new instance of [`SenderRecoveryStage`].
     pub const fn new(config: SenderRecoveryConfig) -> Self {
         Self { commit_threshold: config.commit_threshold }
     }
@@ -284,7 +282,7 @@ struct FailedSenderRecoveryError {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::cursor::DbCursorRO;
+    use reth_db_api::cursor::DbCursorRO;
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,
@@ -506,10 +504,10 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TransactionSenders] table above a given
+        /// 1. If there are any entries in the [`tables::TransactionSenders`] table above a given
         ///    block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        ///    [tables::TransactionSenders] is not empty.
+        ///    [`tables::TransactionSenders`] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db

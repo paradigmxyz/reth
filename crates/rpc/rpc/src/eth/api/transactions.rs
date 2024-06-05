@@ -134,7 +134,7 @@ where
 
         let mut evm = self.inner.evm_config.evm_with_env(db, env);
         let mut index = 0;
-        for tx in transactions.into_iter() {
+        for tx in transactions {
             if tx.hash() == target_tx_hash {
                 // reached the target transaction
                 break
@@ -891,7 +891,7 @@ where
     /// Returns the EIP-1559 fees if they are set, otherwise fetches a suggested gas price for
     /// EIP-1559 transactions.
     ///
-    /// Returns (max_fee, priority_fee)
+    /// Returns (`max_fee`, `priority_fee`)
     pub(crate) async fn eip1559_fees(
         &self,
         max_fee_per_gas: Option<U256>,
@@ -946,7 +946,7 @@ where
         Err(EthApiError::InvalidTransactionSignature)
     }
 
-    /// Get Transaction by [BlockId] and the index of the transaction within that Block.
+    /// Get Transaction by [`BlockId`] and the index of the transaction within that Block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
     pub(crate) async fn transaction_by_block_and_tx_index(

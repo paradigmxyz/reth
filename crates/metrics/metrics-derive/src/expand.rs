@@ -299,7 +299,7 @@ fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<MetricField<'_>>> {
     };
 
     let mut metrics = Vec::with_capacity(data.fields.len());
-    for field in data.fields.iter() {
+    for field in &data.fields {
         let (mut describe, mut rename, mut skip) = (None, None, false);
         if let Some(metric_attr) = parse_single_attr(field, "metric")? {
             let parsed =
@@ -404,7 +404,7 @@ fn parse_single_required_attr<'a, T: WithAttrs + ToTokens>(
 
 fn parse_docs_to_string<T: WithAttrs>(token: &T) -> Result<Option<String>> {
     let mut doc_str = None;
-    for attr in token.attrs().iter() {
+    for attr in token.attrs() {
         if let syn::Meta::NameValue(ref meta) = attr.meta {
             if let Expr::Lit(ref lit) = meta.value {
                 if let Lit::Str(ref doc) = lit.lit {

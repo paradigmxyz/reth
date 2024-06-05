@@ -53,7 +53,7 @@ pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 /// significant harm in leaving this setting as is.
 pub const MIN_PROTOCOL_BASE_FEE: u64 = 7;
 
-/// Same as [MIN_PROTOCOL_BASE_FEE] but as a U256.
+/// Same as [`MIN_PROTOCOL_BASE_FEE`] but as a U256.
 pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
 
 /// Initial base fee as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)

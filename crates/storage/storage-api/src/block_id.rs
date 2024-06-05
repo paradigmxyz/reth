@@ -77,22 +77,17 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     fn block_hash_for_id(&self, block_id: BlockId) -> ProviderResult<Option<B256>> {
         match block_id {
             BlockId::Hash(hash) => Ok(Some(hash.into())),
-            BlockId::Number(num) => {
-                if matches!(num, BlockNumberOrTag::Latest) {
-                    return Ok(Some(self.chain_info()?.best_hash))
-                }
-
-                if matches!(num, BlockNumberOrTag::Pending) {
-                    return self
-                        .pending_block_num_hash()
-                        .map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
-                }
-
-                self.convert_block_number(num)?
+            BlockId::Number(num) => match num {
+                BlockNumberOrTag::Latest => Ok(Some(self.chain_info()?.best_hash)),
+                BlockNumberOrTag::Pending => self
+                    .pending_block_num_hash()
+                    .map(|res_opt| res_opt.map(|num_hash| num_hash.hash)),
+                _ => self
+                    .convert_block_number(num)?
                     .map(|num| self.block_hash(num))
                     .transpose()
-                    .map(|maybe_hash| maybe_hash.flatten())
-            }
+                    .map(|maybe_hash| maybe_hash.flatten()),
+            },
         }
     }
 

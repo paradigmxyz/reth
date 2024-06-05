@@ -1,51 +1,23 @@
 //! Database debugging tool
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, StageEnum,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+    args::StageEnum,
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     utils::DbTool,
 };
 use clap::Parser;
 use itertools::Itertools;
-use reth_db::{open_db, static_file::iter_static_files, tables, transaction::DbTxMut, DatabaseEnv};
+use reth_db::{static_file::iter_static_files, tables, DatabaseEnv};
+use reth_db_api::transaction::DbTxMut;
 use reth_db_common::init::{insert_genesis_header, insert_genesis_history, insert_genesis_state};
-use reth_fs_util as fs;
-use reth_primitives::{
-    stage::StageId, static_file::find_fixed_range, ChainSpec, StaticFileSegment,
-};
-use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
-use std::sync::Arc;
+use reth_primitives::{stage::StageId, static_file::find_fixed_range, StaticFileSegment};
+use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
     #[command(flatten)]
-    db: DatabaseArgs,
+    env: EnvironmentArgs,
 
     stage: StageEnum,
 }
@@ -53,17 +25,11 @@ pub struct Command {
 impl Command {
     /// Execute `db` command
     pub async fn execute(self) -> eyre::Result<()> {
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db();
-        fs::create_dir_all(&db_path)?;
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
-        let db = open_db(db_path.as_ref(), self.db.database_args())?;
-        let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
         let static_file_provider = provider_factory.static_file_provider();
 
-        let tool = DbTool::new(provider_factory, self.chain.clone())?;
+        let tool = DbTool::new(provider_factory)?;
 
         let static_file_segment = match self.stage {
             StageEnum::Headers => Some(StaticFileSegment::Headers),
@@ -102,7 +68,7 @@ impl Command {
                     StageId::Headers.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
+                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
@@ -115,7 +81,7 @@ impl Command {
                     StageId::Bodies.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
+                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
@@ -135,7 +101,7 @@ impl Command {
                     StageId::Execution.to_string(),
                     Default::default(),
                 )?;
-                let alloc = &self.chain.genesis().alloc;
+                let alloc = &self.env.chain.genesis().alloc;
                 insert_genesis_state::<DatabaseEnv>(tx, alloc.len(), alloc.iter())?;
             }
             StageEnum::AccountHashing => {
@@ -194,7 +160,7 @@ impl Command {
                     StageId::IndexStorageHistory.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_history(&provider_rw, self.chain.genesis.alloc.iter())?;
+                insert_genesis_history(&provider_rw, self.env.chain.genesis.alloc.iter())?;
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
@@ -202,7 +168,7 @@ impl Command {
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.chain)?;
+                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
             }
         }
 

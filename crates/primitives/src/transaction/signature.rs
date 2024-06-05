@@ -58,13 +58,13 @@ impl Compact for Signature {
 
 impl Signature {
     /// Output the length of the signature without the length of the RLP header, using the legacy
-    /// scheme with EIP-155 support depends on chain_id.
+    /// scheme with EIP-155 support depends on `chain_id`.
     pub(crate) fn payload_len_with_eip155_chain_id(&self, chain_id: Option<u64>) -> usize {
         self.v(chain_id).length() + self.r.length() + self.s.length()
     }
 
     /// Encode the `v`, `r`, `s` values without a RLP header.
-    /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on chain_id.
+    /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on `chain_id`.
     pub(crate) fn encode_with_eip155_chain_id(
         &self,
         out: &mut dyn alloy_rlp::BufMut,
@@ -75,7 +75,7 @@ impl Signature {
         self.s.encode(out);
     }
 
-    /// Output the `v` of the signature depends on chain_id
+    /// Output the `v` of the signature depends on `chain_id`
     #[inline]
     #[allow(clippy::missing_const_for_fn)]
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
@@ -197,7 +197,7 @@ impl Signature {
     }
 }
 
-/// Outputs (odd_y_parity, chain_id) from the `v` value.
+/// Outputs (`odd_y_parity`, `chain_id`) from the `v` value.
 /// This doesn't check validity of the `v` value for optimism.
 #[inline]
 pub const fn extract_chain_id(v: u64) -> alloy_rlp::Result<(bool, Option<u64>)> {

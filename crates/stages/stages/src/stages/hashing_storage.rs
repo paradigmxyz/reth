@@ -1,12 +1,11 @@
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
-use reth_db::{
-    codecs::CompactU256,
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
     database::Database,
-    models::BlockNumberAddress,
+    models::{BlockNumberAddress, CompactU256},
     table::Decompress,
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
@@ -44,7 +43,7 @@ pub struct StorageHashingStage {
 }
 
 impl StorageHashingStage {
-    /// Create new instance of [StorageHashingStage].
+    /// Create new instance of [`StorageHashingStage`].
     pub const fn new(config: HashingConfig, etl_config: EtlConfig) -> Self {
         Self {
             clean_threshold: config.clean_threshold,
@@ -104,7 +103,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
-                    for (address, slot) in chunk.into_iter() {
+                    for (address, slot) in chunk {
                         let mut addr_key = Vec::with_capacity(64);
                         addr_key.put_slice(keccak256(address).as_slice());
                         addr_key.put_slice(keccak256(slot.key).as_slice());
@@ -219,7 +218,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{
+    use reth_db_api::{
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };

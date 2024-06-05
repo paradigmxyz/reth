@@ -2,7 +2,8 @@ use crate::{
     segments::{PruneInput, PruneOutput, Segment},
     PrunerError,
 };
-use reth_db::{database::Database, tables};
+use reth_db::tables;
+use reth_db_api::database::Database;
 use reth_primitives::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
@@ -216,7 +217,8 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 mod tests {
     use crate::segments::{receipts_by_logs::ReceiptsByLogs, PruneInput, Segment};
     use assert_matches::assert_matches;
-    use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
+    use reth_db::tables;
+    use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_primitives::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig, B256};
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_stages::test_utils::{StorageKind, TestStageDB};

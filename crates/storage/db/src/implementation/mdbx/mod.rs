@@ -1,18 +1,21 @@
 //! Module that interacts with MDBX.
 
 use crate::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
-    models::client_version::ClientVersion,
     tables::{self, TableType, Tables},
-    transaction::{DbTx, DbTxMut},
     utils::default_page_size,
     DatabaseError,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
+use reth_db_api::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    models::client_version::ClientVersion,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_libmdbx::{
     DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
     PageSize, SyncMode, RO, RW,
@@ -37,7 +40,7 @@ const TERABYTE: usize = GIGABYTE * 1024;
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
-/// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
+/// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 #[cfg(not(windows))]
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
@@ -134,6 +137,8 @@ pub struct DatabaseEnv {
     inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Write lock for when dealing with a read-write environment.
+    _lock_file: Option<StorageLock>,
 }
 
 impl Database for DatabaseEnv {
@@ -251,6 +256,15 @@ impl DatabaseEnv {
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
     ) -> Result<Self, DatabaseError> {
+        let _lock_file = if kind.is_rw() {
+            Some(
+                StorageLock::try_acquire(path)
+                    .map_err(|err| DatabaseError::Other(err.to_string()))?,
+            )
+        } else {
+            None
+        };
+
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -382,6 +396,7 @@ impl DatabaseEnv {
         let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
+            _lock_file,
         };
 
         Ok(env)
@@ -446,14 +461,16 @@ impl Deref for DatabaseEnv {
 mod tests {
     use super::*;
     use crate::{
-        abstraction::table::{Encode, Table},
-        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        models::{AccountBeforeTx, ShardedKey},
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
         AccountChangeSets,
+    };
+    use reth_db_api::{
+        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        models::{AccountBeforeTx, ShardedKey},
+        table::{Encode, Table},
     };
     use reth_libmdbx::Error;
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};

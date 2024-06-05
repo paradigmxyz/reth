@@ -32,7 +32,7 @@ pub trait DebugApiExt {
     /// The provider type that is used to make the requests.
     type Provider;
 
-    /// Same as [DebugApiClient::debug_trace_transaction] but returns the result as json.
+    /// Same as [`DebugApiClient::debug_trace_transaction`] but returns the result as json.
     fn debug_trace_transaction_json(
         &self,
         hash: B256,
@@ -59,14 +59,14 @@ pub trait DebugApiExt {
         I: IntoIterator<Item = B>,
         B: Into<BlockId> + Send;
 
-    ///  method  for debug_traceCall
+    ///  method  for `debug_traceCall`
     fn debug_trace_call_json(
         &self,
         request: TransactionRequest,
         opts: GethDebugTracingOptions,
     ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 
-    ///  method for debug_traceCall using raw JSON strings for the request and options.
+    ///  method for `debug_traceCall` using raw JSON strings for the request and options.
     fn debug_trace_call_raw_json(
         &self,
         request_json: String,
@@ -74,9 +74,9 @@ pub trait DebugApiExt {
     ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 }
 
-impl<T: DebugApiClient + Sync> DebugApiExt for T
+impl<T> DebugApiExt for T
 where
-    T: EthApiClient,
+    T: EthApiClient + DebugApiClient + Sync,
 {
     type Provider = T;
 

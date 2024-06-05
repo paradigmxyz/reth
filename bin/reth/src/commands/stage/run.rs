@@ -3,29 +3,19 @@
 //! Stage debugging tool
 
 use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, chain_spec_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs, StageEnum,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
+    args::{get_secret_key, NetworkArgs, StageEnum},
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     prometheus_exporter,
-    version::SHORT_VERSION,
 };
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_runner::CliContext;
-use reth_config::{
-    config::{EtlConfig, HashingConfig, SenderRecoveryConfig, TransactionLookupConfig},
-    Config,
-};
-use reth_db::init_db;
+use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
-use reth_primitives::ChainSpec;
 use reth_provider::{
-    ProviderFactory, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages::{
     stages::{
@@ -35,37 +25,14 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use std::{any::Any, net::SocketAddr, path::PathBuf, sync::Arc, time::Instant};
+use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tracing::*;
 
 /// `reth stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
-    config: Option<PathBuf>,
-
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_spec_value_parser
-    )]
-    chain: Arc<ChainSpec>,
+    #[command(flatten)]
+    env: EnvironmentArgs,
 
     /// Enable Prometheus metrics.
     ///
@@ -89,14 +56,6 @@ pub struct Command {
     #[arg(long)]
     batch_size: Option<u64>,
 
-    /// The maximum size in bytes of data held in memory before being flushed to disk as a file.
-    #[arg(long)]
-    etl_file_size: Option<usize>,
-
-    /// Directory where to collect ETL files
-    #[arg(long)]
-    etl_dir: Option<PathBuf>,
-
     /// Normally, running the stage requires unwinding for stages that already
     /// have been run, in order to not rewrite to the same database slots.
     ///
@@ -104,12 +63,6 @@ pub struct Command {
     /// range that has not been synced before.
     #[arg(long, short)]
     skip_unwind: bool,
-
-    #[command(flatten)]
-    network: NetworkArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
 
     /// Commits the changes in the database. WARNING: potentially destructive.
     ///
@@ -122,6 +75,9 @@ pub struct Command {
     /// Save stage checkpoints
     #[arg(long)]
     checkpoints: bool,
+
+    #[command(flatten)]
+    network: NetworkArgs,
 }
 
 impl Command {
@@ -131,31 +87,17 @@ impl Command {
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
 
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
+        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
 
-        let config: Config = confy::load_path(config_path).unwrap_or_default();
-        info!(target: "reth::cli", "reth {} starting stage {:?}", SHORT_VERSION, self.stage);
-
-        // use the overridden db path if specified
-        let db_path = data_dir.db();
-
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        info!(target: "reth::cli", "Database opened");
-
-        let factory =
-            ProviderFactory::new(Arc::clone(&db), self.chain.clone(), data_dir.static_files())?;
-        let mut provider_rw = factory.provider_rw()?;
+        let mut provider_rw = provider_factory.provider_rw()?;
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::serve(
                 listen_addr,
                 prometheus_exporter::install_recorder()?,
-                Arc::clone(&db),
-                factory.static_file_provider(),
+                provider_factory.db_ref().clone(),
+                provider_factory.static_file_provider(),
                 metrics_process::Collector::default(),
                 ctx.task_executor,
             )
@@ -164,16 +106,14 @@ impl Command {
 
         let batch_size = self.batch_size.unwrap_or(self.to.saturating_sub(self.from) + 1);
 
-        let etl_config = EtlConfig::new(
-            Some(self.etl_dir.unwrap_or_else(|| EtlConfig::from_datadir(data_dir.data_dir()))),
-            self.etl_file_size.unwrap_or(EtlConfig::default_file_size()),
-        );
+        let etl_config = config.stages.etl.clone();
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
                 StageEnum::Bodies => {
-                    let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
+                    let consensus =
+                        Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
@@ -192,17 +132,11 @@ impl Command {
 
                     let default_peers_path = data_dir.known_peers();
 
-                    let provider_factory = Arc::new(ProviderFactory::new(
-                        db.clone(),
-                        self.chain.clone(),
-                        data_dir.static_files(),
-                    )?);
-
                     let network = self
                         .network
                         .network_config(
                             &config,
-                            self.chain.clone(),
+                            provider_factory.chain_spec(),
                             p2p_secret_key,
                             default_peers_path,
                         )
@@ -222,7 +156,7 @@ impl Command {
                                 config.stages.bodies.downloader_min_concurrent_requests..=
                                     config.stages.bodies.downloader_max_concurrent_requests,
                             )
-                            .build(fetch_client, consensus.clone(), provider_factory),
+                            .build(fetch_client, consensus.clone(), provider_factory.clone()),
                     );
                     (Box::new(stage), None)
                 }
@@ -233,7 +167,7 @@ impl Command {
                     None,
                 ),
                 StageEnum::Execution => {
-                    let executor = block_executor!(self.chain.clone());
+                    let executor = block_executor!(provider_factory.chain_spec());
                     (
                         Box::new(ExecutionStage::new(
                             executor,
@@ -319,7 +253,7 @@ impl Command {
 
                 if self.commit {
                     provider_rw.commit()?;
-                    provider_rw = factory.provider_rw()?;
+                    provider_rw = provider_factory.provider_rw()?;
                 }
             }
         }
@@ -342,7 +276,7 @@ impl Command {
             }
             if self.commit {
                 provider_rw.commit()?;
-                provider_rw = factory.provider_rw()?;
+                provider_rw = provider_factory.provider_rw()?;
             }
 
             if done {

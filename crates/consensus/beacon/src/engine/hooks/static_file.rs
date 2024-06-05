@@ -1,11 +1,11 @@
-//! StaticFile hook for the engine implementation.
+//! `StaticFile` hook for the engine implementation.
 
 use crate::{
     engine::hooks::{EngineHook, EngineHookContext, EngineHookError, EngineHookEvent},
     hooks::EngineHookDBAccessLevel,
 };
 use futures::FutureExt;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_errors::RethResult;
 use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
 use reth_static_file::{StaticFileProducer, StaticFileProducerWithResult};
@@ -16,12 +16,12 @@ use tracing::trace;
 
 /// Manages producing static files under the control of the engine.
 ///
-/// This type controls the [StaticFileProducer].
+/// This type controls the [`StaticFileProducer`].
 #[derive(Debug)]
 pub struct StaticFileHook<DB> {
-    /// The current state of the static_file_producer.
+    /// The current state of the `static_file_producer`.
     state: StaticFileProducerState<DB>,
-    /// The type that can spawn the static_file_producer task.
+    /// The type that can spawn the `static_file_producer` task.
     task_spawner: Box<dyn TaskSpawner>,
 }
 
@@ -34,10 +34,10 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
         Self { state: StaticFileProducerState::Idle(Some(static_file_producer)), task_spawner }
     }
 
-    /// Advances the static_file_producer state.
+    /// Advances the `static_file_producer` state.
     ///
-    /// This checks for the result in the channel, or returns pending if the static_file_producer is
-    /// idle.
+    /// This checks for the result in the channel, or returns pending if the `static_file_producer`
+    /// is idle.
     fn poll_static_file_producer(
         &mut self,
         cx: &mut Context<'_>,
@@ -67,19 +67,19 @@ impl<DB: Database + 'static> StaticFileHook<DB> {
         Poll::Ready(Ok(event))
     }
 
-    /// This will try to spawn the static_file_producer if it is idle:
+    /// This will try to spawn the `static_file_producer` if it is idle:
     /// 1. Check if producing static files is needed through
-    ///    [StaticFileProducer::get_static_file_targets](reth_static_file::StaticFileProducerInner::get_static_file_targets)
-    ///    and then [StaticFileTargets::any](reth_static_file::StaticFileTargets::any).
+    ///    [`StaticFileProducer::get_static_file_targets`](reth_static_file::StaticFileProducerInner::get_static_file_targets)
+    ///    and then [`StaticFileTargets::any`](reth_static_file::StaticFileTargets::any).
     ///
     /// 2.1. If producing static files is needed, pass static file request to the
-    ///      [StaticFileProducer::run](reth_static_file::StaticFileProducerInner::run) and
+    ///      [`StaticFileProducer::run`](reth_static_file::StaticFileProducerInner::run) and
     ///      spawn it in a separate task. Set static file producer state to
-    ///      [StaticFileProducerState::Running].
+    ///      [`StaticFileProducerState::Running`].
     /// 2.2. If producing static files is not needed, set static file producer state back to
-    ///      [StaticFileProducerState::Idle].
+    ///      [`StaticFileProducerState::Idle`].
     ///
-    /// If static_file_producer is already running, do nothing.
+    /// If `static_file_producer` is already running, do nothing.
     fn try_spawn_static_file_producer(
         &mut self,
         finalized_block_number: BlockNumber,
@@ -157,14 +157,14 @@ impl<DB: Database + 'static> EngineHook for StaticFileHook<DB> {
     }
 }
 
-/// The possible static_file_producer states within the sync controller.
+/// The possible `static_file_producer` states within the sync controller.
 ///
-/// [StaticFileProducerState::Idle] means that the static file producer is currently idle.
-/// [StaticFileProducerState::Running] means that the static file producer is currently running.
+/// [`StaticFileProducerState::Idle`] means that the static file producer is currently idle.
+/// [`StaticFileProducerState::Running`] means that the static file producer is currently running.
 #[derive(Debug)]
 enum StaticFileProducerState<DB> {
-    /// [StaticFileProducer] is idle.
+    /// [`StaticFileProducer`] is idle.
     Idle(Option<StaticFileProducer<DB>>),
-    /// [StaticFileProducer] is running and waiting for a response
+    /// [`StaticFileProducer`] is running and waiting for a response
     Running(oneshot::Receiver<StaticFileProducerWithResult<DB>>),
 }

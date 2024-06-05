@@ -133,8 +133,7 @@ impl Hardfork {
             Self::Tangerine => Some(2463000),
             Self::SpuriousDragon => Some(2675000),
             Self::Byzantium => Some(4370000),
-            Self::Constantinople => Some(7280000),
-            Self::Petersburg => Some(7280000),
+            Self::Constantinople | Self::Petersburg => Some(7280000),
             Self::Istanbul => Some(9069000),
             Self::MuirGlacier => Some(9200000),
             Self::Berlin => Some(12244000),
@@ -156,19 +155,19 @@ impl Hardfork {
             Self::Paris => Some(1735371),
             Self::Shanghai => Some(2990908),
             Self::Cancun => Some(5187023),
-            Self::Frontier => Some(0),
-            Self::Homestead => Some(0),
-            Self::Dao => Some(0),
-            Self::Tangerine => Some(0),
-            Self::SpuriousDragon => Some(0),
-            Self::Byzantium => Some(0),
-            Self::Constantinople => Some(0),
-            Self::Petersburg => Some(0),
-            Self::Istanbul => Some(0),
-            Self::MuirGlacier => Some(0),
-            Self::Berlin => Some(0),
-            Self::London => Some(0),
-            Self::ArrowGlacier => Some(0),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
             Self::GrayGlacier => Some(0),
             _ => None,
         }
@@ -178,20 +177,20 @@ impl Hardfork {
     pub const fn arbitrum_sepolia_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(0),
-            Self::Homestead => Some(0),
-            Self::Dao => Some(0),
-            Self::Tangerine => Some(0),
-            Self::SpuriousDragon => Some(0),
-            Self::Byzantium => Some(0),
-            Self::Constantinople => Some(0),
-            Self::Petersburg => Some(0),
-            Self::Istanbul => Some(0),
-            Self::MuirGlacier => Some(0),
-            Self::Berlin => Some(0),
-            Self::London => Some(0),
-            Self::ArrowGlacier => Some(0),
-            Self::GrayGlacier => Some(0),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
             Self::Paris => Some(0),
             Self::Shanghai => Some(10653737),
             // Hardfork::ArbOS11 => Some(10653737),
@@ -205,20 +204,20 @@ impl Hardfork {
     pub const fn arbitrum_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(0),
-            Self::Homestead => Some(0),
-            Self::Dao => Some(0),
-            Self::Tangerine => Some(0),
-            Self::SpuriousDragon => Some(0),
-            Self::Byzantium => Some(0),
-            Self::Constantinople => Some(0),
-            Self::Petersburg => Some(0),
-            Self::Istanbul => Some(0),
-            Self::MuirGlacier => Some(0),
-            Self::Berlin => Some(0),
-            Self::London => Some(0),
-            Self::ArrowGlacier => Some(0),
-            Self::GrayGlacier => Some(0),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
             Self::Paris => Some(0),
             Self::Shanghai => Some(184097479),
             // Hardfork::ArbOS11 => Some(184097479),
@@ -233,27 +232,25 @@ impl Hardfork {
     pub const fn base_sepolia_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(0),
-            Self::Homestead => Some(0),
-            Self::Dao => Some(0),
-            Self::Tangerine => Some(0),
-            Self::SpuriousDragon => Some(0),
-            Self::Byzantium => Some(0),
-            Self::Constantinople => Some(0),
-            Self::Petersburg => Some(0),
-            Self::Istanbul => Some(0),
-            Self::MuirGlacier => Some(0),
-            Self::Berlin => Some(0),
-            Self::London => Some(0),
-            Self::ArrowGlacier => Some(0),
-            Self::GrayGlacier => Some(0),
-            Self::Paris => Some(0),
-            Self::Bedrock => Some(0),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
+            Self::Paris |
+            Self::Bedrock |
             Self::Regolith => Some(0),
-            Self::Shanghai => Some(2106456),
-            Self::Canyon => Some(2106456),
-            Self::Cancun => Some(6383256),
-            Self::Ecotone => Some(6383256),
+            Self::Shanghai | Self::Canyon => Some(2106456),
+            Self::Cancun | Self::Ecotone => Some(6383256),
             _ => None,
         }
     }
@@ -263,27 +260,25 @@ impl Hardfork {
     pub const fn base_mainnet_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(0),
-            Self::Homestead => Some(0),
-            Self::Dao => Some(0),
-            Self::Tangerine => Some(0),
-            Self::SpuriousDragon => Some(0),
-            Self::Byzantium => Some(0),
-            Self::Constantinople => Some(0),
-            Self::Petersburg => Some(0),
-            Self::Istanbul => Some(0),
-            Self::MuirGlacier => Some(0),
-            Self::Berlin => Some(0),
-            Self::London => Some(0),
-            Self::ArrowGlacier => Some(0),
-            Self::GrayGlacier => Some(0),
-            Self::Paris => Some(0),
-            Self::Bedrock => Some(0),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
+            Self::Paris |
+            Self::Bedrock |
             Self::Regolith => Some(0),
-            Self::Shanghai => Some(9101527),
-            Self::Canyon => Some(9101527),
-            Self::Cancun => Some(11188936),
-            Self::Ecotone => Some(11188936),
+            Self::Shanghai | Self::Canyon => Some(9101527),
+            Self::Cancun | Self::Ecotone => Some(11188936),
             _ => None,
         }
     }
@@ -292,18 +287,18 @@ impl Hardfork {
     const fn holesky_activation_block(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Dao => Some(0),
-            Self::Tangerine => Some(0),
-            Self::SpuriousDragon => Some(0),
-            Self::Byzantium => Some(0),
-            Self::Constantinople => Some(0),
-            Self::Petersburg => Some(0),
-            Self::Istanbul => Some(0),
-            Self::MuirGlacier => Some(0),
-            Self::Berlin => Some(0),
-            Self::London => Some(0),
-            Self::ArrowGlacier => Some(0),
-            Self::GrayGlacier => Some(0),
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
             Self::Paris => Some(0),
             Self::Shanghai => Some(6698),
             Self::Cancun => Some(894733),
@@ -345,8 +340,7 @@ impl Hardfork {
             Self::Tangerine => Some(1476753571),
             Self::SpuriousDragon => Some(1479788144),
             Self::Byzantium => Some(1508131331),
-            Self::Constantinople => Some(1551340324),
-            Self::Petersburg => Some(1551340324),
+            Self::Constantinople | Self::Petersburg => Some(1551340324),
             Self::Istanbul => Some(1575807909),
             Self::MuirGlacier => Some(1577953849),
             Self::Berlin => Some(1618481223),
@@ -366,20 +360,20 @@ impl Hardfork {
     pub const fn sepolia_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(1633267481),
-            Self::Homestead => Some(1633267481),
-            Self::Dao => Some(1633267481),
-            Self::Tangerine => Some(1633267481),
-            Self::SpuriousDragon => Some(1633267481),
-            Self::Byzantium => Some(1633267481),
-            Self::Constantinople => Some(1633267481),
-            Self::Petersburg => Some(1633267481),
-            Self::Istanbul => Some(1633267481),
-            Self::MuirGlacier => Some(1633267481),
-            Self::Berlin => Some(1633267481),
-            Self::London => Some(1633267481),
-            Self::ArrowGlacier => Some(1633267481),
-            Self::GrayGlacier => Some(1633267481),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
             Self::Paris => Some(1633267481),
             Self::Shanghai => Some(1677557088),
             Self::Cancun => Some(1706655072),
@@ -393,20 +387,20 @@ impl Hardfork {
         match self {
             Self::Shanghai => Some(1696000704),
             Self::Cancun => Some(1707305664),
-            Self::Frontier => Some(1695902100),
-            Self::Homestead => Some(1695902100),
-            Self::Dao => Some(1695902100),
-            Self::Tangerine => Some(1695902100),
-            Self::SpuriousDragon => Some(1695902100),
-            Self::Byzantium => Some(1695902100),
-            Self::Constantinople => Some(1695902100),
-            Self::Petersburg => Some(1695902100),
-            Self::Istanbul => Some(1695902100),
-            Self::MuirGlacier => Some(1695902100),
-            Self::Berlin => Some(1695902100),
-            Self::London => Some(1695902100),
-            Self::ArrowGlacier => Some(1695902100),
-            Self::GrayGlacier => Some(1695902100),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
             Self::Paris => Some(1695902100),
             _ => None,
         }
@@ -417,20 +411,20 @@ impl Hardfork {
     pub const fn arbitrum_sepolia_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(1692726996),
-            Self::Homestead => Some(1692726996),
-            Self::Dao => Some(1692726996),
-            Self::Tangerine => Some(1692726996),
-            Self::SpuriousDragon => Some(1692726996),
-            Self::Byzantium => Some(1692726996),
-            Self::Constantinople => Some(1692726996),
-            Self::Petersburg => Some(1692726996),
-            Self::Istanbul => Some(1692726996),
-            Self::MuirGlacier => Some(1692726996),
-            Self::Berlin => Some(1692726996),
-            Self::London => Some(1692726996),
-            Self::ArrowGlacier => Some(1692726996),
-            Self::GrayGlacier => Some(1692726996),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
             Self::Paris => Some(1692726996),
             Self::Shanghai => Some(1706634000),
             // Hardfork::ArbOS11 => Some(1706634000),
@@ -444,20 +438,20 @@ impl Hardfork {
     pub const fn arbitrum_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(1622240000),
-            Self::Homestead => Some(1622240000),
-            Self::Dao => Some(1622240000),
-            Self::Tangerine => Some(1622240000),
-            Self::SpuriousDragon => Some(1622240000),
-            Self::Byzantium => Some(1622240000),
-            Self::Constantinople => Some(1622240000),
-            Self::Petersburg => Some(1622240000),
-            Self::Istanbul => Some(1622240000),
-            Self::MuirGlacier => Some(1622240000),
-            Self::Berlin => Some(1622240000),
-            Self::London => Some(1622240000),
-            Self::ArrowGlacier => Some(1622240000),
-            Self::GrayGlacier => Some(1622240000),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
             Self::Paris => Some(1622240000),
             Self::Shanghai => Some(1708804873),
             // Hardfork::ArbOS11 => Some(1708804873),
@@ -472,27 +466,25 @@ impl Hardfork {
     pub const fn base_sepolia_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(1695768288),
-            Self::Homestead => Some(1695768288),
-            Self::Dao => Some(1695768288),
-            Self::Tangerine => Some(1695768288),
-            Self::SpuriousDragon => Some(1695768288),
-            Self::Byzantium => Some(1695768288),
-            Self::Constantinople => Some(1695768288),
-            Self::Petersburg => Some(1695768288),
-            Self::Istanbul => Some(1695768288),
-            Self::MuirGlacier => Some(1695768288),
-            Self::Berlin => Some(1695768288),
-            Self::London => Some(1695768288),
-            Self::ArrowGlacier => Some(1695768288),
-            Self::GrayGlacier => Some(1695768288),
-            Self::Paris => Some(1695768288),
-            Self::Bedrock => Some(1695768288),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
+            Self::Paris |
+            Self::Bedrock |
             Self::Regolith => Some(1695768288),
-            Self::Shanghai => Some(1699981200),
-            Self::Canyon => Some(1699981200),
-            Self::Cancun => Some(1708534800),
-            Self::Ecotone => Some(1708534800),
+            Self::Shanghai | Self::Canyon => Some(1699981200),
+            Self::Cancun | Self::Ecotone => Some(1708534800),
             _ => None,
         }
     }
@@ -502,27 +494,25 @@ impl Hardfork {
     pub const fn base_mainnet_activation_timestamp(&self) -> Option<u64> {
         #[allow(unreachable_patterns)]
         match self {
-            Self::Frontier => Some(1686789347),
-            Self::Homestead => Some(1686789347),
-            Self::Dao => Some(1686789347),
-            Self::Tangerine => Some(1686789347),
-            Self::SpuriousDragon => Some(1686789347),
-            Self::Byzantium => Some(1686789347),
-            Self::Constantinople => Some(1686789347),
-            Self::Petersburg => Some(1686789347),
-            Self::Istanbul => Some(1686789347),
-            Self::MuirGlacier => Some(1686789347),
-            Self::Berlin => Some(1686789347),
-            Self::London => Some(1686789347),
-            Self::ArrowGlacier => Some(1686789347),
-            Self::GrayGlacier => Some(1686789347),
-            Self::Paris => Some(1686789347),
-            Self::Bedrock => Some(1686789347),
+            Self::Frontier |
+            Self::Homestead |
+            Self::Dao |
+            Self::Tangerine |
+            Self::SpuriousDragon |
+            Self::Byzantium |
+            Self::Constantinople |
+            Self::Petersburg |
+            Self::Istanbul |
+            Self::MuirGlacier |
+            Self::Berlin |
+            Self::London |
+            Self::ArrowGlacier |
+            Self::GrayGlacier |
+            Self::Paris |
+            Self::Bedrock |
             Self::Regolith => Some(1686789347),
-            Self::Shanghai => Some(1704992401),
-            Self::Canyon => Some(1704992401),
-            Self::Cancun => Some(1710374401),
-            Self::Ecotone => Some(1710374401),
+            Self::Shanghai | Self::Canyon => Some(1704992401),
+            Self::Cancun | Self::Ecotone => Some(1710374401),
             _ => None,
         }
     }
@@ -668,20 +658,20 @@ mod tests {
         let op_hardforks =
             [Hardfork::Bedrock, Hardfork::Regolith, Hardfork::Canyon, Hardfork::Ecotone];
 
-        for hardfork in pow_hardforks.iter() {
+        for hardfork in &pow_hardforks {
             assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfWork);
             assert!(!hardfork.is_proof_of_stake());
             assert!(hardfork.is_proof_of_work());
         }
 
-        for hardfork in pos_hardforks.iter() {
+        for hardfork in &pos_hardforks {
             assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfStake);
             assert!(hardfork.is_proof_of_stake());
             assert!(!hardfork.is_proof_of_work());
         }
 
         #[cfg(feature = "optimism")]
-        for hardfork in op_hardforks.iter() {
+        for hardfork in &op_hardforks {
             assert_eq!(hardfork.consensus_type(), ConsensusType::ProofOfStake);
             assert!(hardfork.is_proof_of_stake());
             assert!(!hardfork.is_proof_of_work());

@@ -1,4 +1,4 @@
-//! Native Compact codec impl for primitive alloy [TxKind].
+//! Native Compact codec impl for primitive alloy [`TxKind`].
 
 use crate::Compact;
 use alloy_primitives::{Address, TxKind};

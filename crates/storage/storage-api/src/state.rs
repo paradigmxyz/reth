@@ -7,7 +7,7 @@ use reth_primitives::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
-/// Type alias of boxed [StateProvider].
+/// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
 
 /// An abstraction for a type that provides state data.
@@ -124,19 +124,15 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
             BlockNumberOrTag::Latest => self.latest(),
             BlockNumberOrTag::Finalized => {
                 // we can only get the finalized state by hash, not by num
-                let hash = match self.finalized_block_hash()? {
-                    Some(hash) => hash,
-                    None => return Err(ProviderError::FinalizedBlockNotFound),
-                };
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+
                 // only look at historical state
                 self.history_by_block_hash(hash)
             }
             BlockNumberOrTag::Safe => {
                 // we can only get the safe state by hash, not by num
-                let hash = match self.safe_block_hash()? {
-                    Some(hash) => hash,
-                    None => return Err(ProviderError::SafeBlockNotFound),
-                };
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
 
                 self.history_by_block_hash(hash)
             }

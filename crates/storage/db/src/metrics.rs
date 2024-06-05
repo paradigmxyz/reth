@@ -18,12 +18,12 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 /// Otherwise, metric recording will no-op.
 #[derive(Debug)]
 pub(crate) struct DatabaseEnvMetrics {
-    /// Caches OperationMetrics handles for each table and operation tuple.
-    operations: FxHashMap<(Tables, Operation), OperationMetrics>,
-    /// Caches TransactionMetrics handles for counters grouped by only transaction mode.
+    /// Caches `OperationMetrics` handles for each table and operation tuple.
+    operations: FxHashMap<(&'static str, Operation), OperationMetrics>,
+    /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
-    /// Caches TransactionOutcomeMetrics handles for counters grouped by transaction mode and
+    /// Caches `TransactionOutcomeMetrics` handles for counters grouped by transaction mode and
     /// outcome. Can only be updated at tx close, as outcome is only known at that point.
     transaction_outcomes:
         FxHashMap<(TransactionMode, TransactionOutcome), TransactionOutcomeMetrics>,
@@ -42,7 +42,7 @@ impl DatabaseEnvMetrics {
 
     /// Generate a map of all possible operation handles for each table and operation tuple.
     /// Used for tracking all operation metrics.
-    fn generate_operation_handles() -> FxHashMap<(Tables, Operation), OperationMetrics> {
+    fn generate_operation_handles() -> FxHashMap<(&'static str, Operation), OperationMetrics> {
         let mut operations = FxHashMap::with_capacity_and_hasher(
             Tables::COUNT * Operation::COUNT,
             BuildHasherDefault::<FxHasher>::default(),
@@ -50,7 +50,7 @@ impl DatabaseEnvMetrics {
         for table in Tables::ALL {
             for operation in Operation::iter() {
                 operations.insert(
-                    (*table, operation),
+                    (table.name(), operation),
                     OperationMetrics::new_with_labels(&[
                         (Labels::Table.as_str(), table.name()),
                         (Labels::Operation.as_str(), operation.as_str()),
@@ -103,7 +103,7 @@ impl DatabaseEnvMetrics {
     /// Panics if a metric recorder is not found for the given table and operation.
     pub(crate) fn record_operation<R>(
         &self,
-        table: Tables,
+        table: &'static str,
         operation: Operation,
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
@@ -336,8 +336,8 @@ impl TransactionOutcomeMetrics {
 pub(crate) struct OperationMetrics {
     /// Total number of database operations made
     calls_total: Counter,
-    /// The time it took to execute a database operation (put/upsert/insert/append/append_dup) with
-    /// value larger than [LARGE_VALUE_THRESHOLD_BYTES] bytes.
+    /// The time it took to execute a database operation (`put/upsert/insert/append/append_dup`)
+    /// with value larger than [`LARGE_VALUE_THRESHOLD_BYTES`] bytes.
     large_value_duration_seconds: Histogram,
 }
 
@@ -345,7 +345,7 @@ impl OperationMetrics {
     /// Record operation metric.
     ///
     /// The duration it took to execute the closure is recorded only if the provided `value_size` is
-    /// larger than [LARGE_VALUE_THRESHOLD_BYTES].
+    /// larger than [`LARGE_VALUE_THRESHOLD_BYTES`].
     pub(crate) fn record<R>(&self, value_size: Option<usize>, f: impl FnOnce() -> R) -> R {
         self.calls_total.increment(1);
 

@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tokio_util::sync::PollSender;
 
-/// The maximum number of [BodyDownloaderResult]s to hold in the buffer.
+/// The maximum number of [`BodyDownloaderResult`]s to hold in the buffer.
 pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
@@ -32,7 +32,7 @@ pub struct TaskDownloader {
 // === impl TaskDownloader ===
 
 impl TaskDownloader {
-    /// Spawns the given `downloader` via [tokio::task::spawn] returns a [TaskDownloader] that's
+    /// Spawns the given `downloader` via [`tokio::task::spawn`] returns a [`TaskDownloader`] that's
     /// connected to that task.
     ///
     /// # Panics
@@ -64,8 +64,8 @@ impl TaskDownloader {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
 
-    /// Spawns the given `downloader` via the given [TaskSpawner] returns a [TaskDownloader] that's
-    /// connected to that task.
+    /// Spawns the given `downloader` via the given [`TaskSpawner`] returns a [`TaskDownloader`]
+    /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
         T: BodyDownloader + 'static,
@@ -101,7 +101,7 @@ impl Stream for TaskDownloader {
     }
 }
 
-/// A [BodyDownloader] that runs on its own task
+/// A [`BodyDownloader`] that runs on its own task
 struct SpawnedDownloader<T> {
     updates: UnboundedReceiverStream<RangeInclusive<BlockNumber>>,
     bodies_tx: PollSender<BodyDownloaderResult>,
