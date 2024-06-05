@@ -51,6 +51,8 @@ use crate::eth::revm_utils::FillableTransaction;
 #[cfg(feature = "optimism")]
 use reth_rpc_types::OptimismTransactionReceiptFields;
 use revm_primitives::db::{Database, DatabaseRef};
+use alloy_network::TransactionBuilder;
+use alloy_rlp::Encodable;
 
 /// Helper alias type for the state's [`CacheDB`]
 pub(crate) type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
@@ -897,8 +899,16 @@ where
             ..
         } = request;
 
+        use alloy_consensus::TxEnvelope;
+        use alloy_signer::Signature;
+        use alloy_signer_wallet::LocalWallet;
+        use reth_transaction_pool::EthPooledTransaction;
+
+        //
+        // let tx_enveloper = TxEnvelope::;
+        // let transaction = TransactionBuilder::build();
         // todo: remove this inlining after https://github.com/alloy-rs/alloy/pull/183#issuecomment-1928161285
-        let transaction = match (
+        let my_tx =   match (
             gas_price,
             max_fee_per_gas,
             access_list.take(),
@@ -909,29 +919,29 @@ where
             // legacy transaction
             // gas price required
             (Some(_), None, None, None, None, None) => {
-                Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
+                Some(alloy_consensus::TxLegacy{
                     nonce: nonce.unwrap_or_default(),
-                    gas_price: U256::from(gas_price.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
+                    gas_price: gas_price.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
+                    to: to.unwrap_or(Create),
                     chain_id: None,
-                }))
+                } as  &dyn alloy_consensus::Transaction)
             }
             // EIP2930
             // if only accesslist is set, and no eip1599 fees
             (_, None, Some(access_list), None, None, None) => {
-                Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
+                Some(alloy_consensus::TxEip2930{
                     nonce: nonce.unwrap_or_default(),
-                    gas_price: U256::from(gas_price.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
+                    gas_price: gas_price.unwrap_or_default(),
+                    gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
+                    to: to.unwrap_or(Create),
                     chain_id: 0,
                     access_list,
-                }))
+                } as  &dyn alloy_consensus::Transaction)
             }
             // EIP1559
             // if 4844 fields missing
@@ -939,19 +949,19 @@ where
             // sidecar,
             (None, _, _, None, None, None) => {
                 // Empty fields fall back to the canonical transaction schema.
-                Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
+                Some(alloy_consensus::TxEip1559{
                     nonce: nonce.unwrap_or_default(),
-                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                    max_priority_fee_per_gas: U256::from(
-                        max_priority_fee_per_gas.unwrap_or_default(),
-                    ),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
+                    max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
+                    max_priority_fee_per_gas:
+                        max_priority_fee_per_gas.unwrap_or_default()
+                    ,
+                    gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or_default(),
                     input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
+                    to: to.unwrap_or(Create),
                     chain_id: 0,
                     access_list: access_list.unwrap_or_default(),
-                }))
+                } as &dyn alloy_consensus::Transaction)
             }
             // EIP4884
             // all blob fields required
@@ -964,93 +974,103 @@ where
                 Some(sidecar),
             ) => {
                 // As per the EIP, we follow the same semantics as EIP-1559.
-                Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
-                    chain_id: 0,
-                    nonce: nonce.unwrap_or_default(),
-                    max_priority_fee_per_gas: U256::from(
-                        max_priority_fee_per_gas.unwrap_or_default(),
-                    ),
-                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
-                    to: match to {
-                        Some(RpcTransactionKind::Call(to)) => to,
-                        _ => Address::default(),
-                    },
-                    access_list: access_list.unwrap_or_default(),
+                Some(alloy_consensus::TxEip4844WithSidecar {
+                        tx: alloy_consensus::TxEip4844{ chain_id: 0,
+                        nonce: nonce.unwrap_or_default(),
+                        max_priority_fee_per_gas:
+                            max_priority_fee_per_gas.unwrap_or_default(),
 
-                    // eip-4844 specific.
-                    max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
-                    blob_versioned_hashes,
+                        max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
+                        gas_limit: gas.unwrap_or_default(),
+                        value: value.unwrap_or_default(),
+                        input: data.into_input().unwrap_or_default(),
+                        #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
+                        to: match to {
+                            Some(RpcTransactionKind::Call(to)) => to,
+                            _ => Address::default(),
+                        },
+                        access_list: access_list.unwrap_or_default(),
+
+                        // eip-4844 specific.
+                        max_fee_per_blob_gas: max_fee_per_blob_gas,
+                        blob_versioned_hashes,
+                    },
                     sidecar,
-                }))
+                } as &dyn alloy_consensus::Transaction)
             }
 
             _ => None,
         };
+        //
+        // let transaction = match transaction {
+        //     Some(TypedTransactionRequest::Legacy(mut req)) => {
+        //         req.chain_id = Some(chain_id.to());
+        //         req.gas_limit = gas_limit.saturating_to();
+        //         req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
+        //
+        //         TypedTransactionRequest::Legacy(req)
+        //     }
+        //     Some(TypedTransactionRequest::EIP2930(mut req)) => {
+        //         req.chain_id = chain_id.to();
+        //         req.gas_limit = gas_limit.saturating_to();
+        //         req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
+        //
+        //         TypedTransactionRequest::EIP2930(req)
+        //     }
+        //     Some(TypedTransactionRequest::EIP1559(mut req)) => {
+        //         let (max_fee_per_gas, max_priority_fee_per_gas) = self
+        //             .eip1559_fees(
+        //                 max_fee_per_gas.map(U256::from),
+        //                 max_priority_fee_per_gas.map(U256::from),
+        //             )
+        //             .await?;
+        //
+        //         req.chain_id = chain_id.to();
+        //         req.gas_limit = gas_limit.saturating_to();
+        //         req.max_fee_per_gas = max_fee_per_gas.saturating_to();
+        //         req.max_priority_fee_per_gas = max_priority_fee_per_gas.saturating_to();
+        //
+        //         TypedTransactionRequest::EIP1559(req)
+        //     }
+        //     Some(TypedTransactionRequest::EIP4844(mut req)) => {
+        //         let (max_fee_per_gas, max_priority_fee_per_gas) = self
+        //             .eip1559_fees(
+        //                 max_fee_per_gas.map(U256::from),
+        //                 max_priority_fee_per_gas.map(U256::from),
+        //             )
+        //             .await?;
+        //
+        //         req.max_fee_per_gas = max_fee_per_gas;
+        //         req.max_priority_fee_per_gas = max_priority_fee_per_gas;
+        //         req.max_fee_per_blob_gas =
+        //             self.eip4844_blob_fee(max_fee_per_blob_gas.map(U256::from)).await?;
+        //
+        //         req.chain_id = chain_id.to();
+        //         req.gas_limit = gas_limit;
+        //
+        //         TypedTransactionRequest::EIP4844(req)
+        //     }
+        //     None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
+        // };
 
-        let transaction = match transaction {
-            Some(TypedTransactionRequest::Legacy(mut req)) => {
-                req.chain_id = Some(chain_id.to());
-                req.gas_limit = gas_limit.saturating_to();
-                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
 
-                TypedTransactionRequest::Legacy(req)
-            }
-            Some(TypedTransactionRequest::EIP2930(mut req)) => {
-                req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit.saturating_to();
-                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
+        let mut encoded = Vec::new();
+        my_tx.encode_for_signing(&mut encoded);
 
-                TypedTransactionRequest::EIP2930(req)
-            }
-            Some(TypedTransactionRequest::EIP1559(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                    .eip1559_fees(
-                        max_fee_per_gas.map(U256::from),
-                        max_priority_fee_per_gas.map(U256::from),
-                    )
-                    .await?;
+        let signature = local_wallet.sign_signable(&mut my_tx.clone()).unwrap(); // init local wallet??
+        let signed_tx = my_tx.clone().into_signed(signature);
 
-                req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit.saturating_to();
-                req.max_fee_per_gas = max_fee_per_gas.saturating_to();
-                req.max_priority_fee_per_gas = max_priority_fee_per_gas.saturating_to();
+        let mut enveloped_tx = Vec::new();
+        TxEnvelope::from(signed_tx).encode(enveloped_tx);
 
-                TypedTransactionRequest::EIP1559(req)
-            }
-            Some(TypedTransactionRequest::EIP4844(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                    .eip1559_fees(
-                        max_fee_per_gas.map(U256::from),
-                        max_priority_fee_per_gas.map(U256::from),
-                    )
-                    .await?;
+        let decoded_tx = TransactionSigned::decode_enveloped_typed_transaction(
+            &mut enveloped_tx.as_ref(),
+        )
+        .unwrap();
 
-                req.max_fee_per_gas = max_fee_per_gas;
-                req.max_priority_fee_per_gas = max_priority_fee_per_gas;
-                req.max_fee_per_blob_gas =
-                    self.eip4844_blob_fee(max_fee_per_blob_gas.map(U256::from)).await?;
-
-                req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit;
-
-                TypedTransactionRequest::EIP4844(req)
-            }
-            None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
-        };
-
-        let signed_tx = self.sign_request(&from, transaction)?;
-
-        let recovered =
-            signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-
-        let pool_transaction = match recovered.try_into() {
-            Ok(converted) => <Pool::Transaction>::from_recovered_pooled_transaction(converted),
-            Err(_) => return Err(EthApiError::TransactionConversionError),
-        };
+        let pool_transaction = EthPooledTransaction::from_recovered_transaction(
+            decoded_tx.clone().into_ecrecovered().unwrap(),
+        );
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;

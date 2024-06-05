@@ -5,6 +5,7 @@
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
 
+// TODO: Get rid of it
 /// Container type for various Ethereum transaction requests
 ///
 /// Its variants correspond to specific allowed transactions:

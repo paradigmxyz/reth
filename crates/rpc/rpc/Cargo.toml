@@ -34,6 +34,10 @@ reth-evm-optimism = { workspace = true, optional = true }
 
 # eth
 alloy-rlp.workspace = true
+alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-signer.workspace = true
+alloy-signer-wallet.workspace = true
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 alloy-primitives.workspace = true
 alloy-sol-types.workspace = true
