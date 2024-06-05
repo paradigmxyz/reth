@@ -58,6 +58,7 @@ eyre.workspace = true
 fdlimit.workspace = true
 confy.workspace = true
 rayon.workspace = true
+backon.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
