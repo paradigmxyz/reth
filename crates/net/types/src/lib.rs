@@ -62,7 +62,7 @@ pub mod node_record;
 pub use node_record::{NodeRecord, NodeRecordParseError};
 
 pub mod trusted_peer;
-pub use trusted_peer::{RetryStrategy, TrustedPeer};
+pub use trusted_peer::TrustedPeer;
 
 /// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
 /// uncompressed pubkey.

@@ -11,8 +11,6 @@ use std::{
 use crate::{NodeRecord, PeerId};
 use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::time::Duration;
-use tokio_retry::{strategy::FixedInterval, Retry};
 use url::Host;
 
 /// Represents the node record of a trusted peer. The only difference between this and a
@@ -35,22 +33,6 @@ pub struct TrustedPeer {
     pub id: PeerId,
 }
 
-/// Retry strategy for DNS lookups.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RetryStrategy {
-    /// The amount of time between attempts.
-    pub interval: Duration,
-    /// The number of attempts to make before failing.
-    pub attempts: usize,
-}
-
-impl RetryStrategy {
-    /// Create a new retry strategy.
-    pub const fn new(interval: Duration, attempts: usize) -> Self {
-        Self { interval, attempts }
-    }
-}
-
 impl TrustedPeer {
     /// Derive the [`NodeRecord`] from the secret key and addr
     pub fn from_secret_key(host: Host, port: u16, sk: &SecretKey) -> Self {
@@ -65,14 +47,7 @@ impl TrustedPeer {
     }
 
     /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
-    ///
-    /// This takes as input a [`RetryStrategy`] which specifies how to handle DNS lookup failures.
-    ///
-    /// Using a retry strategy of `None` will not retry the lookup if a lookup is made and it fails.
-    pub async fn resolve(
-        &self,
-        retry_strategy: Option<RetryStrategy>,
-    ) -> Result<NodeRecord, Error> {
+    pub async fn resolve(&self) -> Result<NodeRecord, Error> {
         let domain = match self.host.to_owned() {
             Host::Ipv4(ip) => {
                 let id = self.id;
@@ -91,32 +66,17 @@ impl TrustedPeer {
             Host::Domain(domain) => domain,
         };
 
-        // Execute the lookup
-        let lookup = || async { Self::lookup_host(&domain).await };
-
-        // Use provided retry strategy or use strategy which does not retry
-        let ip = match retry_strategy {
-            Some(strategy) => {
-                let retry = FixedInterval::new(strategy.interval).take(strategy.attempts);
-                Retry::spawn(retry, lookup).await?
-            }
-            None => lookup().await?,
-        };
-
-        Ok(NodeRecord {
-            address: ip,
-            id: self.id,
-            tcp_port: self.tcp_port,
-            udp_port: self.udp_port,
-        })
-    }
-
-    async fn lookup_host(domain: &str) -> Result<std::net::IpAddr, Error> {
+        // Resolve the domain to an IP address
         let mut ips = tokio::net::lookup_host(format!("{domain}:0")).await?;
         let ip = ips
             .next()
             .ok_or_else(|| Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
-        Ok(ip.ip())
+        Ok(NodeRecord {
+            address: ip.ip(),
+            id: self.id,
+            tcp_port: self.tcp_port,
+            udp_port: self.udp_port,
+        })
     }
 }
 
@@ -317,30 +277,16 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_dns_node_record() {
         // Set up tests
-        let tests = vec![
-            (
-                "localhost",
-                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 0 }),
-            ),
-            (
-                "localhost",
-                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 3 }),
-            ),
-            ("localhost", None),
-            (
-                "localhost",
-                Some(RetryStrategy { interval: Duration::from_millis(100), attempts: 0 }),
-            ),
-        ];
+        let tests = vec![("localhost")];
 
         // Run tests
-        for (domain, retry_strategy) in tests {
+        for domain in tests {
             // Construct record
             let rec =
                 TrustedPeer::new(url::Host::Domain(domain.to_owned()), 30300, PeerId::random());
 
             // Resolve domain and validate
-            let rec = rec.resolve(retry_strategy).await.unwrap();
+            let rec = rec.resolve().await.unwrap();
             match rec.address {
                 std::net::IpAddr::V4(addr) => {
                     assert_eq!(addr, std::net::Ipv4Addr::new(127, 0, 0, 1))

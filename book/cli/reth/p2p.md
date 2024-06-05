@@ -110,12 +110,7 @@ Networking:
 
           Will fall back to a network-specific default if not specified.
 
-      --retry-millis <RETRY_MILLIS>
-          Amount of milliseconds to wait before retrying DNS resolution requests peering
-
-          [default: 1000]
-
-      --retry-attempts <RETRY_ATTEMPTS>
+      --dns-retries <DNS_RETRIES>
           Amount of DNS resolution requests retries to perform when peering
 
           [default: 0]

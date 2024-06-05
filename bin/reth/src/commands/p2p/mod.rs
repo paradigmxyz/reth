@@ -89,7 +89,7 @@ impl Command {
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
         for peer in &self.network.trusted_peers {
-            config.peers.trusted_nodes.insert(peer.resolve(None).await?);
+            config.peers.trusted_nodes.insert(peer.resolve().await?);
         }
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {

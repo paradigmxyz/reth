@@ -7091,7 +7091,6 @@ dependencies = [
  "serde_with",
  "thiserror",
  "tokio",
- "tokio-retry",
  "url",
 ]
 
@@ -7135,6 +7134,7 @@ name = "reth-node-builder"
 version = "0.2.0-beta.8"
 dependencies = [
  "aquamarine",
+ "backon",
  "confy",
  "eyre",
  "fdlimit",
@@ -7152,7 +7152,6 @@ dependencies = [
  "reth-exex",
  "reth-network",
  "reth-network-p2p",
- "reth-network-types",
  "reth-node-api",
  "reth-node-core",
  "reth-node-events",
@@ -9437,17 +9436,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.66",
-]
-
-[[package]]
-name = "tokio-retry"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f57eb36ecbe0fc510036adff84824dd3c24bb781e21bfa67b69d556aa85214f"
-dependencies = [
- "pin-project",
- "rand 0.8.5",
- "tokio",
 ]
 
 [[package]]

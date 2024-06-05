@@ -209,7 +209,7 @@ where
         // resolve boot nodes
         let mut resolved_boot_nodes = vec![];
         for record in &boot_nodes {
-            let resolved = record.resolve(None).await?;
+            let resolved = record.resolve().await?;
             resolved_boot_nodes.push(resolved);
         }
 
