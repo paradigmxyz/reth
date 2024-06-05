@@ -8,16 +8,19 @@ use crate::{
     StateProviderBox, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db::{init_db, mdbx::DatabaseArguments, models::AccountBeforeTx, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
+    ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+};
+use reth_storage_api::{
+    AccountReader, ChangeSetReader, FullBundleStateDataProvider, StateProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
@@ -569,6 +572,21 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
     }
 }
 
+impl<DB: Database> AccountReader for ProviderFactory<DB> {
+    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+        self.provider()?.basic_account(address)
+    }
+}
+
+impl<DB: Database> ChangeSetReader for ProviderFactory<DB> {
+    fn account_block_changeset(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<Vec<AccountBeforeTx>> {
+        self.provider()?.account_block_changeset(block_number)
+    }
+}
+
 impl<DB> Clone for ProviderFactory<DB> {
     fn clone(&self) -> Self {
         Self {
@@ -578,6 +596,7 @@ impl<DB> Clone for ProviderFactory<DB> {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
