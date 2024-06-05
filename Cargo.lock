@@ -2806,11 +2806,17 @@ version = "0.0.0"
 dependencies = [
  "eyre",
  "futures",
+ "rand 0.8.5",
  "reth",
+ "reth-config",
+ "reth-db-common",
+ "reth-evm",
  "reth-exex",
  "reth-node-api",
  "reth-node-ethereum",
+ "reth-testing-utils",
  "reth-tracing",
+ "tokio",
 ]
 
 [[package]]
