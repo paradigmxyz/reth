@@ -15,6 +15,7 @@ use crate::{
     EthApiSpec,
 };
 
+/// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
     /// Returns a handle for reading data from transaction pool.
     ///
@@ -48,6 +49,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         })
     }
 
+    /// Returns code of given account, at given blocknumber.
     fn get_code(
         &self,
         address: Address,
@@ -62,6 +64,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         })
     }
 
+    /// Returns balance of given account, at given blocknumber.
     fn balance(
         &self,
         address: Address,
@@ -75,6 +78,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         })
     }
 
+    /// Returns values stored of given account, at given blocknumber.
     fn storage_at(
         &self,
         address: Address,
@@ -91,12 +95,13 @@ pub trait EthState: LoadState + SpawnBlocking {
         })
     }
 
+    /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
     fn get_proof(
         &self,
         address: Address,
         keys: Vec<JsonStorageKey>,
         block_id: Option<BlockId>,
-    ) -> impl Future<Output = EthResult<EIP1186AccountProofResponse>> + Send
+    ) -> EthResult<impl Future<Output = EthResult<EIP1186AccountProofResponse>> + Send>
     where
         Self: EthApiSpec,
     {
@@ -118,12 +123,12 @@ pub trait EthState: LoadState + SpawnBlocking {
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        self.spawn_tracing(move |this| {
-            let state = this.state_at_block_id(block_id);
+        Ok(self.spawn_tracing(move |this| {
+            let state = this.state_at_block_id(block_id)?;
             let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
             let proof = state.proof(address, &storage_keys)?;
             Ok(from_primitive_account_proof(proof))
-        })
+        }))
     }
 }
 

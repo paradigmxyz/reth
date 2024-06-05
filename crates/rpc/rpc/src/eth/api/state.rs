@@ -1,7 +1,22 @@
 //! Contains RPC handler implementations specific to state.
 
-use crate::{eth::api::LoadState, EthApi};
+use crate::{
+    eth::api::{EthState, LoadState, SpawnBlocking},
+    EthApi,
+};
 use reth_provider::StateProviderFactory;
+use reth_transaction_pool::TransactionPool;
+
+impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: SpawnBlocking + LoadState,
+    Pool: TransactionPool,
+{
+    #[inline]
+    fn pool(&self) -> &impl TransactionPool {
+        self.inner.pool()
+    }
+}
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
@@ -19,7 +34,9 @@ mod tests {
         cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
     };
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, StorageKey, StorageValue};
+    use reth_primitives::{
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, Address, StorageKey, StorageValue, U256,
+    };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::test_utils::testing_pool;
@@ -45,7 +62,7 @@ mod tests {
             None,
         );
         let address = Address::random();
-        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).unwrap();
+        let storage = eth_api.storage_at(address, U256::ZERO.into(), None).await.unwrap();
         assert_eq!(storage, U256::ZERO.to_be_bytes());
 
         // === Mock ===
@@ -71,7 +88,7 @@ mod tests {
         );
 
         let storage_key: U256 = storage_key.into();
-        let storage = eth_api.storage_at(address, storage_key.into(), None).unwrap();
+        let storage = eth_api.storage_at(address, storage_key.into(), None).await.unwrap();
         assert_eq!(storage, storage_value.to_be_bytes());
     }
 }

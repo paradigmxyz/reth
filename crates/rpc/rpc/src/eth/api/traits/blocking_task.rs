@@ -49,11 +49,7 @@ pub trait SpawnBlocking: Clone + Send + Sync + 'static {
         R: Send + 'static,
     {
         let this = self.clone();
-        async move {
-            self.tracing_task_pool()
-                .spawn(move || f(this))
-                .await
-                .map_err(|_| EthApiError::InternalBlockingTaskError)?
-        }
+        let fut = self.tracing_task_pool().spawn(move || f(this));
+        async move { fut.await.map_err(|_| EthApiError::InternalBlockingTaskError)? }
     }
 }
