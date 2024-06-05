@@ -1,9 +1,8 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
-};
+use reth_db::{static_file::HeaderMask, tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
@@ -654,7 +653,7 @@ mod tests {
     use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{

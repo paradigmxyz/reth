@@ -5,7 +5,7 @@ use crate::{
     segments::{PruneInput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{
     BlockNumber, FinishedExExHeight, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
     PruneSegment, StaticFileSegment,

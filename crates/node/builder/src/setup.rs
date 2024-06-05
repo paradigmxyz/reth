@@ -2,7 +2,7 @@
 
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::Consensus;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,

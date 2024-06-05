@@ -57,9 +57,11 @@ impl ReusableDecompressor {
         let mut reserved_upper_bound = false;
         while let Err(err) = self.decompressor.decompress_to_buffer(src, &mut self.buf) {
             let err = err.to_string();
-            if !err.contains("Destination buffer is too small") {
-                panic!("Failed to decompress {} bytes: {err}", src.len());
-            }
+            assert!(
+                err.contains("Destination buffer is too small"),
+                "Failed to decompress {} bytes: {err}",
+                src.len()
+            );
 
             let additional = 'b: {
                 // Try to get the upper bound of the decompression for the given source.

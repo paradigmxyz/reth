@@ -23,11 +23,8 @@
 //! # fn create(exec: impl BlockExecutorProvider) {
 //!
 //! let provider_factory = create_test_provider_factory();
-//! let static_file_producer = StaticFileProducer::new(
-//!     provider_factory.clone(),
-//!     provider_factory.static_file_provider(),
-//!     PruneModes::default(),
-//! );
+//! let static_file_producer =
+//!     StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 //! // Build a pipeline with all offline stages.
 //! let pipeline = Pipeline::builder()
 //!     .add_stages(OfflineStages::new(exec, StageConfig::default(), PruneModes::default()))
@@ -45,7 +42,7 @@ use crate::{
 };
 use reth_config::config::StageConfig;
 use reth_consensus::Consensus;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives::PruneModes;

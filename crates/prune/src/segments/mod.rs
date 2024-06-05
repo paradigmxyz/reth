@@ -14,7 +14,7 @@ pub use account_history::AccountHistory;
 pub use headers::Headers;
 pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{
     BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
     PruneSegment, TxNumber,

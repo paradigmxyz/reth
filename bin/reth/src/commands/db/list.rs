@@ -2,9 +2,10 @@ use super::tui::DbListTUI;
 use crate::utils::{DbTool, ListFilter};
 use clap::Parser;
 use eyre::WrapErr;
-use reth_db::{database::Database, table::Table, DatabaseEnv, RawValue, TableViewer, Tables};
+use reth_db::{DatabaseEnv, RawValue, TableViewer, Tables};
+use reth_db_api::{database::Database, table::Table};
 use reth_primitives::hex;
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Arc};
 use tracing::error;
 
 #[derive(Parser, Debug)]
@@ -50,7 +51,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db list` command
-    pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
         self.table.view(&ListTableViewer { tool, args: &self })
     }
 
@@ -81,7 +82,7 @@ impl Command {
 }
 
 struct ListTableViewer<'a> {
-    tool: &'a DbTool<DatabaseEnv>,
+    tool: &'a DbTool<Arc<DatabaseEnv>>,
     args: &'a Command,
 }
 

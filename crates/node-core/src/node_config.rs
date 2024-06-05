@@ -13,7 +13,7 @@ use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_config::{config::PruneConfig, Config};
-use reth_db::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
@@ -309,10 +309,10 @@ impl NodeConfig {
         client: C,
         executor: TaskExecutor,
         head: Head,
-        data_dir: &ChainPath<DataDirPath>,
+        data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<NetworkConfig<C>> {
         info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = self.network_secret(data_dir)?;
+        let secret_key = self.network_secret(&data_dir)?;
         let default_peers_path = data_dir.known_peers();
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
@@ -326,7 +326,7 @@ impl NodeConfig {
         client: C,
         executor: TaskExecutor,
         head: Head,
-        data_dir: &ChainPath<DataDirPath>,
+        data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<NetworkBuilder<C, (), ()>>
     where
         C: BlockNumReader,

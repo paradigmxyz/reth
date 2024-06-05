@@ -16,6 +16,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-execution-errors.workspace = true
 reth-db.workspace = true
+reth-db-api.workspace = true
 
 revm.workspace = true
 
@@ -49,7 +50,11 @@ triehash = "0.8"
 
 # misc
 proptest.workspace = true
-tokio = { workspace = true, default-features = false, features = ["sync", "rt", "macros"] }
+tokio = { workspace = true, default-features = false, features = [
+    "sync",
+    "rt",
+    "macros",
+] }
 tokio-stream.workspace = true
 once_cell.workspace = true
 serde_json.workspace = true

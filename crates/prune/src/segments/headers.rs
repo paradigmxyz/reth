@@ -5,10 +5,10 @@ use crate::{
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, RangeWalker},
     database::Database,
-    tables,
     transaction::DbTxMut,
 };
 
@@ -188,7 +188,8 @@ where
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::{tables, transaction::DbTx};
+    use reth_db::tables;
+    use reth_db_api::transaction::DbTx;
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, B256, U256,

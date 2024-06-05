@@ -10,17 +10,19 @@ use crate::{
 };
 use futures::Future;
 use reth_db::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
     test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
+};
+use reth_db_api::{
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_exex::ExExContext;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    dirs::{DataDirPath, MaybePlatformPath},
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
@@ -161,26 +163,24 @@ impl<DB> NodeBuilder<DB> {
     /// Preconfigure the builder with the context to launch the node.
     ///
     /// This provides the task executor and the data directory for the node.
-    pub const fn with_launch_context(
-        self,
-        task_executor: TaskExecutor,
-        data_dir: ChainPath<DataDirPath>,
-    ) -> WithLaunchContext<Self> {
-        WithLaunchContext { builder: self, task_executor, data_dir }
+    pub const fn with_launch_context(self, task_executor: TaskExecutor) -> WithLaunchContext<Self> {
+        WithLaunchContext { builder: self, task_executor }
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
     pub fn testing_node(
-        self,
+        mut self,
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
         let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
+        self.config.datadir.datadir = path.clone();
+
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
 
         let db = create_test_rw_db_with_path(data_dir.db());
 
-        WithLaunchContext { builder: self.with_database(db), task_executor, data_dir }
+        WithLaunchContext { builder: self.with_database(db), task_executor }
     }
 }
 
@@ -217,18 +217,12 @@ where
 pub struct WithLaunchContext<Builder> {
     builder: Builder,
     task_executor: TaskExecutor,
-    data_dir: ChainPath<DataDirPath>,
 }
 
 impl<Builder> WithLaunchContext<Builder> {
     /// Returns a reference to the task executor.
     pub const fn task_executor(&self) -> &TaskExecutor {
         &self.task_executor
-    }
-
-    /// Returns a reference to the data directory.
-    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
-        &self.data_dir
     }
 }
 
@@ -246,11 +240,7 @@ where
     where
         T: NodeTypes,
     {
-        WithLaunchContext {
-            builder: self.builder.with_types(),
-            task_executor: self.task_executor,
-            data_dir: self.data_dir,
-        }
+        WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
 
     /// Preconfigures the node with a specific node implementation.
@@ -305,7 +295,6 @@ where
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
             task_executor: self.task_executor,
-            data_dir: self.data_dir,
         }
     }
 }
@@ -326,7 +315,6 @@ where
         Self {
             builder: self.builder.on_component_initialized(hook),
             task_executor: self.task_executor,
-            data_dir: self.data_dir,
         }
     }
 
@@ -339,11 +327,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.on_node_started(hook),
-            task_executor: self.task_executor,
-            data_dir: self.data_dir,
-        }
+        Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -356,11 +340,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.on_rpc_started(hook),
-            task_executor: self.task_executor,
-            data_dir: self.data_dir,
-        }
+        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
     }
 
     /// Sets the hook that is run to configure the rpc modules.
@@ -372,11 +352,7 @@ where
             + Send
             + 'static,
     {
-        Self {
-            builder: self.builder.extend_rpc_modules(hook),
-            task_executor: self.task_executor,
-            data_dir: self.data_dir,
-        }
+        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -395,7 +371,6 @@ where
         Self {
             builder: self.builder.install_exex(exex_id, exex),
             task_executor: self.task_executor,
-            data_dir: self.data_dir,
         }
     }
 
@@ -403,9 +378,9 @@ where
     pub async fn launch(
         self,
     ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>> {
-        let Self { builder, task_executor, data_dir } = self;
+        let Self { builder, task_executor } = self;
 
-        let launcher = DefaultNodeLauncher::new(task_executor, data_dir);
+        let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());
         builder.launch_with(launcher).await
     }
 
@@ -425,8 +400,6 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) provider: Node::Provider,
     /// The executor of the node.
     pub(crate) executor: TaskExecutor,
-    /// The data dir of the node.
-    pub(crate) data_dir: ChainPath<DataDirPath>,
     /// The config of the node
     pub(crate) config: NodeConfig,
     /// loaded config
@@ -439,11 +412,10 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
-        data_dir: ChainPath<DataDirPath>,
         config: NodeConfig,
         reth_config: reth_config::Config,
     ) -> Self {
-        Self { head, provider, executor, data_dir, config, reth_config }
+        Self { head, provider, executor, config, reth_config }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -459,13 +431,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Returns the config of the node.
     pub const fn config(&self) -> &NodeConfig {
         &self.config
-    }
-
-    /// Returns the data dir of the node.
-    ///
-    /// This gives access to all relevant files and directories of the node's datadir.
-    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
-        &self.data_dir
     }
 
     /// Returns the executor of the node.
@@ -502,7 +467,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             self.provider.clone(),
             self.executor.clone(),
             self.head,
-            self.data_dir(),
+            self.config.datadir(),
         )
     }
 
@@ -514,7 +479,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 self.provider.clone(),
                 self.executor.clone(),
                 self.head,
-                self.data_dir(),
+                self.config.datadir(),
             )
             .await
     }
@@ -539,7 +504,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.executor.spawn_critical("p2p txpool", txpool);
         self.executor.spawn_critical("p2p eth request handler", eth);
 
-        let default_peers_path = self.data_dir().known_peers();
+        let default_peers_path = self.config.datadir().known_peers();
         let known_peers_file = self.config.network.persistent_peers_file(default_peers_path);
         self.executor.spawn_critical_with_graceful_shutdown_signal(
             "p2p network task",
@@ -560,7 +525,6 @@ impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
             .field("head", &self.head)
             .field("provider", &std::any::type_name::<Node::Provider>())
             .field("executor", &self.executor)
-            .field("data_dir", &self.data_dir)
             .field("config", &self.config)
             .finish()
     }

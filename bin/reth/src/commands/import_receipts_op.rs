@@ -1,43 +1,33 @@
 //! Command that imports OP mainnet receipts from Bedrock datadir, exported via
 //! <https://github.com/testinprod-io/op-geth/pull/1>.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-
+use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_db::{database::Database, init_db, tables, transaction::DbTx};
+use reth_db::tables;
+use reth_db_api::{database::Database, transaction::DbTx};
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
 };
-use reth_node_core::{args::DatadirArgs, version::SHORT_VERSION};
+use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, Receipts, StaticFileSegment};
 use reth_provider::{
-    providers::StaticFileProvider, BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
+use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, trace};
-
-use crate::args::{
-    utils::{genesis_value_parser, SUPPORTED_CHAINS},
-    DatabaseArgs,
-};
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct ImportReceiptsOpCommand {
     #[command(flatten)]
-    datadir: DatadirArgs,
+    env: EnvironmentArgs,
 
     /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
 
     /// The path to a receipts file for import. File must use `HackReceiptFileCodec` (used for
     /// exporting OP chain segment below Bedrock block via testinprod/op-geth).
@@ -57,21 +47,7 @@ impl ImportReceiptsOpCommand {
             "Chunking receipts import"
         );
 
-        let chain_spec = genesis_value_parser(SUPPORTED_CHAINS[0])?;
-
-        // add network name to data dir
-        let data_dir = self.datadir.resolve_datadir(chain_spec.chain);
-
-        let db_path = data_dir.db();
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
-
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        info!(target: "reth::cli", "Database opened");
-        let provider_factory = ProviderFactory::new(
-            db.clone(),
-            chain_spec.clone(),
-            StaticFileProvider::read_write(data_dir.static_files())?,
-        );
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
         import_receipts_from_file(
             provider_factory,
