@@ -1,4 +1,5 @@
-//! Spawns a blocking task. Should be used for long-lived database reads.
+//! Spawns a blocking task. CPU heavy tasks are executed with the `rayon` library. IO heavy tasks
+//! are executed on the `tokio`` runtime.
 
 use futures::Future;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
@@ -15,7 +16,7 @@ pub trait SpawnBlocking {
 
     /// Returns a handle for spawning CPU heavy blocking tasks.
     ///
-    /// Runtime access in default trait method implementations.
+    /// Thread pool access in default trait method implementations.
     fn tracing_task_pool(&self) -> &BlockingTaskPool;
 
     /// Executes the future on a new blocking task.
