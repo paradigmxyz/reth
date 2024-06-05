@@ -50,7 +50,7 @@ impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
 pub type BundleStateInit =
     HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
 
-/// Types used inside RevertsInit to initialize revms reverts.
+/// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
 /// Type used to initialize revms reverts.
@@ -120,7 +120,7 @@ impl BundleStateWithReceipts {
         self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
     }
 
-    /// Return iterator over all [BundleAccount]s in the bundle
+    /// Return iterator over all [`BundleAccount`]s in the bundle
     pub fn bundle_accounts_iter(&self) -> impl Iterator<Item = (Address, &BundleAccount)> {
         self.bundle.state().iter().map(|(a, acc)| (*a, acc))
     }
@@ -132,7 +132,7 @@ impl BundleStateWithReceipts {
 
     /// Get storage if value is known.
     ///
-    /// This means that depending on status we can potentially return U256::ZERO.
+    /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
         self.bundle.account(address).and_then(|a| a.storage_slot(storage_key))
     }
@@ -142,8 +142,8 @@ impl BundleStateWithReceipts {
         self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
-    /// Returns [HashedPostState] for this bundle state.
-    /// See [HashedPostState::from_bundle_state] for more info.
+    /// Returns [`HashedPostState`] for this bundle state.
+    /// See [`HashedPostState::from_bundle_state`] for more info.
     pub fn hash_state_slow(&self) -> HashedPostState {
         HashedPostState::from_bundle_state(&self.bundle.state)
     }
@@ -174,8 +174,11 @@ impl BundleStateWithReceipts {
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, block_number: BlockNumber) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(block_number)?)
+    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
     }
 
     /// Returns the receipt root for all recorded receipts.
@@ -285,7 +288,7 @@ impl BundleStateWithReceipts {
         self.receipts.extend(other.receipts.receipt_vec);
     }
 
-    /// Prepends present the state with the given BundleState.
+    /// Prepends present the state with the given `BundleState`.
     /// It adds changes from the given state but does not override any existing changes.
     ///
     /// Reverts  and receipts are not updated.
