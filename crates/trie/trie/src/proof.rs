@@ -2,8 +2,8 @@ use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::PrefixSetMut,
-    walker::TrieWalker,
     trie_cursor::TrieCursorFactory,
+    walker::TrieWalker,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
@@ -96,7 +96,11 @@ where
     }
 
     /// Compute storage root.
-    pub fn storage_root(&self, hashed_address: B256, trie_factory: &impl TrieCursorFactory) -> Result<B256, StorageRootError> {
+    pub fn storage_root(
+        &self,
+        hashed_address: B256,
+        trie_factory: &impl TrieCursorFactory,
+    ) -> Result<B256, StorageRootError> {
         let (storage_root, _) = self.storage_root_with_proofs(hashed_address, &[], trie_factory)?;
         Ok(storage_root)
     }

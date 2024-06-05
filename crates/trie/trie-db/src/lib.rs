@@ -32,4 +32,4 @@ pub mod proof;
 
 /// The implementation of the Merkle Patricia Trie.
 mod trie;
-pub use trie::{storage_root, state_root};
+pub use trie::{state_root, storage_root};

@@ -1,4 +1,4 @@
-use crate::walker::TrieWalker;
+use crate::{trie_cursor::TrieCursorFactory, walker::TrieWalker};
 use derive_more::Deref;
 use reth_primitives::{
     trie::{
@@ -8,7 +8,6 @@ use reth_primitives::{
     B256,
 };
 use std::collections::{hash_map::IntoIter, HashMap, HashSet};
-use crate::trie_cursor::TrieCursorFactory;
 
 /// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

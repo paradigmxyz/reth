@@ -1,16 +1,17 @@
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_db::cursor::{DbCursorRW, DbDupCursorRW};
 use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
     B256,
 };
 use reth_trie::{
-    trie_cursor::{TrieCursor, TrieCursorFactory, TrieCursorRw, TrieCursorRwFactory, TrieCursorWrite},
+    trie_cursor::{
+        TrieCursor, TrieCursorFactory, TrieCursorRw, TrieCursorRwFactory, TrieCursorWrite,
+    },
     updates::TrieKey,
 };
 
@@ -28,14 +29,14 @@ impl<'a, TX: DbTx> From<&'a TX> for DbTxRefWrapper<'a, TX> {
 impl<'a, TX: DbTx> TrieCursorFactory for DbTxRefWrapper<'a, TX> {
     type Err = DatabaseError;
 
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor<Err= Self::Err> + '_>, Self::Err> {
+    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor<Err = Self::Err> + '_>, Self::Err> {
         Ok(Box::new(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?)))
     }
 
     fn storage_tries_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Box<dyn TrieCursor<Err= Self::Err> + '_>, Self::Err> {
+    ) -> Result<Box<dyn TrieCursor<Err = Self::Err> + '_>, Self::Err> {
         Ok(Box::new(DatabaseStorageTrieCursor::new(
             self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
@@ -51,13 +52,37 @@ impl<'a, TX: DbTxMut> TrieCursorRwFactory for DbTxRefWrapper<'a, TX> {
     type AccountsKey = tables::StoragesTrie::Key;
     type AccountsValue = tables::StoragesTrie::Value;
 
-    fn account_trie_cursor_rw(&self) -> Result<Box<dyn TrieCursorRw<tables::AccountsTrie::Key, tables::AccountsTrie::Value, Err=Self::Err> + '_>, Self::Err> {
-        self.0.cursor_write::<tables::AccountsTrie>()
+    fn account_trie_cursor_rw(
+        &self,
+    ) -> Result<
+        Box<
+            dyn TrieCursorRw<
+                    tables::AccountsTrie::Key,
+                    tables::AccountsTrie::Value,
+                    Err = Self::Err,
+                > + '_,
+        >,
+        Self::Err,
+    > {
+        self.0
+            .cursor_write::<tables::AccountsTrie>()
             .map(|v| Box::new(DatabaseAccountTrieCursor::new(v)))
     }
 
-    fn storage_tries_cursor_rw(&self) -> Result<Box<dyn TrieCursorRw<tables::StoragesTrie::Key, tables::StoragesTrie::Value, Err=Self::Err> + '_>, Self::Err> {
-        self.0.cursor_dup_write::<tables::StoragesTrie>()
+    fn storage_tries_cursor_rw(
+        &self,
+    ) -> Result<
+        Box<
+            dyn TrieCursorRw<
+                    tables::StoragesTrie::Key,
+                    tables::StoragesTrie::Value,
+                    Err = Self::Err,
+                > + '_,
+        >,
+        Self::Err,
+    > {
+        self.0
+            .cursor_dup_write::<tables::StoragesTrie>()
             .map(|v| Box::new(DatabaseStorageTrieCursor::new(v, B256::ZERO)))
     }
 }
@@ -88,10 +113,7 @@ where
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
+    fn seek(&mut self, key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1 .0)))
     }
 
@@ -101,9 +123,10 @@ where
     }
 }
 
-impl<C> TrieCursorWrite<tables::AccountsTrie::Key, tables::AccountsTrie::Value> for DatabaseAccountTrieCursor<C>
-    where
-        C: DbCursorRW<tables::AccountsTrie> + Send + Sync,
+impl<C> TrieCursorWrite<tables::AccountsTrie::Key, tables::AccountsTrie::Value>
+    for DatabaseAccountTrieCursor<C>
+where
+    C: DbCursorRW<tables::AccountsTrie> + Send + Sync,
 {
     type Err = DatabaseError;
 
@@ -115,14 +138,19 @@ impl<C> TrieCursorWrite<tables::AccountsTrie::Key, tables::AccountsTrie::Value> 
         unimplemented!("Duplicate keys are not supported for accounts trie")
     }
 
-    fn upsert(&mut self, key: tables::AccountsTrie::Key, value: tables::AccountsTrie::Value) -> Result<(), Self::Err> {
+    fn upsert(
+        &mut self,
+        key: tables::AccountsTrie::Key,
+        value: tables::AccountsTrie::Value,
+    ) -> Result<(), Self::Err> {
         self.0.upsert(key, value)
     }
 }
 
-impl<C> TrieCursorWrite<tables::StoragesTrie::Key, tables::StoragesTrie::Value> for DatabaseStorageTrieCursor<C>
-    where
-        C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
+impl<C> TrieCursorWrite<tables::StoragesTrie::Key, tables::StoragesTrie::Value>
+    for DatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
 {
     type Err = DatabaseError;
 
@@ -134,7 +162,11 @@ impl<C> TrieCursorWrite<tables::StoragesTrie::Key, tables::StoragesTrie::Value> 
         self.cursor.delete_current_duplicates()
     }
 
-    fn upsert(&mut self, key: tables::StoragesTrie::Key, value: tables::StoragesTrie::Value) -> Result<(), Self::Err> {
+    fn upsert(
+        &mut self,
+        key: tables::StoragesTrie::Key,
+        value: tables::StoragesTrie::Value,
+    ) -> Result<(), Self::Err> {
         self.cursor.upsert(key, value)
     }
 }
@@ -174,10 +206,7 @@ where
     }
 
     /// Seeks the given key in the storage trie.
-    fn seek(
-        &mut self,
-        key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
+    fn seek(&mut self, key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?

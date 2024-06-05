@@ -254,10 +254,7 @@ where
     type Value = U256;
 
     /// Seek the next account storage entry for a given hashed key pair.
-    fn seek(
-        &mut self,
-        subkey: B256,
-    ) -> Result<Option<(B256, Self::Value)>, Self::Err> {
+    fn seek(&mut self, subkey: B256) -> Result<Option<(B256, Self::Value)>, Self::Err> {
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
         if let Some(storage) = self.post_state.storages.get(&self.hashed_address) {

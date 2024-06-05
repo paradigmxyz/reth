@@ -1,14 +1,11 @@
 use crate::prefix_set::PrefixSetLoader;
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::transaction::DbTx;
-use reth_execution_errors::{StateRootError};
-use reth_primitives::{
-    Address, BlockNumber, B256,
-};
+use reth_execution_errors::StateRootError;
+use reth_primitives::{Address, BlockNumber, B256};
+use reth_trie::{prefix_set::TriePrefixSets, StateRoot, StateRootProgress, StorageRoot};
 use std::ops::RangeInclusive;
-use tracing::{debug};
-use reth_trie::prefix_set::TriePrefixSets;
-use reth_trie::{StateRoot, StateRootProgress, StorageRoot};
+use tracing::debug;
 
 #[cfg(feature = "metrics")]
 use reth_trie::metrics::{TrieRootMetrics, TrieType};
@@ -94,7 +91,7 @@ pub mod storage_root {
             tx,
             address,
             #[cfg(feature = "metrics")]
-                TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(TrieType::Storage),
         )
     }
 
@@ -105,7 +102,7 @@ pub mod storage_root {
             tx,
             hashed_address,
             #[cfg(feature = "metrics")]
-                TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(TrieType::Storage),
         )
     }
 }

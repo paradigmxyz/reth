@@ -11,7 +11,7 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     type Err = ();
 
     /// Generates a Noop account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor<Err= Self::Err> + '_>, Self::Err> {
+    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor<Err = Self::Err> + '_>, Self::Err> {
         Ok(Box::<NoopAccountTrieCursor>::default())
     }
 
@@ -19,7 +19,7 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     fn storage_tries_cursor(
         &self,
         _hashed_address: reth_primitives::B256,
-    ) -> Result<Box<dyn TrieCursor<Err= Self::Err> + '_>, Self::Err> {
+    ) -> Result<Box<dyn TrieCursor<Err = Self::Err> + '_>, Self::Err> {
         Ok(Box::<NoopStorageTrieCursor>::default())
     }
 }
@@ -41,10 +41,7 @@ impl TrieCursor for NoopAccountTrieCursor {
     }
 
     /// Seeks within the account trie.
-    fn seek(
-        &mut self,
-        _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
+    fn seek(&mut self, _key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(None)
     }
 
@@ -71,10 +68,7 @@ impl TrieCursor for NoopStorageTrieCursor {
     }
 
     /// Seeks a key in storage tries.
-    fn seek(
-        &mut self,
-        _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
+    fn seek(&mut self, _key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         Ok(None)
     }
 

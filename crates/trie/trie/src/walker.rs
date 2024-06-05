@@ -203,10 +203,7 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Moves to the next sibling node in the trie, updating the stack.
-    fn move_to_next_sibling(
-        &mut self,
-        allow_root_to_child_nibble: bool,
-    ) -> Result<(), C::Err> {
+    fn move_to_next_sibling(&mut self, allow_root_to_child_nibble: bool) -> Result<(), C::Err> {
         let Some(subnode) = self.stack.last_mut() else { return Ok(()) };
 
         // Check if the walker needs to backtrack to the previous level in the trie during its

@@ -81,9 +81,7 @@ where
     /// 5. Repeat.
     ///
     /// NOTE: The iteration will start from the key of the previous hashed entry if it was supplied.
-    pub fn try_next(
-        &mut self,
-    ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, C::Err> {
+    pub fn try_next(&mut self) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, C::Err> {
         loop {
             // If the walker has a key...
             if let Some(key) = self.walker.key() {

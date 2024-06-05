@@ -1,4 +1,3 @@
-use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
 use derive_more::Deref;
 use reth_db::{
     cursor::DbCursorRO,
@@ -8,6 +7,7 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{keccak256, trie::Nibbles, BlockNumber, StorageEntry, B256};
+use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
 use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,

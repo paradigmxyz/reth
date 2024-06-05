@@ -1,20 +1,18 @@
 #[cfg(test)]
 mod tests {
+    use crate::state_root;
     use once_cell::sync::Lazy;
-    use reth_db::database::Database;
-    use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
-    use reth_storage_errors::provider::ProviderResult;
-    use std::{str::FromStr, sync::Arc};
-    use reth_trie::proof::Proof;
+    use reth_db::{database::Database, transaction::DbTx};
     use reth_primitives::{
         constants::EMPTY_ROOT_HASH,
         keccak256,
         trie::{AccountProof, Nibbles, StorageProof},
-        Address, B256,
+        Account, Address, Bytes, Chain, ChainSpec, StorageEntry, B256, HOLESKY, MAINNET, U256,
     };
-    use reth_db::transaction::DbTx;
-    use crate::state_root;
+    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
+    use reth_storage_errors::provider::ProviderResult;
+    use reth_trie::proof::Proof;
+    use std::{str::FromStr, sync::Arc};
 
     /*
         World State (sampled from <https://ethereum.stackexchange.com/questions/268/ethereum-block-architecture/6413#6413>)
@@ -127,7 +125,8 @@ mod tests {
         let factory = crate::trie_cursor::DbTxRefWrapper(provider.tx_ref());
         for (target, expected_proof) in data {
             let target = Address::from_str(target).unwrap();
-            let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[], &factory).unwrap();
+            let account_proof =
+                Proof::new(provider.tx_ref()).account_proof(target, &[], &factory).unwrap();
             similar_asserts::assert_eq!(
                 account_proof.proof,
                 expected_proof,
@@ -148,7 +147,8 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let factory = crate::trie_cursor::DbTxRefWrapper(provider.tx_ref());
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots, &factory).unwrap();
+        let account_proof =
+            Proof::new(provider.tx_ref()).account_proof(target, &slots, &factory).unwrap();
         assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH, "expected empty storage root");
 
         assert_eq!(slots.len(), account_proof.storage_proofs.len());
@@ -181,7 +181,8 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let factory = crate::trie_cursor::DbTxRefWrapper(provider.tx_ref());
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[], &factory).unwrap();
+        let account_proof =
+            Proof::new(provider.tx_ref()).account_proof(target, &[], &factory).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
         assert_eq!(account_proof.verify(root), Ok(()));
     }
@@ -205,7 +206,8 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let factory = crate::trie_cursor::DbTxRefWrapper(provider.tx_ref());
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[], &factory).unwrap();
+        let account_proof =
+            Proof::new(provider.tx_ref()).account_proof(target, &[], &factory).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
         assert_eq!(account_proof.verify(root), Ok(()));
     }
@@ -292,7 +294,8 @@ mod tests {
 
         let provider = factory.provider().unwrap();
         let factory = crate::trie_cursor::DbTxRefWrapper(provider.tx_ref());
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots, &factory).unwrap();
+        let account_proof =
+            Proof::new(provider.tx_ref()).account_proof(target, &slots, &factory).unwrap();
         similar_asserts::assert_eq!(account_proof, expected);
         assert_eq!(account_proof.verify(root), Ok(()));
     }

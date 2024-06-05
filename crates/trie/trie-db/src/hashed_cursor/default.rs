@@ -1,10 +1,10 @@
-use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
     transaction::DbTx,
 };
 use reth_primitives::{Account, B256, U256};
+use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
 /// New-type for a [`DbTx`] reference with [`HashedCursorFactory`] support.
 pub struct DbTxRefWrapper<'a, TX: DbTx>(&'a TX);

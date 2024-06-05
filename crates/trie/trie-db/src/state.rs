@@ -1,8 +1,4 @@
 use crate::state_root;
-use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::{PrefixSetMut, TriePrefixSets},
-};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{
     cursor::DbCursorRO,
@@ -16,12 +12,16 @@ use reth_primitives::{
     keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, BlockNumber, B256,
     U256,
 };
+use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory,
+    prefix_set::{PrefixSetMut, TriePrefixSets},
+    updates::TrieUpdates,
+};
 use revm::db::BundleAccount;
 use std::{
     collections::{hash_map, HashMap, HashSet},
     ops::RangeInclusive,
 };
-use reth_trie::updates::TrieUpdates;
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
