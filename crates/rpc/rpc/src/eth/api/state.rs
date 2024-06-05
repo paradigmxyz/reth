@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::{
-    eth::error::{EthApiError, EthResult, RpcInvalidTransactionError},
+    eth::error::{EthApiError, EthResult},
     EthApi,
 };
 use reth_evm::ConfigureEvm;
@@ -9,7 +9,7 @@ use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 
 use super::LoadState;
 
@@ -34,31 +34,6 @@ where
             .state_at_block_id_or_latest(block_id)?
             .account_balance(address)?
             .unwrap_or_default())
-    }
-
-    /// Returns the number of transactions sent from an address at the given block identifier.
-    ///
-    /// If this is [`BlockNumberOrTag::Pending`] then this will look up the highest transaction in
-    /// pool and return the next nonce (highest + 1).
-    pub(crate) fn get_transaction_count(
-        &self,
-        address: Address,
-        block_id: Option<BlockId>,
-    ) -> EthResult<U256> {
-        if block_id == Some(BlockId::pending()) {
-            let address_txs = self.pool().get_transactions_by_sender(address);
-            if let Some(highest_nonce) =
-                address_txs.iter().map(|item| item.transaction.nonce()).max()
-            {
-                let tx_count = highest_nonce
-                    .checked_add(1)
-                    .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
-                return Ok(U256::from(tx_count))
-            }
-        }
-
-        let state = self.state_at_block_id_or_latest(block_id)?;
-        Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
     }
 
     pub(crate) fn storage_at(

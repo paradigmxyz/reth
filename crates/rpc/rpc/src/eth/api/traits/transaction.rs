@@ -1,19 +1,18 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use crate::eth::{
-    error::{EthApiError, EthResult},
-    revm_utils::EvmOverrides,
-    TransactionSource,
-};
+use std::sync::Arc;
+
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
-    BlockId, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
-    TransactionSigned, TxHash, B256,
+    revm::env::fill_block_env_with_coinbase, Address, BlockId, Bytes,
+    FromRecoveredPooledTransaction, Header, IntoRecoveredTransaction, Receipt, SealedBlock,
+    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, StateProviderBox, TransactionsProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{AnyTransactionReceipt, TransactionInfo, TransactionRequest};
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{
@@ -23,11 +22,23 @@ use revm::{
     GetInspector, Inspector,
 };
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use revm_primitives::{
+    db::{Database, DatabaseRef},
+    SpecId,
+};
 
-use crate::eth::{api::BuildReceipt, revm_utils::FillableTransaction};
-use revm_primitives::db::{Database, DatabaseRef};
-
-use super::{LoadState, SpawnBlocking};
+use crate::{
+    eth::{
+        api::{BuildReceipt, LoadState, SpawnBlocking},
+        cache::EthStateCache,
+        error::{EthApiError, EthResult, RpcInvalidTransactionError},
+        revm_utils::{EvmOverrides, FillableTransaction},
+        traits::RawTransactionForwarder,
+        utils::recover_raw_transaction,
+        TransactionSource,
+    },
+    EthApiSpec,
+};
 
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
@@ -57,10 +68,28 @@ pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Transaction pool with pending transactions.
+    type Pool: TransactionPool;
+
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
     fn provider(&self) -> &impl BlockReaderIdExt;
+
+    /// Returns a handle for reading data from memory.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn cache(&self) -> &EthStateCache;
+
+    /// Returns a handle for reading data from pool.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn pool(&self) -> &Self::Pool;
+
+    /// Returns a handle for forwarding received raw transactions.
+    ///
+    /// Access to transaction forwarder in default (L1) trait method implementations.
+    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>>;
 
     /// Returns a handle for reading evm config.
     ///
@@ -194,14 +223,29 @@ pub trait EthTransactions: Send + Sync {
     /// This is used for tracing raw blocks
     async fn evm_env_for_raw_block(
         &self,
-        at: &Header,
-    ) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv)>;
+        header: &Header,
+    ) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    where
+        Self: LoadState,
+    {
+        // get the parent config first
+        let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
+
+        let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
+        fill_block_env_with_coinbase(&mut block_env, header, after_merge, header.beneficiary);
+
+        Ok((cfg, block_env))
+    }
 
     /// Get all transactions in the block with the given hash.
     ///
     /// Returns `None` if block does not exist.
-    async fn transactions_by_block(&self, block: B256)
-        -> EthResult<Option<Vec<TransactionSigned>>>;
+    async fn transactions_by_block(
+        &self,
+        block: B256,
+    ) -> EthResult<Option<Vec<TransactionSigned>>> {
+        Ok(self.cache().get_block_transactions(block).await?)
+    }
 
     /// Get the entire block for the given id.
     ///
@@ -233,7 +277,20 @@ pub trait EthTransactions: Send + Sync {
     /// Returns `Ok(None)` if no matching transaction was found.
     async fn raw_transaction_by_hash(&self, hash: B256) -> EthResult<Option<Bytes>>
     where
-        Self: SpawnBlocking;
+        Self: SpawnBlocking,
+    {
+        // Note: this is mostly used to fetch pooled transactions so we check the pool first
+        if let Some(tx) =
+            self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+        {
+            return Ok(Some(tx))
+        }
+
+        self.spawn_blocking_io(move |this| {
+            Ok(this.provider().transaction_by_hash(hash)?.map(|tx| tx.envelope_encoded()))
+        })
+        .await
+    }
 
     /// Returns the transaction by hash.
     ///
@@ -242,21 +299,97 @@ pub trait EthTransactions: Send + Sync {
     /// Returns `Ok(None)` if no matching transaction was found.
     async fn transaction_by_hash(&self, hash: B256) -> EthResult<Option<TransactionSource>>
     where
-        Self: SpawnBlocking;
+        Self: SpawnBlocking,
+    {
+        // Try to find the transaction on disk
+        let mut resp = self
+            .spawn_blocking_io(move |this| {
+                match this.provider().transaction_by_hash_with_meta(hash)? {
+                    None => Ok(None),
+                    Some((tx, meta)) => {
+                        // Note: we assume this transaction is valid, because it's mined (or part of
+                        // pending block) and already. We don't need to
+                        // check for pre EIP-2 because this transaction could be pre-EIP-2.
+                        let transaction = tx
+                            .into_ecrecovered_unchecked()
+                            .ok_or(EthApiError::InvalidTransactionSignature)?;
+
+                        let tx = TransactionSource::Block {
+                            transaction,
+                            index: meta.index,
+                            block_hash: meta.block_hash,
+                            block_number: meta.block_number,
+                            base_fee: meta.base_fee,
+                        };
+                        Ok(Some(tx))
+                    }
+                }
+            })
+            .await?;
+
+        if resp.is_none() {
+            // tx not found on disk, check pool
+            if let Some(tx) =
+                self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
+            {
+                resp = Some(TransactionSource::Pool(tx));
+            }
+        }
+
+        Ok(resp)
+    }
 
     /// Returns the transaction by including its corresponding [BlockId]
     ///
     /// Note: this supports pending transactions
     async fn transaction_by_hash_at(
         &self,
-        hash: B256,
-    ) -> EthResult<Option<(TransactionSource, BlockId)>>;
+        transaction_hash: B256,
+    ) -> EthResult<Option<(TransactionSource, BlockId)>>
+    where
+        Self: SpawnBlocking,
+    {
+        match self.transaction_by_hash(transaction_hash).await? {
+            None => return Ok(None),
+            Some(tx) => {
+                let res = match tx {
+                    tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                    TransactionSource::Block {
+                        transaction,
+                        index,
+                        block_hash,
+                        block_number,
+                        base_fee,
+                    } => {
+                        let at = BlockId::Hash(block_hash.into());
+                        let tx = TransactionSource::Block {
+                            transaction,
+                            index,
+                            block_hash,
+                            block_number,
+                            base_fee,
+                        };
+                        (tx, at)
+                    }
+                };
+                Ok(Some(res))
+            }
+        }
+    }
 
     /// Returns the _historical_ transaction and the block it was mined in
     async fn historical_transaction_by_hash_at(
         &self,
         hash: B256,
-    ) -> EthResult<Option<(TransactionSource, B256)>>;
+    ) -> EthResult<Option<(TransactionSource, B256)>>
+    where
+        Self: SpawnBlocking,
+    {
+        match self.transaction_by_hash_at(hash).await? {
+            None => Ok(None),
+            Some((tx, at)) => Ok(at.as_block_hash().map(|hash| (tx, hash))),
+        }
+    }
 
     /// Returns the transaction receipt for the given hash.
     ///
@@ -304,11 +437,55 @@ pub trait EthTransactions: Send + Sync {
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.
-    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256>;
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
+        // On optimism, transactions are forwarded directly to the sequencer to be included in
+        // blocks that it builds.
+        if let Some(client) = self.raw_tx_forwarder().as_ref() {
+            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            client.forward_raw_transaction(&tx).await?;
+        }
+
+        let recovered = recover_raw_transaction(tx)?;
+        let pool_transaction =
+            <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
+                recovered,
+            );
+
+        // submit the transaction to the pool with a `Local` origin
+        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+
+        Ok(hash)
+    }
 
     /// Signs transaction with a matching signer, if any and submits the transaction to the pool.
     /// Returns the hash of the signed transaction.
-    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<B256>;
+    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<B256>
+    where
+        Self: EthApiSpec + LoadState;
+
+    /// Returns the number of transactions sent from an address at the given block identifier.
+    ///
+    /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
+    /// look up the highest transaction in pool and return the next nonce (highest + 1).
+    fn get_transaction_count(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256>
+    where
+        Self: LoadState,
+    {
+        if block_id == Some(BlockId::pending()) {
+            let address_txs = self.pool().get_transactions_by_sender(address);
+            if let Some(highest_nonce) =
+                address_txs.iter().map(|item| item.transaction.nonce()).max()
+            {
+                let tx_count = highest_nonce
+                    .checked_add(1)
+                    .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
+                return Ok(U256::from(tx_count))
+            }
+        }
+
+        let state = self.state_at_block_id_or_latest(block_id)?;
+        Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
+    }
 
     /// Prepares the state and env for the given [TransactionRequest] at the given [BlockId] and
     /// executes the closure on a new task returning the result of the closure.

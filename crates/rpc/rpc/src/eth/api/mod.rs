@@ -480,4 +480,16 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     pub const fn evm_config(&self) -> &EvmConfig {
         &self.evm_config
     }
+
+    /// Returns a handle to the transaction pool.
+    #[inline]
+    pub const fn pool(&self) -> &Pool {
+        &self.pool
+    }
+
+    /// Returns a handle to the transaction forwarder.
+    #[inline]
+    pub const fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>> {
+        &self.raw_transaction_forwarder
+    }
 }
