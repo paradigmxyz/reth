@@ -19,7 +19,7 @@ use std::{
 
 // TODO: Invalidate metadata if the compiler dependency version changes.
 
-const BG_INTERVAL: Duration = Duration::from_secs(5);
+const BG_INTERVAL: Duration = Duration::from_secs(10);
 const OBJ_NAME: &str = if cfg!(windows) { "object.obj" } else { "object.o" };
 
 /// List of contracts to compile.
