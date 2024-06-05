@@ -1,9 +1,8 @@
-use reth_db::{
+use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
+use reth_db_api::{
     database::Database,
     table::{Compress, Encode, Table, TableRow},
-    test_utils::create_test_rw_db_with_path,
     transaction::DbTxMut,
-    DatabaseEnv,
 };
 use reth_fs_util as fs;
 use reth_primitives::Bytes;

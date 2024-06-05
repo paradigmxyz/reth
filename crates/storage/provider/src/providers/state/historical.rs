@@ -2,13 +2,12 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
-use reth_db::{
+use reth_db::{tables, BlockNumberList};
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::Table,
-    tables,
     transaction::DbTx,
-    BlockNumberList,
 };
 use reth_primitives::{
     constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
@@ -407,11 +406,10 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
         StaticFileProviderFactory,
     };
-    use reth_db::{
+    use reth_db::{tables, BlockNumberList};
+    use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
-        tables,
         transaction::{DbTx, DbTxMut},
-        BlockNumberList,
     };
     use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
     use reth_storage_errors::provider::ProviderError;

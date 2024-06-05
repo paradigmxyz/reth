@@ -1,10 +1,10 @@
 use super::{collect_history_indices, load_history_indices};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
     table::Decode,
-    tables,
     transaction::DbTxMut,
 };
 use reth_primitives::{
@@ -155,14 +155,14 @@ mod tests {
         TestStageDB, UnwindStageTestRunner,
     };
     use itertools::Itertools;
-    use reth_db::{
+    use reth_db::BlockNumberList;
+    use reth_db_api::{
         cursor::DbCursorRO,
         models::{
             sharded_key, storage_sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey,
             StoredBlockBodyIndices,
         },
         transaction::DbTx,
-        BlockNumberList,
     };
     use reth_primitives::{address, b256, Address, BlockNumber, StorageEntry, B256, U256};
     use reth_provider::providers::StaticFileWriter;

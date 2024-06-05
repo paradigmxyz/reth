@@ -1,5 +1,5 @@
 use crate::providers::StaticFileProviderRWRefMut;
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_storage_errors::provider::ProviderResult;
 use revm::db::OriginalValuesKnown;
 

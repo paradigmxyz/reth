@@ -1,10 +1,7 @@
 //! Command for debugging block building.
 
 use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs,
-    },
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
 };
 use alloy_rlp::Decodable;
@@ -19,7 +16,7 @@ use reth_blockchain_tree::{
 };
 use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::DatabaseEnv;
 use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_fs_util as fs;
@@ -29,14 +26,13 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     revm_primitives::KzgSettings,
     stage::StageId,
-    Address, BlobTransaction, BlobTransactionSidecar, Bytes, ChainSpec, PooledTransactionsElement,
-    Receipts, SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256,
-    U256,
+    Address, BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, Receipts,
+    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider},
-    BlockHashReader, BlockReader, BlockWriter, BundleStateWithReceipts, ProviderFactory,
-    StageCheckpointReader, StateProviderFactory,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
+    BundleStateWithReceipts, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
+    StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
@@ -52,24 +48,8 @@ use tracing::*;
 /// The script will then parse the block and attempt to build a similar one.
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
     #[command(flatten)]
-    datadir: DatadirArgs,
-
-    /// Database arguments.
-    #[command(flatten)]
-    db: DatabaseArgs,
+    env: EnvironmentArgs,
 
     /// Overrides the KZG trusted setup by reading from the supplied file.
     #[arg(long, value_name = "PATH")]
@@ -136,23 +116,12 @@ impl Command {
 
     /// Execute `debug in-memory-merkle` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        // add network name to data dir
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
-        let db_path = data_dir.db();
-        fs::create_dir_all(&db_path)?;
-
-        // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory = ProviderFactory::new(
-            Arc::clone(&db),
-            Arc::clone(&self.chain),
-            StaticFileProvider::read_write(data_dir.static_files())?,
-        );
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
         let consensus: Arc<dyn Consensus> =
-            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(self.chain.clone());
+        let executor = block_executor!(provider_factory.chain_spec());
 
         // configure blockchain tree
         let tree_externals =
@@ -169,11 +138,16 @@ impl Command {
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::clone(&self.chain))
-            .with_head_timestamp(best_block.timestamp)
-            .kzg_settings(self.kzg_settings()?)
-            .with_additional_tasks(1)
-            .build_with_tasks(blockchain_db.clone(), ctx.task_executor.clone(), blob_store.clone());
+        let validator =
+            TransactionValidationTaskExecutor::eth_builder(provider_factory.chain_spec())
+                .with_head_timestamp(best_block.timestamp)
+                .kzg_settings(self.kzg_settings()?)
+                .with_additional_tasks(1)
+                .build_with_tasks(
+                    blockchain_db.clone(),
+                    ctx.task_executor.clone(),
+                    blob_store.clone(),
+                );
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             validator,
@@ -259,7 +233,7 @@ impl Command {
                 best_block.hash(),
                 payload_attrs,
             )?,
-            self.chain.clone(),
+            provider_factory.chain_spec(),
         );
 
         let args = BuildArguments::new(
@@ -273,7 +247,7 @@ impl Command {
 
         #[cfg(feature = "optimism")]
         let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            self.chain.clone(),
+            provider_factory.chain_spec(),
             reth_node_optimism::OptimismEvmConfig::default(),
         )
         .compute_pending_block();
@@ -295,7 +269,7 @@ impl Command {
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
-                let executor = block_executor!(self.chain.clone()).executor(db);
+                let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
                 let BlockExecutionOutput { state, receipts, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;

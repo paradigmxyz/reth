@@ -9,9 +9,8 @@ pub use headers::Headers;
 mod receipts;
 pub use receipts::Receipts;
 
-use reth_db::{
-    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, RawKey, RawTable,
-};
+use reth_db::{RawKey, RawTable};
+use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     static_file::{

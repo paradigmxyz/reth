@@ -2,7 +2,7 @@ use crate::{
     BlockIdReader, BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt,
     RequestsProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::models::StoredBlockBodyIndices;
+use reth_db_api::models::StoredBlockBodyIndices;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, BlockWithSenders, Header,
     Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, B256,

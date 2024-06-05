@@ -14,7 +14,8 @@ use crate::{
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
-use reth_db::{
+use reth_db::{tables, BlockNumberList};
+use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
     database::Database,
@@ -23,9 +24,8 @@ use reth_db::{
         ShardedKey, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
     },
     table::{Table, TableRow},
-    tables,
     transaction::{DbTx, DbTxMut},
-    BlockNumberList, DatabaseError,
+    DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
 use reth_network_p2p::headers::downloader::SyncTarget;
@@ -857,7 +857,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(deleted)
     }
 
-    /// Unwind a table forward by a [Walker][reth_db::abstraction::cursor::Walker] on another table
+    /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table
     pub fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), DatabaseError>
     where
         T1: Table,

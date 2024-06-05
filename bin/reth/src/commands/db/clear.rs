@@ -1,10 +1,9 @@
 use clap::{Parser, Subcommand};
-use reth_db::{
+use reth_db::{static_file::iter_static_files, TableViewer, Tables};
+use reth_db_api::{
     database::Database,
-    static_file::iter_static_files,
     table::Table,
     transaction::{DbTx, DbTxMut},
-    TableViewer, Tables,
 };
 use reth_primitives::{static_file::find_fixed_range, StaticFileSegment};
 use reth_provider::{ProviderFactory, StaticFileProviderFactory};
