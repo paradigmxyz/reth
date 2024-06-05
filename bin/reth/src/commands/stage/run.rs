@@ -14,7 +14,6 @@ use reth_cli_runner::CliContext;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
-use reth_net_common::dns_node_record_resolve::resolve_dns_node_record;
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
