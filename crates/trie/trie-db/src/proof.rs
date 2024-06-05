@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use crate::StateRoot;
     use once_cell::sync::Lazy;
     use reth_db::database::Database;
     use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
@@ -15,6 +14,7 @@ mod tests {
         Address, B256,
     };
     use reth_db::transaction::DbTx;
+    use crate::state_root;
 
     /*
         World State (sampled from <https://ethereum.stackexchange.com/questions/268/ethereum-block-architecture/6413#6413>)
@@ -68,7 +68,7 @@ mod tests {
         });
         provider.insert_storage_for_hashing(alloc_storage)?;
 
-        let (root, updates) = StateRoot::from_tx(provider.tx_ref())
+        let (root, updates) = state_root::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
         updates.flush(provider.tx_mut())?;

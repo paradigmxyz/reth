@@ -1,4 +1,4 @@
-use crate::{updates::TrieUpdates, StateRoot, state_root};
+use crate::state_root;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
@@ -21,6 +21,7 @@ use std::{
     collections::{hash_map, HashMap, HashSet},
     ops::RangeInclusive,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]

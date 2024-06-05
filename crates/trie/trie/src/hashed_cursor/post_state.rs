@@ -1,5 +1,4 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::state::HashedPostStateSorted;
 use reth_primitives::{Account, B256, U256};
 
 /// The hashed cursor factory for the post state.

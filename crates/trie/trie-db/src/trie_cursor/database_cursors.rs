@@ -1,18 +1,21 @@
-use crate::updates::TrieKey;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
-    transaction::DbTx,
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
+use reth_db::cursor::{DbCursorRW, DbDupCursorRW};
 use reth_primitives::{
     trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
     B256,
 };
-use reth_trie::trie_cursor::{TrieCursor, TrieCursorFactory};
+use reth_trie::{
+    trie_cursor::{TrieCursor, TrieCursorFactory, TrieCursorRw, TrieCursorRwFactory, TrieCursorWrite},
+    updates::TrieKey,
+};
 
-/// New-type for a [`DbTx`] reference with [`TrieCursorFactory`] support.
-pub struct DbTxRefWrapper<'a, TX: DbTx>(&'a TX);
+/// New-type for a [`DbTx`] and/or [`DbTxMut`] reference with [`TrieCursorFactory`] support.
+pub struct DbTxRefWrapper<'a, TX>(&'a TX);
 
 /// Converts reference to [`DbTx`] into [`DbTxRefWrapper`].
 impl<'a, TX: DbTx> From<&'a TX> for DbTxRefWrapper<'a, TX> {
@@ -37,6 +40,25 @@ impl<'a, TX: DbTx> TrieCursorFactory for DbTxRefWrapper<'a, TX> {
             self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         )))
+    }
+}
+
+/// Implementation of the trie cursor factory for a database transaction.
+impl<'a, TX: DbTxMut> TrieCursorRwFactory for DbTxRefWrapper<'a, TX> {
+    type Err = DatabaseError;
+    type StorageKey = tables::AccountsTrie::Key;
+    type StorageValue = tables::AccountsTrie::Value;
+    type AccountsKey = tables::StoragesTrie::Key;
+    type AccountsValue = tables::StoragesTrie::Value;
+
+    fn account_trie_cursor_rw(&self) -> Result<Box<dyn TrieCursorRw<tables::AccountsTrie::Key, tables::AccountsTrie::Value, Err=Self::Err> + '_>, Self::Err> {
+        self.0.cursor_write::<tables::AccountsTrie>()
+            .map(|v| Box::new(DatabaseAccountTrieCursor::new(v)))
+    }
+
+    fn storage_tries_cursor_rw(&self) -> Result<Box<dyn TrieCursorRw<tables::StoragesTrie::Key, tables::StoragesTrie::Value, Err=Self::Err> + '_>, Self::Err> {
+        self.0.cursor_dup_write::<tables::StoragesTrie>()
+            .map(|v| Box::new(DatabaseStorageTrieCursor::new(v, B256::ZERO)))
     }
 }
 
@@ -76,6 +98,44 @@ where
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<TrieKey>, Self::Err> {
         Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k)))
+    }
+}
+
+impl<C> TrieCursorWrite<tables::AccountsTrie::Key, tables::AccountsTrie::Value> for DatabaseAccountTrieCursor<C>
+    where
+        C: DbCursorRW<tables::AccountsTrie> + Send + Sync,
+{
+    type Err = DatabaseError;
+
+    fn delete_current(&mut self) -> Result<(), Self::Err> {
+        self.0.delete_current()
+    }
+
+    fn delete_current_duplicates(&mut self) -> Result<(), Self::Err> {
+        unimplemented!("Duplicate keys are not supported for accounts trie")
+    }
+
+    fn upsert(&mut self, key: tables::AccountsTrie::Key, value: tables::AccountsTrie::Value) -> Result<(), Self::Err> {
+        self.0.upsert(key, value)
+    }
+}
+
+impl<C> TrieCursorWrite<tables::StoragesTrie::Key, tables::StoragesTrie::Value> for DatabaseStorageTrieCursor<C>
+    where
+        C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
+{
+    type Err = DatabaseError;
+
+    fn delete_current(&mut self) -> Result<(), Self::Err> {
+        self.cursor.delete_current()
+    }
+
+    fn delete_current_duplicates(&mut self) -> Result<(), Self::Err> {
+        self.cursor.delete_current_duplicates()
+    }
+
+    fn upsert(&mut self, key: tables::StoragesTrie::Key, value: tables::StoragesTrie::Value) -> Result<(), Self::Err> {
+        self.cursor.upsert(key, value)
     }
 }
 
