@@ -40,7 +40,7 @@ use revm::{
         db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState,
         ExecutionResult, ResultAndState, SpecId,
     },
-    GetInspector, Inspector,
+    Inspector,
 };
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
@@ -48,7 +48,6 @@ use crate::eth::{
     api::{BuildReceipt, EthTransactions, StateCacheDB},
     revm_utils::FillableTransaction,
 };
-use revm_primitives::db::{Database, DatabaseRef};
 
 #[async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
@@ -66,87 +65,17 @@ where
     Network: NetworkInfo + 'static,
     EvmConfig: ConfigureEvm,
 {
+    #[inline]
     fn provider(&self) -> &impl BlockReaderIdExt {
         &self.inner.provider
     }
 
-    fn transact<DB>(
-        &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
-    where
-        DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
-    {
-        let mut evm = self.inner.evm_config.evm_with_env(db, env);
-        let res = evm.transact()?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env))
+    #[inline]
+    fn evm_config(&self) -> &impl ConfigureEvm {
+        &self.inner.evm_config
     }
 
-    fn inspect<DB, I>(
-        &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-        inspector: I,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
-    where
-        DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
-        I: GetInspector<DB>,
-    {
-        self.inspect_and_return_db(db, env, inspector).map(|(res, env, _)| (res, env))
-    }
-
-    fn inspect_and_return_db<DB, I>(
-        &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-        inspector: I,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg, DB)>
-    where
-        DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
-        I: GetInspector<DB>,
-    {
-        let mut evm = self.inner.evm_config.evm_with_env_and_inspector(db, env, inspector);
-        let res = evm.transact()?;
-        let (db, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env, db))
-    }
-
-    fn replay_transactions_until<DB, I, Tx>(
-        &self,
-        db: &mut CacheDB<DB>,
-        cfg: CfgEnvWithHandlerCfg,
-        block_env: BlockEnv,
-        transactions: I,
-        target_tx_hash: B256,
-    ) -> Result<usize, EthApiError>
-    where
-        DB: DatabaseRef,
-        EthApiError: From<<DB as DatabaseRef>::Error>,
-        I: IntoIterator<Item = Tx>,
-        Tx: FillableTransaction,
-    {
-        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
-
-        let mut evm = self.inner.evm_config.evm_with_env(db, env);
-        let mut index = 0;
-        for tx in transactions {
-            if tx.hash() == target_tx_hash {
-                // reached the target transaction
-                break
-            }
-
-            tx.try_fill_tx_env(evm.tx_mut())?;
-            evm.transact_commit()?;
-            index += 1;
-        }
-        Ok(index)
-    }
-
+    #[inline]
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
     }

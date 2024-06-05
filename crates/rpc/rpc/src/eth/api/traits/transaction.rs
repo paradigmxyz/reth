@@ -6,6 +6,7 @@ use crate::eth::{
     revm_utils::EvmOverrides,
     TransactionSource,
 };
+use reth_evm::ConfigureEvm;
 use reth_primitives::{
     BlockId, Bytes, Header, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
     TransactionSigned, TxHash, B256,
@@ -61,6 +62,11 @@ pub trait EthTransactions: Send + Sync {
     /// Data access in default (L1) trait method implementations.
     fn provider(&self) -> &impl BlockReaderIdExt;
 
+    /// Returns a handle for reading evm config.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn evm_config(&self) -> &impl ConfigureEvm;
+
     /// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state
     /// changes.
     fn transact<DB>(
@@ -70,8 +76,13 @@ pub trait EthTransactions: Send + Sync {
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
         DB: Database,
-        <DB as Database>::Error: Into<EthApiError>;
-
+        <DB as Database>::Error: Into<EthApiError>,
+    {
+        let mut evm = self.evm_config().evm_with_env(db, env);
+        let res = evm.transact()?;
+        let (_, env) = evm.into_db_and_env_with_handler_cfg();
+        Ok((res, env))
+    }
     /// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
@@ -83,7 +94,10 @@ pub trait EthTransactions: Send + Sync {
     where
         DB: Database,
         <DB as Database>::Error: Into<EthApiError>,
-        I: GetInspector<DB>;
+        I: GetInspector<DB>,
+    {
+        self.inspect_and_return_db(db, env, inspector).map(|(res, env, _)| (res, env))
+    }
 
     /// Same as [Self::inspect] but also returns the database again.
     ///
@@ -99,7 +113,13 @@ pub trait EthTransactions: Send + Sync {
     where
         DB: Database,
         <DB as Database>::Error: Into<EthApiError>,
-        I: GetInspector<DB>;
+        I: GetInspector<DB>,
+    {
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
+        let res = evm.transact()?;
+        let (db, env) = evm.into_db_and_env_with_handler_cfg();
+        Ok((res, env, db))
+    }
 
     /// Replays all the transactions until the target transaction is found.
     ///
@@ -120,7 +140,24 @@ pub trait EthTransactions: Send + Sync {
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
         I: IntoIterator<Item = Tx>,
-        Tx: FillableTransaction;
+        Tx: FillableTransaction,
+    {
+        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
+
+        let mut evm = self.evm_config().evm_with_env(db, env);
+        let mut index = 0;
+        for tx in transactions {
+            if tx.hash() == target_tx_hash {
+                // reached the target transaction
+                break
+            }
+
+            tx.try_fill_tx_env(evm.tx_mut())?;
+            evm.transact_commit()?;
+            index += 1;
+        }
+        Ok(index)
+    }
 
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;

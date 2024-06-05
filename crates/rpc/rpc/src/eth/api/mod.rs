@@ -516,4 +516,10 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
         &self.blocking_task_pool
     }
+
+    /// Returns a handle to the EVM config.
+    #[inline]
+    pub const fn evm_config(&self) -> &EvmConfig {
+        &self.evm_config
+    }
 }
