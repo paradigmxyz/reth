@@ -10,15 +10,18 @@ use crate::{
 };
 use futures::Future;
 use reth_db::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
     test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
+};
+use reth_db_api::{
+    database::Database,
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_exex::ExExContext;
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
+    args::DatadirArgs,
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{DataDirPath, MaybePlatformPath},
     node_config::NodeConfig,
@@ -171,7 +174,9 @@ impl<DB> NodeBuilder<DB> {
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
         let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
-        self.config.datadir.datadir = path.clone();
+        self.config = self
+            .config
+            .with_datadir_args(DatadirArgs { datadir: path.clone(), ..Default::default() });
 
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
@@ -465,7 +470,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             self.provider.clone(),
             self.executor.clone(),
             self.head,
-            self.config.datadir(),
         )
     }
 
@@ -477,7 +481,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 self.provider.clone(),
                 self.executor.clone(),
                 self.head,
-                self.config.datadir(),
             )
             .await
     }

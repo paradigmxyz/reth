@@ -457,6 +457,7 @@ where
 
         let full_node = FullNode {
             evm_config: node_adapter.components.evm_config().clone(),
+            block_executor: node_adapter.components.block_executor().clone(),
             pool: node_adapter.components.pool().clone(),
             network: node_adapter.components.network().clone(),
             provider: node_adapter.provider.clone(),

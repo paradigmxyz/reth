@@ -1,9 +1,9 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::DbDupCursorRO,
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{

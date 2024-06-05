@@ -13,7 +13,7 @@ use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
 use reth_config::{config::PruneConfig, Config};
-use reth_db::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
@@ -249,9 +249,9 @@ impl NodeConfig {
     }
 
     /// Get the network secret from the given data dir
-    pub fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
+    pub fn network_secret(&self) -> eyre::Result<SecretKey> {
         let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
+            self.network.p2p_secret_key.clone().unwrap_or_else(|| self.datadir().p2p_secret());
         debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
         let secret_key = get_secret_key(&network_secret_path)?;
         Ok(secret_key)
@@ -312,11 +312,10 @@ impl NodeConfig {
         client: C,
         executor: TaskExecutor,
         head: Head,
-        data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<NetworkConfig<C>> {
         info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = self.network_secret(&data_dir)?;
-        let default_peers_path = data_dir.known_peers();
+        let secret_key = self.network_secret()?;
+        let default_peers_path = self.datadir().known_peers();
         Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
     }
 
@@ -329,12 +328,11 @@ impl NodeConfig {
         client: C,
         executor: TaskExecutor,
         head: Head,
-        data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<NetworkBuilder<C, (), ()>>
     where
         C: BlockNumReader,
     {
-        let network_config = self.network_config(config, client, executor, head, data_dir)?;
+        let network_config = self.network_config(config, client, executor, head)?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
     }

@@ -9,7 +9,7 @@ repository.workspace = true
 
 [dependencies]
 tempfile.workspace = true
-reth-db.workspace = true
+reth-db-api.workspace = true
 rayon.workspace = true
 
 [dev-dependencies]

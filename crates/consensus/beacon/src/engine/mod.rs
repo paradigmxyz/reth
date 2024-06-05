@@ -4,7 +4,7 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
@@ -2178,7 +2178,8 @@ mod tests {
 
     mod fork_choice_updated {
         use super::*;
-        use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
+        use reth_db::{tables, test_utils::create_test_static_files_dir};
+        use reth_db_api::transaction::DbTxMut;
         use reth_primitives::U256;
         use reth_provider::providers::StaticFileProvider;
         use reth_rpc_types::engine::ForkchoiceUpdateError;

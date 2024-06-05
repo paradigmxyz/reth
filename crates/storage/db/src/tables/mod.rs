@@ -4,9 +4,9 @@
 //!
 //! This module defines the tables in reth, as well as some table-related abstractions:
 //!
-//! - [`codecs`] integrates different codecs into [`Encode`](crate::abstraction::table::Encode) and
-//!   [`Decode`](crate::abstraction::table::Decode)
-//! - [`models`] defines the values written to tables
+//! - [`codecs`] integrates different codecs into [`Encode`](reth_db_api::table::Encode) and
+//!   [`Decode`](reth_db_api::table::Decode)
+//! - [`models`](reth_db_api::models) defines the values written to tables
 //!
 //! # Database Tour
 //!
@@ -16,26 +16,21 @@
 #![allow(unknown_lints, non_local_definitions)]
 
 pub mod codecs;
-pub mod models;
 
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
 pub(crate) mod utils;
 
-use crate::{
-    abstraction::table::Table,
-    table::DupSort,
-    tables::{
-        codecs::CompactU256,
-        models::{
-            accounts::{AccountBeforeTx, BlockNumberAddress},
-            blocks::{HeaderHash, StoredBlockOmmers},
-            client_version::ClientVersion,
-            storage_sharded_key::StorageShardedKey,
-            ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
-        },
+use reth_db_api::{
+    models::{
+        accounts::{AccountBeforeTx, BlockNumberAddress},
+        blocks::{HeaderHash, StoredBlockOmmers},
+        client_version::ClientVersion,
+        storage_sharded_key::StorageShardedKey,
+        CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
+    table::{DupSort, Table},
 };
 use reth_primitives::{
     stage::StageCheckpoint,
@@ -60,10 +55,8 @@ pub enum TableType {
 /// # Example
 ///
 /// ```
-/// use reth_db::{
-///     table::{DupSort, Table},
-///     TableViewer, Tables,
-/// };
+/// use reth_db::{TableViewer, Tables};
+/// use reth_db_api::table::{DupSort, Table};
 ///
 /// struct MyTableViewer;
 ///
@@ -136,8 +129,8 @@ macro_rules! tables {
                 }
             }
 
-            impl $crate::table::Table for $name {
-                const TABLE: Tables = Tables::$name;
+            impl reth_db_api::table::Table for $name {
+                const NAME: &'static str = table_names::$name;
 
                 type Key = $key;
                 type Value = $value;
@@ -253,11 +246,12 @@ macro_rules! tables {
         /// # Examples
         ///
         /// ```
-        /// use reth_db::{Table, Tables, tables_to_generic};
+        /// use reth_db::{Tables, tables_to_generic};
+        /// use reth_db_api::table::Table;
         ///
         /// let table = Tables::Headers;
-        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::TABLE);
-        /// assert_eq!(result, table);
+        /// let result = tables_to_generic!(table, |GenericTable| GenericTable::NAME);
+        /// assert_eq!(result, table.name());
         /// ```
         #[macro_export]
         macro_rules! tables_to_generic {

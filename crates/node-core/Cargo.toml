@@ -15,7 +15,8 @@ workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-storage-errors = { workspace = true, features = ["clap"] }
+reth-db-api.workspace = true
+reth-storage-errors.workspace = true
 reth-provider.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true

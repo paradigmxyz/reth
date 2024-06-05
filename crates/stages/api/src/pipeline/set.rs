@@ -1,5 +1,5 @@
 use crate::Stage;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::stage::StageId;
 use std::{
     collections::HashMap,

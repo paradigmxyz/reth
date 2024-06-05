@@ -1,12 +1,10 @@
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{
+use reth_db::{static_file::TransactionMask, tables, RawValue};
+use reth_db_api::{
     cursor::DbCursorRW,
     database::Database,
-    static_file::TransactionMask,
-    tables,
     transaction::{DbTx, DbTxMut},
-    RawValue,
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
@@ -284,7 +282,7 @@ struct FailedSenderRecoveryError {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::cursor::DbCursorRO;
+    use reth_db_api::cursor::DbCursorRO;
     use reth_primitives::{
         stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
         TransactionSigned, B256,

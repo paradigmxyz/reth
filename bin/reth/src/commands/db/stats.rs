@@ -4,9 +4,8 @@ use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
-use reth_db::{
-    database::Database, mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables,
-};
+use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables};
+use reth_db_api::database::Database;
 use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};

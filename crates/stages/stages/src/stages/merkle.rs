@@ -1,8 +1,8 @@
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     database::Database,
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
@@ -367,7 +367,7 @@ mod tests {
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_db::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
+    use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_primitives::{
         keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
     };

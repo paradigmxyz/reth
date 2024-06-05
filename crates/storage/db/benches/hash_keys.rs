@@ -9,7 +9,8 @@ use proptest::{
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{cursor::DbCursorRW, TransactionHashNumbers};
+use reth_db::TransactionHashNumbers;
+use reth_db_api::cursor::DbCursorRW;
 use std::collections::HashSet;
 
 criterion_group! {

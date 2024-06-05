@@ -43,13 +43,15 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_rlp::Decodable;
     use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW},
         mdbx::{cursor::Cursor, RW},
-        table::Table,
         tables,
         test_utils::TempDatabase,
-        transaction::{DbTx, DbTxMut},
         AccountsHistory, DatabaseEnv,
+    };
+    use reth_db_api::{
+        cursor::{DbCursorRO, DbCursorRW},
+        table::Table,
+        transaction::{DbTx, DbTxMut},
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;

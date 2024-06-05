@@ -1,5 +1,5 @@
 use crate::error::StageError;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, TxNumber,
