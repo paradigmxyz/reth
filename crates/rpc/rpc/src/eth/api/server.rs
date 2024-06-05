@@ -317,13 +317,39 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(EthApi::gas_price(self).await?)
+
+        let Some(rpc_url) = &self.provider().chain_spec().bitfinity_evm_url else {
+            return Ok(EthApi::gas_price(self).await?);
+        };
+
+        let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
+            ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc_url.to_string()),
+        );
+
+        let gas_price = client.gas_price().await.map_err(|e| {
+            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+        })?;
+
+        Ok(U256::from(gas_price.as_u128()))
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(EthApi::suggested_priority_fee(self).await?)
+
+        let Some(rpc_url) = &self.provider().chain_spec().bitfinity_evm_url else {
+            return Ok(EthApi::suggested_priority_fee(self).await?);
+        };
+
+        let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
+            ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc_url.to_string()),
+        );
+
+        let priority_fee = client.max_priority_fee_per_gas().await.map_err(|e| {
+            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+        })?;
+
+        Ok(U256::from(priority_fee.as_u128()))
     }
 
     /// Handler for: `eth_blobBaseFee`
@@ -383,14 +409,13 @@ where
 
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256> {
-
         let Some(rpc_url) = &self.provider().chain_spec().bitfinity_evm_url else {
-            return Err(internal_rpc_err("no url found for eth_sendRawTransaction"))
+            return Err(internal_rpc_err("no url found for eth_sendRawTransaction"));
         };
         trace!(target: "rpc::eth", ?rpc_url, "Serving eth_sendRawTransaction");
 
         let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
-            ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc_url.to_string())
+            ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc_url.to_string()),
         );
 
         let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
