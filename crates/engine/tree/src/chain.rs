@@ -14,13 +14,12 @@ pub struct ChainOrchestrator<T>
 where
     T: ChainHandler,
 {
-    /// The handler responsible for advancing the chain.
+    /// The handler for advancing the chain.
     handler: T,
-    /* pipeline */
-
-    /* pruning */
-
-    sync: (),
+    /// Controls pipeline sync.
+    pipeline: (),
+    /// Additional hooks (e.g. pruning) that can require exclusive access to the database.
+    hooks: (),
 }
 
 impl<T> ChainOrchestrator<T>
@@ -42,7 +41,7 @@ where
     /// Polls the `ChainOrchestrator` for the next event.
     #[tracing::instrument(level = "debug", name = "ChainOrchestrator::poll", skip(self, cx))]
     fn poll_next_event(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<ChainEvent> {
-        todo!()
+        todo!("do we need this?")
     }
 }
 
@@ -63,25 +62,6 @@ pub enum ChainEvent {
     Synced(B256),
 }
 
-/// Events/Requests that the [`ChainHandler`] can emit to the [`ChainOrchestrator`].
-#[derive(Debug, Clone)]
-pub enum HandlerEvent {
-    /// Instructs the Swarm
-    Synced(B256),
-    /// Request to sync to a specific target
-    SyncRequest(B256),
-}
-
-/// Internal events issued by the [`ChainOrchestrator`].
-pub enum FromOrchestrator {
-    /// Started syncing or pruning which requires mutable access to the db.
-    Pausing,
-    /// Finished syncing or pruning
-    ///
-    /// TODO: pipeline finished, pruner finished
-    Active,
-}
-
 /// A trait that advances the chain by handling actions.
 ///
 /// This is intended to be implement the chain consensus logic, for example `engine` API.
@@ -93,31 +73,53 @@ pub trait ChainHandler: Send + Sync {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<HandlerEvent>;
 }
 
-/// Represents the state of the chain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum NodeState {
-    /// Node is pruning the chain.
-    Pruning,
-    /// Node is syncing the chain.
-    Syncing,
-    /// Node is actively processing the chain.
-    #[default]
-    Active,
+/// Events/Requests that the [`ChainHandler`] can emit to the [`ChainOrchestrator`].
+#[derive(Debug, Clone)]
+pub enum HandlerEvent {
+    Pipeline(PipelineAction),
+    /// Ack paused write access to the database
+    WriteAccessPaused,
+    /// Operating in write-access mode
+    WriteAccess,
 }
 
-impl NodeState {
-    /// Checks if the node is pruning.
-    pub const fn is_pruning(&self) -> bool {
-        matches!(self, Self::Pruning)
+#[derive(Debug, Clone)]
+pub enum PipelineAction {
+    /// Start pipeline sync
+    SyncPipeline,
+    /// Unwind via the pipeline
+    UnwindPipeline,
+}
+
+/// Internal events issued by the [`ChainOrchestrator`].
+#[derive(Debug, Clone)]
+pub enum FromOrchestrator {
+    /// Request to temporarily freeze write access to the database.
+    PausedWriteHookAccess,
+    /// Orchestrator no longer requires exclusive write access to the database.
+    ReleaseWriteHookAccess,
+    /// Invoked when pipeline sync finished
+    OnPipelineOutcome,
+}
+
+/// Represents the state of the chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OrchestratorState {
+    /// Orchestrator has exclusive write access to the database.
+    WriteAccess,
+    /// Node is actively processing the chain.
+    #[default]
+    Idle,
+}
+
+impl OrchestratorState {
+    /// Returns `true` if the state is [`OrchestratorState::WriteAccess`].
+    pub const fn is_write_access(&self) -> bool {
+        matches!(self, Self::WriteAccess)
     }
 
-    /// Checks if the node is syncing.
-    pub const fn is_syncing(&self) -> bool {
-        matches!(self, Self::Syncing)
-    }
-
-    /// Checks if the node is active.
-    pub const fn is_active(&self) -> bool {
-        matches!(self, Self::Active)
+    /// Returns `true` if the state is [`OrchestratorState::Idle`].
+    pub const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
     }
 }

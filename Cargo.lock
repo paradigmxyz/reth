@@ -6696,6 +6696,8 @@ dependencies = [
  "aquamarine",
  "futures",
  "metrics",
+ "parking_lot 0.12.3",
+ "reth-beacon-consensus",
  "reth-blockchain-tree-api",
  "reth-db",
  "reth-engine-primitives",

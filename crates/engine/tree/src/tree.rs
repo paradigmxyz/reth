@@ -1,72 +1,48 @@
-use futures::stream::FuturesUnordered;
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
-use tokio::sync::mpsc::UnboundedSender;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use crate::{chain::PipelineAction, engine::DownloadRequest};
+use parking_lot::Mutex;
+use reth_beacon_consensus::InvalidHeaderCache;
+use reth_engine_primitives::EngineTypes;
+use reth_primitives::SealedBlockWithSenders;
+use std::sync::Arc;
 
-/// A trait that manages the tree by handling actions.
-pub trait TreeHandler: Send + Sync {
-    /// The action this type handles
-    type Action;
-    /// The outcome
-    type ActionOutcome;
-    /// Error this handler can throw when handling an action.
-    type Error;
-
-    /// Invoked when receiving an action.
-    fn on_action(
-        &mut self,
-        action: Self::Action,
-    ) -> impl Future<Output = Result<Self::ActionOutcome, Self::Error>> + Send;
+/// Keeps track of the state of the tree.
+pub struct TreeState {
+    // TODO: this is shared state
 }
 
-/// Provides access to [TreeEngineService]
+impl TreeState {
+    fn buffer(&mut self) {}
+
+    fn insert_validated(&mut self) {}
+}
+
+/// Tracks the state of the engine api internals.
 ///
-/// This is the frontend for the tree service task.
-// TODO do we want request response or send + poll?
-#[derive(Debug, Clone)]
-pub struct TreeEngine {
-    to_service: UnboundedSender<TreeAction>,
+/// This type is shareable.
+pub struct EngineApiTreeState {
+    /// Tracks the header of invalid payloads that were rejected by the engine because they're
+    /// invalid.
+    invalid_headers: Arc<Mutex<InvalidHeaderCache>>,
+    tree_state: TreeState,
 }
 
-/// A generic task that manages the state of the blockchain tree by handling incoming actions that
-/// must be applied to the tree.
-///
-/// This type is an endless future that listens for incoming messages from the [TreeEngine].
-/// It handles the actions
-#[must_use = "Future does nothing unless polled"]
-pub struct TreeEngineService<T>
-where
-    T: TreeHandler,
-{
-    /// Keeps track of the state the service is in
-    state: (),
-    /// Manages the tree.
-    handler: T,
-    /// Actions that are currently in progress.
-    pending: FuturesUnordered<Pin<Box<dyn Future<Output = Result<T::ActionOutcome, T::Error>>>>>,
-    /// Sender half of the action channel.
-    action_tx: UnboundedSender<TreeAction>,
-    /// Receiver half of the action channel.
-    action_rx: UnboundedReceiverStream<TreeAction>,
+/// Access to tree internals.
+#[derive(Debug)]
+pub struct TreeContext {}
+
+/// The type responsible for processing engine API requests.
+pub trait EngineApiTreeHandler: Send + Sync + Clone {
+    type Engine: EngineTypes;
+
+    fn downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) {}
+
+    fn new_payload(&mut self) {}
+
+    fn forkchoice_updated(&mut self) {}
 }
 
-impl<T> Future for TreeEngineService<T>
-where
-    T: TreeHandler,
-{
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
-    }
-}
-
-/// Incoming actions the tree task can handle
-#[derive(Debug, Clone)]
-pub enum TreeAction {
-    // TODO FCU + Payload this must be generic over engine types
+/// Events that can be emitted by the [EngineApiTreeHandler].
+pub enum TreeEvent {
+    PipelineAction(PipelineAction),
+    Download(DownloadRequest),
 }

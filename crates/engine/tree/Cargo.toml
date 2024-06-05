@@ -28,6 +28,7 @@ reth-static-file.workspace = true
 reth-tokio-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
+reth-beacon-consensus.workspace = true
 
 # common
 tokio = { workspace = true, features = ["macros", "sync"] }
@@ -41,3 +42,4 @@ metrics.workspace = true
 # misc
 aquamarine.workspace = true
 tracing.workspace = true
+parking_lot.workspace = true
