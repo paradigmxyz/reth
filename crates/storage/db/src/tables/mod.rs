@@ -4,8 +4,7 @@
 //!
 //! This module defines the tables in reth, as well as some table-related abstractions:
 //!
-//! - [`codecs`] integrates different codecs into [`Encode`](reth_db_api::table::Encode) and
-//!   [`Decode`](reth_db_api::table::Decode)
+//! - [`codecs`] integrates different codecs into [`Encode`] and [`Decode`]
 //! - [`models`](reth_db_api::models) defines the values written to tables
 //!
 //! # Database Tour
@@ -30,7 +29,7 @@ use reth_db_api::{
         storage_sharded_key::StorageShardedKey,
         CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
-    table::{DupSort, Table},
+    table::{Decode, DupSort, Encode, Table},
 };
 use reth_primitives::{
     stage::StageCheckpoint,
@@ -38,6 +37,7 @@ use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
     PruneSegment, Receipt, Requests, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
@@ -406,6 +406,36 @@ tables! {
 
     /// Stores EIP-7685 EL -> CL requests, indexed by block number.
     table BlockRequests<Key = BlockNumber, Value = Requests>;
+
+    /// Stores generic chain state info, like the last finalized block.
+    table ChainState<Key = ChainStateKey, Value = BlockNumber>;
+}
+
+/// Keys for the `ChainState` table.
+#[derive(Ord, Clone, Eq, PartialOrd, PartialEq, Debug, Deserialize, Serialize, Hash)]
+pub enum ChainStateKey {
+    /// Last finalized block key
+    LastFinalizedBlock,
+}
+
+impl Encode for ChainStateKey {
+    type Encoded = [u8; 1];
+
+    fn encode(self) -> Self::Encoded {
+        match self {
+            Self::LastFinalizedBlock => [0],
+        }
+    }
+}
+
+impl Decode for ChainStateKey {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_db_api::DatabaseError> {
+        if value.as_ref() == [0] {
+            Ok(Self::LastFinalizedBlock)
+        } else {
+            Err(reth_db_api::DatabaseError::Decode)
+        }
+    }
 }
 
 // Alias types.

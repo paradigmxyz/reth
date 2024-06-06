@@ -593,7 +593,7 @@ impl StaticFileProviderRW {
     fn ensure_no_queued_prune(&self) -> ProviderResult<()> {
         if self.prune_on_commit.is_some() {
             return Err(ProviderError::NippyJar(
-                "Pruning should be comitted before appending or pruning more data".to_string(),
+                "Pruning should be committed before appending or pruning more data".to_string(),
             ))
         }
         Ok(())

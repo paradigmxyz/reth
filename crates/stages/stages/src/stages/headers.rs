@@ -351,7 +351,7 @@ where
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
         writer.prune_headers(static_file_headers_to_unwind)?;
 
-        // Set the stage checkpoin entities processed based on how much we unwound - we add the
+        // Set the stage checkpoint entities processed based on how much we unwound - we add the
         // headers unwound from static files and db
         let stage_checkpoint =
             input.checkpoint.headers_stage_checkpoint().map(|stage_checkpoint| HeadersCheckpoint {
