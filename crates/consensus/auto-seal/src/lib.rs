@@ -359,6 +359,7 @@ impl StorageInner {
         // if shanghai is active, include empty withdrawals
         let withdrawals =
             chain_spec.is_shanghai_active_at_timestamp(timestamp).then_some(Withdrawals::default());
+        // if prague is active, include empty requests
         let requests =
             chain_spec.is_prague_active_at_timestamp(timestamp).then_some(Requests::default());
 
