@@ -1,12 +1,15 @@
-use reth_primitives::{Address, B256, ChainSpec, Header, revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg}, SealedBlock, U256, Withdrawals};
+use reth_primitives::{
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+    Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
+};
 use reth_rpc_types::{
-    engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes},
+    engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
     Withdrawal,
 };
-use reth_rpc_types::engine::PayloadId;
 
-use crate::{EngineApiMessageVersion, validate_version_specific_fields};
-use crate::error::EngineObjectValidationError;
+use crate::{
+    error::EngineObjectValidationError, validate_version_specific_fields, EngineApiMessageVersion,
+};
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
 /// engine API execution payloads.
@@ -36,8 +39,8 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
         parent: B256,
         rpc_payload_attributes: Self::RpcPayloadAttributes,
     ) -> Result<Self, Self::Error>
-        where
-            Self: Sized;
+    where
+        Self: Sized;
 
     /// Returns the [`PayloadId`] for the running payload job.
     fn payload_id(&self) -> PayloadId;
@@ -81,7 +84,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 ///
 /// This type is emitted as part of the forkchoiceUpdated call
 pub trait PayloadAttributes:
-serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug + Clone + Send + Sync + 'static
+    serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug + Clone + Send + Sync + 'static
 {
     /// Returns the timestamp to be used in the payload job.
     fn timestamp(&self) -> u64;

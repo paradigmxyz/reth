@@ -6262,7 +6262,6 @@ dependencies = [
  "futures-core",
  "futures-util",
  "metrics",
- "reth-engine-primitives",
  "reth-metrics",
  "reth-payload-builder",
  "reth-payload-primitives",
@@ -6689,9 +6688,7 @@ version = "0.2.0-beta.8"
 dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
- "reth-rpc-types",
  "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -7423,7 +7420,6 @@ version = "0.2.0-beta.8"
 dependencies = [
  "reth-errors",
  "reth-primitives",
- "reth-provider",
  "reth-rpc-types",
  "reth-transaction-pool",
  "serde",

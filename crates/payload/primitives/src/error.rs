@@ -34,8 +34,8 @@ pub enum PayloadBuilderError {
 impl PayloadBuilderError {
     /// Create a new error from a boxed error.
     pub fn other<E>(error: E) -> Self
-        where
-            E: std::error::Error + Send + Sync + 'static,
+    where
+        E: std::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
     }
@@ -56,7 +56,7 @@ impl From<oneshot::error::RecvError> for PayloadBuilderError {
 /// Thrown when the payload or attributes are known to be invalid before processing.
 ///
 /// This is used mainly for
-/// [validate_version_specific_fields](crate::validate_version_specific_fields), which validates
+/// [`validate_version_specific_fields`](crate::validate_version_specific_fields), which validates
 /// both execution payloads and forkchoice update attributes with respect to a method version.
 #[derive(thiserror::Error, Debug)]
 pub enum EngineObjectValidationError {
@@ -89,14 +89,14 @@ pub enum VersionSpecificValidationError {
     /// block root
     #[error("parent beacon block root not supported before V3")]
     ParentBeaconBlockRootNotSupportedBeforeV3,
-    /// Thrown if engine_forkchoiceUpdatedV1 or engine_newPayloadV1 contains withdrawals
+    /// Thrown if `engine_forkchoiceUpdatedV1` or `engine_newPayloadV1` contains withdrawals
     #[error("withdrawals not supported in V1")]
     WithdrawalsNotSupportedInV1,
-    /// Thrown if engine_forkchoiceUpdated or engine_newPayload contains no withdrawals after
+    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains no withdrawals after
     /// Shanghai
     #[error("no withdrawals post-Shanghai")]
     NoWithdrawalsPostShanghai,
-    /// Thrown if engine_forkchoiceUpdated or engine_newPayload contains withdrawals before
+    /// Thrown if `engine_forkchoiceUpdated` or `engine_newPayload` contains withdrawals before
     /// Shanghai
     #[error("withdrawals pre-Shanghai")]
     HasWithdrawalsPreShanghai,
@@ -109,8 +109,8 @@ pub enum VersionSpecificValidationError {
 impl EngineObjectValidationError {
     /// Creates an instance of the `InvalidParams` variant with the given error.
     pub fn invalid_params<E>(error: E) -> Self
-        where
-            E: std::error::Error + Send + Sync + 'static,
+    where
+        E: std::error::Error + Send + Sync + 'static,
     {
         Self::InvalidParams(Box::new(error))
     }

@@ -13,26 +13,25 @@ pub mod error;
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 mod traits;
-pub use traits::{BuiltPayload, PayloadBuilderAttributes, PayloadAttributes};
+pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 
 mod payload;
 pub use payload::PayloadOrAttributes;
 
+use crate::error::{EngineObjectValidationError, VersionSpecificValidationError};
+use reth_primitives::ChainSpec;
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
-use reth_primitives::ChainSpec;
-use crate::error::{EngineObjectValidationError, VersionSpecificValidationError};
 
-pub trait PayloadTypes:
-DeserializeOwned + Serialize + Debug + Unpin + Send + Sync + Clone
-{
+/// Payload types
+pub trait PayloadTypes: DeserializeOwned + Serialize + Debug + Unpin + Send + Sync + Clone {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
     /// The payload attributes type that contains information about a running payload job.
     type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
-    + Clone
-    + Unpin;
+        + Clone
+        + Unpin;
 }
 
 /// Validates the timestamp depending on the version called:
@@ -297,8 +296,8 @@ pub fn validate_version_specific_fields<Type>(
     version: EngineApiMessageVersion,
     payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), EngineObjectValidationError>
-    where
-        Type: PayloadAttributes,
+where
+    Type: PayloadAttributes,
 {
     validate_withdrawals_presence(
         chain_spec,

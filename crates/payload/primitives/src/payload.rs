@@ -1,6 +1,6 @@
+use crate::{MessageValidationKind, PayloadAttributes};
 use reth_primitives::B256;
 use reth_rpc_types::engine::ExecutionPayload;
-use crate::{MessageValidationKind, PayloadAttributes};
 
 /// Either an [`ExecutionPayload`] or a types that implements the [`PayloadAttributes`] trait.
 #[derive(Debug)]
@@ -17,8 +17,8 @@ pub enum PayloadOrAttributes<'a, AttributesType> {
 }
 
 impl<'a, AttributesType> PayloadOrAttributes<'a, AttributesType>
-    where
-        AttributesType: PayloadAttributes,
+where
+    AttributesType: PayloadAttributes,
 {
     /// Construct a [`PayloadOrAttributes`] from an [`ExecutionPayload`] and optional parent beacon
     /// block root.
@@ -63,11 +63,10 @@ impl<'a, AttributesType> PayloadOrAttributes<'a, AttributesType>
 }
 
 impl<'a, AttributesType> From<&'a AttributesType> for PayloadOrAttributes<'a, AttributesType>
-    where
-        AttributesType: PayloadAttributes,
+where
+    AttributesType: PayloadAttributes,
 {
     fn from(attributes: &'a AttributesType) -> Self {
         Self::PayloadAttributes(attributes)
     }
 }
-

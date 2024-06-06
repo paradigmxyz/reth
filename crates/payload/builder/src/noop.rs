@@ -2,7 +2,7 @@
 
 use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
-use reth_engine_primitives::{EngineTypes};
+use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use std::{
     future::Future,

@@ -11,8 +11,9 @@
 use core::fmt;
 use reth_primitives::ChainSpec;
 
-use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
-                              error::EngineObjectValidationError
+use reth_payload_primitives::{
+    error::EngineObjectValidationError, BuiltPayload, EngineApiMessageVersion, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes,
 };
 
 use serde::{de::DeserializeOwned, ser::Serialize};
