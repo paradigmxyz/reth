@@ -490,7 +490,7 @@ where
                     debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
                 }
                 MissingPayloadBehaviour::RaceEmptyPayload => {
-                    debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
+                    debug!(target: "payload_builder", id=%self.config.payload_id(), "racing empty payload");
 
                     // if no payload has been built yet
                     self.metrics.inc_requested_empty_payload();
