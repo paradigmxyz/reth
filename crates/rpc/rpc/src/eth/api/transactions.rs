@@ -37,8 +37,8 @@ use revm::{
 use crate::{
     eth::{
         api::{
-            pending_block::PendingBlockEnv, BuildReceipt, EthState, EthTransactions, LoadState,
-            SpawnBlocking, StateCacheDB,
+            pending_block::PendingBlockEnv, BuildReceipt, EthState, EthTransactions,
+            LoadPendingBlock, LoadState, SpawnBlocking, StateCacheDB,
         },
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
@@ -97,7 +97,7 @@ where
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock,
     {
         if at.is_pending() {
             let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;

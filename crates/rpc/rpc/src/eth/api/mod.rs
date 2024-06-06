@@ -1,43 +1,29 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
+use std::{fmt::Debug, sync::Arc};
+
 use async_trait::async_trait;
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, U256, U64,
-};
+use reth_primitives::{Address, BlockNumberOrTag, ChainInfo, U256, U64};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{CfgEnv, SpecId};
-use std::{
-    fmt::Debug,
-    sync::Arc,
-    time::{Duration, Instant},
-};
 use tokio::sync::Mutex;
 
 use crate::eth::{
-    api::{
-        fee_history::FeeHistoryCache,
-        pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin},
-    },
-    cache::EthStateCache,
-    error::{EthApiError, EthResult},
-    gas_oracle::GasPriceOracle,
+    api::fee_history::FeeHistoryCache, cache::EthStateCache, gas_oracle::GasPriceOracle,
     signer::EthSigner,
 };
 
 pub mod block;
 mod call;
 pub(crate) mod fee_history;
-
 mod fees;
-mod pending_block;
+pub mod pending_block;
 pub mod receipt;
 mod server;
 mod sign;
@@ -46,9 +32,11 @@ pub mod traits;
 pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
+pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadState, SpawnBlocking, StateCacheDB,
+    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking,
+    StateCacheDB,
 };
 pub use transactions::TransactionSource;
 
@@ -201,120 +189,15 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm,
-{
-    /// Configures the [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the pending block
-    ///
-    /// If no pending block is available, this will derive it from the `latest` block
-    pub(crate) fn pending_block_env_and_cfg(&self) -> EthResult<PendingBlockEnv> {
-        let origin: PendingBlockEnvOrigin = if let Some(pending) =
-            self.provider().pending_block_with_senders()?
-        {
-            PendingBlockEnvOrigin::ActualPending(pending)
-        } else {
-            // no pending block from the CL yet, so we use the latest block and modify the env
-            // values that we can
-            let latest =
-                self.provider().latest_header()?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
-            let (mut latest_header, block_hash) = latest.split();
-            // child block
-            latest_header.number += 1;
-            // assumed child block is in the next slot: 12s
-            latest_header.timestamp += 12;
-            // base fee of the child block
-            let chain_spec = self.provider().chain_spec();
-
-            latest_header.base_fee_per_gas = latest_header.next_block_base_fee(
-                chain_spec.base_fee_params_at_timestamp(latest_header.timestamp),
-            );
-
-            // update excess blob gas consumed above target
-            latest_header.excess_blob_gas = latest_header.next_block_excess_blob_gas();
-
-            // we're reusing the same block hash because we need this to lookup the block's state
-            let latest = SealedHeader::new(latest_header, block_hash);
-
-            PendingBlockEnvOrigin::DerivedFromLatest(latest)
-        };
-
-        let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
-
-        let mut block_env = BlockEnv::default();
-        // Note: for the PENDING block we assume it is past the known merge block and thus this will
-        // not fail when looking up the total difficulty value for the blockenv.
-        self.provider().fill_env_with_header(
-            &mut cfg,
-            &mut block_env,
-            origin.header(),
-            self.inner.evm_config.clone(),
-        )?;
-
-        Ok(PendingBlockEnv { cfg, block_env, origin })
-    }
-
-    /// Returns the locally built pending block
-    pub(crate) async fn local_pending_block(&self) -> EthResult<Option<SealedBlockWithSenders>> {
-        let pending = self.pending_block_env_and_cfg()?;
-        if pending.origin.is_actual_pending() {
-            return Ok(pending.origin.into_actual_pending())
-        }
-
-        let mut lock = self.inner.pending_block.lock().await;
-
-        let now = Instant::now();
-
-        // check if the block is still good
-        if let Some(pending_block) = lock.as_ref() {
-            // this is guaranteed to be the `latest` header
-            if pending.block_env.number.to::<u64>() == pending_block.block.number &&
-                pending.origin.header().hash() == pending_block.block.parent_hash &&
-                now <= pending_block.expires_at
-            {
-                return Ok(Some(pending_block.block.clone()))
-            }
-        }
-
-        // no pending block from the CL yet, so we need to build it ourselves via txpool
-        let pending_block = match self
-            .spawn_blocking_io(move |this| {
-                // we rebuild the block
-                pending.build_block(this.provider(), this.pool())
-            })
-            .await
-        {
-            Ok(block) => block,
-            Err(err) => {
-                tracing::debug!(target: "rpc", "Failed to build pending block: {:?}", err);
-                return Ok(None)
-            }
-        };
-
-        let now = Instant::now();
-        *lock = Some(PendingBlock {
-            block: pending_block.clone(),
-            expires_at: now + Duration::from_secs(1),
-        });
-
-        Ok(Some(pending_block))
-    }
-}
-
-impl<Provider, Pool, Events, EvmConfig> std::fmt::Debug
-    for EthApi<Provider, Pool, Events, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
+    for EthApi<Provider, Pool, Network, EvmConfig>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Pool, Events, EvmConfig> Clone for EthApi<Provider, Pool, Events, EvmConfig> {
+impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
@@ -462,6 +345,12 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn cache(&self) -> &EthStateCache {
         &self.eth_cache
+    }
+
+    /// Returns a handle to the pending block.
+    #[inline]
+    pub const fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
+        &self.pending_block
     }
 
     /// Returns a handle to the task spawner.

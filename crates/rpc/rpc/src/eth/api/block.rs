@@ -18,6 +18,8 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::eth::api::EthBlocks;
 
+use super::traits::LoadPendingBlock;
+
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReaderIdExt + BlockReader + ReceiptProvider,
@@ -94,7 +96,10 @@ where
     pub(crate) async fn block(
         &self,
         block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<reth_primitives::SealedBlock>> {
+    ) -> EthResult<Option<reth_primitives::SealedBlock>>
+    where
+        Self: LoadPendingBlock,
+    {
         self.block_with_senders(block_id)
             .await
             .map(|maybe_block| maybe_block.map(|block| block.block))
@@ -104,7 +109,10 @@ where
     pub(crate) async fn block_with_senders(
         &self,
         block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<reth_primitives::SealedBlockWithSenders>> {
+    ) -> EthResult<Option<reth_primitives::SealedBlockWithSenders>>
+    where
+        Self: LoadPendingBlock,
+    {
         let block_id = block_id.into();
 
         if block_id.is_pending() {
@@ -133,7 +141,10 @@ where
         &self,
         block_id: impl Into<BlockId>,
         full: bool,
-    ) -> EthResult<Option<RichBlock>> {
+    ) -> EthResult<Option<RichBlock>>
+    where
+        Self: LoadPendingBlock,
+    {
         let block = match self.block_with_senders(block_id).await? {
             Some(block) => block,
             None => return Ok(None),
@@ -151,7 +162,10 @@ where
     pub(crate) async fn rpc_block_header(
         &self,
         block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<Header>> {
+    ) -> EthResult<Option<Header>>
+    where
+        Self: LoadPendingBlock,
+    {
         let header = self.rpc_block(block_id, false).await?.map(|block| block.inner.header);
         Ok(header)
     }
