@@ -28,10 +28,10 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{Head, SealedBlockWithSenders};
+use reth_primitives::{ChainSpec, Head, SealedBlockWithSenders, MAINNET};
 use reth_provider::{
-    providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
-    ProviderFactory,
+    providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+    BlockReader, ProviderFactory,
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -167,19 +167,21 @@ impl Debug for TestExExContext {
 ///
 /// This is a convenience function that does the following:
 /// 1. Sets up an [`ExExContext`] with all dependencies.
-/// 2. Inserts the Ethereum Mainnet genesis block into the storage.
+/// 2. Inserts the genesis block of the provided (chain spec)[`ChainSpec`] into the storage.
 /// 3. Creates a channel for receiving events from the Execution Extension.
 /// 4. Creates a channel for sending notifications to the Execution Extension.
 ///
 /// # Warning
 /// The genesis block is not sent to the notifications channel. The caller is responsible for
 /// doing this.
-pub async fn test_exex_context() -> eyre::Result<TestExExContext> {
+pub async fn test_exex_context_with_chain_spec(
+    chain_spec: Arc<ChainSpec>,
+) -> eyre::Result<TestExExContext> {
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::default();
     let executor = MockExecutorProvider::default();
 
-    let provider_factory = create_test_provider_factory();
+    let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
     let genesis_hash = init_genesis(provider_factory.clone())?;
     let provider =
         BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;
@@ -230,6 +232,13 @@ pub async fn test_exex_context() -> eyre::Result<TestExExContext> {
     };
 
     Ok(TestExExContext { ctx, genesis, provider_factory, events_rx, notifications_tx })
+}
+
+/// Creates a new [`TestExExContext`] with (mainnet)[`MAINNET`] chain spec.
+///
+/// For more information see [`test_exex_context_with_chain_spec`].
+pub async fn test_exex_context() -> eyre::Result<TestExExContext> {
+    test_exex_context_with_chain_spec(MAINNET.clone()).await
 }
 
 /// An extension trait for polling an Execution Extension future.
