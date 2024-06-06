@@ -36,12 +36,14 @@ use reth_provider::{
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use std::{
+    fmt::Debug,
     future::{poll_fn, Future},
     sync::Arc,
     task::Poll,
 };
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
+/// A test [`PoolBuilder`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct TestPoolBuilder;
@@ -57,6 +59,7 @@ where
     }
 }
 
+/// A test [`ExecutorBuilder`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct TestExecutorBuilder;
@@ -79,11 +82,12 @@ where
     }
 }
 
+/// A test [`Node`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct ExExNode;
+pub struct TestNode;
 
-impl ExExNode {
+impl TestNode {
     fn components<Node>() -> ComponentsBuilder<
         Node,
         TestPoolBuilder,
@@ -103,12 +107,12 @@ impl ExExNode {
     }
 }
 
-impl NodeTypes for ExExNode {
+impl NodeTypes for TestNode {
     type Primitives = ();
     type Engine = EthEngineTypes;
 }
 
-impl<N> Node<N> for ExExNode
+impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<Engine = EthEngineTypes>,
 {
@@ -127,20 +131,49 @@ where
 
 type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 type Adapter = NodeAdapter<
-    RethFullAdapter<TmpDB, ExExNode>,
-    <<ExExNode as Node<FullNodeTypesAdapter<ExExNode, TmpDB, BlockchainProvider<TmpDB>>>>::ComponentsBuilder as NodeComponentsBuilder<
-        RethFullAdapter<TmpDB, ExExNode>,
+    RethFullAdapter<TmpDB, TestNode>,
+    <<TestNode as Node<FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<TmpDB>>>>::ComponentsBuilder as NodeComponentsBuilder<
+        RethFullAdapter<TmpDB, TestNode>,
     >>::Components,
 >;
 
+/// A helper type for testing Execution Extensions.
 pub struct TestExExContext {
+    /// Fully initialized context
     pub ctx: ExExContext<Adapter>,
+    /// Genesis block that was inserted into the storage
     pub genesis: SealedBlockWithSenders,
+    /// Provider Factory for accessing the emphemeral storage of the host node
     pub provider_factory: ProviderFactory<TmpDB>,
+    /// Channel for receiving events from the Execution Extension
     pub events_rx: UnboundedReceiver<ExExEvent>,
+    /// Channel for sending notifications to the Execution Extension
     pub notifications_tx: Sender<ExExNotification>,
 }
 
+impl Debug for TestExExContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestExExContext")
+            .field("ctx", &self.ctx)
+            .field("genesis", &self.genesis)
+            .field("provider_factory", &self.provider_factory)
+            .field("events_rx", &self.events_rx)
+            .field("notifications_tx", &self.notifications_tx)
+            .finish()
+    }
+}
+
+/// Creates a new [`TestExExContext`].
+///
+/// This is a convenience function that does the following:
+/// 1. Sets up an [`ExExContext`] with all dependencies.
+/// 2. Inserts the Ethereum Mainnet genesis block into the storage.
+/// 3. Creates a channel for receiving events from the Execution Extension.
+/// 4. Creates a channel for sending notifications to the Execution Extension.
+///
+/// # Warning
+/// The genesis block is not sent to the notifications channel. The caller is responsible for
+/// doing this.
 pub async fn test_exex_context() -> eyre::Result<TestExExContext> {
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::default();
@@ -163,7 +196,7 @@ pub async fn test_exex_context() -> eyre::Result<TestExExContext> {
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();
 
-    let components = NodeAdapter::<FullNodeTypesAdapter<ExExNode, _, _>, _> {
+    let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
         components: Components { transaction_pool, evm_config, executor, network, payload_builder },
         task_executor,
         provider,

@@ -59,27 +59,34 @@ mod tests {
     use reth::providers::{BundleStateWithReceipts, Chain};
     use reth_exex::{ExExEvent, ExExNotification};
     use reth_exex_test_utils::{test_exex_context, PollOnce, TestExExContext};
-    use tokio::sync::mpsc::error::TryRecvError;
 
     #[tokio::test]
     async fn exex() -> eyre::Result<()> {
+        // Initialize a test Execution Extension context with all dependencies
         let TestExExContext { ctx, genesis, provider_factory: _, mut events_rx, notifications_tx } =
             test_exex_context().await?;
 
+        // Save the current head of the chain to check the finished height against it later
         let head = ctx.head;
 
+        // Send a notification to the Execution Extension that the chain has been committed
         notifications_tx
             .send(ExExNotification::ChainCommitted {
                 new: Arc::new(Chain::from_block(genesis, BundleStateWithReceipts::default(), None)),
             })
             .await?;
 
+        // Initialize the Execution Extension
         let mut exex = pin!(super::exex_init(ctx).await?);
 
+        // Check that the Execution Extension did not emit any events until we polled it
         assert!(events_rx.is_empty());
 
+        // Poll the Execution Extension once to process incoming notifications
         exex.poll_once().await;
 
+        // Check that the Execution Extension emitted a `FinishedHeight` event with the correct
+        // height
         let event = events_rx.try_recv()?;
         assert_eq!(event, ExExEvent::FinishedHeight(head.number));
 
