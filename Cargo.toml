@@ -213,7 +213,6 @@ lto = "thin"
 
 [profile.release]
 lto = "thin"
-strip = "debuginfo"
 
 # Like release, but with full debug symbols. Useful for e.g. `perf`.
 [profile.debug-fast]
