@@ -206,9 +206,16 @@ where
         })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
+        // resolve boot nodes
+        let mut resolved_boot_nodes = vec![];
+        for record in &boot_nodes {
+            let resolved = record.resolve().await?;
+            resolved_boot_nodes.push(resolved);
+        }
+
         discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
-            disc_config.bootstrap_nodes.extend(boot_nodes.clone());
+            disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
             disc_config.add_eip868_pair("eth", status.forkid);
             disc_config
         });

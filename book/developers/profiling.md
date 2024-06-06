@@ -75,6 +75,8 @@ memory spikes or leaks as often as a machine with only 8GB of RAM. Development m
 user's hardware. This can help developers debug issues that only occur on devices with limited hardware. `cgroups` is a tool that allows developers to limit the memory usage of a process,
 making it extremely useful to developers in understanding how their application performs in low-memory environments.
 
+See the [canonical documentation for cgroups](https://git.kernel.org/pub/scm/linux/kernel/git/tj/cgroup.git/tree/Documentation/admin-guide/cgroup-v2.rst) for more information.
+
 ### How to use cgroups to limit process memory
 
 In order to use cgroups to limit process memory, sometimes it must be explicitly enabled as a kernel parameter. For example, the following line is sometimes necessary to enable cgroup memory limits on

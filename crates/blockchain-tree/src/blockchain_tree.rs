@@ -1190,7 +1190,7 @@ where
             "Canonicalization finished"
         );
 
-        // clear trie updates for other childs
+        // clear trie updates for other children
         self.block_indices()
             .fork_to_child()
             .get(&old_tip.hash)
