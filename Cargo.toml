@@ -21,8 +21,8 @@ members = [
     "crates/evm/",
     "crates/evm/execution-errors",
     "crates/evm/execution-types",
-    "crates/exex/",
-    "crates/exex-test-utils/",
+    "crates/exex/exex/",
+    "crates/exex/test-utils/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
     "crates/net/common/",
@@ -264,8 +264,8 @@ reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-execution-types = { path = "crates/evm/execution-types" }
-reth-exex = { path = "crates/exex" }
-reth-exex-test-utils = { path = "crates/exex-test-utils" }
+reth-exex = { path = "crates/exex/exex" }
+reth-exex-test-utils = { path = "crates/exex/test-utils" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
