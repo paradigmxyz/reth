@@ -20,4 +20,10 @@ pub enum OptimismPayloadBuilderError {
     /// Thrown when a blob transaction is included in a sequencer's block.
     #[error("blob transaction included in sequencer block")]
     BlobTransactionRejected,
+    /// OP requires system tx to be included in the block.
+    ///
+    /// Without at least the system tx in the block, no valid block can be produced, because the
+    /// first tx in the block contains the L1 block info.
+    #[error("empty payload building is unsupported")]
+    EmptyPayloadUnsupported,
 }
