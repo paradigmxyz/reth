@@ -256,12 +256,12 @@ pub trait PollOnce {
 /// An Execution Extension future polling error.
 #[derive(Error, Debug)]
 pub enum PollOnceError {
-    /// The future returned [`Poll::Ready`] with an error.
-    #[error(transparent)]
-    FutureError(#[from] eyre::Error),
     /// The future returned [`Poll::Ready`] without an error, but it should never resolve.
     #[error("Execution Extension future returned Ready, but it should never resolve")]
     FutureIsReady,
+    /// The future returned [`Poll::Ready`] with an error.
+    #[error(transparent)]
+    FutureError(#[from] eyre::Error),
 }
 
 impl<F: Future<Output = eyre::Result<()>> + Unpin + Send> PollOnce for F {
