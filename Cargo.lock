@@ -2822,14 +2822,19 @@ dependencies = [
  "alloy-sol-types",
  "eyre",
  "futures",
+ "rand 0.8.5",
  "reth",
  "reth-exex",
+ "reth-exex-test-utils",
  "reth-node-api",
  "reth-node-ethereum",
  "reth-primitives",
  "reth-provider",
+ "reth-testing-utils",
  "reth-tracing",
  "rusqlite",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
