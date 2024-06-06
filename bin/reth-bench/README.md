@@ -16,7 +16,10 @@ Live sync, on the other hand, is a more complex process that is harder to benchm
 In order to benchmark live sync, we need to simulate a CL in a controlled manner, so reth can use the same code paths it would when syncing new blocks.
 
 ### The `reth-bench` tool
-The `reth-bench` tool simulates a CL using an external RPC API for data, replaying historical blocks as if they were new blocks over the node's engine API endpoint.
+The `reth-bench` tool is designed to benchmark performance of reth live sync.
+It can also be used for debugging client spec implementations, as it replays historical blocks by mocking a CL client.
+Performance is measured by latency and gas used in a block, as well as the computed gas used per second.
+As long as the data is representative of real-world load, or closer to worst-case load test, the gas per second gives a rough sense of how much throughput the node would be able to handle.
 
 ## Prerequisites
 
@@ -32,24 +35,24 @@ The `reth-bench new-payload-fcu` command is the most representative of ethereum 
 Below is an overview of how to execute a benchmark:
 
  1. **Setup**: Make sure `reth` is running in the background with the proper configuration. This setup involves ensuring the node is at the correct state, setting up profiling tools, and possibly more depending on the purpose of the benchmark's.
- 
+
  2. **Run the Benchmark**:
     ```bash
     reth-bench new-payload-fcu --rpc-url http://<rpc-url>:8545 --from <start_block> --to <end_block> --jwtsecret <jwt_file_path>
     ```
- 
+
     Replace `<rpc-url>`, `<start_block>`, `<end_block>`, and `<jwt_file_path>` with the appropriate values for your testing environment.
     Note that this assumes that the benchmark node's engine API is running on `http://127.0.0.1:8545`, which is set as a default value in `reth-bench`. To configure this value, use the `--engine-rpc-url` flag.
- 
+
  3. **Observe Outputs**: Upon running the command, `reth-bench` will output benchmark results, showing processing speeds and gas usage, which are crucial for analyzing the node's performance.
- 
+
     Example output:
     ```
     2024-05-30T00:45:20.806691Z  INFO Running benchmark using data from RPC URL: http://<rpc-url>:8545
     // ... logs per block
     2024-05-30T00:45:34.203172Z  INFO Total Ggas/s: 0.15 total_duration=5.085704882s total_gas_used=741620668.0
     ```
- 
+
  4. **Stop and Review**: Once the benchmark completes, terminate the `reth` process and review the logs and performance metrics collected, if any.
  5. **Repeat**.
 
