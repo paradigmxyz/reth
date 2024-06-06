@@ -40,9 +40,6 @@ reth-beacon-consensus.workspace = true
 # ethereum
 alloy-rpc-types-engine.workspace = true
 
-# ethereum
-discv5.workspace = true
-
 # async
 tokio.workspace = true
 tokio-util.workspace = true
