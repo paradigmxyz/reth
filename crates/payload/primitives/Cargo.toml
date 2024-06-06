@@ -12,3 +12,15 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
+# reth
+reth-errors.workspace = true
+reth-provider.workspace = true
+reth-primitives.workspace = true
+reth-transaction-pool.workspace = true
+reth-rpc-types.workspace = true
+
+# async
+tokio = { workspace = true, features = ["sync"] }
+
+# misc
+thiserror.workspace = true

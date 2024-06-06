@@ -15,7 +15,7 @@ use reth_primitives::ChainSpec;
 /// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 pub mod traits;
 use serde::{de::DeserializeOwned, ser::Serialize};
-pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
+pub use traits::{PayloadAttributes};
 
 /// Contains error types used in the traits defined in this crate.
 pub mod error;
@@ -24,6 +24,8 @@ pub use error::{EngineObjectValidationError, VersionSpecificValidationError};
 /// Contains types used in implementations of the [`PayloadAttributes`] trait.
 pub mod payload;
 pub use payload::PayloadOrAttributes;
+
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 
 /// The types that are used by the engine API.
 pub trait EngineTypes:
