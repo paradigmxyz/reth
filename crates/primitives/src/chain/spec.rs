@@ -293,6 +293,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -342,6 +343,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -391,6 +393,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -440,6 +443,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
