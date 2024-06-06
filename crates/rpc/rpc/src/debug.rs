@@ -1,6 +1,6 @@
 use crate::{
     eth::{
-        api::EthTransactions,
+        api::{traits::SpawnBlocking, EthTransactions},
         error::{EthApiError, EthResult},
         revm_utils::{prepare_call_env, EvmOverrides},
     },
@@ -614,7 +614,7 @@ where
 impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
-    Eth: EthApiSpec + 'static,
+    Eth: EthApiSpec + SpawnBlocking + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
