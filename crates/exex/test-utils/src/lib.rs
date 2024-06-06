@@ -145,12 +145,14 @@ impl TestExExHandle {
     }
 
     /// Asserts that the Execution Extension did not emit any events.
+    #[track_caller]
     pub fn assert_events_empty(&self) {
         assert!(self.events_rx.is_empty());
     }
 
     /// Asserts that the Execution Extension emitted a `FinishedHeight` event with the correct
     /// height.
+    #[track_caller]
     pub fn assert_event_finished_height(&mut self, height: u64) -> eyre::Result<()> {
         let event = self.events_rx.try_recv()?;
         assert_eq!(event, ExExEvent::FinishedHeight(height));
