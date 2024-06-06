@@ -6937,6 +6937,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-transaction-pool",
+ "thiserror",
  "tokio",
 ]
 
