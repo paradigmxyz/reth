@@ -49,6 +49,7 @@ members = [
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/ethereum/",
+    "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/primitives/",
     "crates/prune/",
@@ -103,7 +104,7 @@ members = [
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "testing/ef-tests/",
-    "testing/testing-utils",
+    "testing/testing-utils", "crates/payload/primitives",
 ]
 default-members = ["bin/reth"]
 

@@ -7410,6 +7410,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-payload-primitives"
+version = "0.2.0-beta.8"
+
+[[package]]
 name = "reth-payload-validator"
 version = "0.2.0-beta.8"
 dependencies = [
