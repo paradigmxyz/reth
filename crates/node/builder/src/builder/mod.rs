@@ -517,7 +517,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
         let secret_key = self.network_secret(&self.config().datadir())?;
         let default_peers_path = self.config().datadir().known_peers();
-        Ok(self.load_network_config(secret_key, default_peers_path))
+        Ok(self.build_network_config(secret_key, default_peers_path))
     }
 
     /// Get the network secret from the given data dir
@@ -528,8 +528,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         Ok(secret_key)
     }
 
-    /// Builds the [`NetworkConfig`] with the given [`ProviderFactory`].
-    fn load_network_config(
+    /// Builds the [`NetworkConfig`].
+    fn build_network_config(
         &self,
         secret_key: SecretKey,
         default_peers_path: PathBuf,
