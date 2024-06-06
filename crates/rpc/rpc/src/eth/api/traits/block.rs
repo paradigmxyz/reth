@@ -8,18 +8,14 @@ use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
 use reth_rpc_types::AnyTransactionReceipt;
 
 use crate::eth::{
-    api::{BuildReceipt, ReceiptBuilder},
+    api::{BuildReceipt, LoadPendingBlock, ReceiptBuilder},
+    cache::EthStateCache,
     error::EthResult,
 };
 
 /// Commonly used block related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
-pub trait EthBlocks {
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &impl BlockReaderIdExt;
-
+pub trait EthBlocks: LoadBlock {
     /// Helper function for `eth_getBlockReceipts`.
     ///
     /// Returns all transaction receipts in block, or `None` if block wasn't found.
@@ -65,6 +61,50 @@ pub trait EthBlocks {
             Ok(None)
         }
     }
+}
+
+/// Loads a block from database.
+pub trait LoadBlock {
+    // Returns a handle for reading data from disk.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn provider(&self) -> &impl BlockReaderIdExt;
+
+    /// Returns a handle for reading data from memory.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn cache(&self) -> &EthStateCache;
+
+    /// Returns the block object for the given block id.
+    fn block_with_senders(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> impl Future<Output = EthResult<Option<reth_primitives::SealedBlockWithSenders>>>
+    where
+        Self: LoadPendingBlock,
+    {
+        async move {
+            let block_id = block_id.into();
+
+            if block_id.is_pending() {
+                // Pending block can be fetched directly without need for caching
+                let maybe_pending =
+                    LoadPendingBlock::provider(self).pending_block_with_senders()?;
+                return if maybe_pending.is_some() {
+                    Ok(maybe_pending)
+                } else {
+                    self.local_pending_block().await
+                }
+            }
+
+            let block_hash = match LoadPendingBlock::provider(self).block_hash_for_id(block_id)? {
+                Some(block_hash) => block_hash,
+                None => return Ok(None),
+            };
+
+            Ok(self.cache().get_sealed_block_with_senders(block_hash).await?)
+        }
+    }
 
     /// Helper method that loads a bock and all its receipts.
     fn load_block_and_receipts(
@@ -83,7 +123,7 @@ pub trait EthBlocks {
             }
 
             if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
-                return Ok(self.cache().get_block_and_receipts(block_hash).await?)
+                return Ok(BuildReceipt::cache(self).get_block_and_receipts(block_hash).await?)
             }
 
             Ok(None)

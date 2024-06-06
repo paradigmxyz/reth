@@ -7,7 +7,7 @@ pub mod receipt;
 pub mod state;
 pub mod transaction;
 
-pub use block::EthBlocks;
+pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;
 pub use pending_block::LoadPendingBlock;
 pub use receipt::BuildReceipt;

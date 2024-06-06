@@ -35,8 +35,8 @@ use crate::eth::traits::RawTransactionForwarder;
 pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking,
-    StateCacheDB,
+    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadBlock, LoadPendingBlock, LoadState,
+    SpawnBlocking, StateCacheDB,
 };
 pub use transactions::TransactionSource;
 

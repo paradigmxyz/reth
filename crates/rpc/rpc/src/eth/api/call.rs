@@ -2,7 +2,7 @@
 
 use crate::{
     eth::{
-        api::{EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking},
+        api::{EthTransactions, LoadBlock, LoadPendingBlock, LoadState, SpawnBlocking},
         error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
         revm_utils::{
             apply_state_overrides, build_call_evm_env, caller_gas_allowance,
@@ -88,7 +88,7 @@ where
         mut state_override: Option<StateOverride>,
     ) -> EthResult<Vec<EthCallResponse>>
     where
-        Self: LoadPendingBlock,
+        Self: LoadPendingBlock + LoadBlock,
     {
         let Bundle { transactions, block_override } = bundle;
         if transactions.is_empty() {

@@ -1,7 +1,10 @@
 //! Contains RPC handler implementations specific to blocks.
 
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::{
+        cache::EthStateCache,
+        error::{EthApiError, EthResult},
+    },
     EthApi,
 };
 
@@ -16,11 +19,16 @@ use reth_rpc_types::{Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 
-use crate::eth::api::EthBlocks;
+use crate::eth::api::{EthBlocks, LoadPendingBlock};
 
-use super::traits::LoadPendingBlock;
+use super::LoadBlock;
 
-impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig> where
+    Provider: BlockReaderIdExt + BlockReader + ReceiptProvider
+{
+}
+
+impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReaderIdExt + BlockReader + ReceiptProvider,
 {
@@ -28,10 +36,16 @@ where
     fn provider(&self) -> &impl BlockReaderIdExt {
         self.inner.provider()
     }
+
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadBlock,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + Clone + 'static,
@@ -103,34 +117,6 @@ where
         self.block_with_senders(block_id)
             .await
             .map(|maybe_block| maybe_block.map(|block| block.block))
-    }
-
-    /// Returns the block object for the given block id.
-    pub(crate) async fn block_with_senders(
-        &self,
-        block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<reth_primitives::SealedBlockWithSenders>>
-    where
-        Self: LoadPendingBlock,
-    {
-        let block_id = block_id.into();
-
-        if block_id.is_pending() {
-            // Pending block can be fetched directly without need for caching
-            let maybe_pending = self.provider().pending_block_with_senders()?;
-            return if maybe_pending.is_some() {
-                Ok(maybe_pending)
-            } else {
-                self.local_pending_block().await
-            }
-        }
-
-        let block_hash = match self.provider().block_hash_for_id(block_id)? {
-            Some(block_hash) => block_hash,
-            None => return Ok(None),
-        };
-
-        Ok(self.cache().get_sealed_block_with_senders(block_hash).await?)
     }
 
     /// Returns the populated rpc block object for the given block id.

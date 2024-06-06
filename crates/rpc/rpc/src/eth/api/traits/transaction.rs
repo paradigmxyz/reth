@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
     revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
@@ -21,7 +22,7 @@ use revm::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState, ExecutionResult,
         ResultAndState,
     },
-    GetInspector, Inspector,
+    DatabaseCommit, GetInspector, Inspector,
 };
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{
@@ -32,8 +33,8 @@ use revm_primitives::{
 use crate::{
     eth::{
         api::{
-            pending_block::PendingBlockEnv, BuildReceipt, EthState, LoadPendingBlock, LoadState,
-            SpawnBlocking,
+            pending_block::PendingBlockEnv, BuildReceipt, EthState, LoadBlock, LoadPendingBlock,
+            LoadState, SpawnBlocking,
         },
         cache::EthStateCache,
         error::{EthApiError, EthResult},
@@ -236,7 +237,7 @@ pub trait EthTransactions: Send + Sync {
             Ok((cfg, block_env, origin.state_block_id()))
         } else {
             // Use cached values if there is no pending block
-            let block_hash = EthTransactions::provider(self)
+            let block_hash = LoadPendingBlock::provider(self)
                 .block_hash_for_id(at)?
                 .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
             let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
@@ -790,7 +791,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
         F: for<'a> Fn(
@@ -828,7 +829,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
         F: for<'a> Fn(
@@ -860,7 +861,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<Vec<R>>>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
         F: for<'a> Fn(
                 TransactionInfo,
                 TracingInspector,
@@ -891,15 +892,15 @@ pub trait EthTransactions: Send + Sync {
     ///
     /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
     /// the transactions.
-    async fn trace_block_until_with_inspector<Setup, Insp, F, R>(
+    fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
         highest_index: Option<u64>,
-        inspector_setup: Setup,
+        mut inspector_setup: Setup,
         f: F,
-    ) -> EthResult<Option<Vec<R>>>
+    ) -> EthResult<impl (Future<Output = EthResult<Option<Vec<R>>> + Send)>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
         F: for<'a> Fn(
                 TransactionInfo,
                 Insp,
@@ -911,5 +912,75 @@ pub trait EthTransactions: Send + Sync {
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
         Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+            let ((cfg, block_env, _), block) =
+                futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))?;
+
+            let Some(block) = block else { return Ok(None) };
+
+            if block.body.is_empty() {
+                // nothing to trace
+                return Ok(Some(Vec::new()))
+            }
+
+            // replay all transactions of the block
+            self.spawn_tracing(move |this| {
+                // we need to get the state of the parent block because we're replaying this block
+                // on top of its parent block's state
+                let state_at = block.parent_hash;
+                let block_hash = block.hash();
+
+                let block_number = block_env.number.saturating_to::<u64>();
+                let base_fee = block_env.basefee.saturating_to::<u128>();
+
+                // prepare transactions, we do everything upfront to reduce time spent with open
+                // state
+                let max_transactions = highest_index.map_or(block.body.len(), |highest| {
+                    // we need + 1 because the index is 0-based
+                    highest as usize + 1
+                });
+                let mut results = Vec::with_capacity(max_transactions);
+
+                let mut transactions = block
+                    .into_transactions_ecrecovered()
+                    .take(max_transactions)
+                    .enumerate()
+                    .map(|(idx, tx)| {
+                        let tx_info = TransactionInfo {
+                            hash: Some(tx.hash()),
+                            index: Some(idx as u64),
+                            block_hash: Some(block_hash),
+                            block_number: Some(block_number),
+                            base_fee: Some(base_fee),
+                        };
+                        let tx_env = tx_env_with_recovered(&tx);
+                        (tx_info, tx_env)
+                    })
+                    .peekable();
+
+                // now get the state
+                let state = this.state_at_block_id(state_at.into())?;
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                while let Some((tx_info, tx)) = transactions.next() {
+                    let env =
+                        EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
+
+                    let mut inspector = inspector_setup();
+                    let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
+                    let ResultAndState { result, state } = res;
+                    results.push(f(tx_info, inspector, result, &state, &db)?);
+
+                    // need to apply the state changes of this transaction before executing the
+                    // next transaction, but only if there's a next transaction
+                    if transactions.peek().is_some() {
+                        // commit the state changes to the DB
+                        db.commit(state)
+                    }
+                }
+
+                Ok(Some(results))
+            })
+    }
 }
