@@ -30,20 +30,6 @@ use std::{
 };
 use tx::Tx;
 
-pub mod cursor;
-pub mod tx;
-
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
-
-/// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
-const DEFAULT_MAX_READERS: u64 = 32_000;
-
-/// Space that a read-only transaction can occupy until the warning is emitted.
-/// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
-#[cfg(not(windows))]
-const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
-
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
 pub enum DatabaseEnvKind {

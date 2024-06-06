@@ -15,27 +15,13 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod lockfile;
-mod metrics;
-pub mod static_file;
-pub mod tables;
 mod utils;
-pub mod version;
 
-#[cfg(feature = "mdbx")]
-pub mod mdbx {
-    //! Re-export
-    pub use reth_db_mdbx::*;
-}
+pub mod mdbx;
 
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
-pub use tables::*;
-pub use utils::is_database_empty;
 
-#[cfg(feature = "mdbx")]
-pub use reth_db_mdbx::{
-    create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind,
-};
+pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
 
 pub use reth_db_api::*;
 
