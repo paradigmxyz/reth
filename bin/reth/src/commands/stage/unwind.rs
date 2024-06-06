@@ -76,8 +76,7 @@ impl Command {
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
             // update finalized block if needed
-            let last_saved_finalized_block_number =
-                provider.fetch_latest_finalized_block_number()?;
+            let last_saved_finalized_block_number = provider.last_finalized_block_number()?;
             let range_min =
                 range.clone().min().ok_or(eyre::eyre!("Could not fetch lower range end"))?;
             if range_min < last_saved_finalized_block_number {

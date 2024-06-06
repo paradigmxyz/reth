@@ -355,7 +355,7 @@ where
 
                         // update finalized block if needed
                         let last_saved_finalized_block_number =
-                            provider_rw.fetch_latest_finalized_block_number()?;
+                            provider_rw.last_finalized_block_number()?;
                         if checkpoint.block_number < last_saved_finalized_block_number {
                             provider_rw.save_finalized_block_number(BlockNumber::from(
                                 checkpoint.block_number,

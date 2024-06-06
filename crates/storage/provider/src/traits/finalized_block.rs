@@ -3,8 +3,8 @@ use reth_primitives::BlockNumber;
 
 /// Functionality to read the last known finalized block from the database.
 pub trait FinalizedBlockReader: Send + Sync {
-    /// Fetches and returns the latest finalized block number.
-    fn fetch_latest_finalized_block_number(&self) -> ProviderResult<BlockNumber>;
+    /// Returns the last finalized block number.
+    fn last_finalized_block_number(&self) -> ProviderResult<BlockNumber>;
 }
 
 /// Functionality to write the last known finalized block to the database.

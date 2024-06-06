@@ -86,7 +86,7 @@ impl<DB: Database, E> TreeExternals<DB, E> {
     }
 
     pub(crate) fn fetch_latest_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.provider_factory.provider()?.fetch_latest_finalized_block_number()
+        self.provider_factory.provider()?.last_finalized_block_number()
     }
 
     pub(crate) fn save_finalized_block_number(
