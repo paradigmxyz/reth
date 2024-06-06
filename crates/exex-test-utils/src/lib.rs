@@ -87,26 +87,6 @@ where
 #[non_exhaustive]
 pub struct TestNode;
 
-impl TestNode {
-    fn components<Node>() -> ComponentsBuilder<
-        Node,
-        TestPoolBuilder,
-        EthereumPayloadBuilder,
-        EthereumNetworkBuilder,
-        TestExecutorBuilder,
-    >
-    where
-        Node: FullNodeTypes<Engine = EthEngineTypes>,
-    {
-        ComponentsBuilder::default()
-            .node_types::<Node>()
-            .pool(TestPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
-            .network(EthereumNetworkBuilder::default())
-            .executor(TestExecutorBuilder::default())
-    }
-}
-
 impl NodeTypes for TestNode {
     type Primitives = ();
     type Engine = EthEngineTypes;
@@ -125,7 +105,12 @@ where
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
-        Self::components()
+        ComponentsBuilder::default()
+            .node_types::<N>()
+            .pool(TestPoolBuilder::default())
+            .payload(EthereumPayloadBuilder::default())
+            .network(EthereumNetworkBuilder::default())
+            .executor(TestExecutorBuilder::default())
     }
 }
 
