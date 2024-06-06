@@ -16,10 +16,6 @@ eyre.workspace = true
 futures.workspace = true
 
 [dev-dependencies]
-reth-config.workspace = true
-reth-db-common.workspace = true
-reth-evm = { workspace = true, features = ["test-utils"] }
-reth-testing-utils.workspace = true
+reth-exex-test-utils.workspace = true
 
 tokio.workspace = true
-rand.workspace = true
