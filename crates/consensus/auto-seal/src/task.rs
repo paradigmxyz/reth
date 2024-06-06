@@ -3,7 +3,7 @@ use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
 use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_primitives::{ChainSpec, IntoRecoveredTransaction, Requests, Withdrawals};
+use reth_primitives::{ChainSpec, IntoRecoveredTransaction};
 use reth_provider::{CanonChainTracker, StateProviderFactory};
 use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;
@@ -129,15 +129,10 @@ where
                         })
                         .collect();
                     let ommers = vec![];
-                    // todo(onbjerg): these two dont respect chainspec
-                    let withdrawals = Some(Withdrawals::default());
-                    let requests = Some(Requests::default());
 
                     match storage.build_and_execute(
                         transactions.clone(),
                         ommers.clone(),
-                        withdrawals.clone(),
-                        requests.clone(),
                         &client,
                         chain_spec,
                         &executor,
