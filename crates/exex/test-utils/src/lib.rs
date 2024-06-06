@@ -31,7 +31,7 @@ use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives::{ChainSpec, Head, SealedBlockWithSenders, MAINNET};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    BlockReader, ProviderFactory,
+    BlockReader, Chain, ProviderFactory,
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -123,9 +123,8 @@ type Adapter = NodeAdapter<
 >;
 
 /// A helper type for testing Execution Extensions.
-pub struct TestExExContext {
-    /// Fully initialized context
-    pub ctx: ExExContext<Adapter>,
+#[derive(Debug)]
+pub struct TestExExHandle {
     /// Genesis block that was inserted into the storage
     pub genesis: SealedBlockWithSenders,
     /// Provider Factory for accessing the emphemeral storage of the host node
@@ -136,19 +135,30 @@ pub struct TestExExContext {
     pub notifications_tx: Sender<ExExNotification>,
 }
 
-impl Debug for TestExExContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TestExExContext")
-            .field("ctx", &self.ctx)
-            .field("genesis", &self.genesis)
-            .field("provider_factory", &self.provider_factory)
-            .field("events_rx", &self.events_rx)
-            .field("notifications_tx", &self.notifications_tx)
-            .finish()
+impl TestExExHandle {
+    /// Send a notification to the Execution Extension that the chain has been committed
+    pub async fn send_notification_chain_committed(&self, chain: Chain) -> eyre::Result<()> {
+        self.notifications_tx
+            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) })
+            .await?;
+        Ok(())
+    }
+
+    /// Asserts that the Execution Extension did not emit any events.
+    pub fn assert_events_empty(&self) {
+        assert!(self.events_rx.is_empty());
+    }
+
+    /// Asserts that the Execution Extension emitted a `FinishedHeight` event with the correct
+    /// height.
+    pub fn assert_event_finished_height(&mut self, height: u64) -> eyre::Result<()> {
+        let event = self.events_rx.try_recv()?;
+        assert_eq!(event, ExExEvent::FinishedHeight(height));
+        Ok(())
     }
 }
 
-/// Creates a new [`TestExExContext`].
+/// Creates a new [`ExExContext`].
 ///
 /// This is a convenience function that does the following:
 /// 1. Sets up an [`ExExContext`] with all dependencies.
@@ -161,7 +171,7 @@ impl Debug for TestExExContext {
 /// doing this.
 pub async fn test_exex_context_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
-) -> eyre::Result<TestExExContext> {
+) -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::default();
     let executor = MockExecutorProvider::default();
@@ -216,13 +226,13 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok(TestExExContext { ctx, genesis, provider_factory, events_rx, notifications_tx })
+    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx }))
 }
 
-/// Creates a new [`TestExExContext`] with (mainnet)[`MAINNET`] chain spec.
+/// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.
 ///
 /// For more information see [`test_exex_context_with_chain_spec`].
-pub async fn test_exex_context() -> eyre::Result<TestExExContext> {
+pub async fn test_exex_context() -> eyre::Result<(ExExContext<Adapter>, TestExExHandle)> {
     test_exex_context_with_chain_spec(MAINNET.clone()).await
 }
 
