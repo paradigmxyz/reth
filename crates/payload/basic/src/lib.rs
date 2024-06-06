@@ -34,6 +34,7 @@ use revm::{
     Database, DatabaseCommit, Evm, State,
 };
 use std::{
+    fmt,
     future::Future,
     ops::Deref,
     pin::Pin,
@@ -484,30 +485,37 @@ where
                 best_payload: None,
             };
 
-            // TODO: create optimism payload job, that wraps this type, that implements PayloadJob
-            // with this branch. remove this branch from the non-op code. remove
-            // `on_missing_payload` requirement from builder trait
-            if let Some(payload) = self.builder.on_missing_payload(args) {
-                debug!(target: "payload_builder", id=%self.config.payload_id(), "resolving fallback payload as best payload");
-                return (
-                    ResolveBestPayload { best_payload: Some(payload), maybe_better, empty_payload },
-                    KeepPayloadJobAlive::Yes,
-                )
-            }
+            match self.builder.on_missing_payload(args) {
+                MissingPayloadBehaviour::AwaitInProgress => {
+                    debug!(target: "payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
+                }
+                MissingPayloadBehaviour::RaceEmptyPayload => {
+                    debug!(target: "payload_builder", id=%self.config.payload_id(), "racing empty payload");
 
-            // if no payload has been built yet
-            self.metrics.inc_requested_empty_payload();
-            // no payload built yet, so we need to return an empty payload
-            let (tx, rx) = oneshot::channel();
-            let client = self.client.clone();
-            let config = self.config.clone();
-            let builder = self.builder.clone();
-            self.executor.spawn_blocking(Box::pin(async move {
-                let res = builder.build_empty_payload(&client, config);
-                let _ = tx.send(res);
-            }));
+                    // if no payload has been built yet
+                    self.metrics.inc_requested_empty_payload();
+                    // no payload built yet, so we need to return an empty payload
+                    let (tx, rx) = oneshot::channel();
+                    let client = self.client.clone();
+                    let config = self.config.clone();
+                    let builder = self.builder.clone();
+                    self.executor.spawn_blocking(Box::pin(async move {
+                        let res = builder.build_empty_payload(&client, config);
+                        let _ = tx.send(res);
+                    }));
 
-            empty_payload = Some(rx);
+                    empty_payload = Some(rx);
+                }
+                MissingPayloadBehaviour::RacePayload(job) => {
+                    debug!(target: "payload_builder", id=%self.config.payload_id(), "racing fallback payload");
+                    // race the in progress job with this job
+                    let (tx, rx) = oneshot::channel();
+                    self.executor.spawn_blocking(Box::pin(async move {
+                        let _ = tx.send(job());
+                    }));
+                    empty_payload = Some(rx);
+                }
+            };
         }
 
         let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
@@ -772,15 +780,12 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 
     /// Invoked when the payload job is being resolved and there is no payload yet.
     ///
-    /// If this returns a payload, it will be used as the final payload for the job.
-    ///
-    /// TODO(mattsse): This needs to be refined a bit because this only exists for OP atm
+    /// This can happen if the CL requests a payload before the first payload has been built.
     fn on_missing_payload(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
-    ) -> Option<Self::BuiltPayload> {
-        let _args = args;
-        None
+        _args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        MissingPayloadBehaviour::RaceEmptyPayload
     }
 
     /// Builds an empty payload without any transaction.
@@ -789,6 +794,36 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
+}
+
+/// Tells the payload builder how to react to payload request if there's no payload available yet.
+///
+/// This situation can occur if the CL requests a payload before the first payload has been built.
+pub enum MissingPayloadBehaviour<Payload> {
+    /// Await the regular scheduled payload process.
+    AwaitInProgress,
+    /// Race the in progress payload process with an empty payload.
+    RaceEmptyPayload,
+    /// Race the in progress payload process with this job.
+    RacePayload(Box<dyn FnOnce() -> Result<Payload, PayloadBuilderError> + Send>),
+}
+
+impl<Payload> fmt::Debug for MissingPayloadBehaviour<Payload> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AwaitInProgress => write!(f, "AwaitInProgress"),
+            Self::RaceEmptyPayload => {
+                write!(f, "RaceEmptyPayload")
+            }
+            Self::RacePayload(_) => write!(f, "RacePayload"),
+        }
+    }
+}
+
+impl<Payload> Default for MissingPayloadBehaviour<Payload> {
+    fn default() -> Self {
+        Self::RaceEmptyPayload
+    }
 }
 
 /// Represents the outcome of committing withdrawals to the runtime database and post state.
