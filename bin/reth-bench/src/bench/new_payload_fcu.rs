@@ -2,24 +2,22 @@
 //! forkchoiceUpdated.
 
 use crate::{
-    authenticated_transport::AuthenticatedTransportConnect,
-    bench::output::{
-        CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
-        GAS_OUTPUT_SUFFIX,
+    bench::{
+        context::BenchContext,
+        output::{
+            CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
+            GAS_OUTPUT_SUFFIX,
+        },
     },
-    bench_mode::BenchMode,
     valid_payload::EngineApiValidWaitExt,
 };
-use alloy_provider::{network::AnyNetwork, Provider, ProviderBuilder, RootProvider};
-use alloy_rpc_client::ClientBuilder;
-use alloy_rpc_types_engine::{ForkchoiceState, JwtSecret};
+use alloy_provider::Provider;
+use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
-use reqwest::Url;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::{Block, B256};
-use reth_rpc_types::BlockNumberOrTag;
 use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -38,85 +36,9 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        info!("Running benchmark using data from RPC URL: {}", self.rpc_url);
-
-        // Ensure that output directory is a directory
-        if let Some(output) = &self.benchmark.output {
-            if output.is_file() {
-                return Err(eyre::eyre!("Output path must be a directory"));
-            }
-        }
-
-        // set up alloy client for blocks
-        let block_provider = ProviderBuilder::new().on_http(self.rpc_url.parse()?);
-
-        // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
-        // starting at the latest block.
-        let mut benchmark_mode = match (self.benchmark.from, self.benchmark.to) {
-            (Some(from), Some(to)) => BenchMode::Range(from..=to),
-            (None, None) => BenchMode::Continuous,
-            _ => {
-                // both or neither are allowed, everything else is ambiguous
-                return Err(eyre::eyre!(
-                    "Both --benchmark.from and --benchmark.to must be provided together"
-                ))
-            }
-        };
-
-        // construct the authenticated provider
-        let auth_jwt = self.benchmark.auth_jwtsecret.ok_or_else(|| {
-            eyre::eyre!("--auth-jwtsecret must be provided for authenticated RPC")
-        })?;
-
-        // fetch jwt from file
-        //
-        // the jwt is hex encoded so we will decode it after
-        let jwt = std::fs::read_to_string(auth_jwt)?;
-        let jwt = JwtSecret::from_hex(jwt)?;
-
-        // get engine url
-        let auth_url = Url::parse(&self.benchmark.engine_rpc_url)?;
-
-        // construct the authed transport
-        info!("Connecting to Engine RPC at {} for replay", auth_url);
-        let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
-        let client = ClientBuilder::default().connect_boxed(auth_transport).await?;
-        let auth_provider = RootProvider::<_, AnyNetwork>::new(client);
-
-        let first_block = match benchmark_mode {
-            BenchMode::Continuous => {
-                // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest, true).await?.unwrap()
-            }
-            BenchMode::Range(ref mut range) => {
-                match range.next() {
-                    Some(block_number) => {
-                        // fetch first block in range
-                        block_provider
-                            .get_block_by_number(block_number.into(), true)
-                            .await?
-                            .unwrap()
-                    }
-                    None => {
-                        // return an error
-                        panic!("RangeEmpty");
-                    }
-                }
-            }
-        };
-
-        let mut next_block = match first_block.header.number {
-            Some(number) => {
-                // fetch next block
-                number + 1
-            }
-            None => {
-                // this should never happen
-                // TODO: log or return error, we should probably not return the
-                // block here
-                panic!("BlockNumberNone");
-            }
-        };
+        let cloned_args = self.benchmark.clone();
+        let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
+            BenchContext::new(&cloned_args, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
