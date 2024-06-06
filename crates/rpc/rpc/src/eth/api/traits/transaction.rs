@@ -9,7 +9,9 @@ use reth_primitives::{
     Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionMeta, TransactionSigned, TxHash, B256,
 };
-use reth_provider::{BlockReaderIdExt, ReceiptProvider, StateProviderBox, TransactionsProvider};
+use reth_provider::{
+    BlockIdReader, BlockReaderIdExt, ReceiptProvider, StateProviderBox, TransactionsProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{AnyTransactionReceipt, TransactionInfo, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -29,7 +31,10 @@ use revm_primitives::{
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthState, LoadState, SpawnBlocking},
+        api::{
+            pending_block::PendingBlockEnv, BuildReceipt, EthState, LoadPendingBlock, LoadState,
+            SpawnBlocking,
+        },
         cache::EthStateCache,
         error::{EthApiError, EthResult},
         revm_utils::{EvmOverrides, FillableTransaction},
@@ -192,7 +197,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
 
-    /// Executes the closure with the state that corresponds to the given [BlockId].
+    /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         Self: LoadState,
@@ -202,7 +207,7 @@ pub trait EthTransactions: Send + Sync {
         f(state)
     }
 
-    /// Executes the closure with the state that corresponds to the given [BlockId] on a new task
+    /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
     async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         Self: LoadState + SpawnBlocking,
@@ -216,15 +221,28 @@ pub trait EthTransactions: Send + Sync {
         .await
     }
 
-    /// Returns the revm evm env for the requested [BlockId]
+    /// Returns the revm evm env for the requested [`BlockId`]
     ///
-    /// If the [BlockId] this will return the [BlockId] of the block the env was configured
+    /// If the [`BlockId`] this will return the [`BlockId`] of the block the env was configured
     /// for.
-    /// If the [BlockId] is pending, this will return the "Pending" tag, otherwise this returns the
-    /// hash of the exact block.
+    /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
+    /// the hash of the exact block.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
     where
-        Self: LoadState;
+        Self: LoadState + LoadPendingBlock,
+    {
+        if at.is_pending() {
+            let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
+            Ok((cfg, block_env, origin.state_block_id()))
+        } else {
+            // Use cached values if there is no pending block
+            let block_hash = EthTransactions::provider(self)
+                .block_hash_for_id(at)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+            Ok((cfg, env, block_hash.into()))
+        }
+    }
 
     /// Returns the revm evm env for the raw block header
     ///
@@ -234,7 +252,7 @@ pub trait EthTransactions: Send + Sync {
         header: &Header,
     ) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock,
     {
         // get the parent config first
         let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;

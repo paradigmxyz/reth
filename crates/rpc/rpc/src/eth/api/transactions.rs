@@ -28,18 +28,14 @@ use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{
-        db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState,
-        ExecutionResult, ResultAndState,
+        db::DatabaseCommit, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState,
     },
     Inspector,
 };
 
 use crate::{
     eth::{
-        api::{
-            pending_block::PendingBlockEnv, BuildReceipt, EthState, EthTransactions,
-            LoadPendingBlock, LoadState, SpawnBlocking, StateCacheDB,
-        },
+        api::{BuildReceipt, EthState, EthTransactions, LoadState, SpawnBlocking, StateCacheDB},
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
         revm_utils::{prepare_call_env, EvmOverrides, FillableTransaction},
@@ -93,24 +89,6 @@ where
     #[inline]
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
-    }
-
-    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
-    where
-        Self: LoadState + LoadPendingBlock,
-    {
-        if at.is_pending() {
-            let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
-            Ok((cfg, block_env, origin.state_block_id()))
-        } else {
-            // Use cached values if there is no pending block
-            let block_hash = self
-                .provider()
-                .block_hash_for_id(at)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-            let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
-            Ok((cfg, env, block_hash.into()))
-        }
     }
 
     async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>> {

@@ -24,7 +24,7 @@ use revm::{
 use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
 use std::sync::Arc;
 
-use super::api::LoadState;
+use super::api::{LoadPendingBlock, LoadState};
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
@@ -41,7 +41,7 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadState + SpawnBlocking + 'static,
+    Eth: EthTransactions + LoadState + SpawnBlocking + LoadPendingBlock + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current
