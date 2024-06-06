@@ -23,11 +23,10 @@ use std::{
 /// received from the CL to the handler.
 ///
 /// It is responsible for handling the following:
-/// - Downloading blocks on demand
+/// - Downloading blocks on demand from the network if requested by the [`EngineApiRequestHandler`].
 ///
-/// The handler is responsible for delegating the received messages and downloading blocks from the
-/// network on demand. The core logic is part of the [EngineRequestHandler].
-// TODO: maybe this abstraction is not actually useful.
+/// The core logic is part of the [EngineRequestHandler], which is responsible for processing the
+/// incoming requests.
 pub struct EngineHandler<T>
 where
     T: EngineRequestHandler,
@@ -37,6 +36,7 @@ where
     /// This type is responsible for processing incoming requests.
     handler: T,
     /// Receiver for incoming requests that need to be processed.
+    // TODO add stream type for T::Request,
     incoming_requests: (),
     /// Access to the network sync to download blocks on demand.
     network_sync: (),
@@ -57,7 +57,7 @@ where
     }
 }
 
-/// A type that processes incoming requests.
+/// A type that processes incoming requests (e.g. requests from the consensus layer, engine API)
 pub trait EngineRequestHandler: Send + Sync {
     /// The request type this handler can process.
     type Request;
@@ -69,13 +69,24 @@ pub trait EngineRequestHandler: Send + Sync {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent>;
 }
 
-/// Advances the chain based on received engine API requests.
+/// An [`EngineRequestHandler`] that processes engine API requests.
+///
+/// This type is responsible for advancing the chain during live sync (following the tip of the
+/// chain).
+///
+/// It advances the chain based on received engine API requests:
 ///
 /// - `on_new_payload`: Executes the payload and inserts it into the tree. These are allowed to be
 ///   processed concurrently.
 /// - `on_forkchoice_updated`: Updates the fork choice based on the new head. These require write
 ///   access to the database and are skipped if the handler can't acquire exclusive access to the
 ///   database.
+///
+/// The [`EngineApiTreeHandler`] is used to execute the incoming payloads, storing them in a tree
+/// structure and committing new chains to the database on fork choice updates.
+///
+/// In case required blocks are missing, the handler will request them from the network, by emitting
+/// a download request upstream.
 pub struct EngineApiRequestHandler<T>
 where
     T: EngineApiTreeHandler,
@@ -103,7 +114,32 @@ where
     type Request = BeaconEngineMessage<T::Engine>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
-        // TODO check state of the node, spawn tree task if idle
+        // TODO check if we're currently syncing, or mutable access is currently held by the
+        // orchestrator then we respond with SYNCING or delay forkchoice updates.  otherwise
+        // we tell the tree to handle the requests
+
+        // TODO: should this type spawn the jobs and have access to tree internals or should this be
+        // entirely handled by the tree handler? basically
+
+        /*
+           let (tx, req) = event;
+           let handler = self.tree_handler.clone();
+           spawn(move {
+               let resp = handler.on_new_payload(req);
+               tx.send(resp).unwrap();
+           });
+        */
+        // here the handler must contain shareable state internally
+
+        // or
+
+        /*
+         let fut = handler.handle(event);
+         self.pending.push(fut);
+        */
+
+        // the latter would give the handler more control over the execution of the requests, with
+        // this model the logic of this type and the tree handler is very similar
 
         todo!()
     }

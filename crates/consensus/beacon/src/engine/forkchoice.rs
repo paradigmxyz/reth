@@ -3,7 +3,7 @@ use reth_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 
 /// The struct that keeps track of the received forkchoice state and their status.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ForkchoiceStateTracker {
+pub struct ForkchoiceStateTracker {
     /// The latest forkchoice state that we received.
     ///
     /// Caution: this can be invalid.
@@ -139,7 +139,7 @@ impl From<PayloadStatusEnum> for ForkchoiceStatus {
 
 /// A helper type to check represent hashes of a [`ForkchoiceState`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ForkchoiceStateHash {
+pub enum ForkchoiceStateHash {
     Head(B256),
     Safe(B256),
     Finalized(B256),

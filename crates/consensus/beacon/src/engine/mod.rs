@@ -62,8 +62,7 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-pub use forkchoice::ForkchoiceStatus;
-use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
+pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod metrics;
 use metrics::EngineMetrics;

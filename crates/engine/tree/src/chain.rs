@@ -1,5 +1,4 @@
 use futures::Stream;
-use reth_primitives::B256;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -8,7 +7,23 @@ use std::{
 /// The type that drives the chain forward.
 ///
 /// A state machine that orchestrates the components responsible for advancing the chain
-// Reacts to custom requests
+///
+///
+/// ## Control flow
+///
+/// The [`ChainOrchestrator`] is responsible for controlling the pipeline sync and additional hooks.
+/// It polls the given `handler`, which is responsible for advancing the chain, how is up to the
+/// handler. However, due to database restrictions (e.g. exclusive write access), following
+/// invariants apply:
+///  - If the handler requests a pipeline run (e.g. [`PipelineAction::SyncPipeline`]), the handler
+///    must ensure that while the pipeline is running, no other write access is granted.
+///  - At any time the [`ChainOrchestrator`] can request exclusive write access to the database
+///    (e.g. if pruning is required), but will not do so until the handler has acknowledged the
+///    request for write access.
+///
+/// The [`ChainOrchestrator`] polls the [`ChainHandler`] to advance the chain and handles the
+/// emitted events. Requests and events are passed to the [`ChainHandler`] via
+/// [`ChainHandler::on_event`].
 #[must_use = "Stream does nothing unless polled"]
 pub struct ChainOrchestrator<T>
 where
@@ -57,9 +72,11 @@ where
 }
 
 /// Event emitted by the [`ChainOrchestrator`]
+///
+/// These are meant to be used for observability and debugging purposes.
 pub enum ChainEvent {
-    /// Synced new head.
-    Synced(B256),
+    /// Pipeline sync started
+    PipelineStarted,
 }
 
 /// A trait that advances the chain by handling actions.
