@@ -1,8 +1,8 @@
 use reth_node_api::{
     payload::{
-        error::{EngineObjectValidationError, VersionSpecificValidationError},
-        validate_parent_beacon_block_root_presence, EngineApiMessageVersion, MessageValidationKind,
-        PayloadOrAttributes,
+        validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
+        EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes,
+        VersionSpecificValidationError,
     },
     EngineTypes,
 };

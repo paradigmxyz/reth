@@ -8,7 +8,7 @@ use reth_rpc_types::{
 };
 
 use crate::{
-    error::EngineObjectValidationError, validate_version_specific_fields, EngineApiMessageVersion,
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
 };
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into

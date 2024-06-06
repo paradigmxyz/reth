@@ -7370,7 +7370,6 @@ version = "0.2.0-beta.8"
 dependencies = [
  "alloy-rlp",
  "reth-basic-payload-builder",
- "reth-engine-primitives",
  "reth-evm",
  "reth-evm-optimism",
  "reth-payload-builder",

@@ -12,7 +12,7 @@ use core::fmt;
 use reth_primitives::ChainSpec;
 
 use reth_payload_primitives::{
-    error::EngineObjectValidationError, BuiltPayload, EngineApiMessageVersion, PayloadAttributes,
+    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
 

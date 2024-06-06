@@ -8,7 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod error;
+mod error;
+pub use error::{EngineObjectValidationError, PayloadBuilderError, VersionSpecificValidationError};
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
@@ -18,7 +19,6 @@ pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 mod payload;
 pub use payload::PayloadOrAttributes;
 
-use crate::error::{EngineObjectValidationError, VersionSpecificValidationError};
 use reth_primitives::ChainSpec;
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;

@@ -13,7 +13,7 @@ pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{
-    error::EngineObjectValidationError, validate_version_specific_fields, EngineApiMessageVersion,
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     PayloadOrAttributes,
 };
 use reth_primitives::ChainSpec;
