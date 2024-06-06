@@ -6206,6 +6206,7 @@ dependencies = [
  "reth-node-optimism",
  "reth-optimism-primitives",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
@@ -6263,9 +6264,9 @@ dependencies = [
  "futures-core",
  "futures-util",
  "metrics",
- "reth-engine-primitives",
  "reth-metrics",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -6300,6 +6301,7 @@ dependencies = [
  "reth-metrics",
  "reth-network-p2p",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
@@ -6686,10 +6688,9 @@ dependencies = [
 name = "reth-engine-primitives"
 version = "0.2.0-beta.9"
 dependencies = [
+ "reth-payload-primitives",
  "reth-primitives",
- "reth-rpc-types",
  "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -6775,6 +6776,7 @@ version = "0.2.0-beta.9"
 dependencies = [
  "alloy-rlp",
  "reth-engine-primitives",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -7180,6 +7182,7 @@ dependencies = [
  "reth-evm",
  "reth-network",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-provider",
  "reth-tasks",
  "reth-transaction-pool",
@@ -7396,10 +7399,10 @@ version = "0.2.0-beta.9"
 dependencies = [
  "alloy-rlp",
  "reth-basic-payload-builder",
- "reth-engine-primitives",
  "reth-evm",
  "reth-evm-optimism",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -7426,6 +7429,7 @@ dependencies = [
  "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-metrics",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
@@ -7436,6 +7440,19 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-payload-primitives"
+version = "0.2.0-beta.9"
+dependencies = [
+ "reth-errors",
+ "reth-primitives",
+ "reth-rpc-types",
+ "reth-transaction-pool",
+ "serde",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -7715,6 +7732,7 @@ dependencies = [
  "reth-evm",
  "reth-metrics",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-api",
