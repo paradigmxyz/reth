@@ -412,10 +412,9 @@ tables! {
 }
 
 /// Keys for the `ChainState` table.
-#[derive(Ord, Clone, Eq, PartialOrd, PartialEq, Debug, Deserialize, Serialize, Default, Hash)]
+#[derive(Ord, Clone, Eq, PartialOrd, PartialEq, Debug, Deserialize, Serialize, Hash)]
 pub enum ChainStateKey {
     /// Last finalized block key
-    #[default]
     LastFinalizedBlock,
 }
 

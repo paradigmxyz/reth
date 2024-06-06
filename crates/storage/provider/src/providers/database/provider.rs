@@ -2762,7 +2762,9 @@ impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
             .take(1)
             .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
 
-        let last_finalized_block_number = finalized_blocks.pop_first().unwrap_or_default();
+        let last_finalized_block_number = finalized_blocks
+            .pop_first()
+            .unwrap_or((tables::ChainStateKey::LastFinalizedBlock, 0_u64));
         Ok(last_finalized_block_number.1)
     }
 }
