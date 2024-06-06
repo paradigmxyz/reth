@@ -23,17 +23,6 @@ use reth_primitives::ChainSpec;
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
 
-/// Payload types
-pub trait PayloadTypes: DeserializeOwned + Serialize + Debug + Unpin + Send + Sync + Clone {
-    /// The RPC payload attributes type the CL node emits via the engine API.
-    type PayloadAttributes: PayloadAttributes + Unpin;
-
-    /// The payload attributes type that contains information about a running payload job.
-    type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
-        + Clone
-        + Unpin;
-}
-
 /// Validates the timestamp depending on the version called:
 ///
 /// * If V2, this ensures that the payload timestamp is pre-Cancun.
