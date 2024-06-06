@@ -5,7 +5,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use pprof::criterion::{Output, PProfProfiler};
 use prop::test_runner::TestRunner;
 use proptest::{prelude::*, strategy::ValueTree};
-use reth_primitives::{Address, PruneModes, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{Address, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{test_utils::create_test_provider_factory, BlockWriter};
 
 fn block_provider_insert(c: &mut Criterion) {
