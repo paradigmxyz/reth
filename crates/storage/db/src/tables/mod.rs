@@ -407,8 +407,8 @@ tables! {
     /// Stores EIP-7685 EL -> CL requests, indexed by block number.
     table BlockRequests<Key = BlockNumber, Value = Requests>;
 
-    /// Stores the last finalized block.
-    table FinalizedBlocks<Key = u8, Value = BlockNumber>;
+    /// Stores generic chain state info, like the last finalized block.
+    table ChainState<Key = u8, Value = BlockNumber>;
 }
 
 // Alias types.

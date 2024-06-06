@@ -2760,7 +2760,7 @@ impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
     fn last_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
         let mut finalized_blocks = self
             .tx
-            .cursor_read::<tables::FinalizedBlocks>()?
+            .cursor_read::<tables::ChainState>()?
             .walk(Some(FINALIZED_BLOCKS_KEY))?
             .take(1)
             .collect::<Result<BTreeMap<u8, BlockNumber>, _>>()?;
@@ -2772,7 +2772,7 @@ impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
 
 impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
-        Ok(self.tx.put::<tables::FinalizedBlocks>(FINALIZED_BLOCKS_KEY, block_number)?)
+        Ok(self.tx.put::<tables::ChainState>(FINALIZED_BLOCKS_KEY, block_number)?)
     }
 }
 
