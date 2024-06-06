@@ -1,5 +1,5 @@
 use crate::eth::{
-    api::{EthTransactions, LoadState},
+    api::{EthTransactions, LoadState, SpawnBlocking},
     error::{EthApiError, EthResult},
     revm_utils::{prepare_call_env, EvmOverrides},
     utils::recover_raw_transaction,
@@ -72,7 +72,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + LoadState + 'static,
+    Eth: EthTransactions + LoadState + SpawnBlocking + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
@@ -485,7 +485,7 @@ where
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + LoadState + 'static,
+    Eth: EthTransactions + LoadState + SpawnBlocking + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///

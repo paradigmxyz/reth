@@ -20,7 +20,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Mutex;
-use traits::SpawnBlocking;
 
 use crate::eth::{
     api::{
@@ -48,7 +47,9 @@ pub mod transactions;
 
 use crate::eth::traits::RawTransactionForwarder;
 pub use receipt::ReceiptBuilder;
-pub use traits::{BuildReceipt, EthBlocks, EthState, EthTransactions, LoadState, StateCacheDB};
+pub use traits::{
+    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadState, SpawnBlocking, StateCacheDB,
+};
 pub use transactions::TransactionSource;
 
 /// `Eth` API trait.

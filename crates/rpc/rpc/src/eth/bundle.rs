@@ -1,7 +1,7 @@
 //! `Eth` bundle implementation and helpers.
 
 use crate::eth::{
-    api::EthTransactions,
+    api::{EthTransactions, SpawnBlocking},
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
     revm_utils::FillableTransaction,
     utils::recover_raw_transaction,
@@ -41,7 +41,7 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadState + 'static,
+    Eth: EthTransactions + LoadState + SpawnBlocking + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current

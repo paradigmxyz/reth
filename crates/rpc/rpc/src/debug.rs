@@ -1,6 +1,6 @@
 use crate::{
     eth::{
-        api::{traits::SpawnBlocking, EthTransactions, LoadState},
+        api::{EthTransactions, LoadState, SpawnBlocking},
         error::{EthApiError, EthResult},
         revm_utils::{prepare_call_env, EvmOverrides},
     },
@@ -65,7 +65,7 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
 impl<Provider, Eth> DebugApi<Provider, Eth>
 where
     Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + LoadState + 'static,
+    Eth: EthTransactions + LoadState + SpawnBlocking + 'static,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {

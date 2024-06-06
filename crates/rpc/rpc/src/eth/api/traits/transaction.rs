@@ -205,9 +205,16 @@ pub trait EthTransactions: Send + Sync {
     /// Executes the closure with the state that corresponds to the given [BlockId] on a new task
     async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        Self: LoadState,
+        Self: LoadState + SpawnBlocking,
         F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
-        T: Send + 'static;
+        T: Send + 'static,
+    {
+        self.spawn_tracing(move |this| {
+            let state = this.state_at_block_id(at)?;
+            f(state)
+        })
+        .await
+    }
 
     /// Returns the revm evm env for the requested [BlockId]
     ///
@@ -520,7 +527,15 @@ pub trait EthTransactions: Send + Sync {
     ) -> EthResult<R>
     where
         Self: LoadState,
-        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
+    {
+        self.with_state_at_block(at, |state| {
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+            let mut inspector = TracingInspector::new(config);
+            let (res, _) = self.inspect(&mut db, env, &mut inspector)?;
+            f(inspector, res)
+        })
+    }
 
     /// Same as [Self::trace_at] but also provides the used database to the callback.
     ///
@@ -537,15 +552,41 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        Self: LoadState,
+        Self: LoadState + SpawnBlocking,
         F: FnOnce(TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+        let this = self.clone();
+        self.spawn_with_state_at_block(at, move |state| {
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+            let mut inspector = TracingInspector::new(config);
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
+            f(inspector, res, db)
+        })
+        .await
+    }
 
     /// Fetches the transaction and the transaction's block
     async fn transaction_and_block(
         &self,
         hash: B256,
-    ) -> EthResult<Option<(TransactionSource, SealedBlockWithSenders)>>;
+    ) -> EthResult<Option<(TransactionSource, SealedBlockWithSenders)>>
+    where
+        Self: SpawnBlocking,
+    {
+        let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        // Note: this is always either hash or pending
+        let block_hash = match at {
+            BlockId::Hash(hash) => hash.block_hash,
+            _ => return Ok(None),
+        };
+        let block = self.cache().get_block_with_senders(block_hash).await?;
+        Ok(block.map(|block| (transaction, block.seal(block_hash))))
+    }
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///

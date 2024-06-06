@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ReceiptProvider,
-    StateProviderBox, StateProviderFactory, TransactionsProvider,
+    StateProviderFactory, TransactionsProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -33,7 +33,6 @@ use revm::{
     },
     Inspector,
 };
-use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
 use crate::{
     eth::{
@@ -94,19 +93,6 @@ where
     #[inline]
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
-    }
-
-    async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
-    where
-        Self: LoadState,
-        F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        self.spawn_tracing(move |this| {
-            let state = this.state_at_block_id(at)?;
-            f(state)
-        })
-        .await
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
@@ -406,66 +392,6 @@ where
             this.inspect(db, env, inspector)
         })
         .await
-    }
-
-    fn trace_at<F, R>(
-        &self,
-        env: EnvWithHandlerCfg,
-        config: TracingInspectorConfig,
-        at: BlockId,
-        f: F,
-    ) -> EthResult<R>
-    where
-        Self: LoadState,
-        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
-    {
-        let this = self.clone();
-        self.with_state_at_block(at, |state| {
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
-            let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
-            f(inspector, res)
-        })
-    }
-
-    async fn spawn_trace_at_with_state<F, R>(
-        &self,
-        env: EnvWithHandlerCfg,
-        config: TracingInspectorConfig,
-        at: BlockId,
-        f: F,
-    ) -> EthResult<R>
-    where
-        Self: LoadState,
-        F: FnOnce(TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
-        R: Send + 'static,
-    {
-        let this = self.clone();
-        self.spawn_with_state_at_block(at, move |state| {
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
-            let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
-            f(inspector, res, db)
-        })
-        .await
-    }
-
-    async fn transaction_and_block(
-        &self,
-        hash: B256,
-    ) -> EthResult<Option<(TransactionSource, SealedBlockWithSenders)>> {
-        let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
-            None => return Ok(None),
-            Some(res) => res,
-        };
-
-        // Note: this is always either hash or pending
-        let block_hash = match at {
-            BlockId::Hash(hash) => hash.block_hash,
-            _ => return Ok(None),
-        };
-        let block = self.cache().get_block_with_senders(block_hash).await?;
-        Ok(block.map(|block| (transaction, block.seal(block_hash))))
     }
 
     async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
