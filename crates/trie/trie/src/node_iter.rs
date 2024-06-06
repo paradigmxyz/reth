@@ -69,6 +69,7 @@ impl<C, H> TrieNodeIter<C, H>
 where
     C: TrieCursor,
     H: HashedCursor,
+    C::Err: From<H::Err>,
 {
     /// Return the next trie node to be added to the hash builder.
     ///

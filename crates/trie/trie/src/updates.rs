@@ -1,4 +1,4 @@
-use crate::{trie_cursor::TrieCursorFactory, walker::TrieWalker};
+use crate::{trie_cursor::TrieCursorRwFactory, walker::TrieWalker};
 use derive_more::Deref;
 use reth_primitives::{
     trie::{
@@ -124,7 +124,7 @@ impl TrieUpdates {
     }
 
     /// Flush updates all aggregated updates to the database.
-    pub fn flush<F: TrieCursorFactory>(self, factory: &F) -> Result<(), F::Err> {
+    pub fn flush<F: TrieCursorRwFactory>(self, factory: &F) -> Result<(), F::Err> {
         if self.trie_operations.is_empty() {
             return Ok(())
         }
@@ -138,7 +138,7 @@ impl TrieUpdates {
             match key {
                 TrieKey::AccountNode(nibbles) => match operation {
                     TrieOp::Delete => {
-                        if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                        if account_trie_cursor.seek_exact(nibbles.0)?.is_some() {
                             account_trie_cursor.delete_current()?;
                         }
                     }

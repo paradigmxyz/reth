@@ -1,33 +1,32 @@
+use reth_execution_errors::StorageRootError;
 use reth_primitives::{Account, B256, U256};
-
-/// Implementation of hashed state cursor traits for the post state.
-mod post_state;
-pub use post_state::*;
+use std::fmt::Debug;
 
 /// The factory trait for creating cursors over the hashed state.
 pub trait HashedCursorFactory {
+    /// The associated error which can be returned from operations on the cursor.
+    type Err: Debug + Into<StorageRootError>;
+
     /// The hashed account cursor type.
-    type AccountCursor: HashedCursor<Value = Account>;
+    type AccountCursor: HashedCursor<Value = Account, Err = Self::Err>;
     /// The hashed storage cursor type.
-    type StorageCursor: HashedStorageCursor<Value = U256>;
+    type StorageCursor: HashedStorageCursor<Value = U256, Err = Self::Err>;
 
     /// Returns a cursor for iterating over all hashed accounts in the state.
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, Self::AccountCursor::Err>;
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, Self::Err>;
 
     /// Returns a cursor for iterating over all hashed storage entries in the state.
-    fn hashed_storage_cursor(
-        &self,
-        hashed_address: B256,
-    ) -> Result<Self::StorageCursor, Self::AccountCursor::Err>;
+    fn hashed_storage_cursor(&self, hashed_address: B256)
+        -> Result<Self::StorageCursor, Self::Err>;
 }
 
 /// The cursor for iterating over hashed entries.
 pub trait HashedCursor {
     /// The associated error which can be returned from operations on the cursor.
-    type Err;
+    type Err: Debug;
 
     /// Value returned by the cursor.
-    type Value: std::fmt::Debug;
+    type Value: Debug;
 
     /// Seek an entry greater or equal to the given key and position the cursor there.
     /// Returns the first entry with the key greater or equal to the sought key.
@@ -40,5 +39,5 @@ pub trait HashedCursor {
 /// The cursor for iterating over hashed storage entries.
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
-    fn is_storage_empty(&mut self) -> Result<bool, HashedCursor::Err>;
+    fn is_storage_empty(&mut self) -> Result<bool, <Self as HashedCursor>::Err>;
 }

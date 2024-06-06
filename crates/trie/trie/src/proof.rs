@@ -37,14 +37,22 @@ impl<'a, TX> Proof<'a, TX, &'a TX> {
 impl<'a, TX, H> Proof<'a, TX, H>
 where
     H: HashedCursorFactory + Clone,
+    StateRootError: From<<H as HashedCursorFactory>::Err>,
+    StorageRootError: From<<H as HashedCursorFactory>::Err>,
 {
     /// Generate an account proof from intermediate nodes.
-    pub fn account_proof(
+    pub fn account_proof<T: TrieCursorFactory>(
         &self,
         address: Address,
         slots: &[B256],
-        trie_factory: &impl TrieCursorFactory,
-    ) -> Result<AccountProof, StateRootError> {
+        trie_factory: &T,
+    ) -> Result<AccountProof, StateRootError>
+    where
+        StorageRootError: From<T::Err>,
+        StateRootError: From<T::Err>,
+        StateRootError: From<<T as TrieCursorFactory>::Err>,
+        T::Err: From<H::Err>,
+    {
         let target_hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(target_hashed_address);
         let mut account_proof = AccountProof::new(address);
@@ -96,22 +104,30 @@ where
     }
 
     /// Compute storage root.
-    pub fn storage_root(
+    pub fn storage_root<T: TrieCursorFactory>(
         &self,
         hashed_address: B256,
-        trie_factory: &impl TrieCursorFactory,
-    ) -> Result<B256, StorageRootError> {
+        trie_factory: &T,
+    ) -> Result<B256, StorageRootError>
+    where
+        StorageRootError: From<T::Err>,
+        T::Err: From<H::Err>,
+    {
         let (storage_root, _) = self.storage_root_with_proofs(hashed_address, &[], trie_factory)?;
         Ok(storage_root)
     }
 
     /// Compute the storage root and retain proofs for requested slots.
-    pub fn storage_root_with_proofs(
+    pub fn storage_root_with_proofs<T: TrieCursorFactory>(
         &self,
         hashed_address: B256,
         slots: &[B256],
-        trie_factory: &impl TrieCursorFactory,
-    ) -> Result<(B256, Vec<StorageProof>), StorageRootError> {
+        trie_factory: &T,
+    ) -> Result<(B256, Vec<StorageProof>), StorageRootError>
+    where
+        StorageRootError: From<T::Err>,
+        T::Err: From<H::Err>,
+    {
         let mut hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
 

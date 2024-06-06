@@ -14,13 +14,12 @@ use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, BlockNumber, B256,
+    Address, B256,
 };
-use std::ops::RangeInclusive;
-use tracing::{debug, trace};
+use tracing::trace;
 
 #[cfg(feature = "metrics")]
-use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
+use crate::metrics::{StateRootMetrics, TrieRootMetrics};
 
 /// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug, Default)]
@@ -96,6 +95,11 @@ impl<T, H> StateRoot<T, H>
 where
     T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
+    StorageRootError: From<<T as TrieCursorFactory>::Err>,
+    StorageRootError: From<<H as HashedCursorFactory>::Err>,
+    StateRootError: From<<T as TrieCursorFactory>::Err>,
+    StateRootError: From<<H as HashedCursorFactory>::Err>,
+    T::Err: From<H::Err>,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
     /// nodes into the hash builder. Collects the updates in the process.
@@ -352,6 +356,11 @@ impl<T, H> StorageRoot<T, H>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
+    StorageRootError: From<<T as TrieCursorFactory>::Err>,
+    StorageRootError: From<<H as HashedCursorFactory>::Err>,
+    StateRootError: From<<T as TrieCursorFactory>::Err>,
+    StateRootError: From<<H as HashedCursorFactory>::Err>,
+    T::Err: From<H::Err>,
 {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
     ///

@@ -1,4 +1,4 @@
-use super::{TrieCursor, TrieCursorFactory};
+use super::{TrieCursor, TrieCursorErr, TrieCursorFactory};
 use crate::updates::TrieKey;
 use reth_primitives::trie::{BranchNodeCompact, Nibbles};
 
@@ -29,9 +29,11 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
 #[non_exhaustive]
 pub struct NoopAccountTrieCursor;
 
-impl TrieCursor for NoopAccountTrieCursor {
+impl TrieCursorErr for NoopAccountTrieCursor {
     type Err = ();
+}
 
+impl TrieCursor for NoopAccountTrieCursor {
     /// Seeks an exact match within the account trie.
     fn seek_exact(
         &mut self,
@@ -56,9 +58,11 @@ impl TrieCursor for NoopAccountTrieCursor {
 #[non_exhaustive]
 pub struct NoopStorageTrieCursor;
 
-impl TrieCursor for NoopStorageTrieCursor {
+impl TrieCursorErr for NoopStorageTrieCursor {
     type Err = ();
+}
 
+impl TrieCursor for NoopStorageTrieCursor {
     /// Seeks an exact match in storage tries.
     fn seek_exact(
         &mut self,

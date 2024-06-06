@@ -10,7 +10,8 @@ use reth_primitives::{
 };
 use reth_trie::{
     trie_cursor::{
-        TrieCursor, TrieCursorFactory, TrieCursorRw, TrieCursorRwFactory, TrieCursorWrite,
+        TrieCursor, TrieCursorErr, TrieCursorFactory, TrieCursorRw, TrieCursorRwFactory,
+        TrieCursorWrite,
     },
     updates::TrieKey,
 };
@@ -47,10 +48,6 @@ impl<'a, TX: DbTx> TrieCursorFactory for DbTxRefWrapper<'a, TX> {
 /// Implementation of the trie cursor factory for a database transaction.
 impl<'a, TX: DbTxMut> TrieCursorRwFactory for DbTxRefWrapper<'a, TX> {
     type Err = DatabaseError;
-    type StorageKey = tables::AccountsTrie::Key;
-    type StorageValue = tables::AccountsTrie::Value;
-    type AccountsKey = tables::StoragesTrie::Key;
-    type AccountsValue = tables::StoragesTrie::Value;
 
     fn account_trie_cursor_rw(
         &self,
@@ -98,12 +95,17 @@ impl<C> DatabaseAccountTrieCursor<C> {
     }
 }
 
-impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
+impl<C> TrieCursorErr for DatabaseAccountTrieCursor<C>
 where
     C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
 {
     type Err = DatabaseError;
+}
 
+impl<C> TrieCursor for DatabaseAccountTrieCursor<C>
+where
+    C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
+{
     /// Seeks an exact match for the provided key in the account trie.
     fn seek_exact(
         &mut self,
@@ -123,13 +125,18 @@ where
     }
 }
 
+impl<C> TrieCursorErr for DatabaseAccountTrieCursor<C>
+where
+    C: DbCursorRW<tables::AccountsTrie> + Send + Sync,
+{
+    type Err = DatabaseError;
+}
+
 impl<C> TrieCursorWrite<tables::AccountsTrie::Key, tables::AccountsTrie::Value>
     for DatabaseAccountTrieCursor<C>
 where
     C: DbCursorRW<tables::AccountsTrie> + Send + Sync,
 {
-    type Err = DatabaseError;
-
     fn delete_current(&mut self) -> Result<(), Self::Err> {
         self.0.delete_current()
     }
@@ -147,13 +154,18 @@ where
     }
 }
 
+impl<C> TrieCursorErr for DatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
+{
+    type Err = DatabaseError;
+}
+
 impl<C> TrieCursorWrite<tables::StoragesTrie::Key, tables::StoragesTrie::Value>
     for DatabaseStorageTrieCursor<C>
 where
     C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
 {
-    type Err = DatabaseError;
-
     fn delete_current(&mut self) -> Result<(), Self::Err> {
         self.cursor.delete_current()
     }
@@ -187,12 +199,17 @@ impl<C> DatabaseStorageTrieCursor<C> {
     }
 }
 
-impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
+impl<C> TrieCursorErr for DatabaseStorageTrieCursor<C>
 where
     C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
 {
     type Err = DatabaseError;
+}
 
+impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
+where
+    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
+{
     /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(
         &mut self,
