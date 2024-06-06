@@ -173,6 +173,7 @@ needless_bitwise_bool = "warn"
 zero_sized_map_values = "warn"
 single_char_pattern = "warn"
 needless_continue = "warn"
+enum_glob_use = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
