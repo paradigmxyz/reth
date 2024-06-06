@@ -804,7 +804,7 @@ pub enum MissingPayloadBehaviour<Payload> {
     AwaitInProgress,
     /// Race the in progress payload process with an empty payload.
     RaceEmptyPayload,
-    /// Race the in progress payload process with the this job.
+    /// Race the in progress payload process with this job.
     RacePayload(Box<dyn FnOnce() -> Result<Payload, PayloadBuilderError> + Send>),
 }
 
