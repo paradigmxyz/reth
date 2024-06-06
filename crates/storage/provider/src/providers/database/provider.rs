@@ -2757,7 +2757,7 @@ impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
 const FINALIZED_BLOCKS_KEY: u8 = 0;
 
 impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
-    fn fetch_latest_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn last_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
         let mut finalized_blocks = self
             .tx
             .cursor_read::<tables::FinalizedBlocks>()?
