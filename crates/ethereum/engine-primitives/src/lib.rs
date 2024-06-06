@@ -11,10 +11,8 @@
 mod payload;
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 
-use reth_engine_primitives::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    EngineTypes, PayloadOrAttributes,
-};
+use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::{validate_version_specific_fields, error::EngineObjectValidationError, EngineApiMessageVersion, PayloadOrAttributes};
 use reth_primitives::ChainSpec;
 use reth_rpc_types::{
     engine::{
