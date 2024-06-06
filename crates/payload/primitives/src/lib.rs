@@ -20,7 +20,6 @@ mod payload;
 pub use payload::PayloadOrAttributes;
 
 use reth_primitives::ChainSpec;
-use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
 
 /// Validates the timestamp depending on the version called:
