@@ -116,7 +116,8 @@ where
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
         // TODO check if we're currently syncing, or mutable access is currently held by the
         // orchestrator then we respond with SYNCING or delay forkchoice updates.  otherwise
-        // we tell the tree to handle the requests
+        // we tell the tree to handle the requests, but we likely still need to tell the handler
+        // about the stuff while write access is unavailable.
 
         // TODO: should this type spawn the jobs and have access to tree internals or should this be
         // entirely handled by the tree handler? basically

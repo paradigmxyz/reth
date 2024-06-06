@@ -10,8 +10,9 @@ use reth_rpc_types::{
 use std::sync::Arc;
 
 /// Keeps track of the state of the tree.
+#[derive(Clone)]
 pub struct TreeState {
-    // TODO: this is shared state
+    // TODO: this is shared state for the blocks etc.
 }
 
 impl TreeState {
@@ -23,6 +24,7 @@ impl TreeState {
 /// Tracks the state of the engine api internals.
 ///
 /// This type is shareable.
+#[derive(Clone)]
 pub struct EngineApiTreeState {
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
@@ -96,4 +98,29 @@ pub struct TreeOutcome<T> {
 pub enum TreeEvent {
     PipelineAction(PipelineAction),
     Download(DownloadRequest),
+}
+
+#[derive(Clone)]
+pub struct EngineApiTreeHandlerImpl<T: EngineTypes> {
+    state: EngineApiTreeState,
+}
+
+impl<T: EngineTypes> EngineApiTreeHandler for EngineApiTreeHandlerImpl<T> {
+    type Engine = T;
+
+    fn on_new_payload(
+        &self,
+        payload: ExecutionPayload,
+        cancun_fields: Option<CancunPayloadFields>,
+    ) -> TreeOutcome<PayloadStatus> {
+        todo!()
+    }
+
+    fn on_forkchoice_updated(
+        &self,
+        state: ForkchoiceState,
+        attrs: Option<<Self::Engine as EngineTypes>::PayloadAttributes>,
+    ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>> {
+        todo!()
+    }
 }
