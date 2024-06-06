@@ -6918,6 +6918,7 @@ name = "reth-exex-test-utils"
 version = "0.2.0-beta.8"
 dependencies = [
  "eyre",
+ "futures-util",
  "rand 0.8.5",
  "reth-blockchain-tree",
  "reth-config",
@@ -6934,7 +6935,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
- "reth-testing-utils",
  "reth-transaction-pool",
  "tokio",
 ]

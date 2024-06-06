@@ -27,10 +27,10 @@ reth-payload-builder.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
-reth-testing-utils.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 ## async
+futures-util.workspace = true
 tokio.workspace = true
 
 ## misc

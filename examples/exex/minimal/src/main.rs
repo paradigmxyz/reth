@@ -54,17 +54,16 @@ fn main() -> eyre::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{future::poll_fn, pin::pin, sync::Arc, task::Poll};
+    use std::{pin::pin, sync::Arc};
 
-    use futures::FutureExt;
-    use reth::providers::{BlockReader, BundleStateWithReceipts, Chain};
+    use reth::providers::{BundleStateWithReceipts, Chain};
     use reth_exex::{ExExEvent, ExExNotification};
-    use reth_exex_test_utils::test_exex_context;
+    use reth_exex_test_utils::{test_exex_context, PollOnce, TestExExContext};
     use tokio::sync::mpsc::error::TryRecvError;
 
     #[tokio::test]
     async fn exex() -> eyre::Result<()> {
-        let (ctx, genesis, provider_factory, mut events_rx, notifications_tx) =
+        let TestExExContext { ctx, genesis, provider_factory: _, mut events_rx, notifications_tx } =
             test_exex_context().await?;
 
         let head = ctx.head;
@@ -77,13 +76,9 @@ mod tests {
 
         let mut exex = pin!(super::exex_init(ctx).await?);
 
-        assert_eq!(events_rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(events_rx.is_empty());
 
-        poll_fn(|cx| {
-            assert!(exex.poll_unpin(cx).is_pending());
-            Poll::Ready(())
-        })
-        .await;
+        exex.poll_once().await;
 
         let event = events_rx.try_recv()?;
         assert_eq!(event, ExExEvent::FinishedHeight(head.number));

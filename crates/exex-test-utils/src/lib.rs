@@ -8,6 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_db_common::init::init_genesis;
@@ -27,15 +28,18 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{Block, Head, Header, SealedBlockWithSenders};
+use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
     ProviderFactory,
 };
 use reth_tasks::TaskManager;
-use reth_testing_utils::generators::random_block;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-use std::sync::Arc;
+use std::{
+    future::{poll_fn, Future},
+    sync::Arc,
+    task::Poll,
+};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -129,13 +133,15 @@ type Adapter = NodeAdapter<
     >>::Components,
 >;
 
-pub async fn test_exex_context() -> eyre::Result<(
-    ExExContext<Adapter>,
-    SealedBlockWithSenders,
-    ProviderFactory<TmpDB>,
-    UnboundedReceiver<ExExEvent>,
-    Sender<ExExNotification>,
-)> {
+pub struct TestExExContext {
+    pub ctx: ExExContext<Adapter>,
+    pub genesis: SealedBlockWithSenders,
+    pub provider_factory: ProviderFactory<TmpDB>,
+    pub events_rx: UnboundedReceiver<ExExEvent>,
+    pub notifications_tx: Sender<ExExNotification>,
+}
+
+pub async fn test_exex_context() -> eyre::Result<TestExExContext> {
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::default();
     let executor = MockExecutorProvider::default();
@@ -190,5 +196,26 @@ pub async fn test_exex_context() -> eyre::Result<(
         components,
     };
 
-    Ok((ctx, genesis, provider_factory, events_rx, notifications_tx))
+    Ok(TestExExContext { ctx, genesis, provider_factory, events_rx, notifications_tx })
+}
+
+/// An extension trait for polling an Execution Extension future.
+pub trait PollOnce {
+    /// Polls the given Execution Extension future __once__ and asserts that it is
+    /// [`Poll::Pending`]. The future should be (pinned)[`std::pin::pin`].
+    ///
+    /// # Panics
+    /// If the future returns [`Poll::Ready`], because Execution Extension future should never
+    /// resolve.
+    fn poll_once(&mut self) -> impl Future<Output = ()> + Send;
+}
+
+impl<F: Future<Output = eyre::Result<()>> + Unpin + Send> PollOnce for F {
+    async fn poll_once(&mut self) {
+        poll_fn(|cx| {
+            assert!(self.poll_unpin(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+    }
 }
