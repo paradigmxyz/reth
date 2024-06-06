@@ -1,8 +1,9 @@
 //! Common conversions from alloy types.
 
 use crate::{
-    transaction::extract_chain_id, Block, Header, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
+    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, Header, Signature,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
+    TxLegacy, TxType,
 };
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
@@ -36,7 +37,13 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                     .collect(),
                 alloy_rpc_types::BlockTransactions::Hashes(_) |
                 alloy_rpc_types::BlockTransactions::Uncle => {
-                    return Err(ConversionError::MissingFullTransactions)
+                    // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
+                    // root is the empty root then we can just return an empty vec.
+                    if block.header.transactions_root == EMPTY_TRANSACTIONS {
+                        Ok(vec![])
+                    } else {
+                        Err(ConversionError::MissingFullTransactions)
+                    }
                 }
             };
             transactions?
@@ -122,8 +129,27 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                             .into(),
                     ))
                 }
+
+                // extract the chain id if possible
+                let chain_id = match tx.chain_id {
+                    Some(chain_id) => Some(chain_id),
+                    None => {
+                        if let Some(signature) = tx.signature {
+                            // TODO: make this error conversion better. This is needed because
+                            // sometimes rpc providers return legacy transactions without a chain id
+                            // explicitly in the response, however those transactions may also have
+                            // a chain id in the signature from eip155
+                            extract_chain_id(signature.v.to())
+                                .map_err(|err| ConversionError::Eip2718Error(err.into()))?
+                                .1
+                        } else {
+                            return Err(ConversionError::MissingChainId)
+                        }
+                    }
+                };
+
                 Ok(Self::Legacy(TxLegacy {
-                    chain_id: tx.chain_id,
+                    chain_id,
                     nonce: tx.nonce,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                     gas_limit: tx
