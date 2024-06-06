@@ -30,7 +30,7 @@ use reth_db_api::{
         storage_sharded_key::StorageShardedKey,
         CompactU256, ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
-    table::{DupSort, Table},
+    table::{Decode, DupSort, Encode, Table},
 };
 use reth_primitives::{
     stage::StageCheckpoint,
@@ -38,6 +38,7 @@ use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, PruneCheckpoint,
     PruneSegment, Receipt, Requests, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Enum for the types of tables present in libmdbx.
@@ -408,7 +409,35 @@ tables! {
     table BlockRequests<Key = BlockNumber, Value = Requests>;
 
     /// Stores generic chain state info, like the last finalized block.
-    table ChainState<Key = u8, Value = BlockNumber>;
+    table ChainState<Key = ChainStateKey, Value = BlockNumber>;
+}
+
+/// Keys for the `ChainState` table.
+#[derive(Ord, Clone, Eq, PartialOrd, PartialEq, Debug, Deserialize, Serialize, Default, Hash)]
+pub enum ChainStateKey {
+    /// Last finalized block key
+    #[default]
+    LastFinalizedBlock,
+}
+
+impl Encode for ChainStateKey {
+    type Encoded = [u8; 1];
+
+    fn encode(self) -> Self::Encoded {
+        match self {
+            Self::LastFinalizedBlock => [0],
+        }
+    }
+}
+
+impl Decode for ChainStateKey {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, reth_db_api::DatabaseError> {
+        if value.as_ref() == [0] {
+            Ok(Self::LastFinalizedBlock)
+        } else {
+            Err(reth_db_api::DatabaseError::Decode)
+        }
+    }
 }
 
 // Alias types.

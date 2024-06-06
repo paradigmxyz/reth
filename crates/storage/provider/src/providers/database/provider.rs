@@ -2753,17 +2753,14 @@ impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
     }
 }
 
-/// Table key used to read and write the last finalized block.
-const FINALIZED_BLOCKS_KEY: u8 = 0;
-
 impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
     fn last_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
         let mut finalized_blocks = self
             .tx
             .cursor_read::<tables::ChainState>()?
-            .walk(Some(FINALIZED_BLOCKS_KEY))?
+            .walk(Some(tables::ChainStateKey::LastFinalizedBlock))?
             .take(1)
-            .collect::<Result<BTreeMap<u8, BlockNumber>, _>>()?;
+            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
 
         let last_finalized_block_number = finalized_blocks.pop_first().unwrap_or_default();
         Ok(last_finalized_block_number.1)
@@ -2772,7 +2769,9 @@ impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
 
 impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
-        Ok(self.tx.put::<tables::ChainState>(FINALIZED_BLOCKS_KEY, block_number)?)
+        Ok(self
+            .tx
+            .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
     }
 }
 
