@@ -17,6 +17,7 @@ use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
     ProviderError,
 };
+use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::trace;
 
@@ -58,11 +59,13 @@ where
         res
     }
 
-    fn finalize_block(&self, finalized_block: BlockNumber) {
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {
         trace!(target: "blockchain_tree", finalized_block, "Finalizing block");
         let mut tree = self.tree.write();
-        tree.finalize_block(finalized_block);
+        tree.finalize_block(finalized_block)?;
         tree.update_chains_metrics();
+
+        Ok(())
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(

@@ -127,18 +127,7 @@ where
         let last_canonical_hashes =
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
 
-        // TODO(rakita) save last finalized block inside database but for now just take
-        // `tip - max_reorg_depth`
-        // https://github.com/paradigmxyz/reth/issues/1712
-        let last_finalized_block_number = if last_canonical_hashes.len() > max_reorg_depth {
-            // we pick `Highest - max_reorg_depth` block as last finalized block.
-            last_canonical_hashes.keys().nth_back(max_reorg_depth)
-        } else {
-            // we pick the lowest block as last finalized block.
-            last_canonical_hashes.keys().next()
-        }
-        .copied()
-        .unwrap_or_default();
+        let last_finalized_block_number = externals.fetch_latest_finalized_block_number()?;
 
         Ok(Self {
             externals,
@@ -803,7 +792,7 @@ where
     }
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
-    pub fn finalize_block(&mut self, finalized_block: BlockNumber) {
+    pub fn finalize_block(&mut self, finalized_block: BlockNumber) -> ProviderResult<()> {
         // remove blocks
         let mut remove_chains = self.state.block_indices.finalize_canonical_blocks(
             finalized_block,
@@ -817,6 +806,11 @@ where
         }
         // clean block buffer.
         self.remove_old_blocks(finalized_block);
+
+        // save finalized block in db.
+        self.externals.save_finalized_block_number(finalized_block)?;
+
+        Ok(())
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -834,7 +828,7 @@ where
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> ProviderResult<()> {
-        self.finalize_block(last_finalized_block);
+        self.finalize_block(last_finalized_block)?;
 
         let last_canonical_hashes = self.update_block_hashes()?;
 
@@ -1738,7 +1732,7 @@ mod tests {
         tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(10).unwrap();
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -1814,7 +1808,7 @@ mod tests {
         tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(10).unwrap();
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -1899,7 +1893,7 @@ mod tests {
         tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(10).unwrap();
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -2003,7 +1997,7 @@ mod tests {
         tree.is_block_hash_canonical(&B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(head.number);
+        tree.finalize_block(head.number).unwrap();
 
         // block 2 parent is not known, block2 is buffered.
         assert_eq!(
@@ -2253,7 +2247,7 @@ mod tests {
         assert!(tree.is_block_hash_canonical(&block2.hash()).unwrap());
 
         // finalize b1 that would make b1a removed from tree
-        tree.finalize_block(11);
+        tree.finalize_block(11).unwrap();
         // Trie state:
         // b2   b2a (side chain)
         // |   /
@@ -2356,5 +2350,75 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::default()))
             .with_buffered_blocks(HashMap::default())
             .assert(&tree);
+    }
+
+    #[test]
+    fn last_finalized_block_initialization() {
+        let data = BlockchainTestData::default_from_number(11);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
+        let (block3, exec3) = data.blocks[2].clone();
+        let genesis = data.genesis;
+
+        // test pops execution results from vector, so order is from last to first.
+        let externals =
+            setup_externals(vec![exec3.clone(), exec2.clone(), exec1.clone(), exec3, exec2, exec1]);
+        let cloned_externals_1 = TreeExternals {
+            provider_factory: externals.provider_factory.clone(),
+            executor_factory: externals.executor_factory.clone(),
+            consensus: externals.consensus.clone(),
+        };
+        let cloned_externals_2 = TreeExternals {
+            provider_factory: externals.provider_factory.clone(),
+            executor_factory: externals.executor_factory.clone(),
+            consensus: externals.consensus.clone(),
+        };
+
+        // last finalized block would be number 9.
+        setup_genesis(&externals.provider_factory, genesis);
+
+        // make tree
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+
+        assert_eq!(
+            tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block3, BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        tree.make_canonical(block2.hash()).unwrap();
+
+        // restart
+        let mut tree =
+            BlockchainTree::new(cloned_externals_1, config, None).expect("failed to create tree");
+        assert_eq!(tree.block_indices().last_finalized_block(), 0);
+
+        let mut block1a = block1;
+        let block1a_hash = B256::new([0x33; 32]);
+        block1a.set_hash(block1a_hash);
+
+        assert_eq!(
+            tree.insert_block(block1a.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
+        );
+
+        tree.make_canonical(block1a.hash()).unwrap();
+        tree.finalize_block(block1a.number).unwrap();
+
+        // restart
+        let tree =
+            BlockchainTree::new(cloned_externals_2, config, None).expect("failed to create tree");
+
+        assert_eq!(tree.block_indices().last_finalized_block(), block1a.number);
     }
 }
