@@ -4,8 +4,7 @@
 //!
 //! This module defines the tables in reth, as well as some table-related abstractions:
 //!
-//! - [`codecs`] integrates different codecs into [`Encode`](reth_db_api::table::Encode) and
-//!   [`Decode`](reth_db_api::table::Decode)
+//! - [`codecs`] integrates different codecs into [`Encode`] and [`Decode`]
 //! - [`models`](reth_db_api::models) defines the values written to tables
 //!
 //! # Database Tour
