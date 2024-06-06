@@ -40,8 +40,6 @@ use crate::{
     EthApiSpec,
 };
 
-use super::SpawnBlocking;
-
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
 
