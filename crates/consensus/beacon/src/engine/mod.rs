@@ -5,7 +5,7 @@ use reth_blockchain_tree_api::{
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
 use reth_db_api::database::Database;
-use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
+use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     bodies::client::BodiesClient,
@@ -13,6 +13,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     constants::EPOCH_SLOTS,

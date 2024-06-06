@@ -17,6 +17,11 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use std::convert::Infallible;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
 use reth::{
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
@@ -33,8 +38,8 @@ use reth_basic_payload_builder::{
     PayloadBuilder, PayloadConfig,
 };
 use reth_node_api::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
+    validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
@@ -53,9 +58,6 @@ use reth_rpc_types::{
     ExecutionPayloadV1, Withdrawal,
 };
 use reth_tracing::{RethTracer, Tracer};
-use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
-use thiserror::Error;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

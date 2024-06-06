@@ -1,6 +1,3 @@
-use crate::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-};
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
@@ -8,6 +5,10 @@ use reth_primitives::{
 use reth_rpc_types::{
     engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
     Withdrawal,
+};
+
+use crate::{
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
 };
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
