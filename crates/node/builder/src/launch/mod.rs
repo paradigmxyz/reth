@@ -94,7 +94,7 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config)?
+            .with_loaded_toml_config(config).await?
             // attach the database
             .attach(database.clone())
             // ensure certain settings take effect
@@ -449,6 +449,7 @@ where
 
         let full_node = FullNode {
             evm_config: node_adapter.components.evm_config().clone(),
+            block_executor: node_adapter.components.block_executor().clone(),
             pool: node_adapter.components.pool().clone(),
             network: node_adapter.components.network().clone(),
             provider: node_adapter.provider.clone(),
