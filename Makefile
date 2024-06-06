@@ -356,7 +356,7 @@ lint-other-targets:
 	-- -D warnings
 
 lint-codespell: ensure-codespell
-	codespell
+	codespell --skip "*.json"
 
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \

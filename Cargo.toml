@@ -241,7 +241,7 @@ reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
-reth-db = { path = "crates/storage/db" }
+reth-db = { path = "crates/storage/db", default-features = false }
 reth-db-api = { path = "crates/storage/db-api" }
 reth-db-common = { path = "crates/storage/db-common" }
 reth-discv4 = { path = "crates/net/discv4" }
@@ -380,6 +380,7 @@ dyn-clone = "1.0.17"
 sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
 url = "2.3"
+backon = "0.4"
 
 # metrics
 metrics = "0.22.0"

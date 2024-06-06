@@ -17,7 +17,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
+use reth_primitives::{mainnet_nodes, ChainSpec, TrustedPeer};
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -39,7 +39,7 @@ pub struct NetworkArgs {
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
     #[arg(long, value_delimiter = ',')]
-    pub trusted_peers: Vec<NodeRecord>,
+    pub trusted_peers: Vec<TrustedPeer>,
 
     /// Connect to or accept from trusted peers only
     #[arg(long)]
@@ -49,7 +49,11 @@ pub struct NetworkArgs {
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
-    pub bootnodes: Option<Vec<NodeRecord>>,
+    pub bootnodes: Option<Vec<TrustedPeer>>,
+
+    /// Amount of DNS resolution requests retries to perform when peering.
+    #[arg(long, default_value_t = 0)]
+    pub dns_retries: usize,
 
     /// The path to the known peers file. Connected peers are dumped to this file on nodes
     /// shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
@@ -125,10 +129,7 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let boot_nodes = self
-            .bootnodes
-            .clone()
-            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
+        let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
@@ -156,7 +157,7 @@ impl NetworkArgs {
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
-            .boot_nodes(boot_nodes.clone())
+            .boot_nodes(chain_bootnodes.clone())
             .chain_spec(chain_spec.clone())
             .transactions_manager_config(transactions_manager_config)
             // Configure node identity
@@ -189,7 +190,7 @@ impl NetworkArgs {
                 } = self.discovery;
 
                 builder
-                    .add_unsigned_boot_nodes(boot_nodes.into_iter())
+                    .add_unsigned_boot_nodes(chain_bootnodes.into_iter())
                     .lookup_interval(discv5_lookup_interval)
                     .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
                     .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
@@ -224,6 +225,7 @@ impl Default for NetworkArgs {
             trusted_peers: vec![],
             trusted_only: false,
             bootnodes: None,
+            dns_retries: 0,
             peers_file: None,
             identity: P2P_CLIENT_VERSION.to_string(),
             p2p_secret_key: None,
@@ -414,6 +416,22 @@ mod tests {
             "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303".parse().unwrap()
             ]
         );
+    }
+
+    #[test]
+    fn parse_retry_strategy_args() {
+        let tests = vec![0, 10];
+
+        for retries in tests {
+            let args = CommandParser::<NetworkArgs>::parse_from([
+                "reth",
+                "--dns-retries",
+                retries.to_string().as_str(),
+            ])
+            .args;
+
+            assert_eq!(args.dns_retries, retries);
+        }
     }
 
     #[cfg(not(feature = "optimism"))]

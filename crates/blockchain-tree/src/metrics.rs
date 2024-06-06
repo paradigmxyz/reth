@@ -88,7 +88,7 @@ pub(crate) enum MakeCanonicalAction {
     RevertCanonicalChainFromDatabase,
     /// Inserting an old canonical chain.
     InsertOldCanonicalChain,
-    /// Clearing trie updates of other childs chains after fork choice update.
+    /// Clearing trie updates of other children chains after fork choice update.
     ClearTrieUpdatesForOtherChilds,
 }
 
@@ -116,7 +116,8 @@ struct MakeCanonicalMetrics {
     revert_canonical_chain_from_database: Histogram,
     /// Duration of the insert old canonical chain action.
     insert_old_canonical_chain: Histogram,
-    /// Duration of the clear trie updates of other childs chains after fork choice update action.
+    /// Duration of the clear trie updates of other children chains after fork choice update
+    /// action.
     clear_trie_updates_for_other_childs: Histogram,
 }
 

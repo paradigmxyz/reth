@@ -21,7 +21,7 @@ reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
 reth-network-p2p.workspace = true
-reth-db.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true

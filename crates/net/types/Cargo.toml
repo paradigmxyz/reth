@@ -25,6 +25,7 @@ secp256k1.workspace = true
 serde_with.workspace = true
 thiserror.workspace = true
 url.workspace = true
+tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
