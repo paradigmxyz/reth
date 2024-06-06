@@ -43,7 +43,7 @@ use std::{
 };
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
-/// A test [`PoolBuilder`].
+/// A test [`PoolBuilder`] that builds a [`TestPool`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct TestPoolBuilder;
@@ -59,7 +59,7 @@ where
     }
 }
 
-/// A test [`ExecutorBuilder`].
+/// A test [`ExecutorBuilder`] that builds a [`MockExecutorProvider`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct TestExecutorBuilder;
