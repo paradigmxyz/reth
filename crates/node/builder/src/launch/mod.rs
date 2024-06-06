@@ -95,6 +95,8 @@ where
             .with_configured_globals()
             // load the toml config
             .with_loaded_toml_config(config).await?
+            // add resolved peers
+            .with_resolved().await?
             // attach the database
             .attach(database.clone())
             // ensure certain settings take effect
