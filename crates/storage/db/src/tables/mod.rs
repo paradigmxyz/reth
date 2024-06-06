@@ -19,8 +19,6 @@ pub mod codecs;
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
-pub(crate) mod utils;
-
 use reth_db_api::{
     models::{
         accounts::{AccountBeforeTx, BlockNumberAddress},

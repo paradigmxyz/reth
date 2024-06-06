@@ -2,7 +2,7 @@
 
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation},
-    tables::utils::*,
+    utils::*,
     DatabaseError,
 };
 use reth_db_api::{

@@ -1,12 +1,12 @@
 //! Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
 
-pub use crate::implementation::mdbx::*;
 use crate::is_database_empty;
 use eyre::Context;
 pub use reth_libmdbx::*;
 use std::path::Path;
 
 pub mod cursor;
+pub mod env;
 pub mod tx;
 
 const GIGABYTE: usize = 1024 * 1024 * 1024;
