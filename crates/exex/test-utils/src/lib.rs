@@ -266,13 +266,10 @@ pub enum PollOnceError {
 
 impl<F: Future<Output = eyre::Result<()>> + Unpin + Send> PollOnce for F {
     async fn poll_once(&mut self) -> Result<(), PollOnceError> {
-        poll_fn(|cx| {
-            let result = self.poll_unpin(cx);
-            match result {
-                Poll::Ready(Ok(())) => Poll::Ready(Err(PollOnceError::FutureIsReady)),
-                Poll::Ready(Err(err)) => Poll::Ready(Err(PollOnceError::FutureError(err))),
-                Poll::Pending => Poll::Ready(Ok(())),
-            }
+        poll_fn(|cx| match self.poll_unpin(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Err(PollOnceError::FutureIsReady)),
+            Poll::Ready(Err(err)) => Poll::Ready(Err(PollOnceError::FutureError(err))),
+            Poll::Pending => Poll::Ready(Ok(())),
         })
         .await
     }
