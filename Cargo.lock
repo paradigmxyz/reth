@@ -2808,9 +2808,11 @@ dependencies = [
  "futures",
  "reth",
  "reth-exex",
+ "reth-exex-test-utils",
  "reth-node-api",
  "reth-node-ethereum",
  "reth-tracing",
+ "tokio",
 ]
 
 [[package]]
@@ -6910,6 +6912,32 @@ dependencies = [
  "reth-tracing",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "reth-exex-test-utils"
+version = "0.2.0-beta.8"
+dependencies = [
+ "eyre",
+ "futures-util",
+ "rand 0.8.5",
+ "reth-blockchain-tree",
+ "reth-config",
+ "reth-db",
+ "reth-db-common",
+ "reth-evm",
+ "reth-exex",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "tokio",
 ]
 
 [[package]]

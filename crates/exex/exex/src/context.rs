@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
@@ -7,7 +9,6 @@ use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use crate::{ExExEvent, ExExNotification};
 
 /// Captures the context that an `ExEx` has access to.
-#[derive(Debug)]
 pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.
     pub head: Head,
@@ -33,6 +34,19 @@ pub struct ExExContext<Node: FullNodeComponents> {
 
     /// node components
     pub components: Node,
+}
+
+impl<Node: FullNodeComponents> Debug for ExExContext<Node> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExExContext")
+            .field("head", &self.head)
+            .field("config", &self.config)
+            .field("reth_config", &self.reth_config)
+            .field("events", &self.events)
+            .field("notifications", &self.notifications)
+            .field("components", &"...")
+            .finish()
+    }
 }
 
 impl<Node: FullNodeComponents> NodeTypes for ExExContext<Node> {
