@@ -460,7 +460,7 @@ where
         // away and the first full block should have been built by the time CL is requesting the
         // payload.
         self.metrics.inc_requested_empty_payload();
-        Builder::build_empty_payload(&self.client, self.config.clone())
+        self.builder.build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
@@ -501,8 +501,9 @@ where
             let (tx, rx) = oneshot::channel();
             let client = self.client.clone();
             let config = self.config.clone();
+            let builder = self.builder.clone();
             self.executor.spawn_blocking(Box::pin(async move {
-                let res = Builder::build_empty_payload(&client, config);
+                let res = builder.build_empty_payload(&client, config);
                 let _ = tx.send(res);
             }));
 
@@ -784,6 +785,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
 
     /// Builds an empty payload without any transaction.
     fn build_empty_payload(
+        &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
