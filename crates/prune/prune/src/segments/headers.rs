@@ -12,8 +12,9 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 
-use reth_primitives::{BlockNumber, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
+use alloy_primitives::BlockNumber;
 use reth_provider::DatabaseProviderRW;
+use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
 /// Number of header tables to prune in one step
@@ -190,11 +191,11 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::transaction::DbTx;
-    use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, B256, U256,
-    };
+    use reth_primitives::{BlockNumber, B256, U256};
     use reth_provider::PruneCheckpointReader;
+    use reth_prune_types::{
+        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+    };
     use reth_stages::test_utils::TestStageDB;
     use reth_testing_utils::{generators, generators::random_header_range};
     use tracing::trace;

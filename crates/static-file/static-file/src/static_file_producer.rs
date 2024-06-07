@@ -4,8 +4,9 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db_api::database::Database;
-use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
+use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
 use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -230,12 +231,11 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::{database::Database, transaction::DbTx};
-    use reth_primitives::{
-        static_file::HighestStaticFiles, PruneModes, StaticFileSegment, B256, U256,
-    };
+    use reth_primitives::{static_file::HighestStaticFiles, StaticFileSegment, B256, U256};
     use reth_provider::{
         providers::StaticFileWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
     };
+    use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::{
         generators,

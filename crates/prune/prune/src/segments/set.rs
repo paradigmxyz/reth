@@ -3,7 +3,7 @@ use crate::segments::{
     TransactionLookup,
 };
 use reth_db_api::database::Database;
-use reth_primitives::PruneModes;
+use reth_prune_types::PruneModes;
 
 /// Collection of [Segment]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
