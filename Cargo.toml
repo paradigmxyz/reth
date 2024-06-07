@@ -17,6 +17,7 @@ members = [
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
+    "crates/ethereum/payload/",
     "crates/etl/",
     "crates/evm/",
     "crates/evm/execution-errors",
@@ -49,7 +50,6 @@ members = [
     "crates/optimism/primitives/",
     "crates/payload/basic/",
     "crates/payload/builder/",
-    "crates/payload/ethereum/",
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/primitives/",
@@ -67,8 +67,8 @@ members = [
     "crates/rpc/rpc/",
     "crates/stages/api/",
     "crates/stages/stages/",
-    "crates/static-file-types/",
-    "crates/static-file/",
+    "crates/static-file/types/",
+    "crates/static-file/static-file",
     "crates/storage/codecs/",
     "crates/storage/codecs/derive/",
     "crates/storage/db/",
@@ -260,7 +260,7 @@ reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
-reth-ethereum-payload-builder = { path = "crates/payload/ethereum" }
+reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
@@ -310,8 +310,8 @@ reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
-reth-static-file = { path = "crates/static-file" }
-reth-static-file-types = { path = "crates/static-file-types" }
+reth-static-file = { path = "crates/static-file/static-file" }
+reth-static-file-types = { path = "crates/static-file/types" }
 reth-storage-api = { path = "crates/storage/storage-api" }
 reth-storage-errors = { path = "crates/storage/errors" }
 reth-tasks = { path = "crates/tasks" }
