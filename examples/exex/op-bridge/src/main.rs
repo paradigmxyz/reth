@@ -351,7 +351,7 @@ mod tests {
         // Send a notification that the chain has been committed
         handle.send_notification_chain_committed(chain.clone()).await?;
         // Poll the ExEx once, it will process the notification that we just sent
-        exex.poll_once().await;
+        exex.poll_once().await?;
 
         let connection = Connection::open(&db_file)?;
 
@@ -398,7 +398,7 @@ mod tests {
         // Send a notification that the same chain has been reverted
         handle.send_notification_chain_reverted(chain).await?;
         // Poll the ExEx once, it will process the notification that we just sent
-        exex.poll_once().await;
+        exex.poll_once().await?;
 
         // Assert that the deposit was removed from the database
         let deposits = connection
