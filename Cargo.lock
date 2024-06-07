@@ -6304,6 +6304,7 @@ dependencies = [
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
  "reth-payload-builder",
@@ -6918,6 +6919,7 @@ dependencies = [
  "eyre",
  "metrics",
  "reth-config",
+ "reth-exex-types",
  "reth-metrics",
  "reth-network",
  "reth-node-api",
@@ -6956,6 +6958,13 @@ dependencies = [
  "reth-transaction-pool",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "reth-exex-types"
+version = "0.2.0-beta.9"
+dependencies = [
+ "alloy-primitives",
 ]
 
 [[package]]
@@ -7584,6 +7593,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-errors",
+ "reth-exex-types",
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
