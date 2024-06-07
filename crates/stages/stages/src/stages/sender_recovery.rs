@@ -90,9 +90,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TransactionSenders>()?;
 
-        // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
+        // Iterate over transactions in batches, recover the senders and append them
         let batch = (tx_range.start..tx_range.end)
             .step_by(BATCH_SIZE)
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
@@ -155,8 +155,6 @@ fn recover_range<DB: Database>(
     let static_file_provider = provider.static_file_provider().clone();
     tokio::task::spawn_blocking(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
-            let static_file_provider = static_file_provider.clone();
-
             // Read the raw value, and let the rayon worker to decompress & decode.
             let chunk = static_file_provider
                 .fetch_range_with_predicate(
@@ -229,11 +227,11 @@ fn recover_sender(
     (tx_id, tx): (TxNumber, TransactionSignedNoHash),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
-    // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are
-    // known to be valid - this means that we do not need to check whether or not the `s` value is
-    // greater than `secp256k1n / 2` if past EIP-2. There are transactions pre-homestead which have
-    // large `s` values, so using [Signature::recover_signer] here would not be
-    // backwards-compatible.
+    // We call [Signature::encode_and_recover_unchecked] because transactions run in the pipeline
+    // are known to be valid - this means that we do not need to check whether or not the `s`
+    // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
+    // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
+    // would not be backwards-compatible.
     let sender = tx
         .encode_and_recover_unchecked(rlp_buf)
         .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
