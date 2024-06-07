@@ -36,3 +36,4 @@ tokio.workspace = true
 ## misc
 eyre.workspace = true
 rand.workspace = true
+thiserror.workspace = true
