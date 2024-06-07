@@ -659,13 +659,13 @@ mod tests {
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
-        Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
-        B256, U256,
+        Bytecode, ChainSpecBuilder, SealedBlock, StorageEntry, B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
         StaticFileProviderFactory,
     };
+    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {

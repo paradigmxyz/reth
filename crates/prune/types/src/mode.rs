@@ -75,7 +75,7 @@ impl Default for PruneMode {
 #[cfg(test)]
 mod tests {
     use crate::{
-        prune::PruneMode, PrunePurpose, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE,
+        PruneMode, PrunePurpose, PruneSegment, PruneSegmentError, MINIMUM_PRUNING_DISTANCE,
     };
     use assert_matches::assert_matches;
     use serde::Deserialize;

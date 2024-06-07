@@ -12,13 +12,20 @@ description = "Commonly used types for prune usage in reth."
 workspace = true
 
 [dependencies]
-alloy-primitives.workspace = true
 reth-codecs.workspace = true
-reth-codecs-derive.workspace = true
-reth-primitives.workspace = true
-modular-bitfield.workspace = true
 
+alloy-primitives.workspace = true
 bytes.workspace = true
 derive_more.workspace = true
-thiserror.workspace = true
+modular-bitfield.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+arbitrary = { workspace = true, features = ["derive"] }
+assert_matches.workspace = true
+proptest.workspace = true
+proptest-derive.workspace = true
+serde_json.workspace = true
+test-fuzz.workspace = true
+toml.workspace = true

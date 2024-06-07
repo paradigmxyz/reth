@@ -6307,6 +6307,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-prune-types",
  "reth-revm",
  "reth-rpc",
  "reth-rpc-types",
@@ -6875,6 +6876,7 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-primitives",
  "reth-provider",
+ "reth-prune-types",
  "reth-revm",
  "revm",
  "revm-primitives",
@@ -7596,14 +7598,19 @@ name = "reth-prune-types"
 version = "0.2.0-beta.9"
 dependencies = [
  "alloy-primitives",
+ "arbitrary",
+ "assert_matches",
  "bytes",
  "derive_more",
  "modular-bitfield",
+ "proptest",
+ "proptest-derive",
  "reth-codecs",
- "reth-codecs-derive",
- "reth-primitives",
  "serde",
+ "serde_json",
+ "test-fuzz",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

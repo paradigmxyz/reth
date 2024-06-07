@@ -66,6 +66,7 @@ reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-config.workspace = true
 reth-testing-utils.workspace = true
+reth-prune-types.workspace = true
 
 assert_matches.workspace = true
 

@@ -597,9 +597,9 @@ mod tests {
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
-        TxNumber, B256, U256,
+        hex_literal::hex, ChainSpecBuilder, SealedBlock, StaticFileSegment, TxNumber, B256, U256,
     };
+    use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::{
         generators,

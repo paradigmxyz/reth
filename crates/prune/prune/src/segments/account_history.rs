@@ -108,11 +108,11 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
-    use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, B256,
-    };
+    use reth_primitives::{BlockNumber, B256};
     use reth_provider::PruneCheckpointReader;
+    use reth_prune_types::{
+        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::{
         generators,
