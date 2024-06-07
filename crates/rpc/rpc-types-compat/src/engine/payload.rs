@@ -254,6 +254,23 @@ pub fn convert_payload_field_v2_to_payload(value: ExecutionPayloadFieldV2) -> Ex
     }
 }
 
+/// Converts [`ExecutionPayloadV2`] to [`ExecutionPayloadInputV2`].
+///
+/// An [`ExecutionPayloadInputV2`] should have a [`Some`] withdrawals field if shanghai is active,
+/// otherwise the withdrawals field should be [`None`], so the `is_shanghai_active` argument is
+/// provided which will either:
+/// - include the withdrawals field as [`Some`] if true
+/// - set the withdrawals field to [`None`] if false
+pub fn convert_payload_v2_to_payload_input_v2(
+    value: ExecutionPayloadV2,
+    is_shanghai_active: bool,
+) -> ExecutionPayloadInputV2 {
+    ExecutionPayloadInputV2 {
+        execution_payload: value.payload_inner,
+        withdrawals: is_shanghai_active.then_some(value.withdrawals),
+    }
+}
+
 /// Converts [`ExecutionPayloadInputV2`] to [`ExecutionPayload`]
 pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> ExecutionPayload {
     match value.withdrawals {
