@@ -4,11 +4,11 @@ use crate::{
 };
 use reth_db::tables;
 use reth_db_api::database::Database;
-use reth_primitives::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{
     errors::provider::ProviderResult, DatabaseProviderRW, PruneCheckpointWriter,
     TransactionsProvider,
 };
+use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -100,11 +100,11 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, TxNumber, B256,
-    };
+    use reth_primitives::{BlockNumber, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
+    use reth_prune_types::{
+        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::{
         generators,

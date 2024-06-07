@@ -20,10 +20,12 @@ reth-errors.workspace = true
 reth-provider.workspace = true
 reth-tokio-util.workspace = true
 reth-config.workspace = true
+reth-prune-types.workspace = true
 
 # metrics
 reth-metrics.workspace = true
 metrics.workspace = true
+alloy-primitives.workspace = true
 
 # misc
 tracing.workspace = true

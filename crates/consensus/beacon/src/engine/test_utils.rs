@@ -21,12 +21,13 @@ use reth_network_p2p::{
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
+use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     BundleStateWithReceipts, HeaderSyncMode,
 };
 use reth_prune::Pruner;
+use reth_prune_types::PruneModes;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };

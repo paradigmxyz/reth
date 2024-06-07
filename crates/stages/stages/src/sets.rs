@@ -12,7 +12,8 @@
 //! ```no_run
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
-//! # use reth_primitives::{PruneModes, MAINNET};
+//! # use reth_primitives::MAINNET;
+//! # use reth_prune_types::PruneModes;
 //! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::test_utils::create_test_provider_factory;
@@ -45,8 +46,8 @@ use reth_consensus::Consensus;
 use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
-use reth_primitives::PruneModes;
 use reth_provider::{HeaderSyncGapProvider, HeaderSyncMode};
+use reth_prune_types::PruneModes;
 use std::sync::Arc;
 
 /// A set containing all stages to run a fully syncing instance of reth.

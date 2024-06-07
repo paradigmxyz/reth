@@ -8,11 +8,12 @@ use reth_db_api::database::Database;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::args::NetworkArgs;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, PruneModes, B256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
     FinalizedBlockWriter, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
+use reth_prune_types::PruneModes;
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds},

@@ -8,12 +8,13 @@ use reth_db_api::{
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
+    Address, StaticFileSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
 };
+use reth_prune_types::PruneSegment;
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
@@ -282,13 +283,13 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
     use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
-        TransactionSigned, B256,
+        stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, B256,
     };
     use reth_provider::{
         providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
         TransactionsProvider,
     };
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_testing_utils::{
         generators,
         generators::{random_block, random_block_range},

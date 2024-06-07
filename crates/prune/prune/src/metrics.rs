@@ -2,7 +2,7 @@ use reth_metrics::{
     metrics::{Gauge, Histogram},
     Metrics,
 };
-use reth_primitives::PruneSegment;
+use reth_prune_types::PruneSegment;
 use std::collections::HashMap;
 
 #[derive(Metrics)]

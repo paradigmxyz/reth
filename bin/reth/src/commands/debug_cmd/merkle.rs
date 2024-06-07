@@ -18,11 +18,12 @@ use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorP
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
-use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, PruneModes};
+use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber};
 use reth_provider::{
     BlockNumReader, BlockWriter, BundleStateWithReceipts, ChainSpecProvider, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
+use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},

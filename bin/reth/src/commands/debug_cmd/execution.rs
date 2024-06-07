@@ -22,10 +22,11 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkEvents, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
-use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, PruneModes, B256};
+use reth_primitives::{stage::StageId, BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, ChainSpecProvider, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune_types::PruneModes;
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds},
