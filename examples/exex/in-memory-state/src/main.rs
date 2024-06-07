@@ -7,8 +7,8 @@ use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
 use std::{
     future::Future,
-    pin::Pin,
-    task::{ready, Context, Poll},
+    pin::{pin, Pin},
+    task::{Context, Poll},
 };
 
 /// An ExEx that keeps track of the entire state in memory
@@ -30,37 +30,36 @@ impl<Node: FullNodeComponents + Unpin> Future for InMemoryStateExEx<Node> {
     type Output = eyre::Result<()>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
+        pin!(self.get_mut().start()).poll(cx)
+    }
+}
 
-        loop {
-            match ready!(this.ctx.notifications.poll_recv(cx)) {
-                Some(notification) => {
-                    match &notification {
-                        ExExNotification::ChainCommitted { new } => {
-                            info!(committed_chain = ?new.range(), "Received commit");
-                        }
-                        ExExNotification::ChainReorged { old, new } => {
-                            // revert to block before the reorg
-                            this.state.revert_to(new.first().number - 1);
-                            info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-                        }
-                        ExExNotification::ChainReverted { old } => {
-                            this.state.revert_to(old.first().number - 1);
-                            info!(reverted_chain = ?old.range(), "Received revert");
-                        }
-                    };
-
-                    if let Some(committed_chain) = notification.committed_chain() {
-                        // extend the state with the new chain
-                        this.state.extend(committed_chain.state().clone());
-                        this.ctx
-                            .events
-                            .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
-                    }
+impl<Node: FullNodeComponents> InMemoryStateExEx<Node> {
+    async fn start(&mut self) -> eyre::Result<()> {
+        while let Some(notification) = self.ctx.notifications.recv().await {
+            match &notification {
+                ExExNotification::ChainCommitted { new } => {
+                    info!(committed_chain = ?new.range(), "Received commit");
                 }
-                None => return Poll::Ready(Ok(())),
+                ExExNotification::ChainReorged { old, new } => {
+                    // revert to block before the reorg
+                    self.state.revert_to(new.first().number - 1);
+                    info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+                }
+                ExExNotification::ChainReverted { old } => {
+                    self.state.revert_to(old.first().number - 1);
+                    info!(reverted_chain = ?old.range(), "Received revert");
+                }
+            };
+
+            if let Some(committed_chain) = notification.committed_chain() {
+                // extend the state with the new chain
+                self.state.extend(committed_chain.state().clone());
+                self.ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
             }
         }
+
+        Ok(())
     }
 }
 
@@ -93,10 +92,9 @@ mod tests {
         let mut rng = &mut generators::rng();
         let (ctx, handle) = test_exex_context().await?;
 
-        let exex = super::InMemoryStateExEx::new(ctx);
-        let mut exex_future = pin!(exex);
+        let mut exex = pin!(super::InMemoryStateExEx::new(ctx));
 
-        let block = random_block(&mut rng, 1, None, Some(1), None)
+        let block = random_block(&mut rng, 0, None, Some(1), None)
             .seal_with_senders()
             .ok_or(eyre::eyre!("failed to recover senders"))?;
         let state = BundleStateWithReceipts::new(
@@ -108,9 +106,9 @@ mod tests {
         handle
             .send_notification_chain_committed(Chain::new(vec![block], state.clone(), None))
             .await?;
-        exex_future.poll_once().await?;
+        exex.poll_once().await?;
 
-        assert_eq!(exex_future.get_mut().state, state);
+        assert_eq!(exex.get_mut().state, state);
 
         Ok(())
     }
