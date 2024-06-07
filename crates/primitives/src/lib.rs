@@ -29,7 +29,6 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 mod error;
-mod exex;
 pub mod genesis;
 mod header;
 mod integer_list;
@@ -65,7 +64,6 @@ pub use constants::{
     KECCAK_EMPTY, MAINNET_DEPOSIT_CONTRACT, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
-pub use exex::FinishedExExHeight;
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
