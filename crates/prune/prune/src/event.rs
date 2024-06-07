@@ -1,4 +1,5 @@
-use reth_primitives::{BlockNumber, PruneProgress, PruneSegment};
+use alloy_primitives::BlockNumber;
+use reth_prune_types::{PruneProgress, PruneSegment};
 use std::{collections::BTreeMap, time::Duration};
 
 /// An event emitted by a [Pruner][crate::Pruner].

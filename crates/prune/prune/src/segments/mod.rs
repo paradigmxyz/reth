@@ -11,16 +11,16 @@ mod transactions;
 
 use crate::PrunerError;
 pub use account_history::AccountHistory;
+use alloy_primitives::{BlockNumber, TxNumber};
 pub use headers::Headers;
 pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 use reth_db_api::database::Database;
-use reth_primitives::{
-    BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-    PruneSegment, TxNumber,
-};
 use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+};
+use reth_prune_types::{
+    PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
 };
 pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;

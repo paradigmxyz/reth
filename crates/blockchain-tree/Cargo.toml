@@ -21,6 +21,7 @@ reth-db-api.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-provider.workspace = true
+reth-prune-types.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-parallel = { workspace = true, features = ["parallel"] }

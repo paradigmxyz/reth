@@ -21,3 +21,7 @@ pub use builder::PrunerBuilder;
 pub use error::PrunerError;
 pub use event::PrunerEvent;
 pub use pruner::{Pruner, PrunerResult, PrunerWithResult};
+
+// Re-export prune types
+#[doc(inline)]
+pub use reth_prune_types::*;

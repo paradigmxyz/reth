@@ -35,7 +35,6 @@ mod integer_list;
 mod log;
 mod net;
 pub mod proofs;
-mod prune;
 mod receipt;
 mod request;
 /// Helpers for working with revm
@@ -73,11 +72,6 @@ pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
     NodeRecordParseError, TrustedPeer, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,
-};
-pub use prune::{
-    PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneModes, PruneProgress,
-    PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,
-    MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,

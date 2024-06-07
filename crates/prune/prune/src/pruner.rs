@@ -7,13 +7,11 @@ use crate::{
 };
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_primitives::{
-    BlockNumber, PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
-    StaticFileSegment,
-};
+use reth_primitives::{BlockNumber, StaticFileSegment};
 use reth_provider::{
     DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
+use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment};
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
     collections::BTreeMap,

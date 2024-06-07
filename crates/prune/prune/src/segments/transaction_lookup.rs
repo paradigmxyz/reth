@@ -5,8 +5,8 @@ use crate::{
 use rayon::prelude::*;
 use reth_db::tables;
 use reth_db_api::database::Database;
-use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
+use reth_prune_types::{PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -110,11 +110,11 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_primitives::{
-        BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, TxNumber, B256,
-    };
+    use reth_primitives::{BlockNumber, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
+    use reth_prune_types::{
+        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+    };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::{generators, generators::random_block_range};
     use std::ops::Sub;
