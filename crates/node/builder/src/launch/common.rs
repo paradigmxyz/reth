@@ -190,7 +190,7 @@ impl<T> LaunchContextWith<T> {
 
 impl LaunchContextWith<WithConfigs> {
     /// Resolves the trusted peers and adds them to the toml config.
-    pub async fn with_resolved(mut self) -> eyre::Result<Self> {
+    pub async fn with_resolved_peers(mut self) -> eyre::Result<Self> {
         if !self.attachment.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
 
