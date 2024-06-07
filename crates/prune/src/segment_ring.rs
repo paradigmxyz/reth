@@ -189,9 +189,9 @@ pub enum StaticFileTableRef {
 /// A ring over static file tables.
 ///
 /// Iterator that returns pre-configured segments that needs to be pruned according to the highest
-/// static files for [PruneSegment::Transactions](reth_primitives::PruneSegment::Transactions),
-/// [PruneSegment::Headers](reth_primitives::PruneSegment::Headers) and
-/// [PruneSegment::Receipts](reth_primitives::PruneSegment::Receipts).
+/// static files for [`PruneSegment::Transactions`](reth_primitives::PruneSegment::Transactions),
+/// [`PruneSegment::Headers`](reth_primitives::PruneSegment::Headers) and
+/// [`PruneSegment::Receipts`](reth_primitives::PruneSegment::Receipts).
 #[derive(Debug)]
 pub struct StaticFileTableRing<DB> {
     provider: StaticFileProvider,
@@ -202,7 +202,7 @@ pub struct StaticFileTableRing<DB> {
 }
 
 impl<DB> StaticFileTableRing<DB> {
-    pub fn new(provider: StaticFileProvider, start: StaticFileTableRef) -> Self {
+    pub const fn new(provider: StaticFileProvider, start: StaticFileTableRef) -> Self {
         Self { provider, start, current: start, prev: None, _phantom: PhantomData }
     }
 }
@@ -227,7 +227,7 @@ where
     }
 
     fn next_table(&self) -> Self::TableRef {
-        use StaticFileTableRef::*;
+        use StaticFileTableRef::{Headers, Receipts, Transactions};
 
         match self.current {
             Headers => Transactions,
@@ -287,8 +287,11 @@ mod test {
     fn cycle_with_one_static_file_segment() {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
-            .expect("create provide factory with static_files");
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
 
         let provider_rw = provider_factory.provider_rw().unwrap();
         let tx = provider_rw.tx_ref();
@@ -326,8 +329,11 @@ mod test {
     fn cycle_start_at_headers() {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
-            .expect("create provide factory with static_files");
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
 
         let segments: Vec<Arc<dyn Segment<TempDatabase<DatabaseEnv>>>> =
             SegmentSet::from_prune_modes(PruneModes::all()).into_vec();
@@ -347,7 +353,7 @@ mod test {
         assert_eq!(TableRef::Drop(segments_len - 1), ring.prev_table().unwrap());
     }
 
-    fn expected_prev_table(start_index: usize) -> TableRef {
+    const fn expected_prev_table(start_index: usize) -> TableRef {
         if start_index == 0 {
             TableRef::StaticFiles(StaticFileTableRef::Receipts)
         } else {
@@ -359,8 +365,11 @@ mod test {
     fn cycle_start_random_non_static_files_segment() {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
-            .expect("create provide factory with static_files");
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
 
         let segments: Vec<Arc<dyn Segment<TempDatabase<DatabaseEnv>>>> =
             SegmentSet::from_prune_modes(PruneModes::all()).into_vec();
@@ -391,7 +400,7 @@ mod test {
         }
     }
 
-    fn expected_prev_static_files_table(table_ref: StaticFileTableRef) -> StaticFileTableRef {
+    const fn expected_prev_static_files_table(table_ref: StaticFileTableRef) -> StaticFileTableRef {
         use StaticFileTableRef::*;
 
         match table_ref {
@@ -405,8 +414,11 @@ mod test {
     fn cycle_static_files_start_random_segment() {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
-            .expect("create provide factory with static_files");
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
 
         let start = random_static_file_table_ref();
         let mut ring: StaticFileTableRing<TempDatabase<DatabaseEnv>> =

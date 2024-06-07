@@ -33,7 +33,7 @@ impl<DB: Database> SegmentSet<DB> {
         self
     }
 
-    /// Consumes [SegmentSet] and returns a [Vec].
+    /// Consumes [`SegmentSet`] and returns a [`Vec`].
     pub fn into_vec(self) -> Vec<Arc<dyn Segment<DB>>> {
         self.inner
     }

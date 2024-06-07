@@ -5,10 +5,7 @@ use crate::{
     TableRing,
 };
 use reth_db_api::database::Database;
-use reth_primitives::{
-    BlockNumber, FinishedExExHeight, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
-    PruneSegment, StaticFileSegment,
-};
+use reth_primitives::{BlockNumber, FinishedExExHeight, PruneLimiter, PruneProgress, PruneSegment};
 use reth_provider::{
     DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
