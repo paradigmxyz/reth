@@ -22,7 +22,7 @@ Output from running the command to export state, can also be downloaded from <ht
 
 Imports a `.rlp` file of blocks.
 
-Import of >100 million OVM blocks, from genesis to Bedrock, completes in 6 hours.
+Import of >100 million OVM blocks, from genesis to Bedrock, completes in 45 minutes.
 
 ```bash
 ./op-reth import-op <exported-blocks>

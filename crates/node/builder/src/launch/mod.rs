@@ -4,6 +4,7 @@ use crate::{
     builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
+    launch::common::WithConfigs,
     node::FullNode,
     BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
@@ -94,7 +95,7 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config)?
+            .with_loaded_toml_config(config).await?
             // attach the database
             .attach(database.clone())
             // ensure certain settings take effect
@@ -146,12 +147,15 @@ where
             )),
         )?;
 
+        let config_container = WithConfigs {
+            config: ctx.node_config().clone(),
+            toml_config: ctx.toml_config().clone(),
+        };
         let builder_ctx = BuilderContext::new(
             head,
             blockchain_db.clone(),
             ctx.task_executor().clone(),
-            ctx.node_config().clone(),
-            ctx.toml_config().clone(),
+            config_container,
         );
 
         if builder_ctx.config().experimental.any_is_enabled() {

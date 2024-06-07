@@ -37,12 +37,14 @@ reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
+reth-net-common.workspace = true
 reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
@@ -97,7 +99,7 @@ aquamarine.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 tempfile.workspace = true
-backon = "0.4"
+backon.workspace = true
 similar-asserts.workspace = true
 itertools.workspace = true
 rayon.workspace = true

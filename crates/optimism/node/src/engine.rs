@@ -1,7 +1,10 @@
 use reth_node_api::{
-    engine::validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
-    EngineObjectValidationError, EngineTypes, MessageValidationKind, PayloadOrAttributes,
-    VersionSpecificValidationError,
+    payload::{
+        validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
+        EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes,
+        VersionSpecificValidationError,
+    },
+    EngineTypes,
 };
 use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
 use reth_primitives::{ChainSpec, Hardfork};

@@ -45,6 +45,7 @@ reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-revm.workspace = true
 reth-evm-ethereum.workspace = true
