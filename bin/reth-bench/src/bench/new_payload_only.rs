@@ -8,7 +8,7 @@ use crate::{
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::EngineApiValidWaitExt,
+    valid_payload::call_new_payload,
 };
 use alloy_provider::Provider;
 use clap::Parser;
@@ -16,7 +16,7 @@ use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::{Block, B256};
-use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
+use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -71,25 +71,19 @@ impl Command {
 
             let versioned_hashes: Vec<B256> =
                 block.blob_versioned_hashes().into_iter().copied().collect();
-            let (payload, parent_beacon_block_root) = block_to_payload_v3(block);
+            let (payload, parent_beacon_block_root) = block_to_payload(block);
 
-            let block_number = payload.payload_inner.payload_inner.block_number;
+            let block_number = payload.block_number();
 
             debug!(
-                number=block_number,
-                hash=?payload.payload_inner.payload_inner.block_hash,
-                parent_hash=?payload.payload_inner.payload_inner.parent_hash,
-                "Sending payload",
+                number=?payload.block_number(),
+                "Sending payload to engine",
             );
 
-            let parent_beacon_block_root =
-                parent_beacon_block_root.expect("this is a valid v3 payload");
             let start = Instant::now();
-
-            info!(?payload.payload_inner.payload_inner.block_number, "Sending payload to engine");
-            auth_provider
-                .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
+            call_new_payload(&auth_provider, payload, parent_beacon_block_root, versioned_hashes)
                 .await?;
+
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(%new_payload_result);
 

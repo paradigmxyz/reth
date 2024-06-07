@@ -9,7 +9,7 @@ use crate::{
             GAS_OUTPUT_SUFFIX,
         },
     },
-    valid_payload::EngineApiValidWaitExt,
+    valid_payload::{call_forkchoice_updated, call_new_payload},
 };
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -18,7 +18,7 @@ use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::{Block, B256};
-use reth_rpc_types_compat::engine::payload::block_to_payload_v3;
+use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -93,21 +93,13 @@ impl Command {
         while let Some((block, head, safe, finalized)) = receiver.recv().await {
             // just put gas used here
             let gas_used = block.header.gas_used;
+            let block_number = block.header.number;
 
             let versioned_hashes: Vec<B256> =
                 block.blob_versioned_hashes().into_iter().copied().collect();
-            let (payload, parent_beacon_block_root) = block_to_payload_v3(block);
-            let block_number = payload.payload_inner.payload_inner.block_number;
+            let (payload, parent_beacon_block_root) = block_to_payload(block);
 
-            debug!(
-                ?block_number,
-                hash=?payload.payload_inner.payload_inner.block_hash,
-                parent_hash=?payload.payload_inner.payload_inner.parent_hash,
-                "Sending payload",
-            );
-
-            let parent_beacon_block_root =
-                parent_beacon_block_root.expect("this is a valid v3 payload");
+            debug!(?block_number, "Sending payload",);
 
             // construct fcu to call
             let forkchoice_state = ForkchoiceState {
@@ -117,12 +109,18 @@ impl Command {
             };
 
             let start = Instant::now();
-            auth_provider
-                .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
-                .await?;
+            let message_version = call_new_payload(
+                &auth_provider,
+                payload,
+                parent_beacon_block_root,
+                versioned_hashes,
+            )
+            .await?;
+
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
 
-            auth_provider.fork_choice_updated_v3_wait(forkchoice_state, None).await?;
+            call_forkchoice_updated(&auth_provider, message_version, forkchoice_state, None)
+                .await?;
 
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();

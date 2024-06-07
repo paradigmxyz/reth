@@ -160,8 +160,12 @@ impl AuthenticatedTransport {
         Box::pin(async move {
             let mut inner_and_claims = this.inner_and_claims.write().await;
 
+            // shift the iat forward by one second so there is some buffer time
+            let mut shifted_claims = inner_and_claims.1;
+            shifted_claims.iat -= 1;
+
             // if the claims are out of date, reset the inner transport
-            if !inner_and_claims.1.is_within_time_window() {
+            if !shifted_claims.is_within_time_window() {
                 let (new_inner, new_claims) =
                     InnerTransport::connect(this.url.clone(), this.jwt).await.map_err(|e| {
                         TransportError::Transport(TransportErrorKind::Custom(Box::new(e)))
