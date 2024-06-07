@@ -94,21 +94,37 @@ mod tests {
 
         let mut exex = pin!(super::InMemoryStateExEx::new(ctx));
 
-        let block = random_block(&mut rng, 0, None, Some(1), None)
+        let mut state = BundleStateWithReceipts::default();
+
+        let block_1 = random_block(&mut rng, 0, None, Some(1), None)
             .seal_with_senders()
             .ok_or(eyre::eyre!("failed to recover senders"))?;
-        let state = BundleStateWithReceipts::new(
+        let state_1 = BundleStateWithReceipts::new(
             BundleState::default(),
-            Receipts::from_block_receipt(vec![random_receipt(&mut rng, &block.body[0], None)]),
-            block.number,
+            Receipts::from_block_receipt(vec![random_receipt(&mut rng, &block_1.body[0], None)]),
+            block_1.number,
         );
+        state.extend(state_1.clone());
 
-        handle
-            .send_notification_chain_committed(Chain::new(vec![block], state.clone(), None))
-            .await?;
+        handle.send_notification_chain_committed(Chain::new(vec![block_1], state_1, None)).await?;
         exex.poll_once().await?;
 
-        assert_eq!(exex.get_mut().state, state);
+        assert_eq!(exex.as_mut().state, state);
+
+        let block_2 = random_block(&mut rng, 1, None, Some(2), None)
+            .seal_with_senders()
+            .ok_or(eyre::eyre!("failed to recover senders"))?;
+        let state_2 = BundleStateWithReceipts::new(
+            BundleState::default(),
+            Receipts::from_block_receipt(vec![random_receipt(&mut rng, &block_2.body[0], None)]),
+            block_2.number,
+        );
+        state.extend(state_2.clone());
+
+        handle.send_notification_chain_committed(Chain::new(vec![block_2], state_2, None)).await?;
+        exex.poll_once().await?;
+
+        assert_eq!(exex.as_mut().state, state);
 
         Ok(())
     }
