@@ -84,7 +84,7 @@ pub trait EthCall: Call {
         bundle: Bundle,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = EthResult<Vec<EthCallResponse>>> + Send
+    ) -> impl Future<Output = EthResult<Vec<EthCallResponse>>>
     where
         Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
     {
@@ -681,7 +681,7 @@ pub trait Call {
         &self,
         hash: B256,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<R>>> + Send
+    ) -> impl Future<Output = EthResult<Option<R>>>
     where
         Self: LoadState + LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking,
         F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
