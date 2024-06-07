@@ -120,6 +120,7 @@ impl BitfinityResetEvmStateCommand {
             let (accounts_sender, accounts_receiver) = async_channel::bounded(self.parallel_requests * 20);
             let mut task_handles = vec![];
 
+            // We need to create a number of tasks that will send the account data to the EVM
             for _ in 0..self.parallel_requests {
                 let receiver = accounts_receiver.clone();
                 let executor = self.executor.clone();
@@ -192,14 +193,12 @@ impl BitfinityResetEvmStateCommand {
 
                 if accounts.estimate_byte_size() > MAX_REQUEST_BYTES {
                     let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
-                    // split_and_send_add_accout_request(&self.executor, process_accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
                     accounts_sender.send(process_accounts).await?;
                 }
             }
 
             if !accounts.data.is_empty() {
                 info!(target: "reth::cli", "Processing last batch of {} accounts", accounts.data.len());
-                // split_and_send_add_accout_request(&self.executor, accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
                 accounts_sender.send(accounts).await?;
             }
             accounts_sender.close();
